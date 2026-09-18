@@ -1,0 +1,7 @@
+# Versions from the existing validated PJe environment.
+beautifulsoup4==4.15.0
+curl_cffi==0.16.2
+Pillow==12.3.0
+pyotp==2.10.0
+seleniumbase==4.54.1
+zxing-cpp==3.1.1

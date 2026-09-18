@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+node_modules/
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+data/*
+!data/README.md
+downloaded_files/
+Captura de tela 2026-09-11 123028.png
+*.log
+*-session.json
+*_session.json
+*.tmp

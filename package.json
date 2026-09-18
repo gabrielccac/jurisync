@@ -1,0 +1,17 @@
+{
+  "name": "pipeline-juridiq",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "juridiq:read": "node scripts/juridiq_read.mjs",
+    "juridiq:write-test": "node scripts/test_juridiq_write.mjs",
+    "juridiq:lawsuit-test": "node scripts/test_juridiq_lawsuit.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.5.4"
+  }
+}

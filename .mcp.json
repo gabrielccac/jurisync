@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "juridiq-pipeline": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "--env-file=${CLAUDE_PROJECT_DIR}/.env",
+        "${CLAUDE_PROJECT_DIR}/scripts/mcp_server.mjs"
+      ]
+    }
+  }
+}
