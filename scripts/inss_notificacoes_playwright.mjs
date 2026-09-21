@@ -1,0 +1,114 @@
+#!/usr/bin/env node
+
+import { parseArgs } from "node:util";
+import { DEFAULT_PROFILE, loadEnvFile, loginAndAuthorize, qrSecret } from "./inss_gerid_playwright.mjs";
+
+const NOTIFICATIONS_PATH = "/apis/requerimentosPortalApi/requerimento/ec/notificacao?first=0";
+const RECAPTCHA_SITE_KEY = "6LfA-t8oAAAAAAMYMMHDthsSTek1eOYMwyjJcvoK";
+const RECAPTCHA_ACTION = "buscaRequerimentos";
+
+function args() {
+  return parseArgs({
+    options: {
+      profile: { type: "string" },
+      "profile-directory": { type: "string" },
+      "qr-image": { type: "string" },
+      account: { type: "string", default: "1" },
+      timeout: { type: "string", default: "120" },
+      direct: { type: "boolean", default: false },
+    },
+    strict: true,
+  }).values;
+}
+
+async function recaptchaToken(page, timeout) {
+  const siteKey = process.env.INSS_RECAPTCHA_SITE_KEY ?? RECAPTCHA_SITE_KEY;
+  const action = process.env.INSS_RECAPTCHA_ACTION ?? RECAPTCHA_ACTION;
+  await page.waitForFunction(() => {
+    const api = window.grecaptcha?.enterprise ?? window.grecaptcha;
+    return typeof api?.execute === "function";
+  }, null, { timeout });
+  return page.evaluate(async ({ siteKey, action, timeout }) => {
+    const api = window.grecaptcha?.enterprise ?? window.grecaptcha;
+    const value = await Promise.race([
+      api.execute(siteKey, { action }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("reCAPTCHA timeout")), timeout)),
+    ]);
+    if (typeof value !== "string" || !value) throw new Error("reCAPTCHA returned no token");
+    return value;
+  }, { siteKey, action, timeout });
+}
+
+async function directNotificationRequest(page, timeout) {
+  const token = await recaptchaToken(page, timeout);
+  return page.evaluate(async ({ path, token }) => {
+    const auth = localStorage.getItem("gerid_token");
+    if (!auth) throw new Error("gerid_token missing from localStorage");
+    const response = await fetch(path, {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json", Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ tokenReCAPTCHA: token }),
+    });
+    const payload = await response.json().catch(() => null);
+    return {
+      method: "POST",
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? "",
+      topLevelKeys: payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort() : [],
+      notificationCount: Array.isArray(payload) ? payload.length : Array.isArray(payload?.notificacoes) ? payload.notificacoes.length : null,
+    };
+  }, { path: NOTIFICATIONS_PATH, token });
+}
+
+async function main() {
+  loadEnvFile();
+  const options = args();
+  const profile = options.profile ?? process.env.INSS_BROWSER_PROFILE ?? DEFAULT_PROFILE;
+
+  let secret = process.env.INSS_GERID_TOTP_SECRET;
+  if (!secret && options["qr-image"]) secret = await qrSecret(options["qr-image"], options.account);
+  if (!secret && !process.env.INSS_GERID_OTP) {
+    throw new Error("Set INSS_GERID_TOTP_SECRET, INSS_GERID_OTP, or pass --qr-image");
+  }
+
+  const { close, page, summary } = await loginAndAuthorize({
+    profile,
+    profileDirectory: options["profile-directory"] ?? process.env.INSS_BROWSER_PROFILE_DIRECTORY,
+    secret,
+    otp: process.env.INSS_GERID_OTP,
+    timeout: Number(options.timeout) * 1000,
+  });
+  const responses = [];
+  page.on("response", async (response) => {
+    if (!response.url().includes(NOTIFICATIONS_PATH)) return;
+    const item = { method: response.request().method(), status: response.status(), contentType: response.headers()["content-type"] ?? "" };
+    try {
+      const payload = await response.json();
+      item.topLevelKeys = payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort() : [];
+      item.notificationCount = Array.isArray(payload) ? payload.length : Array.isArray(payload?.notificacoes) ? payload.notificacoes.length : null;
+    } catch {
+      item.json = false;
+    }
+    responses.push(item);
+  });
+
+  try {
+    if (options.direct) {
+      await page.goto("https://atendimento.inss.gov.br/tarefas", { waitUntil: "domcontentloaded", timeout: Number(options.timeout) * 1000 });
+      const response = await directNotificationRequest(page, Number(options.timeout) * 1000);
+      console.log(JSON.stringify({ ...summary, endpoint: NOTIFICATIONS_PATH, mode: "direct", response }, null, 2));
+      return;
+    }
+    await page.goto("https://atendimento.inss.gov.br/tarefas", { waitUntil: "domcontentloaded", timeout: Number(options.timeout) * 1000 });
+    await page.waitForTimeout(5000);
+    console.log(JSON.stringify({ ...summary, endpoint: NOTIFICATIONS_PATH, responses }, null, 2));
+  } finally {
+    await close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});

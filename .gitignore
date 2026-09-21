@@ -6,10 +6,17 @@ node_modules/
 .env.*
 !.env.example
 .claude/settings.local.json
+gerid
 data/*
 !data/README.md
 downloaded_files/
 Captura de tela 2026-09-11 123028.png
+QR_gerid.png
+# Local certificate/private-key material
+Certificado_GERID.cer
+*.p12
+*.pfx
+*.key
 *.log
 *-session.json
 *_session.json
