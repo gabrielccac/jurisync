@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHmac } from "node:crypto";
@@ -115,11 +114,8 @@ function chromeExecutable() {
     process.env.INSS_CHROME_PATH,
     process.platform === "win32" ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" : null,
     process.platform === "win32" ? "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe" : null,
-    process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : null,
-    process.platform === "linux" ? "/usr/bin/google-chrome" : null,
-    process.platform === "linux" ? "/usr/bin/chromium" : null,
   ].filter(Boolean);
-  const executable = candidates.find((candidate) => existsSync(candidate));
+  const executable = candidates.find((candidate) => !candidate || path.extname(candidate));
   if (!executable) throw new Error("Google Chrome executable not found; set INSS_CHROME_PATH");
   return executable;
 }
