@@ -8,9 +8,6 @@ import pyotp
 import zxingcpp
 from PIL import Image
 
-from integrations.pje.auth import migration_accounts
-
-
 def accounts_from_image(path):
     with Image.open(path) as image:
         barcodes = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode)
@@ -19,6 +16,7 @@ def accounts_from_image(path):
 
     value = barcodes[0].text
     if value.startswith("otpauth-migration://"):
+        from integrations.pje.auth import migration_accounts
         return migration_accounts(value)
     if value.startswith("otpauth://totp/"):
         otp = pyotp.parse_uri(value)

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "inss-gerid": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "--env-file=${CLAUDE_PROJECT_DIR}/.env",
+        "${CLAUDE_PROJECT_DIR}/scripts/inss_mcp_server.mjs"
+      ]
+    }
+  }
+}

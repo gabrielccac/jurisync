@@ -14,8 +14,10 @@ function args() {
       "profile-directory": { type: "string" },
       "qr-image": { type: "string" },
       account: { type: "string", default: "1" },
+      headless: { type: "boolean", default: false },
       timeout: { type: "string", default: "120" },
       direct: { type: "boolean", default: false },
+      "show-secrets": { type: "boolean", default: false },
     },
     strict: true,
   }).values;
@@ -39,11 +41,11 @@ async function recaptchaToken(page, timeout) {
   }, { siteKey, action, timeout });
 }
 
-async function directNotificationRequest(page, timeout) {
+async function directNotificationRequest(page, timeout, includePayload) {
   const token = await recaptchaToken(page, timeout);
-  return page.evaluate(async ({ path, token }) => {
-    const auth = localStorage.getItem("gerid_token");
-    if (!auth) throw new Error("gerid_token missing from localStorage");
+  return page.evaluate(async ({ includePayload, path, token }) => {
+    const auth = localStorage.getItem("ifs_auth") ?? localStorage.getItem("gerid_token");
+    if (!auth) throw new Error("ifs_auth and gerid_token are missing from localStorage");
     const response = await fetch(path, {
       method: "POST",
       credentials: "include",
@@ -57,52 +59,71 @@ async function directNotificationRequest(page, timeout) {
       contentType: response.headers.get("content-type") ?? "",
       topLevelKeys: payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort() : [],
       notificationCount: Array.isArray(payload) ? payload.length : Array.isArray(payload?.notificacoes) ? payload.notificacoes.length : null,
+      ...(includePayload ? { payload } : {}),
     };
-  }, { path: NOTIFICATIONS_PATH, token });
+  }, { includePayload, path: NOTIFICATIONS_PATH, token });
 }
 
 async function main() {
   loadEnvFile();
   const options = args();
+  if (options["show-secrets"]) console.log("Secret output enabled for this test run.");
   const profile = options.profile ?? process.env.INSS_BROWSER_PROFILE ?? DEFAULT_PROFILE;
 
   let secret = process.env.INSS_GERID_TOTP_SECRET;
   if (!secret && options["qr-image"]) secret = await qrSecret(options["qr-image"], options.account);
-  if (!secret && !process.env.INSS_GERID_OTP) {
-    throw new Error("Set INSS_GERID_TOTP_SECRET, INSS_GERID_OTP, or pass --qr-image");
-  }
 
-  const { close, page, summary } = await loginAndAuthorize({
+  const { close, credentials, page, summary } = await loginAndAuthorize({
     profile,
     profileDirectory: options["profile-directory"] ?? process.env.INSS_BROWSER_PROFILE_DIRECTORY,
     secret,
     otp: process.env.INSS_GERID_OTP,
     timeout: Number(options.timeout) * 1000,
+    headless: options.headless,
   });
-  const responses = [];
-  page.on("response", async (response) => {
-    if (!response.url().includes(NOTIFICATIONS_PATH)) return;
-    const item = { method: response.request().method(), status: response.status(), contentType: response.headers()["content-type"] ?? "" };
-    try {
-      const payload = await response.json();
-      item.topLevelKeys = payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort() : [];
-      item.notificationCount = Array.isArray(payload) ? payload.length : Array.isArray(payload?.notificacoes) ? payload.notificacoes.length : null;
-    } catch {
-      item.json = false;
-    }
-    responses.push(item);
-  });
+  if (options["show-secrets"]) {
+    console.log(JSON.stringify({ storageCredentials: credentials }, null, 2));
+  }
 
   try {
     if (options.direct) {
       await page.goto("https://atendimento.inss.gov.br/tarefas", { waitUntil: "domcontentloaded", timeout: Number(options.timeout) * 1000 });
-      const response = await directNotificationRequest(page, Number(options.timeout) * 1000);
-      console.log(JSON.stringify({ ...summary, endpoint: NOTIFICATIONS_PATH, mode: "direct", response }, null, 2));
+      const response = await directNotificationRequest(page, Number(options.timeout) * 1000, options["show-secrets"]);
+      console.log(JSON.stringify({
+        ...summary,
+        endpoint: NOTIFICATIONS_PATH,
+        mode: "direct",
+        response,
+      }, null, 2));
       return;
     }
-    await page.goto("https://atendimento.inss.gov.br/tarefas", { waitUntil: "domcontentloaded", timeout: Number(options.timeout) * 1000 });
-    await page.waitForTimeout(5000);
-    console.log(JSON.stringify({ ...summary, endpoint: NOTIFICATIONS_PATH, responses }, null, 2));
+    const timeout = Number(options.timeout) * 1000;
+    const responsePromise = page.waitForResponse((response) => response.url().includes(NOTIFICATIONS_PATH), { timeout });
+    await page.goto("https://atendimento.inss.gov.br/tarefas", { waitUntil: "domcontentloaded", timeout });
+    const apiResponse = await responsePromise;
+    const requestHeaders = await apiResponse.request().allHeaders();
+    const requestCredentials = Object.fromEntries(
+      Object.entries(requestHeaders).filter(([name]) => /authorization|cookie|token|auth/i.test(name)),
+    );
+    const response = {
+      method: apiResponse.request().method(),
+      status: apiResponse.status(),
+      contentType: apiResponse.headers()["content-type"] ?? "",
+    };
+    try {
+      const payload = await apiResponse.json();
+      response.topLevelKeys = payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort() : [];
+      response.notificationCount = Array.isArray(payload) ? payload.length : Array.isArray(payload?.notificacoes) ? payload.notificacoes.length : null;
+      if (options["show-secrets"]) response.payload = payload;
+    } catch {
+      response.json = false;
+    }
+    console.log(JSON.stringify({
+      ...summary,
+      endpoint: NOTIFICATIONS_PATH,
+      responses: [response],
+      ...(options["show-secrets"] ? { requestCredentials } : {}),
+    }, null, 2));
   } finally {
     await close();
   }
