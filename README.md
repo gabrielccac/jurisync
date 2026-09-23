@@ -140,8 +140,16 @@ permission to write. Juridiq bearer reuse and its read guard remain unchanged.
 
 The local MCP server in `scripts/mcp_server.mjs` exposes read tools for pending
 and filterable publications, lawsuits and their movements, events, tasks and
-their history/comments, templates and PJe context. It
-also exposes explicitly test-scoped mutation tools. `integrations/juridiq/pipeline.mjs`
+their history/comments, templates and PJe context. The separate local server in
+`scripts/inss_mcp_server.mjs` exposes read-only INSS PAT tools for GERID session
+setup, notifications, task search, and task detail, plus an attachment downloader
+and a consolidated-process PDF downloader that write new files under
+`downloaded_files/inss` and return locally extracted PDF Markdown to the caller.
+See `docs/instalacao-mcp-inss-gerid.md` for the complete macOS setup guide.
+Its first call opens Chrome
+when A3/PIN login is required; valid cached sessions are reused headlessly. The
+Juridiq server also exposes explicitly test-scoped mutation tools.
+`integrations/juridiq/pipeline.mjs`
 exposes `runPublicationPipeline`. The host agent supplies
 `deduplicate`, `assess`, `enrich` (selected PJe context when incomplete), and `route`
 (the skill's task type, description, dates, evidence, and `obligationKey`). The runner

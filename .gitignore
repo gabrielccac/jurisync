@@ -18,6 +18,11 @@ Certificado_GERID.cer
 *.pfx
 *.key
 *.log
+*.har
+claude_desktop_config.inss.json
+inss-gerid-mcp.zip
+inss-macos-scripts.zip
+qr_code_vh.png
 *-session.json
 *_session.json
 *.tmp
