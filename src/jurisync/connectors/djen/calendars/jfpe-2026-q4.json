@@ -1,0 +1,20 @@
+{
+  "id": "jfpe-2026-q4",
+  "scope": "Justiça Federal em Pernambuco, sede e subseções",
+  "coverage_start": "2026-09-25",
+  "coverage_end": "2026-12-19",
+  "closed_dates": [
+    "2026-10-12",
+    "2026-10-30",
+    "2026-11-02",
+    "2026-11-20",
+    "2026-12-08"
+  ],
+  "sources": [
+    "https://www.cnj.jus.br/cnj-alerta-tribunais-sobre-novas-regras-de-contagem-de-prazos-processuais/",
+    "https://www4.trf5.jus.br/comunicacao-social/anexo/114014",
+    "https://www.jfpe.jus.br/index.php/feriados.html?catid=274&id=217:feriadossubsecoes&view=article",
+    "https://www.jfpe.jus.br/index.php/leitura-de-noticias?%2Fid=20003"
+  ],
+  "note": "Portaria JFPE 173/2026 transferiu o Dia do Servidor de 28/10 para 30/10. Calendário revisto em 06/10/2026; suspensões posteriores exigem atualização."
+}

@@ -1,1 +1,0 @@
-"""Canonical Juridiq integration package."""

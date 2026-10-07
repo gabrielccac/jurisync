@@ -1,0 +1,89 @@
+"""Payload validation and value formats; runs before any network call."""
+
+import re
+from pathlib import Path
+
+
+def masked_cpf(value):
+    digits = re.sub(r"\D", "", value)
+    if len(digits) != 11:
+        raise ValueError("CPF must have 11 digits")
+    return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+
+
+def address_cep(address):
+    if not isinstance(address, dict):
+        raise ValueError("author.address must be an object")
+    raw = str(address.get("cep", "")).strip()
+    if not re.fullmatch(r"\d{5}-?\d{3}", raw):
+        raise ValueError("author.address.cep must have 8 digits")
+    cep = raw.replace("-", "")
+    return f"{cep[:5]}-{cep[5:]}"
+
+
+def claim_amount(value):
+    return re.sub(r"^R\$\s*", "", value.strip())
+
+
+def payload_subjects(payload):
+    if "subject" in payload and "subjects" in payload:
+        raise ValueError("Use subject or subjects, not both")
+    subjects = payload.get("subjects", [payload["subject"]] if "subject" in payload else [])
+    if not isinstance(subjects, list) or not subjects:
+        raise ValueError("subjects must be a nonempty list")
+    codes = []
+    for index, subject in enumerate(subjects):
+        if not isinstance(subject, dict):
+            raise ValueError(f"subjects[{index}] must be an object")
+        for field in ("search", "code", "name"):
+            if not isinstance(subject.get(field), str) or not subject[field].strip():
+                raise ValueError(f"subjects[{index}].{field} is required")
+        codes.append(subject["code"])
+    if len(codes) != len(set(codes)):
+        raise ValueError("subjects must have unique codes")
+    return subjects
+
+
+def validate_characteristics(characteristics):
+    if not isinstance(characteristics, dict):
+        raise ValueError("characteristics must be an object")
+    claim_value = characteristics.get("claimValue")
+    if not isinstance(claim_value, str) or not re.fullmatch(r"\d+(?:\.\d{3})*,\d{2}", claim_value):
+        raise ValueError("claimValue must use Brazilian currency format, e.g. 1.000,00")
+    for key in ("legalAid", "injunction"):
+        if not isinstance(characteristics.get(key), bool):
+            raise ValueError(f"{key} must be a boolean")
+    priority = characteristics.get("priority")
+    if (
+        priority is not None
+        and priority is not False
+        and (not isinstance(priority, str) or not priority.strip() or re.fullmatch(r"N[ÃA]O", priority.strip(), re.I))
+    ):
+        raise ValueError("priority must be a PJe option label or false to omit it")
+    return claim_value
+
+
+def validate_fill_payload(payload):
+    payload_subjects(payload)
+    author = payload.get("author") or {}
+    required = (("authorCpf", payload.get("authorCpf")), ("author.name", author.get("name")))
+    missing = [name for name, value in required if not value]
+    if missing:
+        raise ValueError(f"Missing draft payload fields: {', '.join(missing)}")
+    if not isinstance(payload["authorCpf"], str):
+        raise ValueError("authorCpf must be a string")
+    masked_cpf(payload["authorCpf"])
+    if author.get("address") is not None:
+        address_cep(author["address"])
+    if "characteristics" in payload:
+        validate_characteristics(payload["characteristics"])
+    documents = payload.get("documents")
+    if documents is not None:
+        if not isinstance(documents, dict):
+            raise ValueError("documents must be an object")
+        if not documents.get("main", {}).get("path"):
+            raise ValueError("documents.main.path is required")
+        for item in (documents["main"], *documents.get("supporting", [])):
+            source = Path(item.get("path", "")).expanduser()
+            if source.suffix.lower() != ".pdf" or not source.is_file() or source.stat().st_size > 10_000_000:
+                raise ValueError(f"Document must be an existing PDF of at most 10 MB: {source}")

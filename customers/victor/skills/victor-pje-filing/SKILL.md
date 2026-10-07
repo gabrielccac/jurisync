@@ -1,0 +1,72 @@
+---
+name: victor-pje-filing
+description: Prepare Victor's Advbox 00-PROTOCOLAR files and create or review a TRF5 PJe 1G process draft through the PJe MCP. Use for initial-filing preparation and Não Protocolados drafts; never for final Protocolar submission.
+---
+
+# Victor: Advbox to PJe draft
+
+Prepare an initial filing for `trf5-1g` only. Victor's defaults and document
+classification live in `customers/victor/workflows/prepare_pje_filing.py`;
+the generic PJe adapter fills an explicit payload. Neither path submits
+**Protocolar**. Use the POP task-routing skill for DJEN-to-Advbox tasks instead.
+
+1. Resolve the intended Advbox customer and lawsuit. Gather the author's CPF
+   and PJe registry name, jurisdiction, judicial class, and claim value from
+   the lawsuit and petition. For Assuntos, read
+   [references/subjects.md](references/subjects.md) and check the repository's
+   `/home/gabriel/orca/jurisync/customers/victor/README.md` for this exact lawsuit ID or CNJ number before
+   choosing the ordered `subjects` list. The Advbox `Ação` and codes filed in
+   other lawsuits are candidates, not defaults. PJe's `subject-options` lookup
+   requires an existing draft; use it after `stage: create` if an advance
+   check is needed. The `create-fill` path itself matches each code and name
+   against PJe's lookup before adding it. Ask for missing or conflicting
+   facts; never substitute another case's mock values.
+   Graziele is the attorney added to the author; the logged-in Victor is not
+   the `attorney` payload entry. Her CPF comes from the private
+   `VICTOR_PJE_GRAZIELE_CPF` setting. This office always includes
+   `Juízo 100% Digital`; the workflow sets that priority regardless of
+   any priority text in case facts. Do not ask for or edit that field.
+   Compare any address in the petition with the Advbox customer record. If
+   they agree, include it as optional `author.address` in case facts, with
+   `cep` and `numero` when available. The adapter reuses an existing PJe
+   address with the same CEP, or adds one through PJe's CEP lookup and confirms
+   the selected CEP after saving the party. Surface conflicting addresses for
+   user review. A missing address does not block a draft while PJe accepts it
+   as optional.
+2. Choose a new alphanumeric `runId` and a private run directory under the
+   PJe MCP's configured `JURISYNC_FILING_DIR`. Use a root writable in the
+   current ChatGPT workspace; the agent and MCP must use the same root. Do not
+   assume the fallback `~/.local/share/jurisync/filings` is writable.
+   Write reviewed facts to a private JSON file, then run
+   `.venv/bin/python -m customers.victor.workflows.prepare_pje_filing prepare
+   --customer <id> --facts <facts.json> --out <run-directory>` from the repo root
+   (it loads the repo `.env` itself).
+   Do not create a separate `documents.json`; this script downloads and
+   classifies the files, then writes `review.json` and, when ready, `payload.json`.
+   Treat both files as script outputs; do not write or replace them manually.
+   `review.json` must contain a `files` array for the `finalize` command.
+   Read `review.json`: inspect every file, suggested PJe type, fallback,
+   duplicate, and size/split flag. If needed, use the same module's `finalize`
+   command with `--review` and `--overrides` to resolve selections. Continue only when it emits
+   `ready: true` and `payload.json` exists.
+3. Show the user the reviewed facts, selected subjects, address status,
+   document list and classifications, and unresolved limitations. Use
+   `pje_draft_inspect` with `stage: classification` and the run ID to check
+   current PJe choices. Search
+   **Não Protocolados** with `pje_search_pending_drafts` using the author's CPF
+   before creating a new draft; show possible existing drafts for review.
+4. When the user has asked to create the draft, call `pje_draft_write` with
+   `stage: create-fill` and the same run ID. Draft writes require
+   `PJE_ALLOW_DRAFT_WRITES=true` in the PJe MCP process. The adapter writes
+   `checkpoint.json` immediately after **Incluir**. If filling later fails,
+   inspect that checkpoint and the live draft. Correct case facts and
+   regenerate `payload.json` with `finalize --review <run-directory>/review.json
+   --facts <facts.json>` rather than editing it by hand. Resume with the
+   targeted `pje_draft_write` stage (`characteristics`, then `documents`, for
+   a characteristics failure); do not repeat `create` or `create-fill`.
+5. Call `pje_draft_inspect` with `stage: pending` to confirm the draft appears
+   in **Não Protocolados**. Return the draft ID/URL and report which fields and
+   PDFs were actually saved. Have the user review the draft in PJe before any
+   final filing. There is no Protocolar tool in this workflow.
+
+The filing-run root must be the same for the script and PJe MCP process.

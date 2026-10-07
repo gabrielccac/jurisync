@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jurisync"
+version = "0.2.0"
+description = "MCP connectors for Brazilian court portals and legal management tools"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4==4.15.0",
+  "cryptography==50.0.2",
+  "curl_cffi==0.16.2",
+  "mcp==2.3.0",
+  "pdf-inspector==1.25.2",
+  "Pillow==12.3.0",
+  "playwright==1.63.0",
+  "pyotp==2.10.0",
+  "pypdf==6.0.0",
+  "seleniumbase==4.54.1",
+  "zxing-cpp==3.1.1",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"jurisync.connectors.djen" = ["calendars/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Customer workflows are not packaged; they import from the repository root.
+pythonpath = ["."]
+addopts = "-q --import-mode=importlib -m 'not live'"
+markers = ["live: read-only calls against real portals (opt-in: pytest -m live)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["data", "conversions", "downloaded_files"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+# Style preferences, not defects: explicit try/except-pass, nested `with`, if/else over ternaries.
+ignore = ["E501", "SIM105", "SIM108", "SIM117"]
+
+[tool.ruff.lint.per-file-ignores]
+# MCP tool signatures: pydantic validates each call into a fresh list, so `= []` is never shared.
+"src/jurisync/connectors/*/server.py" = ["B006"]
+"tests/*" = ["E731", "B017"]

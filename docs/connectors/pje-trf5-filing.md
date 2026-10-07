@@ -1,0 +1,340 @@
+# TRF5 PJe: prepare a process draft
+
+`src/jurisync/connectors/pje/filing/` creates and fills a TRF5 1G PJe draft by
+direct HTTP requests. It stops with the draft in **Não Protocolados**, ready for
+review and manual **Protocolar**. The request captures and implementation
+findings are in [the flow notes](pje-trf5-filing-flow.md).
+Victor's Advbox preparation, document routing, and office defaults belong in
+`customers/victor/workflows/`; this PJe adapter consumes the resulting explicit
+payload. See [Victor's workflow guide](../../customers/victor/README.md) for the
+Advbox preparation command, Jev review, and private case-facts format.
+
+## How the package is organised and how re-runs stay fast
+
+```text
+src/jurisync/connectors/pje/filing/
+  transport.py        HTTP, multipart and JSF postbacks (counts every request)
+  classification.py   Dados iniciais: the classification form and Incluir
+  subjects.py         assuntos          author.py       author party and address
+  parties.py          attorney, public bodies    characteristics.py   legal aid, claim value, priority
+  documents.py        main petition and supporting PDFs     pending.py   Não Protocolados lookups
+  fill.py             the phases below      checkpoint.py   ledger and atomic checkpoint writes
+  timeline.py         per-step timing       payload.py / names.py / parsing.py   validation and helpers
+  run.py              stages and the command line (client.py composes the sections into DraftClient)
+```
+
+`fill` and `create-fill` work in four phases: subjects, parties, characteristics, documents. Each phase reads the
+draft once, acts only on what is missing, and writes the phase and a fingerprint of the payload slice it used into
+`checkpoint.json` (`completed`). A re-run skips phases whose fingerprint still matches and only confirms the draft is
+listed in **Não Protocolados**. Changing the payload for one phase reruns only that phase. `--verify-all` ignores the
+record and re-checks everything; use it when something may have changed in PJe by hand.
+
+Documents are listed once before uploading and once after the last upload; the upload responses themselves confirm
+that PJe registered each row and accepted its bytes. Every step is recorded in `filing-steps.json` next to the
+checkpoint: run ID, step, document or party, status, seconds, and PJe requests (each request is counted once).
+
+## Codex desktop chat and MCP
+
+The PJe MCP exposes `pje_draft_inspect` for current classification choices,
+subject choices, and **Não Protocolados** checks. `pje_draft_write` exposes the
+CLI's create/fill stages and requires `PJE_ALLOW_DRAFT_WRITES=true` in the MCP
+process. Neither tool exposes **Protocolar**.
+`pje_search_pending_drafts` searches the first **Não Protocolados** results
+page by party name, CPF, or both, without requiring a filing run.
+
+The inspection and write tools take a `runId` and read `payload.json` and `checkpoint.json` from
+`$JURISYNC_FILING_DIR/<runId>` (default:
+`~/.local/share/jurisync/filings/<runId>`). Prepare Victor's reviewed payload
+with `--out` set to that same directory. Keep one unique run ID per draft;
+after **Incluir**, reuse its checkpoint and never call `create` again for that
+run. The desktop workflow is described in
+[Victor's filing skill](../../customers/victor/skills/victor-pje-filing/SKILL.md).
+The local Codex desktop setup already registers this PJe MCP server. Ordinary
+ChatGPT chat needs a separate local plugin connection to use these tools.
+
+## Payload
+
+The current working mock payload is private at
+`~/.local/share/jurisync/pje-draft-payload.json`. Its shape is:
+
+```json
+{
+  "portal": "trf5-1g",
+  "classification": {
+    "area": "DIREITO PREVIDENCIÁRIO",
+    "jurisdiction": "PE / Petrolina",
+    "judicialClass": "PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL (436)"
+  },
+  "subjects": [
+    {"search": "Assistencial", "code": "11946", "name": "Pessoa com Deficiência"}
+  ],
+  "authorCpf": "<CPF do autor>",
+  "author": {"name": "<nome esperado no cadastro do PJe>", "address": {"cep": "<8 dígitos>", "numero": "<número>"}},
+  "attorney": {
+    "cpf": "<CPF da advogada>",
+    "name": "GRAZIELE ALVES DA SILVA",
+    "oabNumber": "48647",
+    "oabState": "PE"
+  },
+  "passive": {
+    "search": "inss",
+    "cnpj": "29979036000140",
+    "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"
+  },
+  "otherParticipants": [
+    {
+      "role": "ÓRGÃO DE CUMPRIMENTO",
+      "search": "ceab",
+      "cnpj": "29979036001465",
+      "name": "CEAB-DJ INSS"
+    },
+    {
+      "role": "FISCAL DA LEI",
+      "search": "ministério público",
+      "cnpj": "26989715005414",
+      "name": "MINISTERIO PUBLICO DA UNIAO"
+    }
+  ],
+  "characteristics": {
+    "claimValue": "5.000,00",
+    "legalAid": true,
+    "injunction": false,
+    "priority": "Juízo 100% Digital"
+  },
+  "documents": {
+    "main": {
+      "path": "/absolute/path/peticao.pdf",
+      "type": "Petição inicial",
+      "description": "Petição inicial"
+    },
+    "supporting": [
+      {
+        "path": "/absolute/path/anexo.pdf",
+        "type": "Documento Comprobatório",
+        "description": "Anexo"
+      }
+    ]
+  }
+}
+```
+
+The example identifiers and classifications reflect the captured mock case;
+replace them for each real matter. PDF paths must exist on the machine running
+the script. The live TRF5 upload panel shows PDF files up to 10.0 MB; this
+client uses a conservative 10,000,000-byte limit per file. DOC/DOCX sources
+must be converted before this adapter receives them. `number` is an optional
+document field; supporting `description` defaults to the filename stem.
+Victor's split supporting PDFs set `number` to the volume fraction (for example,
+`1/2`) and repeat it in the description.
+`claimValue` uses Brazilian currency format, and `legalAid` and `injunction`
+are JSON booleans. Omit `characteristics` or `documents` only when intentionally
+stopping before those stages.
+
+### How selections are resolved
+
+| Item | Payload search input used now | Result selected or checked | Other lookup fields shown by PJe |
+| --- | --- | --- | --- |
+| Area, jurisdiction, class | Exact displayed labels | Script reads each option's current value after the preceding selection refreshes the list. The captured jurisdiction value was `30`; it is not stored in the payload. | No alternate lookup implemented. |
+| Subjects | Each `subjects[].search` text | Each code and name must match one result row; subjects are added in array order. | Code/name are result identifiers; searching directly by code has not been verified. |
+| Author | `authorCpf`; optional `author.address.cep` | `author.name` must match the person PJe returns; the CPF is masked for the form. A unique registered address with the requested CEP is reused, otherwise PJe's CEP suggestion is selected and `author.address.numero` is required. | The name is a returned identity field, not a second search mode in this implementation. |
+| Attorney | `attorney.cpf` | Returned `attorney.name`; associated row must contain the CPF, name, and `attorney.oabState` + `attorney.oabNumber`. | The attorney form also shows OAB number and UF inputs. Searching by OAB instead of CPF is not implemented or verified. |
+| INSS and other public bodies | `search` name text | Select the unique row with `cnpj`, then associate it with the chosen pole or `role`. | The name search may return multiple rows; CNPJ identifies the intended result. Direct CNPJ search has not been verified. |
+| Priority and document types | Exact displayed labels | Script reads current select values from PJe. | Numeric option values from captures are not stable payload values. |
+
+PJe's benefit choice in this flow is the **Assunto** lookup. The integration can
+now list its current choices without adding one to a draft:
+
+```bash
+.venv/bin/python -m jurisync.connectors.pje.filing \
+  --stage subject-options \
+  --checkpoint /home/gabriel/.local/share/jurisync/pje-draft-checkpoint-new.json \
+  --search "Incapacidade Temporária" --page 1
+```
+
+The response contains each result's exact code, leaf name, full subject path,
+and the total result count. Search again with `--page 2` when needed. A broad
+term may return other legal areas, and PJe omits subjects already attached to
+the queried draft. Check the intended area and exact code before selection.
+Historical TRF5 filings can have several associated Assuntos. Supply one or
+more distinct entries in `subjects`; each is looked up and verified on the
+draft. The older singular `subject` form remains accepted. Resolve the full
+subject set from the petition and case review before filling a real draft.
+
+The logged-in certificate user is not an `attorney` payload entry. The script
+explicitly associates Graziele by CPF; it does not add or verify Victor as a
+separate representative. Review the actual Partes tab before protocol.
+
+## Run and review
+
+Certificate and 2FA settings come from the environment: `PJE_A1_P12`,
+`PJE_A1_PIN`, and `PJE_TRF5_2FA_DATA` or `PJE_TRF5_2FA_QR`. Keep them out of
+the JSON payload. With those values loaded:
+
+```bash
+.venv/bin/python -m jurisync.connectors.pje.filing \
+  --stage create-fill \
+  --payload /home/gabriel/.local/share/jurisync/pje-draft-payload.json \
+  --checkpoint /home/gabriel/.local/share/jurisync/pje-draft-checkpoint-next.json
+```
+
+Use a new checkpoint filename for each new draft. **Incluir** creates the
+draft; the script saves its ID and URL to the checkpoint immediately. A later
+failure does not erase that draft. Resume the same draft with `--stage fill`,
+the same payload, and that checkpoint. `--stage documents` only handles the
+PDFs on an existing draft. These stages authenticate once per run and keep the
+same session for that run.
+
+The sequence is:
+
+1. Select area, jurisdiction, then class, and press **Incluir** to create the draft.
+2. Search and associate each subject, then the author, attorney, passive INSS, CEAB, and Ministério Público.
+3. Save Justiça gratuita, tutela/liminar, and valor da causa; separately include Juízo 100% Digital when requested. Set `priority` to `false` or omit it to leave the priority list unchanged; `"NÃO"` is not a PJe option label.
+4. Upload and save the single main petition PDF, then upload, classify, and save each supporting PDF. Read the **Informativo** document grid back to confirm them.
+5. Confirm the draft appears in **Não Protocolados**. Open it in PJe and review all fields and PDFs. Submit **Protocolar** manually when the real case is ready.
+
+The individual direct-request actions and readbacks were exercised on mock
+draft `4167920`, including the documents. A full `create-fill` run from an
+empty new draft through documents has not yet been exercised in one invocation.
+The final protocol request and its signing or result flow have not been mapped.
+
+## Historical document types in Minhas petições
+
+The authenticated **Painel do Advogado** is
+`/pje/Painel/painel_usuario/advogado.seam`. Its `tabPeticoes` tab opens
+**Minhas petições**. The `pedidoPeticaoForm` can filter by CNJ process number
+and inclusion/juntada dates. Results show process number, document description,
+PJe document type, and document/receipt links. PJe permits at most **12 months**
+between search dates. A read-only search on 2026-10-05 used
+05/10/2025–05/10/2026 and one authenticated session for ten process-number
+queries. The grid displays at most 16 rows per page.
+
+| Process | Rows seen / reported | Relevant saved types |
+| --- | ---: | --- |
+| `0005394-06.2026.4.05.8308` | 16 / 18 | Laudos → Laudo Médico; PA → Processo Administrativo; quesitos and procuração → Outros Documentos |
+| `0009696-30.2025.4.05.8303` | 16 / 32 | Later identity/residence bundle and certificates → Outros Documentos; initial package is beyond the visible page |
+| `0011038-42.2026.4.05.8303` | 12 / 12 | Comunicado, laudos, quesitos → Documento Comprobatório; PA → Processo Administrativo |
+| `0004131-48.2026.4.05.8304` | 15 / 15 | Comunicado and laudos → Documento Comprobatório; PA → Processo Administrativo |
+| `0004131-36.2026.4.05.8308` | 16 / 16 | Comunicado → Carta de Concessão; comunicado de cessação → Carta de Indeferimento; laudos → Laudo Médico; contrato de honorários → Documento Comprobatório |
+| `0007999-71.2025.4.05.8303` | 16 / 18 | PA → Documento Comprobatório; procuração → Outros Documentos |
+| `0012409-41.2026.4.05.8303` | 10 / 10 | Comunicado → Carta de Indeferimento; contrato e procuração → Instrumento de Procuração; PA → Processo Administrativo |
+| `0006822-23.2026.4.05.8308` | 14 / 14 | Comunicado and laudos → Documento Comprobatório; procuração → Instrumento de Procuração; PA → Processo Administrativo |
+| `0003232-87.2025.4.05.8303` | 11 / 11 | Comunicado and laudos → Documento Comprobatório; procuração → Outros Documentos |
+| `0001748-37.2025.4.05.8303` | 14 / 14 | Comunicado and laudos → Documento Comprobatório; procuração e contrato → Outros Documentos |
+
+For a **new initial petition** payload, use the stable filename rules first
+and inspect content when the type remains uncertain:
+
+| Source document | Proposed PJe type | Review condition |
+| --- | --- | --- |
+| Main petition | Petição inicial | Exactly one main petition. |
+| Valor da causa / RMI calculation | Planilha | A later calculation petition used Planilha de Cálculo; keep that separate from the initial value sheet. |
+| Author's RG or identity card | Documento de Identificação | A family member's or representative's ID in a combined proof bundle may be Documento Comprobatório. |
+| Procuração; contract | Outros Documentos | Matches the collaborator's current instruction. Historical filings also used Instrumento de Procuração for powers of attorney and Documento Comprobatório for a fee contract. |
+| Quesitos | Outros Documentos | One historical filing used Documento Comprobatório; retain the collaborator's requested default. |
+| Administrative process / PA | Processo Administrativo | Prefer the specific type; one historical case used Documento Comprobatório. |
+| Comunicado de decisão | Carta de Indeferimento or Carta de Concessão | Read the decision outcome: explicit denial → Indeferimento; explicit grant → Concessão. A cessation or refusal to extend an existing benefit needs review. Historical generic labels are not reliable evidence of the outcome. |
+| Medical reports and exams | Laudo Médico or Documento Comprobatório | Choose from the actual content and the intended filing convention; both occur in initial packages. |
+| CNIS/CTPS, residence, rural/family/LOAS evidence | Documento Comprobatório | The general fallback applies to supporting evidence of this kind. |
+
+### What the decision letters actually say
+
+The eight available PDFs behind the visible **Comunicado de decisão** rows
+were inspected on 2026-10-05, including rendered pages where text extraction
+failed. Personal names and benefit numbers are omitted here.
+
+| Process | PDF content | Saved PJe type | Content-based route |
+| --- | --- | --- | --- |
+| `0011038-42.2026.4.05.8303` | Medical review did not recognize incapacity; an existing benefit was not extended | Documento Comprobatório | Review as non-extension/cessation |
+| `0004131-48.2026.4.05.8304` | BPC right not recognized; request denied | Documento Comprobatório | Carta de Indeferimento |
+| `0004131-36.2026.4.05.8308` (decision) | Explicit *Deferimento do Pedido* and recognized right to benefit | Carta de Concessão | Carta de Concessão |
+| `0004131-36.2026.4.05.8308` (cessation) | Rehabilitation completed; existing benefit ended | Carta de Indeferimento | Review as cessation; it is not an initial denial |
+| `0012409-41.2026.4.05.8303` | Explicit *Indeferimento do Pedido* | Carta de Indeferimento | Carta de Indeferimento |
+| `0006822-23.2026.4.05.8308` | Explicit *NEGADO* | Documento Comprobatório | Carta de Indeferimento |
+| `0003232-87.2025.4.05.8303` | Explicit *Indeferimento do Pedido* | Documento Comprobatório | Carta de Indeferimento |
+| `0001748-37.2025.4.05.8303` | Explicit *NEGADO* | Documento Comprobatório | Carta de Indeferimento |
+
+Thus, the title *Comunicado de decisão* does not determine the type, but the
+decision text usually does: five of eight are direct denials, one is a grant,
+and two concern ending or not extending an existing benefit. Four direct
+denials were historically saved as Documento Comprobatório, so the saved PJe
+type is a record of user choice, not a dependable semantic label. For a new
+draft, extract the operative decision language and route clear denials and
+grants by outcome. Victor's preparation workflow flags cessation/non-extension,
+illegible pages, mixed decisions, and missing operative language and assigns
+`Outros Documentos` as the upload fallback. Review the flagged list before
+manual protocol.
+
+Do not route a document only because its name contains a keyword: later
+**Manifestação**, **Petição (outras)**, **Réplica**, and appeal filings in these
+same processes use procedural types, and combined PDFs may need a different
+type from their individual components. The shared PJe script accepts an
+explicit `type` per PDF and checks that PJe offers that label.
+
+### Advbox filename coverage
+
+A review of ten `00-PROTOCOLAR` client folders found many stable filename
+patterns (`VALOR DA CAUSA`, `DOCUMENTO DE IDENTIFICAÇÃO`, `CNIS E CTPS`,
+`PROCURAÇÃO`, `QUESITOS`, `PA`) plus these cases requiring another step:
+
+| Actual filename pattern | Handling before PJe upload |
+| --- | --- |
+| `COMUNICADO DE DECISÃO` / `COMUNICAÇÃO DE DECISÃO` | Read the decision outcome; the filename does not say grant, denial, or cessation. |
+| `INFBEN`, `DESPACHO`, process-number-only PDF | Inspect content and decide whether the file belongs in the initial filing. |
+| `LAUDO INSS`, `LAUDO MÉDICO ADMINISTRATIVO`, `DOCUMENTOS MEDICOS`, `LAUDOS MÉDCIOS E RECEITUARIOS` | Recognize spelling and wording variants, then inspect where the medical-document type is uncertain. |
+| `FORMULARIO LOAS E CADUNICO`, `DOCUMENTOS DO GRUPO FAMILIAR`, `COMPROVANTE DE REQUERIMENTO` | Treat as supporting evidence after confirming its role in the case. |
+| Two rural-proof or CNIS PDFs; petition in both DOCX and PDF | Keep distinct evidence when relevant; compare possible duplicate or alternate petition versions before choosing files. |
+| `PETIÇÃO.doc`, `PETIÇÃO INICIAL.docx` | Identify the main petition and convert the selected version to PDF before upload. |
+
+Numeric prefixes, generated suffixes, `(ATUAL)`, accents, capitalization, and
+extra spaces can be normalized for filename matching. A specific known match
+may bypass content classification; unknown, mixed, or conflicting matches go
+to content inspection, then Victor's flagged `Outros Documentos` fallback if
+their type remains uncertain.
+
+**Minhas petições** provides historical submissions associated with the logged-in
+lawyer; it is not a verified inventory of every document in a process. The
+current `filing` package reads the new draft's **Informativo** document grid but
+does not yet expose a historical **Minhas petições** search command. For a new
+draft, review each Advbox file, choose its PJe type, and provide a PDF path in
+the payload. A protocol folder can also contain editable petition drafts,
+older process PDFs, or duplicate files.
+
+## Author address capture
+
+`author.address` is optional. The direct request adapter opens **Endereços**
+for the author and compares registered rows by CEP. If a row with that CEP is
+already selected, it continues. If another row is selected, it selects the
+matching row, saves **Atualizar Parte**, then reopens the editor to verify the
+selected CEP. If no row matches, it uses PJe's CEP suggestion, fills the
+required `numero` and optional `complemento`, clicks **Incluir**, saves the
+party, and rereads the selected CEP. A CEP with multiple or no suggestions
+requires manual review. No address in the payload leaves the optional PJe
+address flow unchanged.
+
+The focused browser capture
+`~/.local/share/jurisync/captures/pje-address-manual-20261006-150811.mitm`
+maps an existing author's address edit on PJe 1G:
+
+1. **Adicionar endereço** renders the existing address grid and the CEP
+   autocomplete. Entering a CEP sends an Ajax lookup; selecting a returned
+   suggestion sends a second Ajax request with its row selection and fills
+   state, city, neighborhood, and street. Typing the CEP alone does not fill
+   those fields. The separate **Pesquisar endereço** tab returned no result in
+   this capture.
+2. Supply the remaining fields, including number, and click **Incluir**
+   (`cadastroPartePessoaEnderecobtnGravarEndereco`). PJe returned "Registro
+   inserido com sucesso" and changed the grid from one address to two. The
+   newly added address appeared marked **Usar no processo**.
+3. Each address row has its own **Usar no processo** Ajax action. Choosing the
+   older row changed the selected icon to that row; choosing the new row
+   changed it back. Row indexes and JSF component IDs are generated by PJe,
+   so an implementation must find the row by its rendered address, not by its
+   index.
+4. The final **Atualizar Parte** request
+   (`formInserirParteProcesso:btnAtualizarParte`) saved the party update, and
+   the party list was rendered again. The capture ends after reloading the
+   process page, before reopening the address grid; persistence of the final
+   selection after a fresh load has not been independently read back.
+
+The captured address is urban; rural addresses, "sem número", and CEPs
+without suggestions still need their own observed paths before automation.

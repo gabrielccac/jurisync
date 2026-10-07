@@ -1,203 +1,135 @@
-# Pipeline Juridiq
+# Jurisync
 
-One workspace for Juridiq authentication/API calls and TRF1 PJe 1G/2G retrieval.
-Publication context is assessed by the calling LLM agent. This project supplies
-read-only evidence preparation, PJe retrieval, and grounded-response validation.
+MCP connectors that let LLM agents read Brazilian court portals (PJe, Eproc,
+DJEN, INSS) and work with legal management tools (Juridiq, ADVBOX), plus the
+customer workflows and agent skills built on them. Everything is Python.
+
+Connectors supply evidence and mechanics; legal judgment stays with the calling
+agent and its customer skill. Writes are off unless explicitly enabled per
+connector.
 
 ## Layout
 
 ```text
-integrations/
-  juridiq/
-    publications.py       Local evidence bundles and decision validation
-    tasks.py              Skill task routing and payload preparation
-    pipeline.mjs          End-to-end agent-orchestrated publication pipeline
-    client.mjs            Named Juridiq publication/template/lawsuit/task operations
-    profiles.mjs          Default client policy and task-template mapping
-    session.mjs            Shared bearer authentication and request guard
-  pje/
-    auth.py              Shared SSO/TOTP login
-    trf1_1g.py            First-instance JSF process search
-    trf1_2g.py            Second-instance search + shared timeline/document parsing
-    client.py            Common process retrieval CLI/function for 1G and 2G
-    documents.py         Bounded selected-document reads and HTML text extraction
-    watch_1g.py           Imported first-instance process watcher
-    notifications.py     Imported 1G/2G Expedientes and Push exploration
-scripts/
-  juridiq_read.mjs        Print an API response using the shared session
-tests/                   Offline checks; no account credentials required
-docs/
-  endpoints.md           Routes, request shapes, and evidence status
-  pipeline.md            Data sources and remaining implementation stages
-  migration.md           Original files and where they now live
-  reference/            Original triage skill and its supporting references
-data/                    Ignored private responses, documents, polling state
-.env.example             Empty configuration template
-requirements.txt         PJe dependencies from the previous environment
-package.json             Node commands and local MCP dependencies
-pje_adapter.py           Compatibility entry point
-juridiq_session.mjs      Compatibility re-export
+src/jurisync/
+  portals.py            Registry of every court deployment (system, tribunal, instance, host, login)
+  core/                 Shared plumbing
+    mcp.py              Server runner, .env loading, safe tool errors, read-only annotations
+    session_pool.py     In-memory authenticated sessions, one per portal
+    totp.py             Authenticator exports / otpauth URIs / QR images → TOTP codes
+    pdf.py              PDF text + metadata (pdf-inspector), safe download paths
+    document_text.py    HTML/PDF text with access-denied and expired-session detection
+    redaction.py        Strip tokens and raw URLs from results and logs
+    http.py             URL guard, request conventions, request logging
+    word_to_pdf.py      DOC/DOCX → PDF through headless LibreOffice
+  connectors/           One folder per system; each has a server.py MCP entry point
+    pje/                TRF1 1G/2G and TRF5 1G: one search flow for every deployment, documents,
+                        notifications, TRF5 draft filing; jsf.py holds the shared JSF mechanics
+                        (auth/ holds SSO, A1 certificate, session cache)
+    eproc/              TRF4 1G sections (SC, RS): notice queues, process, documents (Selenium login)
+    djen/               Public DJEN/Comunica search, certidão text, JFPE deadline calendar
+    inss/               GERID/PAT through Chrome with the A3 certificate
+    juridiq/            Juridiq REST API
+    advbox/             ADVBOX web session: customers, lawsuits, activities, files, tasks
+  workflows/
+    publications/       Juridiq publication → task pipeline and evidence validation
+customers/
+  jean/                 Juridiq publication triage: profile, runner, skill, notes
+  victor/               DJEN → ADVBOX routing skill, TRF5 filing prep, TRF1 watcher
+cli/                    Diagnostics: juridiq_read, inss_probe, eproc_portal_smoke
+tests/                  Offline tests mirroring src/ and customers/
+docs/                   Architecture, publication workflow, connector references
+.claude/skills/         Links to each customer's skills for Claude Code
 ```
-
-The active code has no import dependency on the Desktop/Juridiq or ChatGPT/General
-projects. Those original projects were left intact. The two root compatibility
-files let existing commands/imports keep working while using the consolidated code.
 
 ## Setup
 
-Use Python 3.12+ and Node 22+. From this project directory:
+Python 3.12+ and [uv](https://docs.astral.sh/uv/):
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```bash
+uv sync
 ```
 
-Fill a local .env using .env.example or export the variables in your shell.
-Node supports --env-file=.env. Python uses environment variables exported in the
-shell; it does not automatically load .env.
-
-PJe supports independent PJE_1G_USERNAME/PASSWORD/2FA_DATA and
-PJE_2G_USERNAME/PASSWORD/2FA_DATA settings. Shared PJE_USERNAME/PASSWORD/2FA_DATA
-are fallbacks. These implementations use username/password + TOTP SSO; they do
-not implement A3 hardware-certificate authentication.
-
-Juridiq uses JURIDIQ_EMAIL/JURIDIQ_PASSWORD only when a session is missing,
-expired, or rejected with 401. Its default cache is keyed by the configured email
-under LocalAppData/Juridiq. If no email is configured, it can reuse the original
-bearer-session.json cache. A custom JURIDIQ_SESSION_FILE must be distinct per account.
-Set credentials before starting Node/importing the helper.
-
-Writes are disabled by default. Each operation explicitly selects `operational`
-or `test`, which determines the credential pair and tenant. Writes additionally
-require `JURIDIQ_ALLOW_WRITES=true` and confirmation at the MCP boundary.
-Login and POST /generic-tables are allowed in read mode. The read CLI exposes only
-GET and the generic-tables query POST.
-
-## Commands
-
-These portal commands use live credentials only when explicitly run:
-
-```powershell
-.\.venv\Scripts\python.exe -m integrations.pje.client --portal 1g --process-number 1024853-70.2023.4.01.3400 --scope page
-.\.venv\Scripts\python.exe -m integrations.pje.client --portal 2g --process-number 1016572-38.2026.4.01.0000 --scope latest
-node --env-file=.env scripts/juridiq_read.mjs --path "/user/me"
+```bash
+cp .env.example .env
 ```
 
-Add --fetch-documents --download-dir data/documents to a PJe command to save raw
-document responses. Inspect the returned HTTP status/content type: a .bin file is
-not proof of a usable PDF. For selected context, use --scope page and repeat
---document-id ID (maximum five). This returns extracted HTML text or an explicit
-unresolved extraction status under attachments. PDF extraction/OCR is not implemented.
+Fill in only the connectors you use; `.env.example` documents every variable.
+INSS also needs Google Chrome and the A3 certificate middleware; see
+[the INSS guide](docs/connectors/inss-instalacao.md).
 
-The PJe CLI writes JSON to stdout and request diagnostics to stderr. It returns
-movement_candidates; these are not confirmed diary/Juridiq publications. The
-result also includes the search row, process details, parties, event origin/type,
-document inventory and pagination metadata. `page` selects the first HTML
-timeline page and is the default; `latest` selects the latest date bucket, not
-necessarily a single movement. `all` is retained as a compatibility alias for
-`page` because the portal uses infinite-scroll pagination and is not fully loaded
-by one detail response.
-Call fetch_process(..., session=session) to reuse an authenticated PJe session
-across multiple searches; otherwise a call logs in and closes its own session.
-Call read_selected_documents(process_result, [document_id], session=session) from
-integrations.pje.client to reuse that session for evidence selected by the agent.
-It accepts only known IDs and the supported joined-document download route, never
-arbitrary agent-supplied URLs. Do not accept caller-supplied process results in a
-hosted wrapper; retain the adapter result on the trusted side.
+Claude Code picks up `.mcp.json` from the project root. Each server runs as
+`.venv/bin/python -m jurisync.connectors.<name>.server` and loads `.env` on
+startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
 
-## Agent-orchestrated publication context
+## Connectors
 
-See [the detailed plan](docs/publication-enrichment-plan.md) for matching rules,
-states, safety boundaries and rollout. The caller assesses the publication first,
-requests PJe context only for identified gaps, then submits a source-quoted decision.
-There is no embedded LLM or OpenRouter dependency. The local MCP server is the
-agent integration surface; automatic operational-account writes remain disabled.
+`*` marks tools that write (locally or remotely).
 
-Prepare one local historical publication (the saved batch is already handled):
+| Server | Tools | Login | Writes |
+|---|---|---|---|
+| `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1: password + TOTP. TRF5: A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
+| `eproc` | `eproc_list_notices`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`) | Browser login + TOTP, once per portal | none |
+| `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
+| `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_download_attachment`*, `inss_download_process`* | Chrome + A3 PIN (by the user) + TOTP | local downloads only |
+| `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
+| `advbox` | 11 read tools (customers, lawsuits, activities, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
 
-```powershell
-.\.venv\Scripts\python.exe -m integrations.juridiq.publications prepare --snapshot data/juridiq-publications-2026-09-08.json --publication-id f8f625ca-5e48-4ae8-92ea-9978dd97e04a --include-handled --output data/publication-assessment.json
+Long-running servers keep each portal's authenticated session in memory, so
+only the first call logs in; later calls reuse it until it expires.
+
+## Customers
+
+Each customer folder owns its policy: skills, profiles, workflows, and notes.
+Shared code never imports from `customers/`.
+
+- **Jean** — `customers.jean.run_publications.run_jean_publications(agent)` runs
+  the publication pipeline with Jean's template mapping.
+- **Victor** — DJEN → ADVBOX task routing skill; TRF5 initial-filing preparation
+  (`python -m customers.victor.workflows.prepare_pje_filing --help`); TRF1
+  spreadsheet watcher (`python -m customers.victor.workflows.pje1g_watch --help`).
+
+Add a customer by creating `customers/<name>/` with a README, its skills under
+`skills/`, and a symlink in `.claude/skills/` for each skill.
+
+## Command line
+
+```bash
+.venv/bin/python -m jurisync.connectors.pje.process --portal trf1-1g --process-number 1024853-70.2023.4.01.3400
 ```
 
-Add --process with a saved PJe client result to supply movement/document candidates,
-and --documents with a JSON array of selected-document read results to supply text.
-The preparation and validation commands are local-only. They do not call a model
-or log into either service. Existing output files are not overwritten.
-Keep rawPublication as a local archive; give the calling agent the parsed
-publication/process/timeline/documents/sources fields and agentInstructions.
-
-After the caller produces a decision matching the bundle's contract:
-
-```powershell
-.\.venv\Scripts\python.exe -m integrations.juridiq.publications validate --bundle data/publication-assessment.json --decision data/agent-decision.json --output data/validated-decision.json
+```bash
+.venv/bin/python -m jurisync.connectors.eproc.client process --portal trf4-1g-sc --process-number 5000436-79.2026.4.04.7220
 ```
 
-Validation checks IDs, states and exact source quotes; it does not establish legal
-correctness. A sufficient-context result is input for later task drafting, not
-permission to write. Juridiq bearer reuse and its read guard remain unchanged.
-
-## Full publication pipeline
-
-The local MCP server in `scripts/mcp_server.mjs` exposes read tools for pending
-and filterable publications, lawsuits and their movements, events, tasks and
-their history/comments, templates and PJe context. The separate local server in
-`scripts/inss_mcp_server.mjs` exposes read-only INSS PAT tools for GERID session
-setup, notifications, task search, and task detail, plus an attachment downloader
-and a consolidated-process PDF downloader that write new files under
-`downloaded_files/inss` and return locally extracted PDF Markdown to the caller.
-See `docs/instalacao-mcp-inss-gerid.md` for the complete macOS setup guide.
-Its first call opens Chrome
-when A3/PIN login is required; valid cached sessions are reused headlessly. The
-Juridiq server also exposes explicitly test-scoped mutation tools.
-`integrations/juridiq/pipeline.mjs`
-exposes `runPublicationPipeline`. The host agent supplies
-`deduplicate`, `assess`, `enrich` (selected PJe context when incomplete), and `route`
-(the skill's task type, description, dates, evidence, and `obligationKey`). The runner
-polls unread publications, resolves live templates from the supplied client profile,
-deduplicates acts, checks existing tasks, creates or updates tasks, handles confirmed
-events, marks only successful publications read, and persists per-publication state.
-All reads and writes in one run use the same account because Juridiq lawsuit, template,
-and task IDs are account-scoped. `DEFAULT_PROFILE` preserves the current client's
-mapping; another client supplies the same profile shape with its own rules and template
-titles. The runtime account is selected per operation; it is not part of the profile.
-
-The opt-in live write test discovers the test account's own office, current user,
-and board column, then creates a minimal temporary task with no tags or template
-dependency. It retrieves the task, updates it, retrieves it again, and deletes only
-the returned ID. `lawSuitId: null` remains supported for an unlinked-task test; set
-`TEST_JURIDIQ_LAWSUIT_ID` to exercise a linked task. No operational-account IDs are
-copied into the test payload:
-
-```powershell
-$env:RUN_JURIDIQ_WRITE_TEST = "true"
-$env:JURIDIQ_ALLOW_WRITES = "true"
-node --env-file=.env scripts/test_juridiq_write.mjs
+```bash
+.venv/bin/python -m jurisync.connectors.djen.client --numero-oab 14663 --uf-oab PB --inicio 2026-10-01 --fim 2026-10-02 --normalized
 ```
 
-PDF documents remain explicitly unresolved in the PJe adapter. The suggested
-`pdf-inspector` should be added only for selected PDF evidence, preserving page
-provenance and OCR-needed statuses; it is not needed for HTML or complete
-publications.
-
-The imported 1G watcher is available via:
-
-```powershell
-.\.venv\Scripts\python.exe -m integrations.pje.watch_1g --sheet-json data/watched_processes_1g.json
+```bash
+.venv/bin/python cli/juridiq_read.py --path /user/me
 ```
 
-Its input is an array of objects with a "Número do processo" field. It defaults to
-one run and writes state/cookies under data. See docs/pipeline.md for its baseline
-limitations. A dedicated 2G watcher has not been implemented.
-
-## Offline validation
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
-node --test tests/juridiq_session.test.mjs
+```bash
+.venv/bin/python cli/inss_probe.py login
 ```
 
-Checks cover both portal routes, session reuse, input validation, timeline/document
-parsing, separate portal credentials, existing notification parsers, bearer reuse,
-one 401 refresh, no login retry on an API 429, account cache separation, and the
-Juridiq read guard. Consolidation checks do not establish fresh live portal/API
-compatibility. See docs/endpoints.md for the distinction.
+## Development
+
+```bash
+uv run pytest
+```
+
+```bash
+uv run ruff check . && uv run ruff format --check .
+```
+
+Tests are offline and need no credentials. Live checks against real portals are
+manual and read-only.
+
+## Docs
+
+- [Architecture](docs/architecture.md) — boundaries, sessions, safety rules
+- [Publication workflow](docs/publication-workflow.md) — the agent contract for Juridiq triage
+- [Connector references](docs/connectors/) — endpoints, TRF5 filing, Eproc captures, INSS setup, Tramitação
+- [Backlog](docs/backlog.md)
