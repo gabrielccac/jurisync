@@ -9,7 +9,9 @@ from jurisync.connectors.inss.auth import is_reusable_auth, safe_url
 from jurisync.connectors.inss.client import (
     attachment_filename,
     process_report_request,
+    read_saved_document,
     save_base64_download,
+    slice_text,
     task_search_request,
 )
 from jurisync.core.pdf import attachment_mime_type, extract_pdf_metadata
@@ -94,7 +96,9 @@ class InssTest(unittest.TestCase):
                 (Path(first["path"]).name, Path(second["path"]).name), ("1-processo.pdf", "1-processo-1.pdf")
             )
             self.assertEqual((first["pageCount"], first["mimeType"]), (1, "application/pdf"))
-            self.assertIsInstance(first["pagesNeedingOcr"], list)
+            self.assertIn("Hello INSS", first["markdown"])
+            ocr_pages = first.get("pagesNeedingOcr", first.get("pagesRecommendedForOcr"))
+            self.assertIsInstance(ocr_pages, list)
             with self.assertRaisesRegex(ValueError, "was not application/pdf"):
                 save_base64_download(
                     base64.b64encode(b"not a pdf").decode(), None, "x.pdf", "application/pdf", directory
@@ -111,6 +115,64 @@ class InssTest(unittest.TestCase):
         self.assertEqual(
             safe_url("https://atendimento.inss.gov.br/x?ticket=t&a=1#frag"), "https://atendimento.inss.gov.br/x?a=1"
         )
+
+
+class ReadDocumentTests(unittest.TestCase):
+    def test_text_comes_in_windows_with_a_pointer_to_the_next_one(self):
+        parsed = {"markdown": "0123456789", "pageCount": 1}
+        first = slice_text(parsed, 0, 4)
+        self.assertEqual((first["markdown"], first["nextOffset"], first["textTruncated"]), ("0123", 4, True))
+        last = slice_text(parsed, 8, 4)
+        self.assertEqual((last["markdown"], last["nextOffset"], last["textTruncated"]), ("89", None, False))
+        self.assertEqual(last["pageCount"], 1)
+
+    def test_a_saved_pdf_is_parsed_and_paged_from_the_download_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "processo.pdf").write_bytes(tiny_pdf("Sentenca procedente"))
+            whole = read_saved_document("processo.pdf", 0, 100_000, folder)
+            self.assertIn("Sentenca procedente", whole["markdown"])
+            self.assertEqual((whole["pageCount"], whole["nextOffset"]), (1, None))
+            part = read_saved_document("processo.pdf", 0, 5, folder)
+            self.assertEqual(part["markdown"], whole["markdown"][:5])
+            self.assertEqual(part["nextOffset"], 5)
+
+    def test_only_a_bare_file_name_inside_the_download_folder_is_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            outside = Path(folder).parent / "secret.pdf"
+            outside.write_bytes(tiny_pdf("secret"))
+            try:
+                for name in ("../secret.pdf", "sub/x.pdf", "/etc/passwd", "..", "", "a\\b.pdf"):
+                    with self.assertRaises(ValueError, msg=name):
+                        read_saved_document(name, 0, 100, folder)
+                with self.assertRaises(FileNotFoundError):
+                    read_saved_document("missing.pdf", 0, 100, folder)
+            finally:
+                outside.unlink()
+
+    def test_get_tools_cap_the_returned_text_and_point_to_the_rest(self):
+        from jurisync.connectors.inss.server import file_result
+
+        result = file_result({"filename": "p.pdf", "markdown": "x" * 5000, "base64": "AAAA"}, 2000)
+        structured = result.structured_content
+        self.assertEqual((structured["textReturnedCharacters"], structured["nextOffset"]), (2000, 2000))
+        self.assertTrue(structured["textTruncated"])
+        self.assertNotIn("base64", structured)
+        self.assertEqual(len(result.content[1].text.split("\n\n", 1)[1]), 2000)
+
+    def test_tools_use_the_get_names_and_a_read_tool_is_registered(self):
+        import asyncio
+
+        from mcp.client.client import Client
+
+        from jurisync.connectors.inss import server
+
+        async def names():
+            async with Client(server.server) as client:
+                return {tool.name for tool in (await client.list_tools()).tools}
+
+        tools = asyncio.run(names())
+        self.assertTrue({"inss_get_process", "inss_get_attachment", "inss_read_document"} <= tools)
+        self.assertFalse({"inss_download_process", "inss_download_attachment"} & tools)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from urllib.parse import quote, unquote, urlencode
 from zoneinfo import ZoneInfo
 
 from jurisync.connectors.inss.auth import default_profile, jwt_claims, login_and_authorize, qr_secret
-from jurisync.core.pdf import attachment_mime_type, available_path, extract_pdf_metadata
+from jurisync.core.pdf import analyze_document, attachment_mime_type, available_path
 
 TASKS_URL = "https://atendimento.inss.gov.br/tarefas"
 DIGITS = re.compile(r"^\d+$")
@@ -110,18 +110,78 @@ def save_base64_download(data, requested_name, fallback, expected_mime_type=None
     mime_type = attachment_mime_type(content, name)
     if expected_mime_type and mime_type != expected_mime_type:
         raise ValueError(f"INSS download was not {expected_mime_type}")
-    folder = Path(directory or Path.cwd() / "downloaded_files" / "inss")
+    folder = Path(directory or download_directory())
     folder.mkdir(parents=True, exist_ok=True)
     output = available_path(folder, name)
     with open(output, "xb") as handle:
         handle.write(content)
-    pdf = {}
-    if mime_type == "application/pdf":
-        try:
-            pdf = extract_pdf_metadata(content, int(os.environ.get("INSS_MAX_PDF_TEXT_CHARS") or 500_000))
-        except Exception as error:
-            pdf = {"pdfExtractionError": str(error)}
+    pdf = parse_document(content, output.name) if mime_type == "application/pdf" else {}
     return {"path": str(output), "filename": output.name, "bytes": len(content), "mimeType": mime_type, **pdf}
+
+
+def parse_document(content, filename):
+    """Parsed text and page details for a PDF. Scanned pages get local OCR (INSS_PDF_OCR=false turns it off).
+
+    Pages that pdf-inspector marks for hosted OCR are reported but never sent anywhere: INSS documents hold personal
+    and health data, so only local extraction is used.
+    """
+    parsed = analyze_document(
+        content,
+        filename,
+        max_text_chars=int(os.environ.get("INSS_MAX_PDF_TEXT_CHARS") or 500_000),
+        ocr=os.environ.get("INSS_PDF_OCR", "true").strip().lower() != "false",
+    )
+    parsed.pop("mimeType", None)
+    return parsed
+
+
+def download_directory():
+    return Path(os.environ.get("INSS_DOWNLOAD_DIR") or Path.cwd() / "downloaded_files" / "inss")
+
+
+def read_saved_document(filename, offset=0, max_chars=40_000, directory=None):
+    """Parse a file already saved by a download and return one slice of its text.
+
+    Only a bare file name inside the INSS download folder is accepted, never a path.
+    """
+    if (
+        not isinstance(filename, str)
+        or filename in ("", ".", "..")
+        or Path(filename).name != filename
+        or "\\" in filename
+    ):
+        raise ValueError("filename must be a file name inside the INSS download folder")
+    if offset < 0 or max_chars < 1:
+        raise ValueError("offset must be 0 or more and max_chars at least 1")
+    folder = Path(directory or download_directory()).resolve()
+    path = (folder / filename).resolve()
+    if path.parent != folder or not path.is_file():
+        raise FileNotFoundError(f"{filename} is not in the INSS download folder")
+    content = path.read_bytes()
+    mime_type = attachment_mime_type(content, filename)
+    parsed = parse_document(content, filename) if mime_type == "application/pdf" else {}
+    return {
+        "filename": filename,
+        "bytes": len(content),
+        "mimeType": mime_type,
+        **slice_text(parsed, offset, max_chars),
+    }
+
+
+def slice_text(parsed, offset=0, max_chars=40_000):
+    """Return a window of the parsed Markdown and where the next window starts (None at the end)."""
+    parsed = dict(parsed)
+    markdown = parsed.pop("markdown", "") or ""
+    window = markdown[offset : offset + max_chars]
+    end = offset + len(window)
+    return {
+        **parsed,
+        "markdown": window,
+        "offset": offset,
+        "textReturnedCharacters": len(window),
+        "nextOffset": end if end < len(markdown) else None,
+        "textTruncated": end < len(markdown) or bool(parsed.get("textTruncated")),
+    }
 
 
 class InssClient:

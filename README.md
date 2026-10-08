@@ -71,7 +71,7 @@ startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
 | `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1: password + TOTP. TRF5: A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
 | `eproc` | `eproc_list_notices`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`) | Browser login + TOTP, once per portal | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
-| `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_download_attachment`*, `inss_download_process`* | Chrome + A3 PIN (by the user) + TOTP | local downloads only |
+| `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_get_attachment`*, `inss_get_process`*, `inss_read_document` | Chrome + A3 PIN (by the user) + TOTP | local downloads only (`get` tools save the file and return its parsed text) |
 | `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
 | `advbox` | 11 read tools (customers, lawsuits, activities, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
 

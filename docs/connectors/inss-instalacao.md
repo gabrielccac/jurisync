@@ -110,9 +110,19 @@ mescle (sem apagar o que já existe) usando caminhos absolutos:
 Encerre o Claude Desktop com `Cmd+Q` e abra de novo.
 
 Ferramentas: `inss_gerid_ensure_session`, `inss_list_notifications`,
-`inss_search_tasks`, `inss_get_task`, `inss_download_attachment`,
-`inss_download_process`. Downloads vão para `downloaded_files/inss/`; o texto de
-PDFs é extraído localmente e nenhum arquivo é enviado a serviço externo.
+`inss_search_tasks`, `inss_get_task`, `inss_get_attachment`, `inss_get_process`,
+`inss_read_document`.
+
+`inss_get_attachment` e `inss_get_process` baixam o arquivo para
+`downloaded_files/inss/` e devolvem o texto do PDF já extraído (até `maxChars`,
+padrão 40 000 caracteres). Se o documento for maior, a resposta traz
+`nextOffset`: chame `inss_read_document` com o nome do arquivo salvo e esse
+`offset` para ler o resto, sem novo login. O texto é extraído localmente com o
+pdf-inspector; páginas digitalizadas passam por OCR local (desligue com
+`INSS_PDF_OCR=false`). Nenhum arquivo é enviado a serviço externo: páginas que a
+biblioteca marca para OCR hospedado são apenas reportadas. Variáveis opcionais:
+`INSS_MAX_PDF_TEXT_CHARS` (limite total extraído, padrão 500 000) e
+`INSS_DOWNLOAD_DIR` (pasta dos downloads).
 
 ## Solução de problemas
 
