@@ -16,7 +16,6 @@ from jurisync.core.http import UnsafeUrlError, require_url
 
 MAX_DOCUMENTS = 5
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
-CONTROLLER = "/eprocV2/controlador.php"
 
 
 def validate_document_ids(document_ids):
@@ -49,7 +48,9 @@ def _read_response(response):
 def _validate_url(url, action, document_id=None, *, portal):
     config = portals.eproc(portal)
     try:
-        require_url(url, hosts={config.host}, path=CONTROLLER, label="eproc document", allow_fragment=False)
+        require_url(
+            url, hosts={config.host}, path=f"{config.root}controlador.php", label="eproc document", allow_fragment=False
+        )
     except UnsafeUrlError:
         raise ValueError("Document route is outside the supported read surface") from None
     query = parse_qs(urlsplit(url).query, keep_blank_values=True)

@@ -295,3 +295,12 @@ class EprocClientTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PortalRootTest(unittest.TestCase):
+    def test_controller_path_follows_each_portals_application_root(self):
+        from jurisync import portals
+        from jurisync.connectors.eproc.client import controller_path
+
+        self.assertEqual(controller_path(portals.eproc("trf4-1g-sc")), "/eprocV2/controlador.php")
+        self.assertEqual(controller_path(portals.eproc("trf6-1g"), ajax=True), "/eproc/controlador_ajax.php")

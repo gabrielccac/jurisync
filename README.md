@@ -63,7 +63,7 @@ Claude Code picks up `.mcp.json` from the project root. Each server runs as
 `.venv/bin/python -m jurisync.connectors.<name>.server` and loads `.env` on
 startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
 
-## Installing on another machine (Claude and ChatGPT)
+## Installing on another machine (Claude and Codex)
 
 Needs [`uv`](https://docs.astral.sh/uv/) and read access to the (private) GitHub repository.
 
@@ -85,7 +85,18 @@ claude mcp add pje -- jurisync-pje
 claude mcp add advbox -- jurisync-advbox
 ```
 
-**ChatGPT** (remote connector, streamable HTTP): serve the servers from one process and expose it through a tunnel.
+**Codex CLI** (stdio, local, same commands as Claude):
+
+```bash
+codex mcp add pje -- jurisync-pje
+codex mcp add advbox -- jurisync-advbox
+```
+
+This writes `[mcp_servers.pje]` and `[mcp_servers.advbox]` to `~/.codex/config.toml`. The servers start in about
+1.3 s, inside Codex's default 10 s startup limit (`startup_timeout_sec` raises it).
+
+**ChatGPT app** (web/desktop; only for when Codex or Claude cannot be used): its custom connectors reach only
+public HTTPS, not local programs, so serve the servers over HTTP from one process and expose it through a tunnel.
 
 ```bash
 jurisync-http pje advbox            # http://127.0.0.1:8000/pje/mcp and /advbox/mcp

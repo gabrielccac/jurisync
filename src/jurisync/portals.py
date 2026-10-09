@@ -77,6 +77,9 @@ PORTALS = {
             "trf4-1g-rs", "eproc", "TRF4", "1g", "eproc.jfrs.jus.br", "/eprocV2/", "browser_totp", "JFRS",
             legacy_env_prefixes=("JRFS",), region="04", origins=("71",),
         ),
+        # TRF6 serves its Eproc under /eproc/ (not /eprocV2/); both instances share one account (TRF6_*).
+        Portal("trf6-1g", "eproc", "TRF6", "1g", "eproc1g.trf6.jus.br", "/eproc/", "browser_totp", "TRF6", region="06"),
+        Portal("trf6-2g", "eproc", "TRF6", "2g", "eproc2g.trf6.jus.br", "/eproc/", "browser_totp", "TRF6", region="06"),
         Portal("trf4-1g-pr", "eproc", "TRF4", "1g", "eproc.jfpr.jus.br", "/", "browser_totp", region="04",
                origins=("70",), wired=False),
         Portal("trf4-2g", "eproc", "TRF4", "2g", "eproc.trf4.jus.br", "/", "browser_totp", region="04",

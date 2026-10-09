@@ -28,8 +28,6 @@ from jurisync.core.http import IMPERSONATE, enable_request_logging, require_url
 from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
 
-CONTROLLER = "/eprocV2/controlador.php"
-AJAX_CONTROLLER = "/eprocV2/controlador_ajax.php"
 TIMEOUT = 30
 REDIRECTS = {301, 302, 303, 307, 308}
 QUEUE_ACTIONS = {
@@ -49,13 +47,18 @@ CNJ = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
 MAX_EVENT_PAGES = 5
 
 
+def controller_path(config, *, ajax=False):
+    """The portal's controller script under its own application root (/eprocV2/ at TRF4, /eproc/ at TRF6)."""
+    return f"{config.root}{'controlador_ajax.php' if ajax else 'controlador.php'}"
+
+
 def require_route(value, actions=READ_ACTIONS, *, ajax=False, portal):
     """Validate a portal URL discovered from authenticated HTML."""
     config = portals.eproc(portal)
     require_url(
         value,
         hosts={config.host},
-        path=AJAX_CONTROLLER if ajax else CONTROLLER,
+        path=controller_path(config, ajax=ajax),
         label="eproc",
         allow_fragment=False,
     )

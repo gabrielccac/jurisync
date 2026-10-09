@@ -10,3 +10,17 @@
 [trf1-1g]
 method = "password_totp"
 secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+
+# Eproc TRF6 serves 1G and 2G with one account (TRF6_*): CPF, password and the Eproc/TRF6 TOTP export.
+[trf6-1g]
+method = "browser_totp"
+secrets = ["TRF6_USUARIO", "TRF6_SENHA", "TRF6_EXPORT_DATA"]
+
+[trf6-2g]
+method = "browser_totp"
+secrets = ["TRF6_USUARIO", "TRF6_SENHA", "TRF6_EXPORT_DATA"]
+
+# TRF5 accepts a certificate (Victor) or the PDPJ password + TOTP flow. Without PJE_A1_P12 this customer uses the password flow.
+[trf5-1g]
+method = "password_totp"
+secrets = ["PJE_TRF5_1G_USERNAME", "PJE_TRF5_1G_PASSWORD", "PJE_TRF5_1G_2FA_DATA|PJE_TRF5_1G_2FA_QR"]

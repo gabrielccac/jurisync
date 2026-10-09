@@ -13,10 +13,23 @@ from curl_cffi import requests
 from jurisync import portals
 
 
+def auth_method(portal):
+    """How this install logs in to the portal.
+
+    A portal registered with a certificate (TRF5) also accepts its own username, password and TOTP: the
+    password flow is used only when no A1 certificate is configured (``PJE_A1_P12``) and all three are set.
+    """
+    config = portals.pje(portal)
+    password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD", "2FA_DATA"))
+    if config.auth == "certificate_totp" and password_ready and not os.environ.get("PJE_A1_P12"):
+        return "password_totp"
+    return config.auth
+
+
 def cache_identity(portal):
     config = portals.pje(portal)
     account = config.env("SESSION_ACCOUNT")
-    username = config.env("USERNAME") if config.auth == "password_totp" else ""
+    username = config.env("USERNAME") if auth_method(portal) == "password_totp" else ""
     if not account and not username:
         # The certificate is not part of the identity. Reuse is safe only
         # when the caller identifies that account; fresh login still works.

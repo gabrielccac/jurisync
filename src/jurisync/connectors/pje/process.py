@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 
 from jurisync import portals
 from jurisync.connectors.pje import search
-from jurisync.connectors.pje.auth.sessions import load_session, save_session
+from jurisync.connectors.pje.auth.sessions import auth_method, load_session, save_session
 from jurisync.connectors.pje.auth.sso import login_session
 from jurisync.connectors.pje.documents import read_selected_documents, validate_document_ids
 from jurisync.connectors.pje.expedientes import (
@@ -46,7 +46,7 @@ def login_portal(portal):
     cached = load_session(portal)
     if cached is not None:
         return cached, None
-    if config.auth == "certificate_totp":
+    if auth_method(portal) == "certificate_totp":
         from jurisync.connectors.pje.auth.certificate import trf5_cert_login
 
         session, response = trf5_cert_login(), None
