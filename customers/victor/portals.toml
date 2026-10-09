@@ -1,0 +1,7 @@
+# Victor's portal access. Method and secret names only; the values go in the
+# gitignored customers/victor/.env (see .env.example in this directory).
+# "A|B" means either variable is enough.
+
+[trf5-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]

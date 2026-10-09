@@ -3,38 +3,86 @@
     "juridiq": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["-m", "jurisync.connectors.juridiq.server"],
-      "env": { "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env" }
+      "args": [
+        "-m",
+        "jurisync.connectors.juridiq.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
     },
     "pje": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["-m", "jurisync.connectors.pje.server"],
-      "env": { "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env" }
+      "args": [
+        "-m",
+        "jurisync.connectors.pje.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
     },
     "djen": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["-m", "jurisync.connectors.djen.server"],
-      "env": { "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env" }
+      "args": [
+        "-m",
+        "jurisync.connectors.djen.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
     },
     "eproc": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["-m", "jurisync.connectors.eproc.server"],
-      "env": { "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env" }
+      "args": [
+        "-m",
+        "jurisync.connectors.eproc.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
     },
     "inss-gerid": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["-m", "jurisync.connectors.inss.server"],
-      "env": { "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env" }
+      "args": [
+        "-m",
+        "jurisync.connectors.inss.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
     },
     "advbox": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": ["-m", "jurisync.connectors.advbox.server"],
-      "env": { "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env" }
+      "args": [
+        "-m",
+        "jurisync.connectors.advbox.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
+    },
+    "filing": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": [
+        "-m",
+        "jurisync.workflows.filing.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
+        "JURISYNC_CUSTOMER": "victor"
+      }
     }
   }
 }

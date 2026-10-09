@@ -17,11 +17,18 @@ def load_env_file(path=None):
     """Load KEY=VALUE lines like `node --env-file`: existing variables win.
 
     The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json);
-    without it, nothing is loaded.
+    without it, nothing is loaded. When JURISYNC_CUSTOMER names a customer, its
+    gitignored ``customers/<name>/.env`` is loaded first, so a customer's values
+    take precedence over the shared file.
     """
-    path = path or os.environ.get("JURISYNC_ENV_FILE")
-    if not path:
-        return
+    from jurisync.customers import customer_env_path
+
+    for candidate in (customer_env_path(), path or os.environ.get("JURISYNC_ENV_FILE")):
+        if candidate:
+            _load_lines(candidate)
+
+
+def _load_lines(path):
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
