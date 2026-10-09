@@ -84,8 +84,8 @@ sigilo a conferir (via `link` + `numero_processo`).
 Exemplo real: `0003527-90.2026.4.05.8303`, 38ª PE, MARIA DE LOURDES DA SILVA
 (polo A) x INSS — "intimadas para se manifestarem sobre o(s) laudo(s)
 pericial(is)" → workflow `12049 Z-ANALISE DE LAUDO` (ver skill
-`customers/victor/skills/victor-hugo-task-routing/` para cadeia POP completa e invariantes
-AdvBox, ex `guests[]` com Deivid 216759).
+`customers/victor/skills/victor-sop-intimacoes/` para cadeia POP completa e invariantes
+AdvBox, ex `guests[]` com CONTROLADORIA 216759).
 
 ## 6. Arquitetura (decisão da sessão)
 

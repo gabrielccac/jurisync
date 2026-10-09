@@ -5,10 +5,10 @@ description: Prepare Victor's Advbox 00-PROTOCOLAR files and create or review a 
 
 # Victor: Advbox to PJe draft
 
-Prepare an initial filing for `trf5-1g` only. Victor's defaults and document
-classification live in `customers/victor/workflows/prepare_pje_filing.py`;
-the generic PJe adapter fills an explicit payload. Neither path submits
-**Protocolar**. Use the POP task-routing skill for DJEN-to-Advbox tasks instead.
+Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
+`customers/victor/filing-profile.json` (profile `victor`); the generic filing tools
+(`src/jurisync/workflows/filing`) and the PJe adapter do the work. Neither path submits
+**Protocolar**. Use `victor-sop-intimacoes` for DJEN-to-Advbox tasks instead.
 
 1. Resolve the intended Advbox customer and lawsuit. Gather the author's CPF
    and PJe registry name, jurisdiction, judicial class, and claim value from
@@ -38,7 +38,7 @@ the generic PJe adapter fills an explicit payload. Neither path submits
    current ChatGPT workspace; the agent and MCP must use the same root. Do not
    assume the fallback `~/.local/share/jurisync/filings` is writable.
    Write reviewed facts to a private JSON file, then run
-   `.venv/bin/python -m customers.victor.workflows.prepare_pje_filing prepare
+   `.venv/bin/python -m jurisync.workflows.filing prepare --profile victor
    --customer <id> --facts <facts.json> --out <run-directory>` from the repo root
    (it loads the repo `.env` itself).
    Do not create a separate `documents.json`; this script downloads and
@@ -70,3 +70,24 @@ the generic PJe adapter fills an explicit payload. Neither path submits
    final filing. There is no Protocolar tool in this workflow.
 
 The filing-run root must be the same for the script and PJe MCP process.
+
+## Without a shell: the generic `filing` tools
+
+A chat session that only has MCP tools cannot run the `prepare` command in a terminal. The `filing` MCP does the same
+work and never takes file paths. It is not Victor-specific: every filing tool takes a `profile` name, and **this skill
+always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; replace step 2 with:
+
+1. `filing_profiles` lists the available profiles (confirm `victor` is there). `filing_subjects` with
+   `profile: "victor"` (and optionally the lawsuit ID or CNJ) returns the reference subject codes and the README record
+   of what was filed for that exact case. They are candidates for the user to confirm, never defaults.
+2. `filing_prepare` with `profile: "victor"`, a new `runId`, the ADVBOX customer ID and the reviewed facts. Facts may
+   be partial: missing ones come back as review items, and `candidates` lists the claim values and CPFs the petition
+   states. Document text is not sent to Jev unless `useJev` is true.
+3. Resolve every item in `review`: each file's `id` is the key for `overrides` (`{role, type}`, or `{role: "skip"}`
+   for a duplicate such as a `.docx` copy of the petition). `filing_review` shows the run again.
+4. `filing_finalize` with `profile: "victor"` and `overrides` writes `payload.json` only when the checks pass (one main
+   petition; the claim value and CPF appear in the petition). Show its summary to the user before creating the draft.
+5. `pje_draft_write` with `create-fill` starts the fill in the background. Follow it with `pje_draft_status`, and use
+   `checkPje: true` to confirm the draft in PJe. `pje_draft_delete` removes a draft by number (it asks first).
+
+The filing root (`JURISYNC_FILING_DIR`) is shared by both servers, so the same `runId` works in each.

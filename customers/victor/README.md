@@ -6,7 +6,7 @@ repository. The shared ADVBOX and PJe connectors live under `src/jurisync/connec
 ## DJEN to ADVBOX tasks
 
 The customer POP rules live in
-`skills/victor-hugo-task-routing/SKILL.md` with its three reference tables.
+`skills/victor-sop-intimacoes/SKILL.md` with its five reference files.
 The intended scheduled agent uses the DJEN MCP to fetch communication pages for
 Victor's OABs, applies those rules (reading PJe only when needed), resolves the
 ADVBOX lawsuit, checks existing activities, creates the required tasks through
@@ -42,7 +42,8 @@ preparation and PJe MCP stages. The skill is installed through a symlink in
 The existing TRF1 spreadsheet watcher runs from the repository root with
 `python -m customers.victor.workflows.pje1g_watch --help`.
 
-`workflows/prepare_pje_filing.py` prepares a TRF5 draft payload from an Advbox
+`filing-profile.json` holds the office defaults the generic filing tools
+(`src/jurisync/workflows/filing`) use to prepare a TRF5 draft payload from an Advbox
 `00-PROTOCOLAR` folder. It downloads files, converts DOC/DOCX files to PDF,
 classifies clear filenames, reads decision letters, and asks TypeSafe AI Jev
 about ambiguous readable documents. Uncertain supporting files fall back to
@@ -90,7 +91,7 @@ otherwise the CEP lookup must return one suggestion and `numero` is required
 to add the address. The adapter rereads the selected address after saving.
 
 ```bash
-.venv/bin/python -m customers.victor.workflows.prepare_pje_filing prepare \
+.venv/bin/python -m jurisync.workflows.filing prepare --profile victor \
   --customer 6540591 --facts /private/case-facts.json --out /private/run
 ```
 
@@ -102,7 +103,7 @@ or `{"role":"skip"}`. If the folder has two petitions, select one as `main`
 and skip the other. Then finalize using the downloaded files:
 
 ```bash
-.venv/bin/python -m customers.victor.workflows.prepare_pje_filing finalize \
+.venv/bin/python -m jurisync.workflows.filing finalize --profile victor \
   --review /private/run/review.json --facts /private/case-facts.json \
   --overrides /private/overrides.json
 ```
@@ -269,3 +270,18 @@ current workflow, uncertain supporting files use flagged `Outros Documentos`.
 The historical comparison predates automatic splitting. The current
 preparation splits eligible unsigned supporting PDFs into reviewed volumes;
 it still does not infer unreadable pages.
+
+## Portal access
+
+`portals.toml` lists, per portal, the login method and the environment variables it
+needs (no values). The values go in the gitignored `customers/victor/.env`, copied from
+`.env.example`. Servers pick the customer with `JURISYNC_CUSTOMER=victor` (set in
+`.mcp.json`); the customer `.env` loads before the shared `.env`, and variables already
+in the environment win. Check a setup without printing secrets:
+
+```bash
+uv run python -m jurisync.customers victor
+```
+
+A new customer is a new directory with its own `portals.toml` and `.env`; a new portal
+is one row in `src/jurisync/portals.py` plus one section per customer that uses it.
