@@ -10,7 +10,7 @@ from pydantic import Field
 
 from jurisync.connectors.djen.client import DjenError, fetch_certidao, search_page
 from jurisync.connectors.djen.deadlines import calculate_deadline
-from jurisync.connectors.djen.normalize import normalize_item
+from jurisync.connectors.djen.normalize import compact_item, normalize_item
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 
@@ -22,7 +22,7 @@ server = MCPServer("djen", version="1.0.0")
 @server.tool(
     name="djen_search_communications",
     title="Search DJEN communications",
-    description="Read one page of public DJEN communications by exact OAB, UF, date window, and optional tribunal. Returns normalized text and metadata; routing decisions belong to the skill. No authentication or poll-state mutation.",
+    description="Read one page of public DJEN communications by exact OAB, UF, date window, and optional tribunal. Returns normalized text and metadata; routing decisions belong to the skill. A full 50-item page can exceed tool output limits: compact=true keeps one copy of the text plus the fields routing needs, and textLimit cuts each text (texto_chars keeps the original length; the full text stays available through djen_get_certidao_text). No authentication or poll-state mutation.",
     annotations=READ_ONLY,
 )
 def search_communications(
@@ -33,6 +33,8 @@ def search_communications(
     tribunal: Annotated[str | None, Field(pattern=r"(?i)^[A-Z0-9]+$")] = None,
     pagina: Annotated[int, Field(ge=1)] = 1,
     itens: Annotated[int, Field(ge=5, le=50)] = 10,
+    compact: bool = False,
+    textLimit: Annotated[int, Field(ge=0, le=100_000)] = 0,
 ) -> dict[str, Any]:
     params = {
         "numeroOab": numeroOab,
@@ -44,7 +46,8 @@ def search_communications(
         params["siglaTribunal"] = tribunal
     with tool_errors("DJEN", *REQUEST_ERRORS):
         result = search_page(params, pagina, itens)
-    result["items"] = [normalize_item(item) for item in result["items"]]
+    items = [normalize_item(item) for item in result["items"]]
+    result["items"] = [compact_item(item, textLimit) for item in items] if compact else items
     return result
 
 

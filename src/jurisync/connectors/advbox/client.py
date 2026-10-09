@@ -7,12 +7,14 @@ from urllib.parse import quote, urlencode
 from jurisync.connectors.advbox.parsers import (
     BASE_URL,
     build_create_body,
+    build_edit_body,
     normalize_activities,
     normalize_table,
     parse_activity_details,
     parse_create_response,
     parse_lawsuit_report,
     parse_members,
+    parse_task_form,
     parse_workflow_steps,
     parse_workflows,
 )
@@ -223,6 +225,37 @@ class AdvboxClient:
 
         return self.session.using(read)
 
+    def find_tasks(self, query, *, responsible=None, limit=25):
+        """Find pending tasks whose title, comment, client or process number matches ``query``.
+
+        The activities listing only returns the tasks of the responsibles it is asked for, so by default every
+        member is asked. The server ignores the pending/completed switch, so completed tasks are not covered here;
+        use ``lawsuit_report`` (with a task filter) for a lawsuit's full history.
+        """
+        responsible_ids = list(responsible or [user["id"] for user in self.list_members()["users"]])
+        page = self.list_activities(
+            page=1,
+            pageSize=min(max(int(limit), 1), 100),
+            search=query,
+            completed="pendentes",
+            responsibleIds=responsible_ids,
+            dateFrom="",
+            dateTo="",
+        )
+        tasks = [
+            {
+                "postId": record["postId"],
+                "tarefa": record["task"],
+                "comentario": record["detail"],
+                "inicio": record["start"],
+                "prazo": record["deadline"],
+                "cliente": (record["customer"] or {}).get("name"),
+                "responsaveis": [person["name"] for person in record["responsible"]],
+            }
+            for record in page["records"]
+        ][:limit]
+        return {"query": query, "count": len(tasks), "total": page["total"], "tasks": tasks}
+
     def activity_details(self, post_id):
         return self.session.using(
             lambda s: parse_activity_details(s.get_html(f"/posts/{quote(str(post_id), safe='')}/edit?autoread=0"))
@@ -248,7 +281,7 @@ class AdvboxClient:
 
     def stage_files(self, files, *, root="posts", folder=None):
         require_writes()
-        folder = folder if folder is not None else os.environ.get("ADVBOX_UPLOAD_FOLDER")
+        folder = folder if folder is not None else (self.upload_folder() if files else None)
         if files and (not folder or not re.fullmatch(r"files/temp/\d+", folder)):
             raise ValueError(
                 "Set ADVBOX_UPLOAD_FOLDER to this account's files/temp/<user-id> path before uploading attachments"
@@ -271,8 +304,18 @@ class AdvboxClient:
             staged.append({"filename": file["filename"], "code": code})
         return staged
 
-    def create_task(self, options, attachments=()):
-        require_writes()
+    def upload_folder(self):
+        """The account's staging folder: ADVBOX_UPLOAD_FOLDER, else the one the task form announces for this login."""
+        configured = os.environ.get("ADVBOX_UPLOAD_FOLDER")
+        if configured:
+            return configured
+        if getattr(self, "_discovered_folder", None) is None:
+            html = self.session.using(lambda s: s.get_html("/posts/create"))
+            found = re.search(r"files/temp/\d+", html)
+            self._discovered_folder = found[0] if found else ""
+        return self._discovered_folder or None
+
+    def _task_body(self, options):
         body = build_create_body(**options)
         # Optional template guard: when a workflow is named, the task type must be one of its steps.
         if options.get("workflowId"):
@@ -286,10 +329,125 @@ class AdvboxClient:
                 )
             body["workflow"] = str(options["workflowId"])
             body["workflow_limit"] = str(workflow["totalSteps"])
+        return body
+
+    def preview_task(self, options, attachments=()):
+        """Validate a task and its files like ``create_task`` does, but send nothing."""
+        body = self._task_body(options)
+        folder = self.upload_folder() if attachments else None
+        if attachments and (not folder or not re.fullmatch(r"files/temp/\d+", folder)):
+            raise ValueError(
+                "Set ADVBOX_UPLOAD_FOLDER to this account's files/temp/<user-id> path before uploading attachments"
+            )
+        return {
+            "dryRun": True,
+            "uploadFolder": folder,
+            "body": body,
+            "attachments": [
+                {"filename": file["filename"], "bytes": len(file["bytes"]), "contentType": file.get("contentType")}
+                for file in attachments
+            ],
+        }
+
+    def create_task(self, options, attachments=()):
+        require_writes()
+        body = self._task_body(options)
         staged = self.stage_files(list(attachments))
         if staged:
             body["file[]"] = [item["code"] for item in staged]
         return {**parse_create_response(self.session.post("/posts", body)), "staged": staged}
+
+    def is_pending(self, post_id, guests, *, max_pages=6):
+        """True when ``post_id`` is listed among the pending tasks of ``guests``.
+
+        An edit replaces a task, but the old post stays readable; this stops an edit of a stale, completed or
+        deleted post from creating a second copy.
+        """
+        for page in range(1, max_pages + 1):
+            result = self.list_activities(
+                page=page,
+                pageSize=100,
+                search="",
+                completed="pendentes",
+                responsibleIds=list(guests),
+                dateFrom="",
+                dateTo="",
+            )
+            if any(record["postId"] == str(post_id) for record in result["records"]):
+                return True
+            if len(result["records"]) < 100:
+                return False
+        return False
+
+    def read_task_form(self, post_id):
+        """The task's pre-filled edit form as plain values (read-only)."""
+        return self.session.using(
+            lambda s: parse_task_form(s.get_html(f"/posts/create?id={quote(str(post_id), safe='')}&edit=true"))
+        )
+
+    def account_id(self):
+        folder = self.upload_folder()
+        found = re.fullmatch(r"files/temp/(\d+)", folder or "")
+        return int(found[1]) if found else None
+
+    def _edit_body(self, post_id, changes, file_codes=(), expect_comments="", remove_files=()):
+        form = self.read_task_form(post_id)
+        if form["editing"] != str(post_id):
+            raise ValueError(f"ADVBOX returned the form of task {form['editing']}, not {post_id}")
+        if not self.is_pending(post_id, form["guests"]):
+            raise ValueError(
+                f"ADVBOX task {post_id} is not among the pending tasks of its guests "
+                "(already replaced by an edit, completed or deleted); refusing to edit"
+            )
+        if expect_comments and expect_comments not in form["comments"]:
+            raise ValueError("The task's current comment does not contain the expected text; refusing to edit")
+        missing = [name for name in remove_files if name not in {item["name"] for item in form["files"]}]
+        if missing:
+            raise ValueError(f"The task has no attachment named {', '.join(missing)}")
+        body = build_edit_body(form, file_codes=file_codes, account_id=self.account_id(), **changes)
+        return form, body
+
+    def preview_update(self, post_id, changes, attachments=(), expect_comments="", remove_files=()):
+        """Validate an edit and show the body that would be sent, changing nothing."""
+        form, body = self._edit_body(post_id, changes, expect_comments=expect_comments, remove_files=remove_files)
+        return {
+            "dryRun": True,
+            "postId": str(post_id),
+            "current": {key: form[key] for key in ("tasksId", "guests", "date", "hour", "deadline", "comments")},
+            "files": [item["name"] for item in form["files"]],
+            "newFiles": [file["filename"] for file in attachments],
+            "removeFiles": list(remove_files),
+            "body": {key: ("<token>" if key == "create_token" else value) for key, value in body.items()},
+        }
+
+    def update_task(self, post_id, changes, attachments=(), expect_comments="", remove_files=()):
+        """Edit a task the way the browser does: ADVBOX replaces it, so the task gets a NEW post ID.
+
+        Existing attachments are kept. New files are staged first; files named in ``remove_files`` are deleted
+        from the replacement afterwards, using its own file codes.
+        """
+        require_writes()
+        form, _ = self._edit_body(post_id, changes, expect_comments=expect_comments, remove_files=remove_files)
+        staged = self.stage_files(list(attachments))
+        body = build_edit_body(
+            form, file_codes=[item["code"] for item in staged], account_id=self.account_id(), **changes
+        )
+        created = parse_create_response(self.session.post("/posts", body))
+        removed = []
+        if remove_files:
+            codes = {item["name"]: item["code"] for item in self.read_task_form(created["postId"])["files"]}
+            for name in remove_files:
+                if name in codes:
+                    self.session.post("/s3", {"id": codes[name], "type": "file", "customer": "", "_method": "DELETE"})
+                    removed.append(name)
+        raw = created["raw"]
+        return {
+            "postId": created["postId"],
+            "replacedPostId": str((raw.get("kanban") or {}).get("remove") or post_id),
+            "message": re.sub(r"<[^>]+>", "", str(raw.get("message") or "")).strip(),
+            "staged": staged,
+            "removedFiles": removed,
+        }
 
     def complete_task(self, post_id):
         require_writes()

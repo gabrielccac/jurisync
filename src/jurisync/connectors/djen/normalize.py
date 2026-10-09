@@ -49,3 +49,42 @@ def normalize_item(raw):
         "destinatarios": [{"nome": d.get("nome"), "polo": d.get("polo")} for d in raw.get("destinatarios", []) or []],
         "advogados": advogados,
     }
+
+
+COMPACT_KEYS = (
+    "id",
+    "numero_processo_mascara",
+    "sigla_tribunal",
+    "tipo_comunicacao",
+    "tipo_documento",
+    "data_disponibilizacao",
+    "hash",
+    "ativo",
+    "data_cancelamento",
+)
+
+
+def compact_item(item, text_limit=0):
+    """A routing-sized view of a normalized item: one copy of the text, lawyers and recipients trimmed.
+
+    ``texto`` and ``texto_limpo`` are the same text for plain-text records, so the compact view keeps the clean one
+    as ``texto``. ``text_limit`` > 0 cuts it and sets ``texto_truncado``; the full text stays reachable through
+    ``djen_get_certidao_text``.
+    """
+    compact = {key: item.get(key) for key in COMPACT_KEYS}
+    compact["orgao"] = (item.get("orgao") or {}).get("nome")
+    compact["classe"] = (item.get("classe") or {}).get("nome")
+    compact["destinatarios"] = item.get("destinatarios") or []
+    compact["advogados"] = [
+        {"nome": a.get("nome"), "oab": f"{a.get('numero_digits')}/{a.get('uf_oab')}"}
+        for a in item.get("advogados") or []
+    ]
+    text = item.get("texto_limpo") or ""
+    compact["texto_chars"] = len(text)
+    if text_limit and len(text) > text_limit:
+        compact["texto"] = text[:text_limit]
+        compact["texto_truncado"] = True
+    else:
+        compact["texto"] = text
+        compact["texto_truncado"] = False
+    return compact

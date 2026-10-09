@@ -66,6 +66,42 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["texto_limpo"], "Intime-se a parte")
         self.assertEqual(item["advogados"][0]["numero_digits"], "14663")
 
+    async def test_compact_search_keeps_one_text_and_trims_lawyers(self):
+        raw = dict(RAW_ITEM)
+        raw["texto"] = "Intime-se a parte autora para manifestar-se sobre o laudo pericial."
+        page = {"status": "success", "count": 1, "items": [raw]}
+        with mock.patch.object(djen_server, "search_page", return_value=page):
+            result = await self.call(
+                "djen_search_communications",
+                {
+                    "numeroOab": "14663",
+                    "ufOab": "PB",
+                    "inicio": "2026-10-06",
+                    "fim": "2026-10-06",
+                    "compact": True,
+                    "textLimit": 20,
+                },
+            )
+        self.assertFalse(result.is_error)
+        item = result.structured_content["items"][0]
+        self.assertNotIn("texto_limpo", item)
+        self.assertEqual((item["texto"], item["texto_truncado"]), ("Intime-se a parte au", True))
+        self.assertEqual(item["texto_chars"], len(raw["texto"]))
+        self.assertEqual(item["advogados"][0]["oab"], "14663/PB")
+        self.assertEqual(item["id"], raw["id"])
+
+    async def test_compact_without_limit_keeps_the_whole_text(self):
+        raw = dict(RAW_ITEM)
+        page = {"status": "success", "count": 1, "items": [raw]}
+        with mock.patch.object(djen_server, "search_page", return_value=page):
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-10-06", "fim": "2026-10-06", "compact": True},
+            )
+        item = result.structured_content["items"][0]
+        self.assertFalse(item["texto_truncado"])
+        self.assertEqual(item["texto"], "Intime-se a parte")
+
     async def test_certidao_failure_is_sanitized_tool_error(self):
         error = DjenError("certidão failed at https://comunicaapi.pje.jus.br/x session=secret")
         with mock.patch.object(djen_server, "fetch_certidao", side_effect=error):

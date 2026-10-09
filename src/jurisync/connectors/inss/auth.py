@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from playwright.async_api import async_playwright
 
 from jurisync.core.totp import accounts_from_image, parse_accounts, select_account, totp
+from jurisync.paths import REPO_ROOT
 
 LOGIN_URL = "https://atendimento.inss.gov.br/auth/login?loginwith=gerid"
 DEFAULT_CDP_PORT = 9338
@@ -29,7 +30,7 @@ GERID_CERTIFICATE_POLICY = json.dumps(
 
 
 def default_profile():
-    return Path.cwd() / "data" / "inss-browser-profile"
+    return REPO_ROOT / "data" / "inss-browser-profile"
 
 
 def gerid_code(secret):

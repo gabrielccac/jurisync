@@ -20,6 +20,12 @@ from jurisync.core.totp import accounts_from_image, parse_accounts, select_accou
 PORTAL_KEY = "trf5-1g"
 
 
+def _require_available(page):
+    """A 5xx login page means the portal is down, not that the login flow changed."""
+    if page.status_code >= 500:
+        raise RuntimeError(f"TRF5 PJe is unavailable (HTTP {page.status_code}); try again later")
+
+
 def _challenge(html):
     match = re.search(r"autenticar\('([^']+)',\s*'([^']+)'\)", html)
     if not match:
@@ -87,6 +93,7 @@ def _login(session, config, account, key, cert, chain):
     page = _follow(session, session.get(config.login_url, impersonate="chrome", allow_redirects=False, timeout=30))
     require_allowed_url(page.url)
     log_request("GET", config.login_url, page.status_code)
+    _require_available(page)
     _, mensagem = _challenge(page.text)
     token = str(uuid.uuid4())
     payload = native_signer.build_payload(

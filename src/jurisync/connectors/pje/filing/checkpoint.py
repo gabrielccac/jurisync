@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -26,6 +27,43 @@ def documents_fingerprint(documents):
             }
         )
     return fingerprint(items)
+
+
+def run_directory(run_id):
+    """The folder of one filing run. Every server and tool that touches a run must use this same root."""
+    root = Path(os.environ.get("JURISYNC_FILING_DIR") or Path.home() / ".local/share/jurisync/filings").resolve()
+    return root / run_id
+
+
+def phase_fingerprints(payload):
+    """The fingerprint each phase records in the ledger for this payload (absent phases are omitted)."""
+    from jurisync.connectors.pje.filing.payload import payload_subjects
+
+    prints = {
+        "subjects": fingerprint(payload_subjects(payload)),
+        "parties": fingerprint(
+            {key: payload.get(key) for key in ("authorCpf", "author", "attorney", "passive", "otherParticipants")}
+        ),
+    }
+    if "characteristics" in payload:
+        prints["characteristics"] = fingerprint(payload["characteristics"])
+    if "documents" in payload:
+        prints["documents"] = documents_fingerprint(payload["documents"])
+    return prints
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except (ProcessLookupError, ValueError, TypeError):
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def now():
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def write_checkpoint(path, data):

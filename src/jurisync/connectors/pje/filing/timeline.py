@@ -9,6 +9,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from jurisync.connectors.pje.filing.checkpoint import now
+
 log = logging.getLogger("jurisync.pje.filing")
 
 
@@ -34,6 +36,7 @@ class StepTimeline:
             "stage": self.stage,
             "step": step_name,
             **details,
+            "startedAt": now(),
             "status": "running",
             "seconds": None,
         }
@@ -46,14 +49,24 @@ class StepTimeline:
         try:
             yield entry
             entry["status"] = "ok"
-        except Exception as error:
-            entry["status"] = "failed"
+        except BaseException as error:
+            entry["status"] = "failed" if isinstance(error, Exception) else "interrupted"
             entry["error"] = f"{type(error).__name__}: {str(error)[:300]}"
             raise
         finally:
             entry["seconds"] = round(time.monotonic() - started, 2)
             entry["requests"] = self.client.requests - requests
             log.info("%s %s %.2fs %dreq", entry["status"].upper(), label, entry["seconds"], entry["requests"])
+            self._save()
+
+    def close_stale(self):
+        """Mark steps left `running` by a run that no longer exists."""
+        changed = False
+        for entry in self.steps:
+            if entry.get("status") == "running":
+                entry["status"], entry["error"] = "interrupted", entry.get("error") or "run ended without finishing"
+                changed = True
+        if changed:
             self._save()
 
     def skip(self, step_name, reason, /, **details):

@@ -159,6 +159,21 @@ class ReadDocumentTests(unittest.TestCase):
         self.assertNotIn("base64", structured)
         self.assertEqual(len(result.content[1].text.split("\n\n", 1)[1]), 2000)
 
+    def test_default_folders_do_not_depend_on_the_working_directory(self):
+        import os
+
+        from jurisync.connectors.inss.auth import REPO_ROOT, default_profile
+        from jurisync.connectors.inss.client import download_directory
+
+        before = os.getcwd()
+        try:
+            with tempfile.TemporaryDirectory() as elsewhere:
+                os.chdir(elsewhere)
+                self.assertEqual(download_directory(), REPO_ROOT / "downloaded_files" / "inss")
+                self.assertEqual(default_profile(), REPO_ROOT / "data" / "inss-browser-profile")
+        finally:
+            os.chdir(before)
+
     def test_tools_use_the_get_names_and_a_read_tool_is_registered(self):
         import asyncio
 

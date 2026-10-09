@@ -4,8 +4,9 @@ Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
 """
 
+import json
 import os
-from pathlib import Path
+import threading
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
@@ -15,8 +16,9 @@ from pydantic import Field, StringConstraints
 
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
+from jurisync.connectors.pje.filing.checkpoint import run_directory
 from jurisync.connectors.pje.notifications import read_portal, read_push
-from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates
+from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, run_stdio, tool_errors
 from jurisync.core.session_pool import SessionPool
 
@@ -55,7 +57,7 @@ def _notifications(portal, read):
 @server.tool(
     name="pje_get_process",
     title="Get PJe process context",
-    description="Retrieve a read-only PJe process result from the selected portal with metadata, parties, bounded timeline pages, document inventory and optionally up to five selected document texts. TRF5 1º Grau/JEF uses certificate login. scope=latest returns the newest date bucket; scope=page returns the first timeline page; scope=all merges the bounded pages returned by the search layer. This returns movements, not confirmed publications.",
+    description="Retrieve a read-only PJe process result from the selected portal with metadata, parties, bounded timeline pages, document inventory and optionally up to five selected document texts. TRF5 1º Grau/JEF uses certificate login. scope=latest returns the newest date bucket; scope=page returns the first timeline page; scope=all merges the bounded pages returned by the search layer. It also returns expedientes from the process Expedientes tab: each communication per recipient with channel, notice date, days and the deadline date PJe computed (limite), plus the ones still open (abertos). This returns movements, not confirmed publications.",
     annotations=READ_ONLY,
 )
 def get_process(
@@ -68,6 +70,61 @@ def get_process(
         result = fetch_process(processNumber, scope, portal=portal, session=session, document_ids=documentIds or None)
     result["movement_candidates"] = movement_candidates(result)
     return require_success("PJe", result)
+
+
+@server.tool(
+    name="pje_read_documents",
+    title="Read PJe documents",
+    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Read-only toward PJe.",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+)
+def read_documents_tool(
+    processNumber: Annotated[str, Field(min_length=1)],
+    portal: Portal,
+    documentIds: Annotated[list[Annotated[str, Field(pattern=r"^[0-9]+$")]], Field(min_length=1, max_length=5)],
+    textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
+    save: bool = False,
+) -> dict[str, Any]:
+    with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
+        result = read_documents(processNumber, documentIds, portal=portal, session=session, save=save)
+    for document in result.get("documents", []):
+        text = document.get("text", "")
+        document["textTruncated"] = len(text) > textLimit
+        document["text"] = text[:textLimit]
+    return require_success("PJe", result)
+
+
+@server.tool(
+    name="pje_read_expediente_ato",
+    title="Read the act behind a PJe expediente",
+    description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Only communications whose notice (ciência) is already registered are opened, because opening a pending one makes the party count as notified and starts its deadline; otherwise the call returns an error in ato.error.",
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+)
+def read_expediente_ato_tool(
+    processNumber: Annotated[str, Field(min_length=1)],
+    portal: Portal,
+    expedienteId: Annotated[str, Field(pattern=r"^[0-9]+$")],
+    textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
+) -> dict[str, Any]:
+    with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
+        result = fetch_process(
+            processNumber,
+            "latest",
+            portal=portal,
+            session=session,
+            ato_expediente=expedienteId,
+            ato_text_limit=textLimit,
+        )
+    return require_success(
+        "PJe",
+        {k: result[k] for k in ("success", "source", "portal", "processNumber", "ato", "diagnostics")}
+        | {
+            "expediente": next(
+                (i for i in (result.get("expedientes") or {}).get("items", []) if i["expedienteId"] == expedienteId),
+                None,
+            )
+        },
+    )
 
 
 @server.tool(
@@ -91,9 +148,50 @@ def watched_processes(portal: Portal) -> dict[str, Any]:
 
 
 def draft_paths(run_id):
-    root = Path(os.environ.get("JURISYNC_FILING_DIR") or Path.home() / ".local/share/jurisync/filings").resolve()
-    directory = root / run_id
+    directory = run_directory(run_id)
     return directory / "payload.json", directory / "checkpoint.json"
+
+
+BACKGROUND_STAGES = frozenset({"create-fill", "fill"})
+# Fills take minutes, longer than a tool call may last, so they run in a thread of this server and report through
+# pje_draft_status. A fill that fails before its checkpoint exists can only leave its error here.
+fill_jobs = {}
+fill_errors = {}
+
+
+def _fill_job(run_id, stage):
+    payload, checkpoint = draft_paths(run_id)
+    try:
+        filing.run_stage(stage, payload_path=str(payload), checkpoint_path=str(checkpoint))
+        fill_errors.pop(run_id, None)
+    except BaseException as error:
+        fill_errors[run_id] = f"{type(error).__name__}: {str(error)[:300]}"
+
+
+def _start_fill(run_id, stage):
+    if os.environ.get("PJE_ALLOW_DRAFT_WRITES") != "true":
+        raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
+    running = fill_jobs.get(run_id)
+    if running is not None and running.is_alive():
+        return {"runId": run_id, "success": True, "stage": stage, "state": "already-running"}
+    payload, checkpoint = draft_paths(run_id)
+    with tool_errors("PJe draft", *ERRORS):
+        filing.validate_fill_payload(json.loads(payload.read_text(encoding="utf-8")))
+        if stage == "create-fill" and checkpoint.exists():
+            raise ToolError("This run already has a draft; use stage fill to continue it")
+        if stage == "fill" and not checkpoint.exists():
+            raise ToolError("This run has no draft yet; use stage create-fill")
+    fill_errors.pop(run_id, None)
+    job = threading.Thread(target=_fill_job, args=(run_id, stage), name=f"pje-fill-{run_id}", daemon=True)
+    fill_jobs[run_id] = job
+    job.start()
+    return {
+        "runId": run_id,
+        "success": True,
+        "stage": stage,
+        "state": "started",
+        "next": "Call pje_draft_status with this runId to follow progress; it finishes on its own.",
+    }
 
 
 def _draft_stage(label, stage, run_id=None, **options):
@@ -104,8 +202,12 @@ def _draft_stage(label, stage, run_id=None, **options):
         options["checkpoint_path"] = str(checkpoint)
         if stage != "subject-options":
             options["payload_path"] = str(payload)
-    with tool_errors(label, *ERRORS), sessions.session("trf5-1g") as session:
-        result = filing.run_stage(stage, session=session, **options)
+    if stage == "status":  # reads local files only: no login needed
+        with tool_errors(label, *ERRORS):
+            result = filing.run_stage(stage, **options)
+    else:
+        with tool_errors(label, *ERRORS), sessions.session("trf5-1g") as session:
+            result = filing.run_stage(stage, session=session, **options)
     return {**({"runId": run_id} if run_id is not None else {}), "success": True, "stage": stage, "result": result}
 
 
@@ -145,11 +247,47 @@ def search_pending_drafts(
 @server.tool(
     name="pje_draft_write",
     title="Create or fill TRF5 PJe draft",
-    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill performs all available filling stages; individual stages support recovery and review.",
+    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
+    if stage in BACKGROUND_STAGES:
+        return _start_fill(runId, stage)
     return _draft_stage("PJe draft", stage, runId)
+
+
+@server.tool(
+    name="pje_draft_delete",
+    title="Delete a TRF5 PJe draft",
+    description="Delete one draft from Não Protocolados by its draft number. The row must show the author's name, otherwise nothing is deleted. Uses the portal's own Remover action and confirms the draft is gone from a fresh search. Irreversible. Requires PJE_ALLOW_DRAFT_WRITES=true.",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
+)
+def draft_delete(
+    draftId: Annotated[str, StringConstraints(pattern=r"^\d{1,12}$")],
+    authorName: Annotated[str, Field(min_length=3, max_length=200)],
+) -> dict[str, Any]:
+    return _draft_stage("PJe draft delete", "delete-draft", name=authorName, draft_id=draftId)
+
+
+@server.tool(
+    name="pje_draft_status",
+    title="TRF5 PJe draft run status",
+    description="Report where a filing run stands: running, interrupted, failed or complete; which phases are recorded; the current step and the latest steps with durations. checkPje=true also reads the draft in PJe and compares its documents with the payload, which is the real test that a draft is complete. Read only.",
+    annotations=READ_ONLY,
+)
+def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
+    _, checkpoint = draft_paths(runId)
+    job = fill_jobs.get(runId)
+    if not checkpoint.exists():
+        if job is not None and job.is_alive():
+            return {"runId": runId, "success": True, "result": {"state": "starting", "conclusion": "not_checked"}}
+        if runId in fill_errors:
+            return {"runId": runId, "success": True, "result": {"state": "failed", "error": fill_errors[runId]}}
+        raise ToolError("This run has no checkpoint yet")
+    response = _draft_stage("PJe draft status", "status-check" if checkPje else "status", runId)
+    if job is not None and job.is_alive() and response["result"]["state"] == "unknown":
+        response["result"]["state"] = "running"
+    return response
 
 
 def main():

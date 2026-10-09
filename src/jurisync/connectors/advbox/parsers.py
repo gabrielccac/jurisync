@@ -4,6 +4,7 @@ import json
 import os
 import re
 from datetime import UTC, datetime
+from html import unescape
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 BASE_URL = os.environ.get("ADVBOX_BASE_URL", "https://app.advbox.com.br")
@@ -67,7 +68,7 @@ def parse_activity_row(row):
     deadline, deadline_label = cell_date(_cell(row, 7))
     deadline_date = _brazilian_date(deadline)
     return {
-        "postId": _data_attribute(_cell(row, 0), "post"),
+        "postId": _data_attribute(_cell(row, 0), "post") or (task[1] if task else None),
         "activityId": _data_attribute(_cell(row, 0), "id"),
         "lawsuitId": _data_attribute(_cell(row, 0), "lawsuit"),
         "taskTemplateId": _data_attribute(_cell(row, 0), "task"),
@@ -367,3 +368,193 @@ def build_create_body(
         "editing": "",
         "v2": "1",
     }
+
+
+def compact_lawsuit_report(report, *, task_search="", max_tasks=0, max_notices=0, max_text=0):
+    """Return a bounded view of a lawsuit report: filter task history by text, cap lists, shorten long texts.
+
+    With every option at its default the report is returned unchanged. Totals before bounding are kept in
+    ``compact`` so a caller can tell that the list was cut.
+    """
+    if not (task_search or max_tasks or max_notices or max_text):
+        return report
+    sections = dict(report.get("sections") or {})
+    summary = {}
+
+    def shorten(record, field):
+        if max_text and len(record.get(field, "")) > max_text:
+            return {**record, field: record[field][:max_text] + "…"}
+        return record
+
+    tasks = sections.get("Histórico de tarefas")
+    if tasks is not None:
+        needle = task_search.casefold().strip()
+        if needle:
+            tasks = [t for t in tasks if needle in f"{t.get('Descrição', '')} {t.get('Responsável', '')}".casefold()]
+        summary["tasksMatched"] = len(tasks)
+        if max_tasks:
+            tasks = tasks[:max_tasks]
+        sections["Histórico de tarefas"] = [shorten(t, "Descrição") for t in tasks]
+        summary["tasksReturned"] = len(sections["Histórico de tarefas"])
+    notices = sections.get("Intimações")
+    if notices is not None:
+        summary["noticesTotal"] = len(notices)
+        if max_notices:
+            notices = notices[:max_notices]
+        sections["Intimações"] = [shorten(n, "Intimação") for n in notices]
+        summary["noticesReturned"] = len(sections["Intimações"])
+    return {**report, "sections": sections, "compact": summary}
+
+
+TASK_FORM_FLAGS = (
+    "important",
+    "urgent",
+    "display_date",
+    "display_schedule",
+    "private",
+    "toggle_end",
+    "all_day",
+    "is_recurring",
+)
+DATE_PATTERN = re.compile(r"\d{2}/\d{2}/\d{4}")
+HOUR_PATTERN = re.compile(r"\d{2}:\d{2}")
+
+
+def _tag(html, element, name):
+    found = re.search(rf"""<{element}\b[^>]*\bname=["']{re.escape(name)}["'][^>]*>""", html, re.I)
+    return found[0] if found else ""
+
+
+def _attribute(tag, name):
+    found = re.search(rf"""\b{re.escape(name)}=["']([^"']*)["']""", tag, re.I)
+    return unescape(found[1]) if found else ""
+
+
+def _selected_value(html, name):
+    block = re.search(rf"""<select\b[^>]*\bname=["']{re.escape(name)}["'][^>]*>([\s\S]*?)</select>""", html, re.I)
+    if not block:
+        return ""
+    chosen = re.search(r"""<option\b[^>]*value=["']([^"']*)["'][^>]*selected""", block[1], re.I)
+    return unescape(chosen[1]) if chosen else ""
+
+
+def parse_task_form(html):
+    """Read the pre-filled task form (``GET /posts/create?id=<id>&edit=true``) into plain values."""
+    source = str(html)
+    editing = _attribute(_tag(source, "input", "editing"), "value")
+    token = _attribute(_tag(source, "input", "create_token"), "value")
+    lawsuit = re.search(
+        r"""<select\b[^>]*name=["']lawsuits_id["'][^>]*>\s*<option value="(\d+)"[^>]*selected""", source
+    )
+    user = _tag(source, "select", "user")
+    guests = [int(item) for item in re.findall(r"\d+", _attribute(user, "data-guests"))]
+    task = _attribute(_tag(source, "select", "tasks_id"), "data-task")
+    if not (editing and token and lawsuit and guests and task):
+        raise ValueError("ADVBOX edit form was not recognised (missing task, lawsuit, guests or token)")
+    comments = re.search(r"""<textarea\b[^>]*name=["']comments["'][^>]*>([\s\S]*?)</textarea>""", source, re.I)
+
+    def value(name):
+        return _attribute(_tag(source, "input", name), "value")
+
+    def checked(name):
+        return any(
+            re.search(r"\bchecked\b", tag, re.I)
+            for tag in re.findall(rf"""<input\b[^>]*\bname=["']{re.escape(name)}["'][^>]*>""", source, re.I)
+        )
+
+    files = [
+        {"name": unescape(item[0]), "code": item[1]}
+        for item in re.findall(r'class="delete-file[^"]*"[^>]*data-file="([^"]*)"[^>]*data-item="(\d+)"', source)
+    ]
+    return {
+        "editing": editing,
+        "createToken": token,
+        "lawsuitId": lawsuit[1],
+        "tasksId": task,
+        "guests": guests,
+        "hasPartner": value("has_partner") or "0",
+        "workflowId": value("workflow_id") or "0",
+        "workflowSequence": value("workflow_sequence") or "1",
+        "workflowLimit": value("workflow_limit") or "0",
+        "date": value("date"),
+        "hour": value("hour"),
+        "deadline": value("date_deadline"),
+        "dateEnd": value("date_end"),
+        "hourEnd": value("hour_end"),
+        "local": value("local"),
+        "comments": unescape(comments[1]) if comments else "",
+        "recurrence": _selected_value(source, "recurrence"),
+        "repeatOnWeek": _selected_value(source, "repeat_on_week") or "all",
+        "flags": {name: checked(name) for name in TASK_FORM_FLAGS},
+        "files": files,
+    }
+
+
+def build_edit_body(
+    form,
+    *,
+    comments=None,
+    append_comments=None,
+    date=None,
+    hour=None,
+    deadline=None,
+    guests=None,
+    file_codes=(),
+    account_id=None,
+):
+    """Rebuild the browser's edit POST from the current form values plus the requested changes.
+
+    ``None`` leaves a field as it is; an empty string clears ``hour`` or ``deadline``.
+    """
+    text = form["comments"] if comments is None else comments
+    if append_comments:
+        text = f"{text.rstrip()}\n\n{append_comments}" if text.strip() else append_comments
+    members = list(form["guests"] if guests is None else guests)
+    if guests is not None and account_id and account_id not in members:
+        members.append(account_id)  # the integration account must stay a guest or the task leaves its listings
+    if not members:
+        raise ValueError("at least one guest (responsible) is required")
+    new_date = form["date"] if date is None else date
+    new_hour = form["hour"] if hour is None else hour
+    new_deadline = form["deadline"] if deadline is None else deadline
+    for label, found, pattern in (
+        ("date", new_date, DATE_PATTERN),
+        ("deadline", new_deadline, DATE_PATTERN),
+        ("hour", new_hour, HOUR_PATTERN),
+    ):
+        if found and not pattern.fullmatch(found):
+            raise ValueError(f"{label} must be DD/MM/YYYY" if pattern is DATE_PATTERN else "hour must be HH:MM")
+    if not new_date:
+        raise ValueError("date is required")
+    body = {
+        "lawsuits_id": form["lawsuitId"],
+        "user": "",
+        "squad": "",
+        "guests[]": [str(member) for member in members],
+        "has_partner": form["hasPartner"],
+        "tasks_id": form["tasksId"],
+        "workflow_id": form["workflowId"],
+        "workflow_sequence": form["workflowSequence"],
+        "workflow_limit": form["workflowLimit"],
+        "workflow": "",
+        "date": new_date,
+        "hour": new_hour,
+        "date_deadline": new_deadline,
+        "date_end": form["dateEnd"],
+        "hour_end": form["hourEnd"],
+        "local": form["local"],
+        "comments": text,
+        "recurrence": form["recurrence"],
+        "repeat_on_week": form["repeatOnWeek"],
+        "create": "1",
+        "ai_suggestion": "",
+        "create_token": form["createToken"],
+        "editing": form["editing"],
+        "v2": "1",
+    }
+    for flag, on in form["flags"].items():
+        if on:
+            body[flag] = "1"
+    if file_codes:
+        body["file[]"] = [str(code) for code in file_codes]
+    return body

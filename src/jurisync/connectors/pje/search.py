@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje.expedientes import ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
     matching_process_id,
@@ -110,7 +111,7 @@ def _safe_page_url(candidate, detail_url):
     return url
 
 
-def search_process(session, process_number, raw_html_path=None, *, portal):
+def search_process(session, process_number, raw_html_path=None, *, portal, ato_expediente=None, ato_text_limit=20000):
     config = portals.pje(portal)
     search_url = config.search_url
     parts = parse_process_number(process_number)
@@ -209,6 +210,19 @@ def search_process(session, process_number, raw_html_path=None, *, portal):
     first_timeline = parse_timeline(detail_html, download_pattern, search_url)
     timeline, pagination = fetch_timeline_pages(session, detail_html, detail_url, download_pattern, search_url)
     documents = [doc for day in timeline for movement in day["movements"] for doc in movement["documents"]]
+    diagnostics = []
+    try:
+        expedientes = fetch_expedientes(session, detail_html, detail_url)
+    except RuntimeError as error:
+        expedientes = None
+        diagnostics.append({"code": "expedientes_unavailable", "message": str(error)[:200]})
+    ato = None
+    if ato_expediente and expedientes is not None:
+        ato = {"expedienteId": str(ato_expediente)}
+        try:
+            ato.update(fetch_ato(session, ato_item(expedientes, ato_expediente), detail_url, ato_text_limit))
+        except (RuntimeError, ValueError) as error:
+            ato["error"] = str(error)[:300]
     return {
         "success": response.status_code == 200,
         "processo_id": process_id,
@@ -226,6 +240,9 @@ def search_process(session, process_number, raw_html_path=None, *, portal):
         "document_inventory": parse_document_inventory(detail_html, timeline, download_pattern, search_url),
         "pagination": pagination,
         "latest_update": timeline[0] if timeline else None,
+        "expedientes": expedientes,
+        "ato": ato,
+        "diagnostics": diagnostics,
     }
 
 

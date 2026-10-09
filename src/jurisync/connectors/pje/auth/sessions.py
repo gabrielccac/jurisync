@@ -18,7 +18,7 @@ def cache_identity(portal):
     account = config.env("SESSION_ACCOUNT")
     username = config.env("USERNAME") if config.auth == "password_totp" else ""
     if not account and not username:
-        # A certificate is selected externally by PJeOffice. Reuse is safe only
+        # The certificate is not part of the identity. Reuse is safe only
         # when the caller identifies that account; fresh login still works.
         return None
     identity = json.dumps([str(Path.cwd().resolve()), config.host, username, account])

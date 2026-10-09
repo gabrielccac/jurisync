@@ -10,6 +10,7 @@ from jurisync.connectors.pje import search
 from jurisync.connectors.pje.auth.sessions import load_session, save_session
 from jurisync.connectors.pje.auth.sso import login_session
 from jurisync.connectors.pje.documents import read_selected_documents, validate_document_ids
+from jurisync.connectors.pje.expedientes import open_deadlines
 from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core.http import enable_request_logging
 from jurisync.core.redaction import drop_keys
@@ -62,6 +63,8 @@ def fetch_process(
     session=None,
     raw_html_path=None,
     document_ids=None,
+    ato_expediente=None,
+    ato_text_limit=20000,
 ):
     """Pass an authenticated session to reuse it across searches in one workflow.
 
@@ -89,7 +92,8 @@ def fetch_process(
     if owned_session:
         session, _ = login_portal(portal)
     try:
-        raw_result = search.search_process(session, process_number, raw_html_path, portal=portal)
+        ato_args = {"ato_expediente": ato_expediente, "ato_text_limit": ato_text_limit} if ato_expediente else {}
+        raw_result = search.search_process(session, process_number, raw_html_path, portal=portal, **ato_args)
         result = dict(raw_result or {})
         timeline = _all_timeline(result)
         selected = _select_timeline(timeline, scope, _first_timeline_page(result))
@@ -124,6 +128,8 @@ def fetch_process(
             "timeline": selected,
             "documentInventory": inventory,
             "attachments": attachments,
+            "expedientes": _expedientes(result.get("expedientes")),
+            "ato": result.get("ato"),
             "pagination": pagination,
             "diagnostics": list(result.get("diagnostics") or []),
             # Minimal compatibility for movement_candidates and old callers.
@@ -143,6 +149,48 @@ def fetch_process(
     finally:
         if owned_session:
             session.close()
+
+
+def read_documents(process_number, document_ids, *, portal, session=None, save=False):
+    """Read 1-5 joined documents of one process without returning the timeline.
+
+    Each document carries its extraction status and text; a Certidão de Intimação also carries its parsed
+    ``expedientes`` (recipient, medium, deadline in days). With ``save`` the original bytes are written to the
+    shared documents folder so another tool can attach them by file name.
+    """
+    from jurisync.connectors.pje.documents import parse_expedientes
+
+    config = portals.pje(portal)
+    number_parts = parse_process_number(process_number)
+    expected_tribunal = {"TRF1": "01", "TRF5": "05"}[config.tribunal]
+    if number_parts[4] != expected_tribunal:
+        raise ValueError(f"Process number does not belong to {config.tribunal}")
+    validate_document_ids(document_ids)
+    owned_session = session is None
+    if owned_session:
+        session, _ = login_portal(portal)
+    try:
+        result = dict(search.search_process(session, process_number, None, portal=portal) or {})
+        if not result.get("success"):
+            return {"success": False, "portal": portal, "processNumber": process_number, "documents": []}
+        timeline = _all_timeline(result)
+        documents = read_selected_documents(
+            {**result, "portal": portal, "timeline": timeline}, document_ids, session=session, save=save
+        )
+    finally:
+        if owned_session:
+            session.close()
+    for document in documents:
+        if "EXPEDIENTES GERADOS" in document.get("text", ""):
+            document["expedientes"] = parse_expedientes(document["text"])
+    return {
+        "success": True,
+        "source": "pje",
+        "portal": portal,
+        "processNumber": process_number,
+        "processId": result.get("processo_id"),
+        "documents": documents,
+    }
 
 
 def _all_timeline(result):
@@ -195,6 +243,22 @@ def _document_inventory(result, timeline):
 
 
 REDACTED_KEYS = {"download_url", "url", "href", "hash", "ca", "viewstate"}
+
+
+def _expedientes(items, limit=30):
+    """Newest communications first, as PJe lists them, plus the ones still open."""
+    if items is None:
+        return None
+    items = [
+        {**{k: v for k, v in item.items() if k not in ("atoPath", "respostaPath")}, "temAto": bool(item["atoPath"])}
+        for item in items
+    ]
+    return {
+        "total": len(items),
+        "abertos": open_deadlines(items),
+        "items": items[:limit],
+        "truncated": len(items) > limit,
+    }
 
 
 def _redact(value):

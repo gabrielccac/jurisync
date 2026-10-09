@@ -1,4 +1,4 @@
-"""Classify Victor's Advbox filing documents into PJe document types.
+"""Classify the documents of a filing folder into PJe document types.
 
 Clear filenames decide directly; decision letters are read for their outcome;
 ambiguous readable files are sent to TypeSafe Jev (filename + at most 12,000
@@ -40,27 +40,29 @@ def plain(value):
     return "".join(char for char in text if not unicodedata.combining(char)).upper()
 
 
-def document_kind(name):
+DEFAULT_RULES = (
+    (r"PETI?CAO|MANDADO DE SEGURANCA", "petition"),
+    (r"^INDEFERIMENTO$", "Carta de Indeferimento"),
+    (r"^CONCESSAO$", "Carta de Concessão"),
+    (r"COMUNICAD[OA].*DECISAO|COMUNICACAO.*DECISAO|COMUNICAD[OA].*CESSACAO", "decision"),
+    (r"VALOR DA CAUSA|PLANILHA|\bRMI\b", "Planilha"),
+    (r"QUESITOS", "Outros Documentos"),
+    (r"PROCURACAO|CONTRATO", "Outros Documentos"),
+    (r"IDENTIFI.*REPRESENTAN", "Documento Comprobatório"),
+    (r"DOCUMENTO DE IDENTIFICACAO|\bRG\b|\bCNH\b", "Documento de Identificação"),
+    (r"^PA\b|PROCESSO ADMINISTRATIVO", "Processo Administrativo"),
+    (r"LAUDO|MEDIC|RECEITUARIO|EXAME", "medical"),
+    (
+        r"CNIS|CTPS|RESIDENCIA|ATIVIDADE RURAL|PROVAS RURAIS|GRUPO FAMILIAR|CADUNICO|LOAS|COMPROVANTE"
+        r"|CERTIDAO DE OBITO|DEPENDENCIA ECONOMICA",
+        "Documento Comprobatório",
+    ),
+)
+
+
+def document_kind(name, rules=None):
     stem = re.sub(r"[\s_]+\d{3,}$", "", re.sub(r"^\d+[\s._-]+", "", plain(Path(name).stem)))
-    rules = (
-        (r"PETI?CAO|MANDADO DE SEGURANCA", "petition"),
-        (r"^INDEFERIMENTO$", "Carta de Indeferimento"),
-        (r"^CONCESSAO$", "Carta de Concessão"),
-        (r"COMUNICAD[OA].*DECISAO|COMUNICACAO.*DECISAO|COMUNICAD[OA].*CESSACAO", "decision"),
-        (r"VALOR DA CAUSA|PLANILHA|\bRMI\b", "Planilha"),
-        (r"QUESITOS", "Outros Documentos"),
-        (r"PROCURACAO|CONTRATO", "Outros Documentos"),
-        (r"IDENTIFI.*REPRESENTAN", "Documento Comprobatório"),
-        (r"DOCUMENTO DE IDENTIFICACAO|\bRG\b|\bCNH\b", "Documento de Identificação"),
-        (r"^PA\b|PROCESSO ADMINISTRATIVO", "Processo Administrativo"),
-        (r"LAUDO|MEDIC|RECEITUARIO|EXAME", "medical"),
-        (
-            r"CNIS|CTPS|RESIDENCIA|ATIVIDADE RURAL|PROVAS RURAIS|GRUPO FAMILIAR|CADUNICO|LOAS|COMPROVANTE"
-            r"|CERTIDAO DE OBITO|DEPENDENCIA ECONOMICA",
-            "Documento Comprobatório",
-        ),
-    )
-    return next((kind for pattern, kind in rules if re.search(pattern, stem)), "unknown")
+    return next((kind for pattern, kind in (rules or DEFAULT_RULES) if re.search(pattern, stem)), "unknown")
 
 
 def decision_outcome(text):
@@ -145,8 +147,8 @@ def ask_jev(name, text, *, post=_post_json, openrouter_key=None, api_key=None, s
     raise RuntimeError("Jev API kept returning rate-limit responses")
 
 
-def classify_document(name, text, **jev_options):
-    kind = document_kind(name)
+def classify_document(name, text, *, rules=None, **jev_options):
+    kind = document_kind(name, rules)
     if kind == "petition":
         return {"role": "main", "type": "Petição inicial", "method": "filename"}
     if kind not in ("decision", "medical", "unknown"):

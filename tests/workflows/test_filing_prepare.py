@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from customers.victor.workflows.pje_documents import (
+from jurisync.workflows.filing.classify import (
     ask_jev,
     claim_value_candidates,
     classify_document,
@@ -14,14 +14,16 @@ from customers.victor.workflows.pje_documents import (
     decision_outcome,
     document_kind,
 )
-from customers.victor.workflows.prepare_pje_filing import (
+from jurisync.workflows.filing.prepare import (
     _stage_upload,
     apply_supporting_fallback,
     build_payload,
     finalize_review,
     upload_filename,
 )
+from jurisync.workflows.filing.profile import load_profile
 
+PROFILE = load_profile("victor")
 FACTS = {
     "authorCpf": "12345678909",
     "author": {"name": "EXAMPLE"},
@@ -182,13 +184,15 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(apply_supporting_fallback(main), main)
 
     def test_defaults_merge_only_with_explicit_case_facts(self):
-        payload = build_payload(FACTS, {"main": {"path": "/tmp/test.pdf", "type": "Petição inicial"}, "supporting": []})
+        payload = build_payload(
+            FACTS, {"main": {"path": "/tmp/test.pdf", "type": "Petição inicial"}, "supporting": []}, PROFILE.defaults()
+        )
         self.assertEqual(payload["attorney"]["name"], "GRAZIELE ALVES DA SILVA")
         self.assertTrue(payload["characteristics"]["legalAid"])
         self.assertEqual(payload["characteristics"]["claimValue"], "5.000,00")
         self.assertEqual(payload["classification"]["jurisdiction"], "PE / Petrolina")
         with self.assertRaisesRegex(ValueError, "claimValue"):
-            build_payload({**FACTS, "characteristics": {"claimValue": "0"}}, {})
+            build_payload({**FACTS, "characteristics": {"claimValue": "0"}}, {}, PROFILE.defaults())
 
     def test_review_finalizer_requires_resolution_and_verifies_pdf_contents(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -227,9 +231,9 @@ class PayloadTest(unittest.TestCase):
                 )
             )
             with self.assertRaisesRegex(ValueError, "needs review"):
-                finalize_review(report, FACTS)
+                finalize_review(report, FACTS, profile=PROFILE)
             choice = {"file:0": {"role": "main", "type": "Petição inicial"}}
-            result = finalize_review(report, FACTS, choice)
+            result = finalize_review(report, FACTS, choice, profile=PROFILE)
             self.assertTrue(result["ready"])
             documents = json.loads(Path(result["payloadPath"]).read_text())["documents"]
             self.assertEqual(documents["main"]["path"], str(petition))
@@ -240,7 +244,7 @@ class PayloadTest(unittest.TestCase):
             self.assertEqual(oct(Path(result["payloadPath"]).stat().st_mode & 0o777), "0o600")
             petition.write_bytes(b"%PDF-1.4\nchanged")
             with self.assertRaisesRegex(ValueError, "Document changed"):
-                finalize_review(report, FACTS, choice)
+                finalize_review(report, FACTS, choice, profile=PROFILE)
 
 
 if __name__ == "__main__":

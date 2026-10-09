@@ -7,11 +7,14 @@ import os
 from pathlib import Path
 
 from jurisync.connectors.pje.auth.certificate import trf5_cert_login
-from jurisync.connectors.pje.filing.checkpoint import write_checkpoint
+from jurisync.connectors.pje.filing.checkpoint import now, pid_alive, write_checkpoint
 from jurisync.connectors.pje.filing.client import DraftClient
 from jurisync.connectors.pje.filing.payload import payload_subjects, validate_fill_payload
+from jurisync.connectors.pje.filing.status import run_status
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 from jurisync.core.http import enable_request_logging
+from jurisync.core.mcp import load_env_file
+from jurisync.paths import REPO_ROOT
 
 STAGES = (
     "classification",
@@ -29,6 +32,9 @@ STAGES = (
     "main-document",
     "supporting-documents",
     "documents",
+    "status",
+    "status-check",
+    "delete-draft",
 )
 
 
@@ -45,6 +51,7 @@ WRITE_STAGES = frozenset(
         "main-document",
         "supporting-documents",
         "documents",
+        "delete-draft",
     }
 )
 
@@ -53,15 +60,34 @@ def _timeline(checkpoint_path, client, stage):
     return StepTimeline(Path(checkpoint_path).with_name("filing-steps.json"), client, stage)
 
 
+def _load_payload(path):
+    if not path:
+        return None
+    with open(path, encoding="utf-8") as source:
+        return json.load(source)
+
+
 def _fill(client, checkpoint, checkpoint_path, payload, stage, verify_all):
     """Fill the draft, saving the checkpoint as each phase completes, then label how far it got."""
 
     def save(data):
         write_checkpoint(checkpoint_path, data)
 
-    result = client.fill_draft(
-        checkpoint, payload, _timeline(checkpoint_path, client, stage), verify_all=verify_all, save=save
-    )
+    holder = checkpoint.get("pid")
+    if checkpoint.get("status") == "running" and holder and holder != os.getpid() and pid_alive(holder):
+        raise RuntimeError(f"Another fill is already running for this draft (pid {holder})")
+    timeline = _timeline(checkpoint_path, client, stage)
+    timeline.close_stale()
+    checkpoint.update(status="running", pid=os.getpid(), startedAt=now(), updatedAt=now(), error=None)
+    save(checkpoint)
+    try:
+        result = client.fill_draft(checkpoint, payload, timeline, verify_all=verify_all, save=save)
+    except BaseException as error:
+        failed = isinstance(error, Exception)
+        message = f"{type(error).__name__}: {str(error)[:300]}"
+        checkpoint.update(status="failed" if failed else "interrupted", error=message, updatedAt=now())
+        save(checkpoint)
+        raise
     checkpoint["stage"] = (
         "documents_complete"
         if "documents" in payload
@@ -69,6 +95,7 @@ def _fill(client, checkpoint, checkpoint_path, payload, stage, verify_all):
         if "characteristics" in payload
         else "parties_complete"
     )
+    checkpoint.update(status="complete", updatedAt=now(), error=None)
     save(checkpoint)
     return result
 
@@ -84,6 +111,7 @@ def run_stage(
     cpf=None,
     session=None,
     verify_all=False,
+    draft_id=None,
 ):
     """Run one draft stage; pass an authenticated TRF5 session to reuse it.
 
@@ -92,6 +120,10 @@ def run_stage(
     """
     if stage not in STAGES:
         raise ValueError(f"Unknown draft stage: {stage}")
+    if stage == "status":
+        if not checkpoint_path:
+            raise ValueError("status requires a checkpoint")
+        return run_status(checkpoint_path, _load_payload(payload_path))
     if stage == "subject-options":
         if not checkpoint_path or not search or page < 1:
             raise ValueError("subject-options requires a checkpoint, search text and a positive page")
@@ -99,6 +131,10 @@ def run_stage(
     elif stage == "pending-search":
         if not (name or cpf):
             raise ValueError("pending-search requires a name or CPF")
+        payload = {}
+    elif stage == "delete-draft":
+        if not (draft_id and name):
+            raise ValueError("delete-draft requires the draft number and the author's name")
         payload = {}
     else:
         if not payload_path:
@@ -116,6 +152,8 @@ def run_stage(
         client = DraftClient(session)
         if stage == "pending-search":
             result = client.search_pending_drafts(name=name, cpf=cpf)
+        elif stage == "delete-draft":
+            result = client.delete_draft(draft_id, name)
         elif stage == "classification":
             result = client.classification_options(payload["classification"])
         elif stage in ("create", "create-fill"):
@@ -141,7 +179,9 @@ def run_stage(
                 raise ValueError("--checkpoint is required after classification")
             with open(checkpoint_path, encoding="utf-8") as source:
                 checkpoint = json.load(source)
-            if stage == "subject-options":
+            if stage == "status-check":
+                result = run_status(checkpoint_path, payload, client)
+            elif stage == "subject-options":
                 result = client.search_subjects(checkpoint["draftUrl"], search, page)
             elif stage == "subject":
                 added_subjects = client.add_subjects(checkpoint["draftUrl"], payload_subjects(payload))
@@ -186,6 +226,7 @@ def run_stage(
 
 
 def main():
+    load_env_file(os.environ.get("JURISYNC_ENV_FILE") or REPO_ROOT / ".env")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     parser = argparse.ArgumentParser(description="Inspect TRF5 PJe draft fields via direct requests")
     parser.add_argument("--payload")
@@ -195,6 +236,7 @@ def main():
     parser.add_argument("--name", help="Parte name for the read-only pending-search stage")
     parser.add_argument("--cpf", help="Parte CPF for the read-only pending-search stage")
     parser.add_argument("--page", type=int, default=1, help="Assunto result page (default: 1)")
+    parser.add_argument("--draft-id", help="Draft number for the delete-draft stage")
     parser.add_argument(
         "--verify-all", action="store_true", help="Re-read and re-check every phase instead of trusting the checkpoint"
     )
@@ -211,6 +253,7 @@ def main():
             name=args.name,
             cpf=args.cpf,
             verify_all=args.verify_all,
+            draft_id=args.draft_id,
         )
     except ValueError as error:
         if args.mcp:

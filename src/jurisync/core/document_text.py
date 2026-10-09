@@ -4,6 +4,8 @@ from io import BytesIO
 
 from bs4 import BeautifulSoup
 
+from jurisync.core.transcription import transcribe_bytes
+
 MAX_EXTRACTED_CHARACTERS = 1_000_000
 
 
@@ -35,6 +37,25 @@ def _html_status(body):
     return None
 
 
+UNNUMBERED_MIN_CHARACTERS = 80
+NOT_A_DOCUMENT_MARKERS = (
+    "não é válido ou não existe",
+    "nao e valido ou nao existe",
+    "indisponível",
+    "indisponivel",
+    "pjeoffice",
+    "sessão expirada",
+    "sessao expirada",
+    "acesso negado",
+    "protegido por sigilo",
+)
+
+
+def _looks_like_document(text):
+    lowered = text.casefold()
+    return len(text) >= UNNUMBERED_MIN_CHARACTERS and not any(marker in lowered for marker in NOT_A_DOCUMENT_MARKERS)
+
+
 def _pdf_has_images(reader):
     for page in reader.pages:
         try:
@@ -48,11 +69,18 @@ def _pdf_has_images(reader):
     return False
 
 
-def extract_document_text(content, content_type="", process_number=""):
-    """Return ``(status, text)`` without treating portal/error pages as evidence."""
+def extract_document_text(content, content_type="", process_number="", *, allow_unnumbered=False):
+    """Return ``(status, text)`` without treating portal/error pages as evidence.
+
+    HTML that does not print the process number is normally rejected as an unknown page. With
+    ``allow_unnumbered`` (for callers that already fetched the document by a process-bound ID), a
+    substantial page without error or login markers is returned as ``extracted_unnumbered``.
+    """
     if not content or not content.strip():
         return "empty", ""
     content_type = content_type or ""
+    if content_type.casefold().startswith("audio/") or content.startswith((b"ID3", b"\xff\xfb", b"\xff\xf3")):
+        return transcribe_bytes(content)
     looks_html = content.lstrip().lower().startswith((b"<html", b"<!doctype html"))
     is_pdf = content.lstrip().startswith(b"%PDF-") or ("pdf" in content_type.casefold() and not looks_html)
     if is_pdf:
@@ -97,5 +125,7 @@ def extract_document_text(content, content_type="", process_number=""):
         digits = "".join(ch for ch in process_number if ch.isdigit())
         haystack = "".join(ch for ch in text if ch.isdigit())
         if digits not in haystack:
+            if allow_unnumbered and _looks_like_document(text):
+                return "extracted_unnumbered", text
             return "unrecognized_html", ""
     return "extracted", text

@@ -5,7 +5,7 @@ the payload it worked from. A re-run skips phases whose fingerprint still matche
 re-reads everything instead.
 """
 
-from jurisync.connectors.pje.filing.checkpoint import documents_fingerprint, fingerprint
+from jurisync.connectors.pje.filing.checkpoint import now, phase_fingerprints
 from jurisync.connectors.pje.filing.payload import payload_subjects
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 
@@ -18,13 +18,13 @@ class FillMixin:
         completed = checkpoint.setdefault("completed", {})
         found = {}
 
-        def phase(name, source, run):
-            key = fingerprint(source)
+        def phase(name, key, run):
             if not verify_all and completed.get(name) == key:
                 timeline.skip(name, "completed in an earlier run")
                 return {"skipped": True}
             value = run()
             completed[name] = key
+            checkpoint["stage"], checkpoint["updatedAt"] = f"{name}_complete", now()
             if save:
                 save(checkpoint)
             return value
@@ -83,18 +83,29 @@ class FillMixin:
         def documents():
             return self.add_documents(draft_listing()["draftUrl"], payload["documents"], timeline)
 
-        added = phase("subjects", payload_subjects(payload), subjects)
+        prints = phase_fingerprints(payload)
+        added = phase("subjects", prints["subjects"], subjects)
         single = "subject" in payload and isinstance(added, list)
         result = {("subject" if "subject" in payload else "subjects"): added[0] if single else added}
-        party_slice = {
-            key: payload.get(key) for key in ("authorCpf", "author", "attorney", "passive", "otherParticipants")
-        }
-        filled = phase("parties", party_slice, parties)
+        filled = phase("parties", prints["parties"], parties)
         result.update({"parties": filled} if filled.get("skipped") else filled)
         if "characteristics" in payload:
-            result["characteristics"] = phase("characteristics", payload["characteristics"], characteristics)
+            result["characteristics"] = phase("characteristics", prints["characteristics"], characteristics)
         if "documents" in payload:
-            result["documents"] = phase("documents", documents_fingerprint(payload["documents"]), documents)
+            result["documents"] = phase("documents", prints["documents"], documents)
+        if "documents" in payload and result["documents"].get("skipped"):
+            # The ledger skipped the upload, so confirm in PJe that the documents are still on the draft.
+            main = payload["documents"]["main"]
+            expected = [{"path": main["path"], "type": main.get("type", "Petição inicial")}]
+            expected += payload["documents"].get("supporting", [])
+            with timeline.step("documents check"):
+                try:
+                    self._require_listed(self.review_documents(draft_listing()["draftUrl"]), expected)
+                except RuntimeError:
+                    completed.pop("documents", None)  # the next run uploads what is missing
+                    if save:
+                        save(checkpoint)
+                    raise
         draft_listing()
         result["pending"] = {"draftId": draft_id, "inNaoProtocolados": True}
         return result

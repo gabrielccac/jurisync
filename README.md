@@ -33,6 +33,7 @@ src/jurisync/
     advbox/             ADVBOX web session: customers, lawsuits, activities, files, tasks
   workflows/
     publications/       Juridiq publication → task pipeline and evidence validation
+    filing/             Profile-driven filing prep (ADVBOX protocol folder → PJe payload) and its MCP server
 customers/
   jean/                 Juridiq publication triage: profile, runner, skill, notes
   victor/               DJEN → ADVBOX routing skill, TRF5 filing prep, TRF1 watcher
@@ -69,6 +70,7 @@ startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
 | Server | Tools | Login | Writes |
 |---|---|---|---|
 | `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1: password + TOTP. TRF5: A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
+| `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | ADVBOX session | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
 | `eproc` | `eproc_list_notices`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`) | Browser login + TOTP, once per portal | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
 | `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_get_attachment`*, `inss_get_process`*, `inss_read_document` | Chrome + A3 PIN (by the user) + TOTP | local downloads only (`get` tools save the file and return its parsed text) |
@@ -86,7 +88,7 @@ Shared code never imports from `customers/`.
 - **Jean** — `customers.jean.run_publications.run_jean_publications(agent)` runs
   the publication pipeline with Jean's template mapping.
 - **Victor** — DJEN → ADVBOX task routing skill; TRF5 initial-filing preparation
-  (`python -m customers.victor.workflows.prepare_pje_filing --help`); TRF1
+  (`python -m jurisync.workflows.filing --help`, profile `victor`); TRF1
   spreadsheet watcher (`python -m customers.victor.workflows.pje1g_watch --help`).
 
 Add a customer by creating `customers/<name>/` with a README, its skills under

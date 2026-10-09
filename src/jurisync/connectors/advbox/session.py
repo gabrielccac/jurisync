@@ -18,6 +18,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 from curl_cffi import CurlMime, requests
 
 from jurisync.connectors.advbox.parsers import BASE_URL, parse_csrf_token, parse_hidden_inputs
+from jurisync.paths import REPO_ROOT
 
 
 class SessionExpiredError(RuntimeError):
@@ -86,7 +87,7 @@ def is_expired_session(cache, now_ms=None):
 def session_file():
     account = (os.environ.get("ADVBOX_EMAIL") or "").strip().lower()
     name = f"advbox-{hashlib.sha256(account.encode()).hexdigest()[:16]}.json" if account else "advbox-session.json"
-    return Path(os.environ.get("ADVBOX_SESSION_FILE") or Path.cwd() / "data" / name)
+    return Path(os.environ.get("ADVBOX_SESSION_FILE") or REPO_ROOT / "data" / name)
 
 
 def _ok(response):

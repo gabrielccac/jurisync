@@ -264,5 +264,16 @@ class SubjectBatchTests(unittest.TestCase):
         self.assertEqual(len(reads), 2)
 
 
+class LoginOutageTests(unittest.TestCase):
+    def test_a_5xx_login_page_is_reported_as_an_outage(self):
+        from types import SimpleNamespace
+
+        from jurisync.connectors.pje.auth.certificate import _require_available
+
+        with self.assertRaisesRegex(RuntimeError, "unavailable \\(HTTP 503\\)"):
+            _require_available(SimpleNamespace(status_code=503))
+        _require_available(SimpleNamespace(status_code=200))
+
+
 if __name__ == "__main__":
     unittest.main()

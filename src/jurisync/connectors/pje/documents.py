@@ -13,6 +13,7 @@ from curl_cffi.requests.exceptions import RequestException
 from jurisync import portals
 from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core.document_text import extract_document_text as _extract_document_text
+from jurisync.core.documents_dir import save_document
 
 MAX_DOCUMENTS = 5
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -28,9 +29,9 @@ def validate_document_ids(document_ids):
         raise ValueError("Select 1-5 unique numeric document ID strings")
 
 
-def extract_document_text(content, content_type, process_number=""):
+def extract_document_text(content, content_type, process_number="", *, allow_unnumbered=False):
     """Legacy helper name; selected reads use the shared status unchanged."""
-    status, text = _extract_document_text(content, content_type, process_number)
+    status, text = _extract_document_text(content, content_type, process_number, allow_unnumbered=allow_unnumbered)
     if status == "session_expired":
         return "unrecognized_html", ""
     if status == "pdf_parse_error":
@@ -38,13 +39,16 @@ def extract_document_text(content, content_type, process_number=""):
     return status, text
 
 
-def read_selected_documents(process, document_ids, *, session):
+def read_selected_documents(process, document_ids, *, session, save=False):
     """Read 1-5 known document IDs with an already-authenticated session.
 
     Validate the whole selection before any request. Use only the exact adapter
     download route, refuse redirects, cap each streamed body at 10 MiB, and leave
     the supplied session open. Returned records omit session-bearing URLs.
     Network failures return metadata with no evidence text; there is no retry/login.
+    The fetch is bound to the process (ID and download path), so HTML that omits the process number is
+    still accepted as ``extracted_unnumbered`` when it is a substantial page without error markers.
+    With ``save`` the original bytes are written to the shared documents folder and reported as ``savedAs``.
     """
     portal = process.get("portal")
     if process.get("success") is not True or portal not in ("trf1-1g", "trf1-2g", "trf5-1g"):
@@ -153,8 +157,10 @@ def read_selected_documents(process, document_ids, *, session):
                 else:
                     item["sha256"] = hashlib.sha256(content).hexdigest()
                     item["extractionStatus"], item["text"] = _extract_document_text(
-                        bytes(content), item["content_type"], number
+                        bytes(content), item["content_type"], number, allow_unnumbered=True
                     )
+                    if save:
+                        item["savedAs"] = save_document(_saved_name(number, document["id"], content, item), content)
         except (RequestException, OSError):
             # Exception messages can include session-bearing request URLs.
             item.update(extractionStatus="request_failed", text="")
@@ -166,3 +172,48 @@ def read_selected_documents(process, document_ids, *, session):
                     item.update(extractionStatus="request_failed", text="")
         results.append(item)
     return results
+
+
+def _saved_name(number, doc_id, content, item):
+    digits = "".join(ch for ch in str(number) if ch.isdigit())
+    kind = item.get("content_type", "").casefold()
+    if bytes(content[:5]) == b"%PDF-" or "pdf" in kind:
+        extension = "pdf"
+    elif kind.startswith("audio/") or bytes(content[:3]) == b"ID3":
+        extension = "mp3"
+    else:
+        extension = "html"
+    return f"{digits}_{doc_id}.{extension}"
+
+
+EXPEDIENTE = re.compile(
+    r"(?P<parte>[^()]{2,120}?)\s*\((?P<documentId>\d+)\s*-\s*(?P<documento>[^)]{1,80})\)\s*"
+    r"(?P<meio>Diário Eletrônico|Sistema|Correios|Central de Mandados|Edital|Pessoal)\s+"
+    r"(?:(?P<dias>\d+)\s+dias?|(?P<zero>\d+)\s+sem prazo)\s+(?P<pessoal>Sim|Não)"
+)
+
+
+def parse_expedientes(text):
+    """Parse the EXPEDIENTES GERADOS table of a Certidão de Intimação into one record per recipient."""
+    start = str(text).find("EXPEDIENTES GERADOS")
+    if start < 0:
+        return []
+    body = text[start:]
+    end = body.find("O(s) documento(s)")
+    body = body[: end if end > 0 else len(body)]
+    body = body.replace("EXPEDIENTES GERADOS Parte Documento Meio Prazo Pessoal", " ")
+    records = []
+    for match in EXPEDIENTE.finditer(body):
+        days = match.group("dias")
+        records.append(
+            {
+                "parte": " ".join(match.group("parte").split()),
+                "documentId": match.group("documentId"),
+                "documento": match.group("documento").strip(),
+                "meio": match.group("meio"),
+                "prazoDias": int(days) if days else None,
+                "semPrazo": days is None,
+                "pessoal": match.group("pessoal") == "Sim",
+            }
+        )
+    return records

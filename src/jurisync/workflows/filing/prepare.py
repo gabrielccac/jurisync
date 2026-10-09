@@ -1,7 +1,7 @@
-"""Prepare a TRF5 PJe draft payload from a customer's Advbox 00-PROTOCOLAR folder.
+"""Prepare a TRF5 PJe draft payload from a customer's Advbox protocol folder, driven by a filing profile.
 
-    python -m customers.victor.workflows.prepare_pje_filing prepare --customer ID --facts case-facts.json --out RUN_DIR
-    python -m customers.victor.workflows.prepare_pje_filing finalize --review RUN_DIR/review.json --facts case-facts.json [--overrides overrides.json]
+    python -m jurisync.workflows.filing prepare --profile NAME --customer ID --facts case-facts.json --out RUN_DIR
+    python -m jurisync.workflows.filing finalize --profile NAME --review RUN_DIR/review.json --facts case-facts.json [--overrides overrides.json]
 
 Downloads the folder, converts DOC/DOCX to PDF, classifies documents, splits
 oversized supporting PDFs, and writes review.json (plus payload.json once no
@@ -23,9 +23,9 @@ from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.core.pdf import analyze_document
 from jurisync.core.word_to_pdf import convert_word_to_pdf
 
-from .pje_defaults import UNCERTAIN_SUPPORTING_TYPE, victor_defaults
-from .pje_documents import claim_value_candidates, classify_document, cpf_candidates, document_kind
-from .split_pdf import split_pdf
+from .classify import claim_value_candidates, classify_document, cpf_candidates, document_kind
+from .profile import load_profile
+from .split import split_pdf
 
 PJE_LIMIT = 10_000_000
 SUPPORTING_TYPES = {
@@ -38,7 +38,6 @@ SUPPORTING_TYPES = {
     "Carta de Concessão",
     "Laudo Médico",
 }
-PROTOCOLAR_FOLDERS = (r"(?:^|/)00\s*-\s*PROTOCOLAR$", r"(?:^|/)00\s*-\s*PROTOCOLAR\s+JUD$")
 
 
 def _sha256(content):
@@ -96,8 +95,7 @@ def require_facts(facts, defaults):
             raise ValueError(f"characteristics.{key} must be a boolean")
 
 
-def build_payload(facts, documents):
-    defaults = victor_defaults()
+def build_payload(facts, documents, defaults):
     require_facts(facts, defaults)
     author = facts["author"]
     return {
@@ -115,14 +113,14 @@ def build_payload(facts, documents):
     }
 
 
-def apply_supporting_fallback(classification):
+def apply_supporting_fallback(classification, uncertain_type="Outros Documentos"):
     """Uncertain supporting files go in as Outros Documentos, flagged, instead of blocking the draft."""
     if classification.get("role") != "supporting" or not classification.get("review"):
         return classification
     details = {key: value for key, value in classification.items() if key not in ("review", "type")}
     result = {
         **details,
-        "type": UNCERTAIN_SUPPORTING_TYPE,
+        "type": uncertain_type,
         "method": "fallback",
         "fallbackReason": classification["review"],
     }
@@ -166,9 +164,9 @@ def _petition_candidates(path):
     return claim_value_candidates(markdown), cpf_candidates(markdown)
 
 
-def _safe_classify(name, text):
+def _safe_classify(name, text, jev_options=None, rules=None):
     try:
-        return classify_document(name, text)
+        return classify_document(name, text, rules=rules, **(jev_options or {}))
     except Exception as error:  # Classification problems become review items, not crashes.
         return {"role": "supporting", "type": None, "method": "jev", "review": str(error)}
 
@@ -194,13 +192,13 @@ def _stage_upload(path, directory):
     return str(target)
 
 
-def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_hashes):
+def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_hashes, profile, jev_options=None):
     file = documents.download_file(
         entry.get("downloadUrl") or entry["url"], filename=entry["name"], directory=directory / "files", inspect=False
     )
     content = Path(file["path"]).read_bytes()
     sha256 = _sha256(content)
-    ambiguous = document_kind(entry["name"]) in ("decision", "medical", "unknown")
+    ambiguous = document_kind(entry["name"], profile.document_rules) in ("decision", "medical", "unknown")
     analysis = (
         analyze_document(content, entry["name"]) if ambiguous and len(content) <= PJE_LIMIT and _is_pdf(content) else {}
     )
@@ -212,7 +210,9 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
             "review": "Confirm this unlabeled editable file is the main petition",
         }
     else:
-        classification = _safe_classify(entry["name"], analysis.get("markdown") or "")
+        classification = _safe_classify(
+            entry["name"], analysis.get("markdown") or "", jev_options, profile.document_rules
+        )
     if (
         classification.get("review")
         and ambiguous
@@ -221,7 +221,9 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
         and (analysis.get("textCharacters") or 0) < 80
     ):
         analysis = analyze_document(content, entry["name"], ocr=True)
-        classification = _safe_classify(entry["name"], analysis.get("markdown") or "")
+        classification = _safe_classify(
+            entry["name"], analysis.get("markdown") or "", jev_options, profile.document_rules
+        )
     row = {
         "id": f"{sha256[:12]}:{index}",
         "name": entry["name"],
@@ -229,7 +231,7 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
         "sha256": sha256,
         "pages": analysis.get("pageCount"),
         "textCharacters": analysis.get("textCharacters") or 0,
-        **apply_supporting_fallback(classification),
+        **apply_supporting_fallback(classification, profile.uncertain_type),
     }
     if sha256 in seen_hashes:
         row["review"] = "Duplicate file contents in folder"
@@ -267,7 +269,9 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
     return row
 
 
-def prepare_customer(customer_id, facts, out_dir, *, folder=None, client=None):
+def prepare_customer(customer_id, facts, out_dir, *, profile, folder=None, client=None, jev=True):
+    """Download, convert, split and classify the protocol folder. `jev=False` keeps document text off the network."""
+    jev_options = None if jev else {"openrouter_key": "", "api_key": ""}
     directory = Path(out_dir).resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     documents = AdvboxDocuments(client or AdvboxClient())
@@ -275,7 +279,7 @@ def prepare_customer(customer_id, facts, out_dir, *, folder=None, client=None):
     selected = folder or next(
         (
             entry["path"]
-            for pattern in PROTOCOLAR_FOLDERS
+            for pattern in profile.folder_patterns
             for entry in root["folders"]
             if re.search(pattern, entry["path"].strip(), re.I)
         ),
@@ -289,11 +293,15 @@ def prepare_customer(customer_id, facts, out_dir, *, folder=None, client=None):
     editable = [entry for entry in files if re.search(r"\.docx?$", entry["name"], re.I)]
     unlabeled = (
         editable[0]
-        if len(editable) == 1 and not any(document_kind(entry["name"]) == "petition" for entry in files)
+        if len(editable) == 1
+        and not any(document_kind(entry["name"], profile.document_rules) == "petition" for entry in files)
         else None
     )
     seen = set()
-    rows = [_prepare_row(entry, index, directory, documents, unlabeled, seen) for index, entry in enumerate(files)]
+    rows = [
+        _prepare_row(entry, index, directory, documents, unlabeled, seen, profile, jev_options)
+        for index, entry in enumerate(files)
+    ]
 
     mains = [row for row in rows if row["role"] == "main"]
     review = [{"id": row["id"], "name": row["name"], "reason": row["review"]} for row in rows if row.get("review")]
@@ -310,13 +318,13 @@ def prepare_customer(customer_id, facts, out_dir, *, folder=None, client=None):
                 {"name": "authorCpf", "reason": "Author CPF was not found among the petition's formatted CPFs"}
             )
     try:
-        require_facts(facts, victor_defaults())
+        require_facts(facts, profile.defaults())
     except ValueError as error:
         review.append({"name": "case facts", "reason": str(error)})
     payload_path = None
     if not review:
         try:
-            payload = build_payload(facts, _main_document(rows))
+            payload = build_payload(facts, _main_document(rows), profile.defaults())
             payload_path = directory / "payload.json"
             _write_private(payload_path, payload)
         except ValueError as error:
@@ -378,7 +386,7 @@ def _verify_row(row):
             raise ValueError(f"Split PDF changed or is invalid: {part['path']}")
 
 
-def finalize_review(review_path, facts, overrides=None):
+def finalize_review(review_path, facts, overrides=None, *, profile):
     """Apply the reviewer's explicit choices and write payload.json next to review.json."""
     overrides = overrides or {}
     report = json.loads(Path(review_path).read_text(encoding="utf-8"))
@@ -400,36 +408,35 @@ def finalize_review(review_path, facts, overrides=None):
         raise ValueError("Case claimValue differs from the selected petition's stated value")
     if cpfs and _digits(facts.get("authorCpf")) not in cpfs:
         raise ValueError("Author CPF was not found among the selected petition's formatted CPFs")
-    payload = build_payload(facts, _main_document(rows))
+    payload = build_payload(facts, _main_document(rows), profile.defaults())
     destination = Path(review_path).resolve().parent / "payload.json"
     _write_private(destination, payload)
     return {"ready": True, "payloadPath": str(destination), "documentCount": len(rows)}
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Prepare Victor's TRF5 PJe filing payload from Advbox")
+    parser = argparse.ArgumentParser(description="Prepare a PJe filing payload from a customer's protocol folder")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--customer", required=True)
     prepare.add_argument("--facts", required=True, type=Path)
     prepare.add_argument("--out", required=True, type=Path)
     prepare.add_argument("--folder")
+    prepare.add_argument("--no-jev", action="store_true", help="Keep document text off the network")
     finalize = commands.add_parser("finalize")
     finalize.add_argument("--review", required=True, type=Path)
     finalize.add_argument("--facts", required=True, type=Path)
     finalize.add_argument("--overrides", type=Path)
+    for command in (prepare, finalize):
+        command.add_argument("--profile", required=True, help="Filing profile name, e.g. victor")
     args = parser.parse_args(argv)
+    profile = load_profile(args.profile)
     facts = json.loads(args.facts.read_text(encoding="utf-8"))
     if args.command == "prepare":
-        result = prepare_customer(args.customer, facts, args.out, folder=args.folder)
+        result = prepare_customer(
+            args.customer, facts, args.out, profile=profile, folder=args.folder, jev=not args.no_jev
+        )
     else:
         overrides = json.loads(args.overrides.read_text(encoding="utf-8")) if args.overrides else {}
-        result = finalize_review(args.review, facts, overrides)
+        result = finalize_review(args.review, facts, overrides, profile=profile)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    from jurisync.core.mcp import load_env_file
-
-    load_env_file(Path(__file__).resolve().parents[3] / ".env")
-    main()

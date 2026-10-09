@@ -201,14 +201,19 @@ class DocumentsMixin:
         ]
 
     @staticmethod
-    def _require_listed(listed, documents):
-        """Every document must appear exactly once on the draft with its type; name the ones that do not."""
+    def _missing_documents(listed, documents):
+        """Names of the documents that do not appear exactly once on the draft with their type."""
         missing = []
         for document in documents:
             path = Path(document["path"]).expanduser()
             saved = [item for item in listed if same_name(item["name"], path) and item["type"] == document["type"]]
             if len(saved) != 1:
                 missing.append(path.name)
+        return missing
+
+    def _require_listed(self, listed, documents):
+        """Every document must appear exactly once on the draft with its type; name the ones that do not."""
+        missing = self._missing_documents(listed, documents)
         if missing:
             raise RuntimeError(f"PJe did not retain these documents on the draft: {', '.join(missing)}")
 

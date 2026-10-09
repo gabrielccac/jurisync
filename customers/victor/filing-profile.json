@@ -1,0 +1,33 @@
+{
+  "name": "victor",
+  "description": "Victor's office: TRF5 1G initial filings from the ADVBOX 00-PROTOCOLAR folder",
+  "portal": "trf5-1g",
+  "folderPatterns": [
+    "(?:^|/)00\\s*-\\s*PROTOCOLAR$",
+    "(?:^|/)00\\s*-\\s*PROTOCOLAR\\s+JUD$"
+  ],
+  "uncertainType": "Outros Documentos",
+  "defaults": {
+    "attorney": {
+      "cpfEnv": ["VICTOR_PJE_GRAZIELE_CPF", "VICTOR_PJE_ATTORNEY_CPF"],
+      "name": "GRAZIELE ALVES DA SILVA",
+      "oabNumber": "48647",
+      "oabState": "PE"
+    },
+    "passive": {"search": "inss", "cnpj": "29979036000140", "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"},
+    "otherParticipants": [
+      {"role": "ÓRGÃO DE CUMPRIMENTO", "search": "ceab", "cnpj": "29979036001465", "name": "CEAB-DJ INSS"},
+      {
+        "role": "FISCAL DA LEI",
+        "search": "ministério público",
+        "cnpj": "26989715005414",
+        "name": "MINISTERIO PUBLICO DA UNIAO"
+      }
+    ],
+    "characteristics": {"legalAid": true, "injunction": false, "priority": "Juízo 100% Digital"}
+  },
+  "references": {
+    "subjects": "skills/victor-pje-filing/references/subjects.md",
+    "history": "README.md"
+  }
+}

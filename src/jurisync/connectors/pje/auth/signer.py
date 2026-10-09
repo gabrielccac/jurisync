@@ -10,15 +10,8 @@ SSO_CALLBACK = "https://sso.cloud.pje.jus.br/auth/realms/pje/pjeoffice-rest"
 
 
 def a1_path():
-    """Prefer an explicit A1 path; reuse the certificate already configured locally."""
+    """The A1 file configured for this customer (PJE_A1_P12)."""
     path = os.environ.get("PJE_A1_P12")
-    if not path:
-        config = Path.home() / ".pjeoffice-pro/pjeoffice-pro.config"
-        if config.is_file():
-            path = next(
-                (line.partition("=")[2] for line in config.read_text().splitlines() if line.startswith("list.a1=")),
-                None,
-            )
     if not path:
         raise RuntimeError("Set PJE_A1_P12 to the A1 .p12/.pfx file")
     return Path(path.strip().strip('"')).expanduser()

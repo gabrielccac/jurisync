@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlencode
 from zoneinfo import ZoneInfo
 
-from jurisync.connectors.inss.auth import default_profile, jwt_claims, login_and_authorize, qr_secret
+from jurisync.connectors.inss.auth import REPO_ROOT, default_profile, jwt_claims, login_and_authorize, qr_secret
 from jurisync.core.pdf import analyze_document, attachment_mime_type, available_path
 
 TASKS_URL = "https://atendimento.inss.gov.br/tarefas"
@@ -136,7 +136,7 @@ def parse_document(content, filename):
 
 
 def download_directory():
-    return Path(os.environ.get("INSS_DOWNLOAD_DIR") or Path.cwd() / "downloaded_files" / "inss")
+    return Path(os.environ.get("INSS_DOWNLOAD_DIR") or REPO_ROOT / "downloaded_files" / "inss")
 
 
 def read_saved_document(filename, offset=0, max_chars=40_000, directory=None):
@@ -194,7 +194,7 @@ class InssClient:
     def _gerid_secret(self):
         if os.environ.get("INSS_GERID_TOTP_SECRET"):
             return os.environ["INSS_GERID_TOTP_SECRET"]
-        image = Path(os.environ.get("INSS_GERID_QR_IMAGE") or Path.cwd() / "QR_gerid.png").resolve()
+        image = Path(os.environ.get("INSS_GERID_QR_IMAGE") or REPO_ROOT / "QR_gerid.png").resolve()
         if not image.exists():
             return None
         if self._secret is None:
