@@ -85,7 +85,10 @@ def migration_accounts(encoded):
 
 def parse_accounts(value):
     """Return every account in an otpauth URI, migration export, or raw secret."""
-    value = unquote(value.strip())
+    value = value.strip()
+    # Query parsers decode escapes themselves; decoding %2B early loses Base64 '+' characters.
+    if not value.startswith(("otpauth://", "otpauth-migration://")) and "data=" not in value:
+        value = unquote(value)
     if value.startswith("otpauth://totp/"):
         otp = pyotp.parse_uri(value)
         return [

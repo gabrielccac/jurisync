@@ -1,4 +1,6 @@
+import base64
 import unittest
+from urllib.parse import quote
 
 from jurisync.core.totp import next_code, parse_accounts, parse_index, select_account, totp
 
@@ -6,6 +8,17 @@ SECRET = "JBSWY3DPEHPK3PXP"
 
 
 class TotpTest(unittest.TestCase):
+    def test_migration_preserves_escaped_base64_plus(self):
+        secret = b"\xfa" * 20
+        account = b"\x0a" + bytes([len(secret)]) + secret
+        data = base64.b64encode(b"\x0a" + bytes([len(account)]) + account).decode()
+        self.assertIn("+", data)
+        query = "data=" + quote(data, safe="")
+        uri = "otpauth-migration://offline?" + query
+        for value in (uri, quote(uri, safe=""), query):
+            with self.subTest(value=value):
+                self.assertEqual(parse_accounts(value)[0]["secret"], base64.b32encode(secret).decode())
+
     def test_parses_raw_secret_and_otpauth_uri(self):
         self.assertEqual(parse_accounts(SECRET.lower())[0]["secret"], SECRET)
         account = parse_accounts(

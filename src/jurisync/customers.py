@@ -6,6 +6,9 @@ A customer is a directory under ``customers/``. Two files describe its access:
   the environment variables that must be set. Alternatives are joined with ``|``.
 * ``.env`` (gitignored, the secrets): the values of those variables.
 
+An optional ``settings.toml`` (committed) holds the customer's choices, e.g.
+``[pje] ciencia_on_read = "allow"`` to read pending communications without asking.
+
 ``JURISYNC_CUSTOMER`` selects the customer for a server process. Its ``.env`` is loaded
 before the shared one, and variables already in the environment always win.
 """
@@ -69,6 +72,29 @@ def load_setup(name):
             raise ValueError(f"{name}/{key}: secrets must be a list of variable names")
         setups[key] = PortalSetup(key, method, tuple(secrets))
     return setups
+
+
+CIENCIA_POLICIES = ("ask", "allow")
+
+
+def settings(name=None):
+    """The customer's committed ``settings.toml`` (empty when it has none)."""
+    name = name or customer_name()
+    if not name:
+        return {}
+    try:
+        return tomllib.loads((customer_dir(name) / "settings.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+
+
+def ciencia_on_read(name=None):
+    """PJe: ``ask`` (default) refuses to read a communication whose ciência is pending until the user agrees;
+    ``allow`` reads it and reports that the ciência may have been registered."""
+    value = settings(name).get("pje", {}).get("ciencia_on_read", "ask")
+    if value not in CIENCIA_POLICIES:
+        raise ValueError(f"settings.toml [pje] ciencia_on_read must be one of {', '.join(CIENCIA_POLICIES)}")
+    return value
 
 
 def customer_env_path(name=None):

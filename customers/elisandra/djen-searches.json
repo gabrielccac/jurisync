@@ -1,0 +1,14 @@
+{
+  "customer": "elisandra",
+  "description": "Elisandra's DJEN search payloads. Pass each as djen_search_communications arguments; the date window is set per run.",
+  "searches": [
+    {
+      "name": "stj-diario",
+      "numeroOab": "61216",
+      "ufOab": "RS",
+      "nomeAdvogado": "ELISANDRA BECKER",
+      "tribunal": "STJ",
+      "meio": "D"
+    }
+  ]
+}

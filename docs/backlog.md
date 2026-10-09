@@ -22,9 +22,8 @@ different.
 
 ## PJe Expedientes and Push
 
-The MCP currently exposes only Expedientes counters and the read-only Push
-watched-process registry. JSF partial-response parsing advances ViewState and
-form fragments for the internal/CLI Expedientes expansion path, while unknown
-controls fail closed. Do not expose expanded notice rows or replay Push pages
-until an authenticated capture proves the actions are side-effect free and the
-portal's page contract is stable.
+`pje_list_inbox` reads the panel inboxes (see `docs/connectors/pje-panel-inbox.md`). Still open:
+new-expediente detection across runs (store the seen `expedienteId`s per customer and emit only
+the new ones), the órgão julgador and prioridade filters (they take PJe option ids), and
+reading the other buckets' tree prefixes on a profile that has items in them. The Push registry
+stays read-only: no page replay until an authenticated capture proves it is side-effect free.

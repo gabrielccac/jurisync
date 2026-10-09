@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from jurisync.connectors.pje import expedientes
 
 ROW = """<tr><td id="r{n}a"><span><div>{tipo} ({exp}) - Prioridade: Normal - ID do documento
@@ -114,3 +116,31 @@ def test_ato_is_not_opened_before_notice_is_registered():
         expedientes.fetch_ato(None, item, "https://pje1g.trf5.jus.br/pje/x")
     with pytest.raises(ValueError, match="not in this process"):
         expedientes.ato_item([], "9")
+
+
+def test_ato_of_a_pending_communication_opens_only_with_permission():
+    from unittest.mock import Mock, patch
+
+    item = {
+        "atoPath": "/pje/Painel/painel_usuario/popup/visualizarExpediente.seam?idProcessoParteExpediente=1&x=2",
+        "ciencia": None,
+        "expedienteId": "1",
+    }
+    session = Mock()
+    session.get.return_value = Mock(status_code=200, content=b"<html>Ato</html>", headers={})
+    with patch.object(expedientes.jsf, "get", return_value=session.get.return_value) as get:
+        with pytest.raises(expedientes.PendingNotice):
+            expedientes.fetch_ato(session, item, "https://pje1g.trf5.jus.br/pje/x")
+        get.assert_not_called()
+        ato = expedientes.fetch_ato(session, item, "https://pje1g.trf5.jus.br/pje/x", allow_pending=True)
+        get.assert_called_once()
+    assert ato["ciencia"]["pendenteAoLer"][0]["expedienteId"] == "1"
+
+
+def test_pending_notice_matches_only_requested_documents_without_ciencia():
+    items = [
+        {"expedienteId": "1", "documentId": "10", "ciencia": None},
+        {"expedienteId": "2", "documentId": "10", "ciencia": {"por": "x", "em": "2026-10-01"}},
+        {"expedienteId": "3", "documentId": "11", "ciencia": None},
+    ]
+    assert [i["expedienteId"] for i in expedientes.pending_notice(items, ["10"])] == ["1"]

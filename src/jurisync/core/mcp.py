@@ -1,5 +1,6 @@
 """Shared pieces for Python MCP servers: annotations and safe tool errors."""
 
+import argparse
 import io
 import os
 import re
@@ -16,14 +17,16 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotent
 def load_env_file(path=None):
     """Load KEY=VALUE lines like `node --env-file`: existing variables win.
 
-    The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json);
-    without it, nothing is loaded. When JURISYNC_CUSTOMER names a customer, its
+    The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json); without it the
+    user's ``~/.config/jurisync/.env`` is used when it exists. When JURISYNC_CUSTOMER names a customer, its
     gitignored ``customers/<name>/.env`` is loaded first, so a customer's values
     take precedence over the shared file.
     """
     from jurisync.customers import customer_env_path
+    from jurisync.paths import USER_ENV_FILE
 
-    for candidate in (customer_env_path(), path or os.environ.get("JURISYNC_ENV_FILE")):
+    shared = path or os.environ.get("JURISYNC_ENV_FILE") or (USER_ENV_FILE if USER_ENV_FILE.exists() else None)
+    for candidate in (customer_env_path(), shared):
         if candidate:
             _load_lines(candidate)
 
@@ -107,3 +110,33 @@ def tool_errors(label, *anticipated):
         yield
     except anticipated as error:
         raise ToolError(f"{label} request failed: {sanitize_diagnostics(error) or 'unknown'}") from error
+
+
+def http_settings():
+    """Streamable HTTP for local test installs reached through a tunnel.
+
+    The Host header of a tunnel is not loopback, so the SDK's DNS-rebinding check is off. There is no
+    authentication: bind to 127.0.0.1 (the default) and expose it only through a tunnel you control.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
+def serve(server, on_exit=None, argv=None):
+    """Run one server over stdio (default) or, with ``--http``, over streamable HTTP (for ChatGPT connectors)."""
+    parser = argparse.ArgumentParser(description="Run this MCP server over stdio, or over HTTP with --http.")
+    parser.add_argument("--http", action="store_true", help="serve streamable HTTP at /mcp instead of stdio")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args(argv)
+    if not args.http:
+        return run_stdio(server, on_exit=on_exit)
+    from jurisync.core.http import enable_request_logging
+
+    enable_request_logging()
+    try:
+        server.run("streamable-http", host=args.host, port=args.port, transport_security=http_settings())
+    finally:
+        if on_exit is not None:
+            on_exit()

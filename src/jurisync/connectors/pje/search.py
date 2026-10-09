@@ -111,7 +111,16 @@ def _safe_page_url(candidate, detail_url):
     return url
 
 
-def search_process(session, process_number, raw_html_path=None, *, portal, ato_expediente=None, ato_text_limit=20000):
+def search_process(
+    session,
+    process_number,
+    raw_html_path=None,
+    *,
+    portal,
+    ato_expediente=None,
+    ato_text_limit=20000,
+    ato_allow_pending=False,
+):
     config = portals.pje(portal)
     search_url = config.search_url
     parts = parse_process_number(process_number)
@@ -220,7 +229,15 @@ def search_process(session, process_number, raw_html_path=None, *, portal, ato_e
     if ato_expediente and expedientes is not None:
         ato = {"expedienteId": str(ato_expediente)}
         try:
-            ato.update(fetch_ato(session, ato_item(expedientes, ato_expediente), detail_url, ato_text_limit))
+            ato.update(
+                fetch_ato(
+                    session,
+                    ato_item(expedientes, ato_expediente),
+                    detail_url,
+                    ato_text_limit,
+                    allow_pending=ato_allow_pending,
+                )
+            )
         except (RuntimeError, ValueError) as error:
             ato["error"] = str(error)[:300]
     return {

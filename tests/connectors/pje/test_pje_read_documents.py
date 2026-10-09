@@ -32,6 +32,7 @@ def process():
         "portal": "trf5-1g",
         "numero_processo": NUMBER,
         "processo_id": "123",
+        "expedientes": [],
         "timeline": [
             {
                 "date": "05 out. 2026",
@@ -159,6 +160,67 @@ class ReadDocumentsTest(unittest.TestCase):
         self.assertEqual(document["extractionStatus"], "extracted")
         self.assertEqual([row["prazoDias"] for row in document["expedientes"]], [15, 15])
         session.close.assert_not_called()
+
+    def read_with(self, expedientes, **options):
+        session = Mock()
+        session.get.return_value = response(CERTIDAO)
+        found = {**copy.deepcopy(process()), "expedientes": expedientes}
+        with patch.object(client.search, "search_process", return_value=found):
+            return session, client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session, **options)
+
+    def test_document_of_a_pending_communication_is_not_opened_without_permission(self):
+        pending = [
+            {
+                "expedienteId": "9",
+                "documentId": "456",
+                "tipo": "Intimação",
+                "parte": "AUTORA",
+                "prazoDias": 15,
+                "ciencia": None,
+            }
+        ]
+        session = Mock()
+        found = {**copy.deepcopy(process()), "expedientes": pending}
+        with patch.object(client.search, "search_process", return_value=found):
+            with self.assertRaisesRegex(client.PendingNotice, "acknowledgeCiencia=true"):
+                client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session)
+        session.get.assert_not_called()
+
+    def test_pending_communication_is_read_once_the_user_agreed(self):
+        pending = [{"expedienteId": "9", "documentId": "456", "ciencia": None}]
+        session, result = self.read_with(pending, acknowledge_ciencia=True)
+        self.assertTrue(result["success"])
+        session.get.assert_called()
+
+    def test_read_of_a_pending_communication_reports_that_ciencia_may_be_registered(self):
+        pending = [
+            {
+                "expedienteId": "9",
+                "documentId": "456",
+                "tipo": "Intimação",
+                "parte": "AUTORA",
+                "prazoDias": 15,
+                "limite": "2026-10-30",
+                "ciencia": None,
+            }
+        ]
+        _, result = self.read_with(pending, acknowledge_ciencia=True)
+        self.assertEqual(result["ciencia"]["pendenteAoLer"][0]["expedienteId"], "9")
+        self.assertIn("informe o usuário", result["ciencia"]["aviso"])
+        noticed = [{"expedienteId": "9", "documentId": "456", "ciencia": {"por": "x", "em": "2026-10-06"}}]
+        self.assertNotIn("ciencia", self.read_with(noticed)[1])
+
+    def test_documents_with_registered_notice_or_unrelated_to_expedientes_are_read(self):
+        noticed = [{"expedienteId": "9", "documentId": "456", "ciencia": {"por": "O sistema", "em": "2026-10-06"}}]
+        other = [{"expedienteId": "8", "documentId": "999", "ciencia": None}]
+        self.assertTrue(self.read_with(noticed)[1]["success"])
+        self.assertTrue(self.read_with(other)[1]["success"])
+
+    def test_unreadable_expedientes_tab_does_not_block_but_is_reported(self):
+        session, result = self.read_with(None)
+        self.assertTrue(result["success"])
+        self.assertIs(result["cienciaChecked"], False)
+        session.get.assert_called()
 
     def test_failed_search_and_wrong_tribunal_do_not_read_anything(self):
         session = Mock()

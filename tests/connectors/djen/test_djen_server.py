@@ -41,6 +41,37 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         search.assert_not_called()
 
+    async def test_search_by_advogado_name_passes_the_payload(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {
+                    "numeroOab": "61216",
+                    "ufOab": "RS",
+                    "nomeAdvogado": "ELISANDRA BECKER",
+                    "tribunal": "STJ",
+                    "meio": "D",
+                    "inicio": "2026-09-03",
+                    "fim": "2026-10-03",
+                },
+            )
+        self.assertFalse(result.is_error)
+        params = search.call_args.args[0]
+        self.assertEqual(params["nomeAdvogado"], "ELISANDRA BECKER")
+        self.assertEqual((params["siglaTribunal"], params["meio"], params["numeroOab"]), ("STJ", "D", "61216"))
+
+    async def test_oab_without_uf_and_missing_keys_are_tool_errors(self):
+        with mock.patch.object(
+            djen_server, "search_page", side_effect=ValueError("pesquisa exige uma chave")
+        ) as search:
+            no_uf = await self.call(
+                "djen_search_communications", {"numeroOab": "61216", "inicio": "2026-09-03", "fim": "2026-10-03"}
+            )
+            no_key = await self.call("djen_search_communications", {"inicio": "2026-09-03", "fim": "2026-10-03"})
+        self.assertTrue(no_uf.is_error and no_key.is_error)
+        self.assertEqual(search.call_count, 1)  # the OAB check fails before any request
+
     async def test_search_normalizes_items(self):
         page = {"status": "success", "count": 1, "items": [dict(RAW_ITEM)]}
         with mock.patch.object(djen_server, "search_page", return_value=page) as search:

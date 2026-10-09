@@ -10,7 +10,13 @@ from jurisync.connectors.pje import search
 from jurisync.connectors.pje.auth.sessions import load_session, save_session
 from jurisync.connectors.pje.auth.sso import login_session
 from jurisync.connectors.pje.documents import read_selected_documents, validate_document_ids
-from jurisync.connectors.pje.expedientes import open_deadlines
+from jurisync.connectors.pje.expedientes import (
+    PendingNotice,
+    ciencia_report,
+    open_deadlines,
+    pending_message,
+    pending_notice,
+)
 from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core.http import enable_request_logging
 from jurisync.core.redaction import drop_keys
@@ -65,6 +71,7 @@ def fetch_process(
     document_ids=None,
     ato_expediente=None,
     ato_text_limit=20000,
+    ato_allow_pending=False,
 ):
     """Pass an authenticated session to reuse it across searches in one workflow.
 
@@ -92,7 +99,11 @@ def fetch_process(
     if owned_session:
         session, _ = login_portal(portal)
     try:
-        ato_args = {"ato_expediente": ato_expediente, "ato_text_limit": ato_text_limit} if ato_expediente else {}
+        ato_args = (
+            {"ato_expediente": ato_expediente, "ato_text_limit": ato_text_limit, "ato_allow_pending": ato_allow_pending}
+            if ato_expediente
+            else {}
+        )
         raw_result = search.search_process(session, process_number, raw_html_path, portal=portal, **ato_args)
         result = dict(raw_result or {})
         timeline = _all_timeline(result)
@@ -151,7 +162,7 @@ def fetch_process(
             session.close()
 
 
-def read_documents(process_number, document_ids, *, portal, session=None, save=False):
+def read_documents(process_number, document_ids, *, portal, session=None, save=False, acknowledge_ciencia=False):
     """Read 1-5 joined documents of one process without returning the timeline.
 
     Each document carries its extraction status and text; a Certidão de Intimação also carries its parsed
@@ -174,6 +185,8 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
         if not result.get("success"):
             return {"success": False, "portal": portal, "processNumber": process_number, "documents": []}
         timeline = _all_timeline(result)
+        checked = _require_notice(result.get("expedientes"), document_ids) if not acknowledge_ciencia else None
+        pending = pending_notice(result.get("expedientes") or [], document_ids)
         documents = read_selected_documents(
             {**result, "portal": portal, "timeline": timeline}, document_ids, session=session, save=save
         )
@@ -190,7 +203,19 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
         "processNumber": process_number,
         "processId": result.get("processo_id"),
         "documents": documents,
+        **({"cienciaChecked": False} if checked is False else {}),
+        **({"ciencia": ciencia_report(pending)} if pending else {}),
     }
+
+
+def _require_notice(expedientes, document_ids):
+    """Refuse a pending communication's document; False when the tab could not be checked."""
+    if expedientes is None:
+        return False
+    pending = pending_notice(expedientes, document_ids)
+    if pending:
+        raise PendingNotice(pending_message(pending))
+    return True
 
 
 def _all_timeline(result):

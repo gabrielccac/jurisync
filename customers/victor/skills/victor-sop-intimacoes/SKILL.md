@@ -81,6 +81,10 @@ dados do cliente estão em `tarefas.md` e `fora-do-mapa.md`.
   `maxNotices`, `maxTextChars` (relatórios chegam a 70 mil caracteres);
   `advbox_find_tasks` (tarefas **pendentes**, com `postId`); `advbox_list_activities`
   (inclui `deadline`; o filtro pendentes/concluídas não tem efeito hoje);
+  `advbox_list_publications` (intimações que o ADVBOX recebeu: `period` today/3d/7d/30d ou
+  `dateFrom`+`dateTo`, `tribunal` por sigla, `processNumber` CNJ, `responsible`; até 200 por
+  página, `hasMore` indica a próxima; `status` pendente/concluida mostra se já foi tratada;
+  o texto de uma intimação vem de `advbox_activity_details` com o `postId`);
   `advbox_list_members`, `advbox_list_workflows`, `advbox_workflow_tasks`.
 - **ADVBOX** (escrita, gate `ADVBOX_ALLOW_WRITES=true`): `advbox_create_task` (anexos por
   `attachmentFiles`; `dryRun=true` valida corpo, workflow e arquivos sem enviar nada),

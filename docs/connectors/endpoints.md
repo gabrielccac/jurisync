@@ -214,12 +214,14 @@ Authentication is session cookies obtained through username/password + TOTP.
 | GET /pje/Painel/painel_usuario/advogado.seam | Imported notification exploration |
 | GET /pje/Push/listView.seam?iframe=true | Watched-process registry; not publication text |
 
-The PJe MCP exposes `pje_list_expediente_counters` for bucket counts only and
-`pje_list_watched_processes` for the Push registry and observed completeness
-metadata. Neither tool expands Expedientes, replays an unverified page action,
-acknowledges notices, changes Push registrations, or returns session-bearing
-URLs. Expedientes expansion remains CLI/internal until live evidence proves that
-reading it has no acknowledgment or other side effect.
+The PJe MCP reads the lawyer panel with `pje_list_expediente_counters` (buckets, and with
+`regions` the regions and inboxes under each) and `pje_list_inbox` (the rows of an inbox, all
+pages, with the inbox's own search). They only open buckets, expand regions, open inboxes, turn
+pages and press "Pesquisar"; `check_control` in `pje/inbox.py` refuses every other control
+(tomar ciência, responder, select, distribute). The flow is in
+[pje-panel-inbox.md](pje-panel-inbox.md). `pje_list_watched_processes` reads the Push registry
+and its observed completeness metadata; no tool changes Push registrations or returns
+session-bearing URLs.
 
 Search form fields: javax.faces.ViewState and the six fPP:numeroProcesso fields
 (numeroSequencial, numeroDigitoVerificador, Ano, ramoJustica,

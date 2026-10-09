@@ -67,3 +67,17 @@ def test_victor_setup_is_valid():
     finally:
         if monkeypatch_dir:
             os.environ["JURISYNC_CUSTOMERS_DIR"] = monkeypatch_dir
+
+
+def test_ciencia_on_read_defaults_to_ask_and_follows_settings_toml(root):
+    assert customers.ciencia_on_read() == "ask"
+    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "allow"\n')
+    assert customers.ciencia_on_read() == "allow"
+    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "sometimes"\n')
+    with pytest.raises(ValueError, match="ciencia_on_read"):
+        customers.ciencia_on_read()
+
+
+def test_ciencia_on_read_without_a_customer_is_ask(monkeypatch):
+    monkeypatch.delenv("JURISYNC_CUSTOMER", raising=False)
+    assert customers.ciencia_on_read() == "ask"

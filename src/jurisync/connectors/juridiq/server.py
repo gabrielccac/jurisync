@@ -11,7 +11,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from jurisync.connectors.juridiq.api import JuridiqApi, JuridiqError
-from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 
 ADDITIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
@@ -553,7 +553,7 @@ def create_server(allow_writes=None, api=None):
 
 def main():
     load_env_file()
-    run_stdio(create_server())
+    serve(create_server())
 
 
 if __name__ == "__main__":

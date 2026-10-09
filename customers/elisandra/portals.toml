@@ -1,0 +1,11 @@
+# Elisandra's portal access. Method and secret names only; values are in the
+# gitignored customers/elisandra/.env. "A|B" means either variable is enough.
+# Eproc logins are browser_totp: user, password and the TOTP export (or profile match).
+
+[trf4-1g-sc]
+method = "browser_totp"
+secrets = ["JFSC_USUARIO", "JFSC_SENHA", "JFSC_EXPORT_DATA"]
+
+[trf4-1g-rs]
+method = "browser_totp"
+secrets = ["JFRS_USUARIO|JRFS_USUARIO", "JFRS_SENHA|JRFS_SENHA", "JFRS_EXPORT_DATA|JRFS_EXPORT_DATA"]

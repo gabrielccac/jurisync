@@ -44,9 +44,18 @@ por destinatário e é a ponte entre a comunicação DJEN e o PJe:
    expediente, o texto completo do ato e os `anexos` (documentId e título; leia-os com
    `pje_read_documents`). Use para: nomeação de perícia (anexo do ato), mandados,
    intimações com anexo (proposta, laudo, cálculo).
-4. **Só abre se a ciência já consta.** O PJe trata a abertura de um ato com ciência
-   pendente como intimação da parte e inicia o prazo; a ferramenta recusa essas
-   (`ato.error`). Para elas, use apenas o texto DJEN.
+4. **Ciência pendente exige permissão.** Abrir o ato (ou ler o documento da intimação com
+   `pje_read_documents`) de uma comunicação com ciência pendente pode registrar a ciência da
+   parte e iniciar o prazo. As duas ferramentas leem tudo o mais por padrão, mas recusam esses
+   casos e a mensagem lista os expedientes. **Pergunte ao usuário e só repita a chamada com
+   `acknowledgeCiencia=true` depois de um sim explícito.** Sem o sim, use apenas o texto DJEN.
+   O cliente pode liberar a leitura sem perguntar em `customers/<cliente>/settings.toml`
+   (`[pje] ciencia_on_read = "allow"`). Nesse caso, e também quando o usuário disse sim, o
+   resultado traz `ciencia.pendenteAoLer` (expedientes que estavam pendentes quando foram lidos):
+   **avise no chat e registre na descrição da tarefa** a linha `Ciência possivelmente registrada
+   na leitura em {data}: expediente {id}, prazo {limite}`.
+   Se o resultado trouxer `cienciaChecked: false`, a aba Expedientes não pôde ser lida e a
+   verificação foi pulada: diga isso na nota.
 
 Limites (verificados em 09/10/2026): a aba mostra só comunicações de 1º grau (Turma
 Recursal não aparece); processo sigiloso ou sem expediente gerado volta vazio

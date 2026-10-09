@@ -24,7 +24,9 @@ DOCUMENT = re.compile(r"ID do documento\s*\((\d+)\)")
 ISSUED = re.compile(
     r"(Expedição eletrônica|Diário Eletrônico|Edital|Correio|Mandado|Central de Mandados)[^()]*\((\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)\)"
 )
-NOTICE = re.compile(r"(?P<quem>.+?)\s+registrou ciência em\s+(?P<quando>\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)")
+NOTICE = re.compile(
+    r"(?P<quem>.+?)\s+(?:registrou|tomou) ciência em\s+(?P<quando>\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)"
+)
 PRAZO = re.compile(r"Prazo:\s*(?:(\d+)\s*dias?|(\d+)\s*sem prazo|sem prazo)", re.I)
 ATO_HREF = re.compile(r"^/pje/Painel/painel_usuario/popup/visualizarExpediente\.seam\?idProcessoParteExpediente=\d+&")
 RESPONSE_HREF = re.compile(
@@ -157,20 +159,57 @@ def parse_ato(html, text_limit=20000):
     }
 
 
-def fetch_ato(session, item, detail_url, text_limit=20000):
-    """Open the act of one communication. Refused until PJe registered the notice.
+class PendingNotice(ValueError):
+    """Opening this would register the party's ciência, which starts the deadline."""
 
-    Opening an act whose notice is still pending makes the party count as notified,
-    which starts its deadline; only communications that already show a notice date
-    are opened.
+
+def pending_notice(items, document_ids):
+    """Communications whose act is one of ``document_ids`` and whose ciência is not registered yet."""
+    wanted = {str(i) for i in document_ids}
+    return [item for item in items if item.get("documentId") in wanted and not item.get("ciencia")]
+
+
+def ciencia_report(items):
+    """What a read may have done: the communications whose ciência was pending when it was read."""
+    return {
+        "pendenteAoLer": [
+            {k: item.get(k) for k in ("expedienteId", "tipo", "parte", "prazoDias", "limite")} for item in items
+        ],
+        "aviso": "Ler este conteúdo pode ter registrado a ciência da parte e iniciado o prazo; informe o usuário.",
+    }
+
+
+def pending_message(items):
+    shown = ", ".join(
+        f"{item.get('expedienteId')} ({item.get('tipo')}, {item.get('parte')}, "
+        f"{item['prazoDias'] if item.get('prazoDias') is not None else 'sem'} dias)"
+        for item in items[:5]
+    )
+    return (
+        "ciência not yet registered for: "
+        + shown
+        + ". Opening the act or its document may register the party's ciência and start the deadline. "
+        "Ask the user for explicit permission; if they agree, repeat the call with acknowledgeCiencia=true."
+    )
+
+
+def fetch_ato(session, item, detail_url, text_limit=20000, *, allow_pending=False):
+    """Open the act of one communication. Refused while PJe has no notice, unless allowed.
+
+    Opening an act whose notice is still pending can make the party count as notified, which
+    starts its deadline. Only communications that already show a notice date are opened unless
+    the caller passes ``allow_pending`` after the user agreed to it.
     """
     path = item.get("atoPath")
     if not path:
         raise ValueError("this expediente has no readable act link")
-    if not item.get("ciencia"):
-        raise ValueError("ciência not yet registered; opening the act could start the deadline, so it was not opened")
+    if not item.get("ciencia") and not allow_pending:
+        raise PendingNotice(pending_message([item]))
     response = jsf.get(session, base_url(detail_url) + path, label="PJe expediente act", referer=detail_url)
-    return parse_ato(response_html(response), text_limit)
+    ato = parse_ato(response_html(response), text_limit)
+    if not item.get("ciencia"):
+        ato["ciencia"] = ciencia_report([item])
+    return ato
 
 
 def base_url(detail_url):

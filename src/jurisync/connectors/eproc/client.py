@@ -326,7 +326,15 @@ def _event_pages(session, detail_url, detail, initial_events, *, portal):
 
 
 def fetch_process(
-    process_number, scope="page", document_ids=None, *, session=None, panel_html=None, panel_url=None, portal
+    process_number,
+    scope="page",
+    document_ids=None,
+    *,
+    session=None,
+    panel_html=None,
+    panel_url=None,
+    portal,
+    save=False,
 ):
     portal = portals.eproc(portal).key  # aliases in, current key out
     if not isinstance(process_number, str) or not CNJ.fullmatch(process_number):
@@ -402,7 +410,7 @@ def fetch_process(
         if document_ids is not None:
             if read_selected_documents is None:
                 raise RuntimeError("eproc document adapter is unavailable")
-            attachments = read_selected_documents(internal, document_ids, session=session, portal=portal)
+            attachments = read_selected_documents(internal, document_ids, session=session, portal=portal, save=save)
         result = {
             "success": True,
             "source": "eproc",

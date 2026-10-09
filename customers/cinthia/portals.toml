@@ -1,0 +1,12 @@
+# Cinthia's portal access. Method and secret names only; the values go in the
+# gitignored customers/cinthia/.env (see .env.example in this directory).
+# "A|B" means either variable is enough. Methods: password_totp, certificate_totp,
+# browser_totp. Sections are added as each portal is wired, for example:
+#
+# [trf6-1g]
+# method = "password_totp"
+# secrets = ["PJE_TRF6_1G_USERNAME", "PJE_TRF6_1G_PASSWORD", "PJE_TRF6_1G_2FA_DATA|PJE_TRF6_1G_2FA_QR"]
+
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]

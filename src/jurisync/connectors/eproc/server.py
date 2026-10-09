@@ -13,7 +13,7 @@ from selenium.common.exceptions import WebDriverException
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER
 from jurisync.connectors.eproc.client import _response_error, authenticate, fetch_process, list_notices, request
-from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, run_stdio, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
 
 # Selenium raises WebDriverException for browser/network failures during login.
@@ -65,7 +65,7 @@ def create_server(keys=None):
     @server.tool(
         name="eproc_get_process",
         title="Get Eproc process context",
-        description=f"Read an Eproc process, parties, events, document inventory and up to five selected document texts. Portals: {describe(keys)}. Read-only.",
+        description=f"Read an Eproc process, parties, events, document inventory and up to five selected document texts. With save=true each read document is stored in the shared documents folder (HTML acts are rendered to PDF) and reported as savedAs, so a task can attach it by file name. Portals: {describe(keys)}. Read-only toward eproc.",
         annotations=READ_ONLY,
     )
     def eproc_get_process(
@@ -73,15 +73,18 @@ def create_server(keys=None):
         processNumber: Annotated[str, Field(min_length=1)],
         scope: Literal["latest", "page"] = "page",
         documentIds: Annotated[list[Annotated[str, Field(min_length=1)]], Field(max_length=5)] = [],
+        save: bool = False,
     ) -> dict[str, Any]:
-        return call(portal, lambda **context: fetch_process(processNumber, scope, documentIds or None, **context))
+        return call(
+            portal, lambda **context: fetch_process(processNumber, scope, documentIds or None, save=save, **context)
+        )
 
     return server
 
 
 def main():
     load_env_file()
-    run_stdio(create_server(), on_exit=sessions.close)
+    serve(create_server(), on_exit=sessions.close)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from jurisync.connectors.djen.client import DjenError, fetch_certidao, search_pa
 from jurisync.connectors.djen.deadlines import calculate_deadline
 from jurisync.connectors.djen.normalize import compact_item, normalize_item
 from jurisync.core.document_text import extract_document_text
-from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 
 REQUEST_ERRORS = (DjenError, ValueError, urllib.error.URLError, TimeoutError)
 
@@ -22,14 +22,19 @@ server = MCPServer("djen", version="1.0.0")
 @server.tool(
     name="djen_search_communications",
     title="Search DJEN communications",
-    description="Read one page of public DJEN communications by exact OAB, UF, date window, and optional tribunal. Returns normalized text and metadata; routing decisions belong to the skill. A full 50-item page can exceed tool output limits: compact=true keeps one copy of the text plus the fields routing needs, and textLimit cuts each text (texto_chars keeps the original length; the full text stays available through djen_get_certidao_text). No authentication or poll-state mutation.",
+    description="Read one page of public DJEN communications for a date window and at least one search key: OAB + UF, advogado name (nomeAdvogado), party name, free text (texto) or process number, with optional tribunal and meio (D = Diário, E = eletrônico). Returns normalized text and metadata; routing decisions belong to the skill. A full 50-item page can exceed tool output limits: compact=true keeps one copy of the text plus the fields routing needs, and textLimit cuts each text (texto_chars keeps the original length; the full text stays available through djen_get_certidao_text). No authentication or poll-state mutation.",
     annotations=READ_ONLY,
 )
 def search_communications(
-    numeroOab: Annotated[str, Field(pattern=r"(?i)^\d+(?:-[ABENOS])?$")],
-    ufOab: Annotated[str, Field(pattern=r"(?i)^[A-Z]{2}$")],
     inicio: date,
     fim: date,
+    numeroOab: Annotated[str | None, Field(pattern=r"(?i)^\d+(?:-[ABENOS])?$")] = None,
+    ufOab: Annotated[str | None, Field(pattern=r"(?i)^[A-Z]{2}$")] = None,
+    nomeAdvogado: Annotated[str | None, Field(min_length=3, max_length=120)] = None,
+    nomeParte: Annotated[str | None, Field(min_length=3, max_length=120)] = None,
+    texto: Annotated[str | None, Field(min_length=3, max_length=200)] = None,
+    numeroProcesso: Annotated[str | None, Field(pattern=r"^\d{7,25}$")] = None,
+    meio: Literal["D", "E"] | None = None,
     tribunal: Annotated[str | None, Field(pattern=r"(?i)^[A-Z0-9]+$")] = None,
     pagina: Annotated[int, Field(ge=1)] = 1,
     itens: Annotated[int, Field(ge=5, le=50)] = 10,
@@ -37,14 +42,23 @@ def search_communications(
     textLimit: Annotated[int, Field(ge=0, le=100_000)] = 0,
 ) -> dict[str, Any]:
     params = {
-        "numeroOab": numeroOab,
-        "ufOab": ufOab,
         "dataDisponibilizacaoInicio": inicio.isoformat(),
         "dataDisponibilizacaoFim": fim.isoformat(),
     }
-    if tribunal:
-        params["siglaTribunal"] = tribunal
+    optional = {
+        "numeroOab": numeroOab,
+        "ufOab": ufOab,
+        "nomeAdvogado": nomeAdvogado,
+        "nomeParte": nomeParte,
+        "texto": texto,
+        "numeroProcesso": numeroProcesso,
+        "meio": meio,
+        "siglaTribunal": tribunal,
+    }
+    params.update({key: value for key, value in optional.items() if value})
     with tool_errors("DJEN", *REQUEST_ERRORS):
+        if numeroOab and not ufOab:
+            raise ValueError("numeroOab requires ufOab")
         result = search_page(params, pagina, itens)
     items = [normalize_item(item) for item in result["items"]]
     result["items"] = [compact_item(item, textLimit) for item in items] if compact else items
@@ -90,7 +104,7 @@ def deadline(
 
 def main():
     load_env_file()
-    run_stdio(server)
+    serve(server)
 
 
 if __name__ == "__main__":

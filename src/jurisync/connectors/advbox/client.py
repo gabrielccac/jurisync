@@ -2,18 +2,22 @@
 
 import os
 import re
+from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
+from zoneinfo import ZoneInfo
 
 from jurisync.connectors.advbox.parsers import (
     BASE_URL,
     build_create_body,
     build_edit_body,
     normalize_activities,
+    normalize_publications,
     normalize_table,
     parse_activity_details,
     parse_create_response,
     parse_lawsuit_report,
     parse_members,
+    parse_publication_courts,
     parse_task_form,
     parse_workflow_steps,
     parse_workflows,
@@ -164,9 +168,89 @@ def build_activities_body(
     return urlencode(pairs)
 
 
+# Intimações screen presets (Hoje, últimos 3/7/30 dias). The endpoint ignores `interval`; only the dates filter.
+PUBLICATION_PERIODS = {"today": 0, "3d": 3, "7d": 7, "30d": 30}
+PUBLICATION_PAGE_SIZE_MAX = 200
+PUBLICATION_COLUMNS = ["", "start", "", "", "users.name", "completed", ""]
+PUBLICATION_SORTABLE = (1, 4, 5)
+BRAZIL = ZoneInfo("America/Sao_Paulo")
+
+
+def publication_dates(period=None, dateFrom="", dateTo="", today=None):
+    """Resolve a preset or an explicit range into the ``dd/mm/yyyy`` pair the endpoint requires."""
+    if period and (dateFrom or dateTo):
+        raise ValueError("pass either period or dateFrom/dateTo, not both")
+    if period:
+        if period not in PUBLICATION_PERIODS:
+            raise ValueError(f"period must be one of {', '.join(PUBLICATION_PERIODS)}")
+        end = today or datetime.now(BRAZIL).date()
+        return (end - timedelta(days=PUBLICATION_PERIODS[period])).strftime("%d/%m/%Y"), end.strftime("%d/%m/%Y")
+    if not (dateFrom and dateTo):
+        raise ValueError("pass period (today, 3d, 7d, 30d) or both dateFrom and dateTo")
+    start, end = (datetime.strptime(value, "%d/%m/%Y") for value in (dateFrom, dateTo))
+    if start > end:
+        raise ValueError("dateFrom is after dateTo")
+    return dateFrom, dateTo
+
+
+def build_publications_query(
+    token, *, page=1, pageSize=50, dateFrom, dateTo, courtId="", processNumber="", responsibleId=""
+):
+    """The DataTables query the Intimações screen sends; the column and sort fields are required by the server."""
+    positive_integer(page, "page", 2**53 - 1)
+    positive_integer(pageSize, "pageSize", PUBLICATION_PAGE_SIZE_MAX)
+    columns = len(PUBLICATION_COLUMNS)
+    pairs = [
+        ("sEcho", "1"),
+        ("iColumns", str(columns)),
+        ("sColumns", ",".join(PUBLICATION_COLUMNS)),
+        ("iDisplayStart", str((page - 1) * pageSize)),
+        ("iDisplayLength", str(pageSize)),
+    ]
+    for index in range(columns):
+        pairs += [
+            (f"mDataProp_{index}", str(index)),
+            (f"sSearch_{index}", ""),
+            (f"bRegex_{index}", "false"),
+            (f"bSearchable_{index}", "true"),
+            (f"bSortable_{index}", "true" if index in PUBLICATION_SORTABLE else "false"),
+        ]
+    pairs += [
+        ("sSearch", ""),
+        ("bRegex", "false"),
+        ("iSortCol_0", "5"),
+        ("sSortDir_0", "asc"),
+        ("iSortingCols", "1"),
+        ("_token", token),
+        ("interval", ""),
+        ("user", str(responsibleId)),
+        ("date_from", dateFrom),
+        ("date_until", dateTo),
+        ("customer", ""),
+        ("courts_id", str(courtId)),
+        ("process_number", processNumber),
+        ("report_url", "report/publications"),
+    ]
+    return urlencode(pairs)
+
+
+def resolve_court(courts, tribunal):
+    """Match a sigla (``TRF5``) to one court option; ambiguous or unknown values list the candidates."""
+    wanted = str(tribunal).strip().upper()
+    exact = [court for court in courts if court["code"] == wanted]
+    if len(exact) == 1:
+        return exact[0]
+    near = exact or [court for court in courts if wanted in court["label"].upper()]
+    if len(near) == 1:
+        return near[0]
+    options = ", ".join(court["label"] for court in (near or courts)[:12])
+    raise ValueError(f"tribunal {tribunal!r} {'is ambiguous' if near else 'was not found'}; options: {options}")
+
+
 class AdvboxClient:
     def __init__(self, session=None):
         self.session = session or AdvboxSession()
+        self._courts = None
 
     def close(self):
         self.session.close()
@@ -255,6 +339,58 @@ class AdvboxClient:
             for record in page["records"]
         ][:limit]
         return {"query": query, "count": len(tasks), "total": page["total"], "tasks": tasks}
+
+    def publication_courts(self):
+        """Court filter options (id, sigla, label) read once from the Intimações page."""
+        if not self._courts:
+            self._courts = parse_publication_courts(self.session.using(lambda s: s.get_html("/content/publications")))
+        return self._courts
+
+    def list_publications(
+        self,
+        *,
+        period=None,
+        dateFrom="",
+        dateTo="",
+        tribunal="",
+        processNumber="",
+        responsibleId="",
+        page=1,
+        pageSize=50,
+    ):
+        """Intimações received by the office, filtered by period, court, process or responsible (read-only).
+
+        ``period`` is a screen preset (today, 3d, 7d, 30d); otherwise both dates are required. Pages are capped
+        at ``PUBLICATION_PAGE_SIZE_MAX`` records, and every record keeps the post ID that opens the intimação.
+        """
+        date_from, date_until = publication_dates(period, dateFrom, dateTo)
+        court = resolve_court(self.publication_courts(), tribunal) if tribunal else None
+
+        def read(session):
+            query = build_publications_query(
+                session.csrf_token(),
+                page=page,
+                pageSize=pageSize,
+                dateFrom=date_from,
+                dateTo=date_until,
+                courtId=court["id"] if court else "",
+                processNumber=processNumber,
+                responsibleId=responsibleId,
+            )
+            return session.get_json(f"/content/publications?{query}")
+
+        try:
+            payload = self.session.using(read)
+        except RuntimeError as error:
+            if "failed (404)" in str(error):
+                raise RuntimeError("ADVBOX Intimações are not enabled for this account") from error
+            raise
+        return {
+            "dateFrom": date_from,
+            "dateUntil": date_until,
+            "tribunal": court,
+            **normalize_publications(payload, pageSize, page),
+        }
 
     def activity_details(self, post_id):
         return self.session.using(

@@ -21,6 +21,15 @@ dependencies = [
   "zxing-cpp==3.1.1",
 ]
 
+[project.scripts]
+jurisync-pje = "jurisync.connectors.pje.server:main"
+jurisync-advbox = "jurisync.connectors.advbox.server:main"
+jurisync-djen = "jurisync.connectors.djen.server:main"
+jurisync-eproc = "jurisync.connectors.eproc.server:main"
+jurisync-juridiq = "jurisync.connectors.juridiq.server:main"
+jurisync-inss = "jurisync.connectors.inss.server:main"
+jurisync-http = "jurisync.serve:main"
+
 [project.optional-dependencies]
 # Local speech-to-text for audio documents. av is pinned: faster-whisper 1.1.1 needs av < 14.
 transcription = ["faster-whisper==1.1.1", "av==13.1.0"]

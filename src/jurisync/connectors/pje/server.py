@@ -1,4 +1,4 @@
-"""PJe MCP server: TRF1/TRF5 process context, notifications, and TRF5 drafts.
+"""PJe MCP server: TRF1/TRF5 process context, the Expedientes panel, Push, and TRF5 drafts.
 
 Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
@@ -17,10 +17,12 @@ from pydantic import Field, StringConstraints
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
 from jurisync.connectors.pje.filing.checkpoint import run_directory
-from jurisync.connectors.pje.notifications import read_portal, read_push
+from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
-from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, run_stdio, tool_errors
+from jurisync.connectors.pje.push import read_push
+from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
+from jurisync.customers import ciencia_on_read
 
 Portal = Literal["trf1-1g", "trf1-2g", "trf5-1g"]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
@@ -49,6 +51,11 @@ sessions = SessionPool(
 server = MCPServer("pje", version="1.0.0")
 
 
+def _allow_ciencia(requested):
+    """An explicit acknowledgeCiencia wins; otherwise the customer's ``ciencia_on_read`` setting decides."""
+    return ciencia_on_read() == "allow" if requested is None else requested
+
+
 def _notifications(portal, read):
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         return require_success("PJe", read(portal, session=session))
@@ -75,7 +82,7 @@ def get_process(
 @server.tool(
     name="pje_read_documents",
     title="Read PJe documents",
-    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Read-only toward PJe.",
+    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except the act of a communication whose ciência is not registered yet: reading it may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. When such a read happens the result has ciencia.pendenteAoLer and an aviso: tell the user and note it in the task. If the Expedientes tab cannot be read the check is skipped and the result says cienciaChecked=false.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_documents_tool(
@@ -84,9 +91,17 @@ def read_documents_tool(
     documentIds: Annotated[list[Annotated[str, Field(pattern=r"^[0-9]+$")]], Field(min_length=1, max_length=5)],
     textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
     save: bool = False,
+    acknowledgeCiencia: bool | None = None,
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
-        result = read_documents(processNumber, documentIds, portal=portal, session=session, save=save)
+        result = read_documents(
+            processNumber,
+            documentIds,
+            portal=portal,
+            session=session,
+            save=save,
+            acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
+        )
     for document in result.get("documents", []):
         text = document.get("text", "")
         document["textTruncated"] = len(text) > textLimit
@@ -97,7 +112,7 @@ def read_documents_tool(
 @server.tool(
     name="pje_read_expediente_ato",
     title="Read the act behind a PJe expediente",
-    description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Only communications whose notice (ciência) is already registered are opened, because opening a pending one makes the party count as notified and starts its deadline; otherwise the call returns an error in ato.error.",
+    description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Communications whose notice (ciência) is already registered are opened by default. A pending one is refused (error in ato.error) because opening it may register the party's ciência and start the deadline: ask the user, and only with their explicit yes repeat the call with acknowledgeCiencia=true (customers with ciencia_on_read = 'allow' in settings.toml open them by default). When a pending one is opened, ato.ciencia lists it with an aviso: tell the user and note it in the task.",
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_expediente_ato_tool(
@@ -105,6 +120,7 @@ def read_expediente_ato_tool(
     portal: Portal,
     expedienteId: Annotated[str, Field(pattern=r"^[0-9]+$")],
     textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
+    acknowledgeCiencia: bool | None = None,
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = fetch_process(
@@ -114,6 +130,7 @@ def read_expediente_ato_tool(
             session=session,
             ato_expediente=expedienteId,
             ato_text_limit=textLimit,
+            ato_allow_pending=_allow_ciencia(acknowledgeCiencia),
         )
     return require_success(
         "PJe",
@@ -130,11 +147,45 @@ def read_expediente_ato_tool(
 @server.tool(
     name="pje_list_expediente_counters",
     title="List PJe Expedientes counters",
-    description="Read authenticated PJe Expedientes bucket counters only. Expansion is intentionally not exposed until live evidence proves it has no acknowledgment or other side effect.",
+    description="Read the PJe lawyer panel's Expedientes buckets (the same for every login) with their counts. With regions=true each bucket that has items also lists its regions and inboxes with counts (jurisdictions, boxes the profile has), which vary per user. Opening a bucket or expanding a region does not notify anyone; no expediente row is opened and nothing is acknowledged.",
     annotations=READ_ONLY,
 )
-def expediente_counters(portal: Portal) -> dict[str, Any]:
-    return _notifications(portal, lambda name, session: read_portal(name, expand=False, session=session))
+def expediente_counters(portal: Portal, regions: bool = False) -> dict[str, Any]:
+    return _notifications(portal, lambda name, session: read_counters(name, session=session, tree=regions))
+
+
+@server.tool(
+    name="pje_list_inbox",
+    title="List PJe Expedientes inbox rows",
+    description="List the communications of a PJe panel bucket (default 0, Pendentes de ciência ou de resposta; pass its index or part of its label) from the panel's inboxes, region by region, all pages up to maxPages (40 rows per page). Each row has the expediente id, type, recipient, channel, expedition date, notice (ciência) and whether it is still pending, days, PJe's deadline (limite), the process number and the last movement; read the act with pje_read_expediente_ato and the process with pje_get_process. regions keeps only inboxes whose path contains one of the texts. processNumber, expedidoDe/expedidoAte (YYYY-MM-DD, expedition date interval) and expedienteId run the inbox's own search. inboxes[].complete is true only when the rows read equal the total PJe reports. Read-only: it never takes ciência, replies, selects or distributes expedientes.",
+    annotations=READ_ONLY,
+)
+def list_inbox(
+    portal: Portal,
+    bucket: str | None = None,
+    regions: list[str] | None = None,
+    processNumber: str | None = None,
+    expedidoDe: str | None = None,
+    expedidoAte: str | None = None,
+    expedienteId: Annotated[str | None, Field(pattern=r"^[0-9]+$")] = None,
+    maxPages: Annotated[int, Field(ge=1, le=50)] = 5,
+) -> dict[str, Any]:
+    filters = {
+        key: value
+        for key, value in {
+            "processNumber": processNumber,
+            "from": expedidoDe,
+            "to": expedidoAte,
+            "expedienteId": expedienteId,
+        }.items()
+        if value
+    }
+    return _notifications(
+        portal,
+        lambda name, session: read_inbox(
+            name, bucket=bucket, regions=regions, filters=filters or None, max_pages=maxPages, session=session
+        ),
+    )
 
 
 @server.tool(
@@ -292,7 +343,7 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
 
 def main():
     load_env_file()
-    run_stdio(server, on_exit=sessions.close)
+    serve(server, on_exit=sessions.close)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ from jurisync.connectors.advbox.client import positive_integer
 from jurisync.connectors.advbox.parsers import BASE_URL, parse_file_tree
 from jurisync.connectors.advbox.session import SessionExpiredError
 from jurisync.core.pdf import analyze_document, available_path
-from jurisync.paths import REPO_ROOT
+from jurisync.paths import STATE_DIR
 
 MAX_FOLDERS = 100
 
@@ -117,7 +117,7 @@ class AdvboxDocuments:
                 raise RuntimeError("ADVBOX download response was empty")
             fallback = unquote(urlsplit(url).path.split("/")[-1]) or "advbox-download"
             output_name = download_filename("", filename or fallback)
-            folder = Path(directory or REPO_ROOT / "downloaded_files" / "advbox")
+            folder = Path(directory or STATE_DIR / "downloaded_files" / "advbox")
             folder.mkdir(parents=True, exist_ok=True)
             output = available_path(folder, output_name)
             with open(output, "xb") as handle:

@@ -10,7 +10,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import Field
 
 from jurisync.connectors.inss.client import InssClient, read_saved_document, slice_text
-from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, sanitize_diagnostics
+from jurisync.core.mcp import READ_ONLY, load_env_file, sanitize_diagnostics, serve
 
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 Digits = Annotated[str, Field(pattern=r"^\d+$")]
@@ -145,7 +145,7 @@ async def read_document(
 
 def main():
     load_env_file()
-    run_stdio(server)
+    serve(server)
 
 
 if __name__ == "__main__":

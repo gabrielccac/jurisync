@@ -116,6 +116,45 @@ def normalize_activities(payload, page_size):
     }
 
 
+def parse_publication_row(row):
+    """One row of the Intimações (publications) table: customer, date, court, process, responsible, status, links."""
+    post = _group(r'href="posts/(\d+)/edit"', _cell(row, 0))
+    responsible = re.search(r'<img[^>]*profiles/(\d+)\.\w+[^>]*title="([^"]*)"', str(_cell(row, 4)))
+    links = str(_cell(row, 6))
+    return {
+        "postId": post,
+        "customer": {"id": _group(r"customers/(\d+)/edit", links), "name": decode_cell(_cell(row, 0))},
+        "lawsuitId": _group(r"lawsuits/(\d+)/edit", links),
+        "date": decode_cell(_cell(row, 1)),
+        "court": decode_cell(_cell(row, 2)) or None,
+        "processNumber": decode_cell(_cell(row, 3)),
+        "responsible": {"id": responsible[1], "name": decode_cell(responsible[2])} if responsible else None,
+        "status": "concluida" if "conclu" in decode_cell(_cell(row, 5)).lower() else "pendente",
+    }
+
+
+def normalize_publications(payload, page_size, page=1):
+    total = _number(payload.get("iTotalDisplayRecords", 0))
+    return {
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": -(-total // page_size) or 1,
+        "hasMore": page * page_size < total,
+        "records": [parse_publication_row(row) for row in _rows(payload, "publications")],
+    }
+
+
+def parse_publication_courts(html):
+    """Court filter options of the Intimações page: ``[{"id", "code", "label"}]`` (``code`` is the sigla)."""
+    select = _group(r'<select[^>]*name="courts_id"[^>]*>([\s\S]*?)</select>', html)
+    courts = []
+    for match in re.finditer(r'<option[^>]*value="(\d+)"[^>]*>([^<]*)</option>', select or ""):
+        label = decode_cell(match[2])
+        courts.append({"id": int(match[1]), "code": label.split(" - ", 1)[0].strip().upper(), "label": label})
+    return courts
+
+
 def normalize_table(payload, names):
     data = _rows(payload, "table")
     records = []

@@ -24,7 +24,7 @@ src/jurisync/
     word_to_pdf.py      DOC/DOCX → PDF through headless LibreOffice
   connectors/           One folder per system; each has a server.py MCP entry point
     pje/                TRF1 1G/2G and TRF5 1G: one search flow for every deployment, documents,
-                        notifications, TRF5 draft filing; jsf.py holds the shared JSF mechanics
+                        Expedientes panel inboxes (inbox.py), Push registry, TRF5 draft filing; jsf.py holds the shared JSF mechanics
                         (auth/ holds SSO, A1 certificate, session cache)
     eproc/              TRF4 1G sections (SC, RS): notice queues, process, documents (Selenium login)
     djen/               Public DJEN/Comunica search, certidão text, JFPE deadline calendar
@@ -63,19 +63,54 @@ Claude Code picks up `.mcp.json` from the project root. Each server runs as
 `.venv/bin/python -m jurisync.connectors.<name>.server` and loads `.env` on
 startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
 
+## Installing on another machine (Claude and ChatGPT)
+
+Needs [`uv`](https://docs.astral.sh/uv/) and read access to the (private) GitHub repository.
+
+```bash
+uv tool install git+https://github.com/gabrielccac/jurisync
+```
+
+This installs one command per server (`jurisync-pje`, `jurisync-advbox`, `jurisync-djen`, `jurisync-eproc`,
+`jurisync-juridiq`, `jurisync-inss`) and `jurisync-http`.
+
+**Where the credentials go.** One shared file, `~/.config/jurisync/.env`, in the same `KEY=value` format as
+`.env.example`. Servers read it when they start, so restart them after editing. Variables already set in the
+environment win over the file; `JURISYNC_ENV_FILE` points to a different file.
+
+**Claude** (stdio): register the commands, with no credentials in the command:
+
+```bash
+claude mcp add pje -- jurisync-pje
+claude mcp add advbox -- jurisync-advbox
+```
+
+**ChatGPT** (remote connector, streamable HTTP): serve the servers from one process and expose it through a tunnel.
+
+```bash
+jurisync-http pje advbox            # http://127.0.0.1:8000/pje/mcp and /advbox/mcp
+cloudflared tunnel --url http://127.0.0.1:8000
+```
+
+In ChatGPT's developer mode, add a custom connector per server with the tunnel URL plus `/pje/mcp` (and
+`/advbox/mcp`), with no authentication. **This is for local tests only**: anyone with the tunnel URL can call
+the tools with the machine's credentials, so stop the tunnel when you finish. One server alone also runs with
+`jurisync-pje --http --port 8000`. Mutable state (ADVBOX session, downloads) lives in `~/.local/share/jurisync/`
+for an installed package and beside the code in a checkout.
+
 ## Connectors
 
 `*` marks tools that write (locally or remotely).
 
 | Server | Tools | Login | Writes |
 |---|---|---|---|
-| `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1: password + TOTP. TRF5: A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
+| `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_inbox`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1: password + TOTP. TRF5: A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
 | `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | ADVBOX session | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
 | `eproc` | `eproc_list_notices`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`) | Browser login + TOTP, once per portal | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
 | `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_get_attachment`*, `inss_get_process`*, `inss_read_document` | Chrome + A3 PIN (by the user) + TOTP | local downloads only (`get` tools save the file and return its parsed text) |
 | `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
-| `advbox` | 11 read tools (customers, lawsuits, activities, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
+| `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
 
 Long-running servers keep each portal's authenticated session in memory, so
 only the first call logs in; later calls reuse it until it expires.

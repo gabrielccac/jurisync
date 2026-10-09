@@ -17,7 +17,7 @@ from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.connectors.advbox.parsers import compact_lawsuit_report
 from jurisync.connectors.advbox.session import require_writes
 from jurisync.core.documents_dir import resolve_saved_document
-from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
@@ -120,6 +120,36 @@ def list_activities(
             responsibleIds=responsible or [],
             dateFrom=dateFrom or "",
             dateTo=dateTo or "",
+        )
+    )
+
+
+@server.tool(
+    name="advbox_list_publications",
+    title="List ADVBOX publications (intimações)",
+    description="List the intimações (publications) that ADVBOX received for the office, with the post ID that opens each one, customer, date, court, process number, responsible and status (pendente/concluida). Choose a period (today, 3d, 7d, 30d) or both dateFrom and dateTo, and optionally filter by tribunal sigla (for example TRF5), exact CNJ process number or responsible ID (advbox_list_members). Pages hold at most 200 records (default 50); use page while hasMore is true. The text of one intimação is read with advbox_activity_details using its postId. Fails with a clear message when the account has no Intimações module. Read-only.",
+    annotations=READ_ONLY,
+)
+def list_publications(
+    period: Literal["today", "3d", "7d", "30d"] | None = None,
+    dateFrom: Date | None = None,
+    dateTo: Date | None = None,
+    tribunal: Annotated[str, Field(max_length=40)] = "",
+    processNumber: Annotated[str, Field(pattern=r"^(\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4})?$")] = "",
+    responsible: Annotated[int, Field(gt=0)] | None = None,
+    page: Page = 1,
+    pageSize: Annotated[int, Field(ge=1, le=200)] = 50,
+) -> dict[str, Any]:
+    return call(
+        lambda: client.list_publications(
+            period=period,
+            dateFrom=dateFrom or "",
+            dateTo=dateTo or "",
+            tribunal=tribunal,
+            processNumber=processNumber,
+            responsibleId=responsible or "",
+            page=page,
+            pageSize=pageSize,
         )
     )
 
@@ -437,7 +467,7 @@ def delete_task(
 
 def main():
     load_env_file()
-    run_stdio(server, on_exit=client.close)
+    serve(server, on_exit=client.close)
 
 
 if __name__ == "__main__":

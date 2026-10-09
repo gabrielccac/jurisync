@@ -10,6 +10,8 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.core.document_text import extract_document_text
+from jurisync.core.documents_dir import save_document
+from jurisync.core.html_pdf import html_to_pdf
 from jurisync.core.http import UnsafeUrlError, require_url
 
 MAX_DOCUMENTS = 5
@@ -96,7 +98,7 @@ def _item(document):
     }
 
 
-def read_selected_documents(process, document_ids, *, session, portal):
+def read_selected_documents(process, document_ids, *, session, portal, save=False):
     portal = portals.eproc(portal).key
     """Read 1-5 IDs already present in the freshly parsed process inventory."""
     if process.get("success") is False:
@@ -180,6 +182,8 @@ def read_selected_documents(process, document_ids, *, session, portal):
             result["bytes"] = len(body)
             result["sha256"] = hashlib.sha256(body).hexdigest()
             result["extractionStatus"], result["text"] = extract_document_text(body, result["content_type"], number)
+            if save and result["extractionStatus"] == "extracted":
+                result["savedAs"] = _save(number, document["id"], body, result)
         except (RequestException, OSError):
             result["extractionStatus"] = "request_failed"
         except ValueError:
@@ -195,3 +199,16 @@ def read_selected_documents(process, document_ids, *, session, portal):
                         pass
         results.append(result)
     return results
+
+
+def _save(number, doc_id, body, result):
+    """Store the original in the shared documents folder; HTML acts become PDFs so they attach."""
+    digits = "".join(ch for ch in str(number) if ch.isdigit())
+    if result["format"] == "pdf":
+        return save_document(f"{digits}_{doc_id}.pdf", body)
+    pdf = html_to_pdf(body, result.get("content_type", ""))
+    if pdf is not None:
+        result["savedFormat"] = "pdf (rendered from html)"
+        return save_document(f"{digits}_{doc_id}.pdf", pdf)
+    result["savedFormat"] = "html"
+    return save_document(f"{digits}_{doc_id}.html", body)
