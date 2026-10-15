@@ -5,3 +5,7 @@
 [trf5-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]
+
+# Variables that belong to no portal. ADVBOX_DEVICE_ID is what lets the same login work on any machine.
+[env]
+secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]
