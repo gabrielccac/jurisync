@@ -134,7 +134,8 @@ class CertificateCustomerTest(unittest.TestCase):
             (customer / "portals.toml").write_text(
                 '[trf5-1g]\nmethod = "certificate_totp"\n'
                 'secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]\n'
-                '[env]\nsecrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD"]\noptional = ["OPENROUTER_API_KEY"]\n',
+                '[env]\nsecrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD"]\noptional = ["OPENROUTER_API_KEY"]\n'
+                'set = { ADVBOX_ALLOW_WRITES = "true" }\n',
                 encoding="utf-8",
             )
             setup.write_env(
@@ -173,6 +174,7 @@ class CertificateCustomerTest(unittest.TestCase):
             self.assertEqual(stored["PJE_TRF5_2FA_DATA"], URI)
             self.assertNotIn("PJE_TRF5_2FA_QR", stored)
             self.assertEqual(stored["ADVBOX_EMAIL"], "v@x")
+            self.assertEqual(stored["ADVBOX_ALLOW_WRITES"], "true")
             self.assertNotIn("UNRELATED", stored)
 
 

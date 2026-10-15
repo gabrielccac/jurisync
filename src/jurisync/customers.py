@@ -89,6 +89,16 @@ def extra_variables(name):
     return list(table.get("secrets", [])), list(table.get("optional", []))
 
 
+def fixed_variables(name):
+    """Variables the customer's ``[env].set`` table pins to a value (e.g. ADVBOX_ALLOW_WRITES = "true")."""
+    path = customer_dir(name) / "portals.toml"
+    try:
+        table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
+    except FileNotFoundError:
+        return {}
+    return {str(key): str(value) for key, value in (table.get("set") or {}).items()}
+
+
 CIENCIA_POLICIES = ("ask", "allow")
 
 

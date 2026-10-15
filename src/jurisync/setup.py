@@ -372,6 +372,8 @@ def export_main(argv, *, ask_secret, say):
                 selected[name] = value
                 if is_shared:
                     from_shared.append(name)
+    fixed = customers.fixed_variables(args.customer)
+    selected.update(fixed)
     if not selected:
         raise SystemExit(f"Nenhuma credencial de {args.customer} encontrada (.env do cliente ou .env da raiz)")
 
@@ -414,6 +416,8 @@ def export_main(argv, *, ask_secret, say):
         say(f"  arquivos: {', '.join(sorted(files))}")
     if from_shared:
         say(f"  vindas do .env da raiz (confira se são deste cliente): {', '.join(sorted(from_shared))}")
+    if fixed:
+        say(f"  valores fixos do cliente (portals.toml): {', '.join(f'{k}={v}' for k, v in sorted(fixed.items()))}")
     say(f"  verificações: {', '.join(checks) or '-'} | servidores: {', '.join(servers)}")
     if not args.ask_passphrase:
         say(f"Senha do pacote (envie por OUTRO canal, aparece só aqui): {passphrase}")
