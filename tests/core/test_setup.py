@@ -82,7 +82,7 @@ class LoginRetryTest(unittest.TestCase):
             mock.patch.object(setup, "check_login", side_effect=fake_login),
             mock.patch.object(setup, "wait_for_fresh_code"),
         ):
-            failures = setup.verify_and_register(["tjrs-1g"], args, lambda _t: None)
+            failures = setup.verify_and_register(["eproc:tjrs-1g"], args, lambda _t: None)
         return failures, calls
 
     def test_a_timeout_is_retried_once_but_a_rejection_is_not(self):

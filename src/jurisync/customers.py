@@ -63,6 +63,8 @@ def load_setup(name):
         raise ValueError(f"customer {name!r} has no portals.toml at {path}") from None
     setups = {}
     for key, entry in data.items():
+        if key == RESERVED_TABLE:
+            continue
         portals.get(key)  # unknown or unwired portals fail loudly
         method = entry.get("method")
         if method not in METHODS:
@@ -72,6 +74,19 @@ def load_setup(name):
             raise ValueError(f"{name}/{key}: secrets must be a list of variable names")
         setups[key] = PortalSetup(key, method, tuple(secrets))
     return setups
+
+
+RESERVED_TABLE = "env"  # [env] lists variables that belong to no portal (ADVBOX login, CPF, API keys)
+
+
+def extra_variables(name):
+    """Variables declared in the customer's ``[env]`` table: ``(required, optional)`` name lists."""
+    path = customer_dir(name) / "portals.toml"
+    try:
+        table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
+    except FileNotFoundError:
+        return [], []
+    return list(table.get("secrets", [])), list(table.get("optional", []))
 
 
 CIENCIA_POLICIES = ("ask", "allow")

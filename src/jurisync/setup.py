@@ -24,7 +24,13 @@ from jurisync import credentials_bundle, customers, portals
 from jurisync.core.totp import parse_accounts, select_account
 from jurisync.paths import USER_ENV_FILE
 
-SERVERS = {"eproc": "jurisync-eproc", "djen": "jurisync-djen"}
+SERVERS = {
+    "eproc": "jurisync-eproc",
+    "pje": "jurisync-pje",
+    "advbox": "jurisync-advbox",
+    "djen": "jurisync-djen",
+}
+FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
 
 
 def qr_text(path):
@@ -150,6 +156,44 @@ def check_login(key):
     return True, "login ok"
 
 
+def check_pje(key):
+    """Authenticate a PJe portal (A1 certificate + authenticator, or password + authenticator)."""
+    from jurisync.connectors.pje.process import login_portal
+
+    try:
+        session, _ = login_portal(key)
+    except Exception as error:  # noqa: BLE001 - report any login failure to the user
+        return False, f"{type(error).__name__}: {str(error)[:140]}"
+    try:
+        session.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return True, "login ok"
+
+
+def check_advbox():
+    """Open (or reuse) the ADVBOX session; a new device must be approved in ADVBOX first."""
+    from jurisync.connectors.advbox.client import AdvboxClient
+
+    try:
+        AdvboxClient().ensure_session()
+    except Exception as error:  # noqa: BLE001
+        return False, f"{type(error).__name__}: {str(error)[:140]}"
+    return True, "sessão ok"
+
+
+def run_check(check):
+    """``eproc:<portal>``, ``pje:<portal>`` or ``advbox`` → (ok, message)."""
+    system, _, key = check.partition(":")
+    if system == "eproc":
+        return check_login(key)
+    if system == "pje":
+        return check_pje(key)
+    if system == "advbox":
+        return check_advbox()
+    return False, f"verificação desconhecida: {check}"
+
+
 def wait_for_fresh_code(secret_text, say):
     """Portals refuse a TOTP code already used in this window; wait for the next one."""
     try:
@@ -206,28 +250,42 @@ def server_commands(servers):
     return {name: shutil.which(command) or command for name, command in SERVERS.items() if name in servers}
 
 
-def verify_and_register(keys, args, say):
-    """Test each portal's login, then register the servers. Returns the number of failed logins."""
+def check_secret(check):
+    """The authenticator export behind a check, to space out logins that share one TOTP window."""
+    system, _, key = check.partition(":")
+    try:
+        if system == "eproc":
+            return portals.eproc(key).env("2FA_DATA")
+        if system == "pje":
+            return portals.pje(key).env("2FA_DATA") or os.environ.get("PJE_TRF5_2FA_DATA", "")
+    except ValueError:
+        return ""
+    return ""
+
+
+def verify_and_register(checks, args, say, servers=None):
+    """Run each check, then register the servers. Returns the number of failed checks."""
     failures = 0
-    if not args.no_login:
-        say("\nTestando o login de cada portal...")
+    if not args.no_login and checks:
+        say("\nTestando o login de cada serviço...")
         previous_secret = None
-        for key in keys:
-            secret = portals.eproc(key).env("2FA_DATA")
+        for check in checks:
+            secret = check_secret(check)
             if previous_secret and previous_secret == secret:
                 wait_for_fresh_code(secret, say)
-            ok, message = check_login(key)
+            ok, message = run_check(check)
             if not ok and "Timed out" in message:
                 # A slow first start (driver download, busy portal): one retry on a fresh code. Rejected
                 # credentials are never retried, so a wrong password cannot trip the account lock.
-                say(f"  {key}: demorou demais; tentando mais uma vez com um código novo...")
+                say(f"  {check}: demorou demais; tentando mais uma vez com um código novo...")
                 wait_for_fresh_code(secret, say)
-                ok, message = check_login(key)
-            say(f"  {key}: {'pronto' if ok else 'FALHOU - ' + message}")
+                ok, message = run_check(check)
+            say(f"  {check}: {'pronto' if ok else 'FALHOU - ' + message}")
             failures += 0 if ok else 1
             previous_secret = secret
     if args.register != "none":
-        names = server_commands(set(args.servers.split(",")))
+        wanted = set(servers or args.servers.split(","))
+        names = server_commands(wanted)
         if args.register in ("auto", "claude-code"):
             register_claude_code(names, say)
         if args.register in ("auto", "desktop"):
@@ -239,7 +297,7 @@ def add_finish_options(parser):
     parser.add_argument("--env-file", help=f"arquivo de credenciais (padrão: {USER_ENV_FILE})")
     parser.add_argument("--no-login", action="store_true", help="não testa o login")
     parser.add_argument("--register", choices=("auto", "claude-code", "desktop", "none"), default="auto")
-    parser.add_argument("--servers", default="eproc,djen", help="servidores a registrar")
+    parser.add_argument("--servers", default="eproc,djen", help="servidores a registrar (o pacote já indica os dele)")
 
 
 def target_env_file(args):
@@ -261,7 +319,33 @@ def setup_main(argv, *, ask, ask_secret, say):
         write_env(env_file, updates)
         say(f"\nCredenciais gravadas em {env_file} (somente o seu usuário lê esse arquivo).")
     os.environ.update({k: v for k, v in read_env(env_file).items() if k not in os.environ})
-    return 1 if verify_and_register(keys, args, say) else 0
+    return 1 if verify_and_register([f"eproc:{key}" for key in keys], args, say) else 0
+
+
+def declared_names(customer):
+    """Every variable a customer's portals.toml declares: portal secrets (all alternatives) and [env]."""
+    names, optional = [], []
+    path = customers.customer_dir(customer) / "portals.toml"
+    import tomllib
+
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    for key, entry in data.items():
+        if key == customers.RESERVED_TABLE:
+            continue
+        for group in entry.get("secrets", []):
+            names += [name.strip() for name in group.split("|")]
+    required, extra_optional = customers.extra_variables(customer)
+    names += required
+    optional += extra_optional
+    return names, optional
+
+
+def customer_values(customer):
+    """Variable values for a customer: its own .env first, then the shared repository .env."""
+    shared = Path(os.environ.get("JURISYNC_ENV_FILE") or customers.REPO_ROOT / ".env")
+    own = read_env(customers.customer_env_path(customer))
+    fallback = read_env(shared)
+    return own, fallback
 
 
 def export_main(argv, *, ask_secret, say):
@@ -271,27 +355,66 @@ def export_main(argv, *, ask_secret, say):
     parser.add_argument("--ask-passphrase", action="store_true", help="digitar a senha em vez de gerar uma")
     args = parser.parse_args(argv)
 
-    env_path = customers.customer_env_path(args.customer)
-    values = read_env(env_path)
+    setups = customers.load_setup(args.customer)
+    own, fallback = customer_values(args.customer)
+    names, optional = declared_names(args.customer)
     prefixes = []
-    for key in customers.load_setup(args.customer):
+    for key in setups:
         portal = portals.get(key)
         prefixes += [f"{prefix}_" for prefix in (portal.env_prefix, *portal.legacy_env_prefixes) if prefix]
-    selected = {name: value for name, value in values.items() if value and name.startswith(tuple(prefixes))}
+    wanted = set(names) | set(optional)
+    selected, from_shared = {}, []
+    for source, is_shared in ((own, False), (fallback, True)):
+        for name, value in source.items():
+            if not value or name in selected:
+                continue
+            if name in wanted or name.startswith(tuple(prefixes)):
+                selected[name] = value
+                if is_shared:
+                    from_shared.append(name)
     if not selected:
-        raise SystemExit(f"Nenhuma credencial dos portais de {args.customer} encontrada em {env_path}")
+        raise SystemExit(f"Nenhuma credencial de {args.customer} encontrada (.env do cliente ou .env da raiz)")
+
+    # File variables (A1 certificate): embed the bytes; authenticator QR images become their text export.
+    files, file_vars = {}, {}
+    for name in list(selected):
+        path = Path(selected[name].strip().strip("\"'")).expanduser()
+        if name.endswith(FILE_SUFFIXES) and path.is_file():
+            files[path.name] = path.read_bytes()
+            file_vars[name] = path.name
+            selected[name] = path.name
+        elif name.endswith("_2FA_QR") and path.is_file():
+            selected[name.removesuffix("_2FA_QR") + "_2FA_DATA"] = qr_text(path)
+            del selected[name]
+    checks = []
+    for key in setups:
+        system = portals.get(key).system
+        if system in ("eproc", "pje"):
+            checks.append(f"{system}:{key}")
+    if any(name.startswith("ADVBOX_") for name in selected):
+        checks.append("advbox")
+    servers = sorted({check.split(":")[0] for check in checks} | {"djen"})
+
     if args.ask_passphrase:
         passphrase = ask_secret("Senha do pacote: ")
         if passphrase != ask_secret("Repita a senha: "):
             raise SystemExit("As senhas não conferem")
     else:
         passphrase = credentials_bundle.generate_passphrase()
-    text = credentials_bundle.seal(selected, passphrase, customer=args.customer)
+    text = credentials_bundle.seal(
+        selected, passphrase, customer=args.customer, files=files, file_vars=file_vars, checks=checks, servers=servers
+    )
     out = Path(args.out)
     descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
         output.write(text + "\n")
-    say(f"Pacote criado: {out} ({len(selected)} variáveis: {credentials_bundle.describe(selected)})")
+    say(f"Pacote criado: {out}")
+    say(f"  variáveis ({len(selected)}): {credentials_bundle.describe(selected)}")
+    if files:
+        say(f"  arquivos: {', '.join(sorted(files))}")
+    if from_shared:
+        say(f"  vindas do .env da raiz (confira se são deste cliente): {', '.join(sorted(from_shared))}")
+    say(f"  verificações: {', '.join(checks) or '-'} | servidores: {', '.join(servers)}")
     if not args.ask_passphrase:
         say(f"Senha do pacote (envie por OUTRO canal, aparece só aqui): {passphrase}")
     return 0
@@ -314,19 +437,23 @@ def import_main(argv, *, ask_secret, say, stdin=None):
         passphrase = credentials_bundle.passphrase_from_page(say)
     opened = credentials_bundle.unseal(text, passphrase)
     env_file = target_env_file(args)
-    write_env(env_file, opened["env"])
-    os.environ.update({k: v for k, v in opened["env"].items() if k not in os.environ})
+    values = dict(opened["env"])
+    if opened["files"]:
+        directory = env_file.parent / "files"
+        directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        for name, raw in opened["files"].items():
+            target = directory / Path(name).name  # never trust a path from the bundle
+            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(raw)
+        for variable, name in opened["file_vars"].items():
+            values[variable] = str(directory / Path(name).name)
+    write_env(env_file, values)
+    os.environ.update(values)
     say(f"Credenciais instaladas em {env_file} (somente o seu usuário lê esse arquivo).")
-    keys = [
-        key
-        for key in portals.keys("eproc")
-        if any(
-            name.startswith(f"{prefix}_")
-            for name in opened["env"]
-            for prefix in (portals.eproc(key).env_prefix, *portals.eproc(key).legacy_env_prefixes)
-        )
-    ]
-    return 1 if verify_and_register(keys, args, say) else 0
+    checks = opened["checks"] or [f"eproc:{key}" for key in portals.keys("eproc") if portals.eproc(key).env("USERNAME")]
+    return 1 if verify_and_register(checks, args, say, servers=set(opened["servers"]) or None) else 0
 
 
 def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):

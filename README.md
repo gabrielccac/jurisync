@@ -74,6 +74,20 @@ uv tool install git+https://github.com/gabrielccac/jurisync
 This installs one command per server (`jurisync-pje`, `jurisync-advbox`, `jurisync-djen`, `jurisync-eproc`,
 `jurisync-juridiq`, `jurisync-inss`) and `jurisync-http`.
 
+**Customer credentials without editing files.** The operator exports a customer's logins into one encrypted
+bundle and the customer's machine imports it:
+
+```bash
+jurisync-setup export --customer elisandra --out elisandra.jurisync   # prints a one-use passphrase
+jurisync-setup import elisandra.jurisync                              # passphrase is typed on a local page
+```
+
+The bundle carries the portal logins, authenticator exports, certificate files (A1 `.p12`) and the variables
+declared in the customer's `portals.toml` (`[env]` for ADVBOX, CPF and API keys). `import` writes
+`~/.config/jurisync/.env` and `~/.config/jurisync/files/` with owner-only permissions, tests each login
+(`eproc`, `pje`, `advbox`) and registers the servers with Claude Desktop and Claude Code. Send the file and the
+passphrase over different channels.
+
 **Where the credentials go.** One shared file, `~/.config/jurisync/.env`, in the same `KEY=value` format as
 `.env.example`. Servers read it when they start, so restart them after editing. Variables already set in the
 environment win over the file; `JURISYNC_ENV_FILE` points to a different file.

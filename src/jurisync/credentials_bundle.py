@@ -36,14 +36,26 @@ def generate_passphrase():
     return secrets.token_urlsafe(15)
 
 
-def seal(env, passphrase, *, customer=""):
-    """Encrypt ``env`` (a dict of variable → value) into a JSON bundle."""
+def seal(env, passphrase, *, customer="", files=None, file_vars=None, checks=None, servers=None):
+    """Encrypt ``env`` (variable → value) plus optional files into a JSON bundle.
+
+    ``files`` maps a file name to its bytes; ``file_vars`` maps a variable to the file name it should point to
+    after import; ``checks`` and ``servers`` tell the importing machine what to verify and register.
+    """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     if len(passphrase) < MIN_PASSPHRASE:
         raise ValueError(f"A senha do pacote precisa ter ao menos {MIN_PASSPHRASE} caracteres")
     salt, nonce = os.urandom(16), os.urandom(12)
-    payload = json.dumps({"customer": customer, "env": env}, ensure_ascii=False).encode("utf-8")
+    content = {
+        "customer": customer,
+        "env": env,
+        "files": {name: _b64(raw) for name, raw in (files or {}).items()},
+        "file_vars": dict(file_vars or {}),
+        "checks": list(checks or []),
+        "servers": list(servers or []),
+    }
+    payload = json.dumps(content, ensure_ascii=False).encode("utf-8")
     box = AESGCM(_derive(passphrase, salt)).encrypt(nonce, payload, HEADER)
     bundle = {
         "format": FORMAT,
@@ -73,7 +85,14 @@ def unseal(text, passphrase):
     except InvalidTag:
         raise ValueError("Senha do pacote incorreta ou arquivo alterado") from None
     result = json.loads(payload.decode("utf-8"))
-    return {"customer": result.get("customer", ""), "env": dict(result.get("env") or {})}
+    return {
+        "customer": result.get("customer", ""),
+        "env": dict(result.get("env") or {}),
+        "files": {name: base64.b64decode(raw) for name, raw in (result.get("files") or {}).items()},
+        "file_vars": dict(result.get("file_vars") or {}),
+        "checks": list(result.get("checks") or []),
+        "servers": list(result.get("servers") or []),
+    }
 
 
 PAGE = """<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Jurisync</title>
