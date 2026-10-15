@@ -18,6 +18,7 @@ dependencies = [
   "pyotp==2.10.0",
   "pypdf==6.0.0",
   "seleniumbase==4.54.1",
+  "tzdata==2026.5",
   "zxing-cpp==3.1.1",
 ]
 
