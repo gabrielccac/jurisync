@@ -5,9 +5,3 @@
 [trf5-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]
-
-# Variables that belong to no portal. Values come from customers/victor/.env, then the repository .env.
-# The *_ALLOW_WRITES flags decide whether the installed servers may write; list them only on purpose.
-[env]
-secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID", "VICTOR_PJE_GRAZIELE_CPF"]
-optional = ["OPENROUTER_API_KEY", "ADVBOX_ALLOW_WRITES", "PJE_ALLOW_DRAFT_WRITES"]
