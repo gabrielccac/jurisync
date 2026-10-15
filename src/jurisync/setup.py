@@ -385,8 +385,10 @@ def export_main(argv, *, ask_secret, say):
             files[path.name] = path.read_bytes()
             file_vars[name] = path.name
             selected[name] = path.name
-        elif name.endswith("_2FA_QR") and path.is_file():
-            selected[name.removesuffix("_2FA_QR") + "_2FA_DATA"] = qr_text(path)
+        elif name.endswith("_2FA_QR"):
+            data_name = name.removesuffix("_2FA_QR") + "_2FA_DATA"
+            if data_name not in selected and path.is_file():
+                selected[data_name] = qr_text(path)  # the customer's own text export wins over an image
             del selected[name]
     checks = []
     for key in setups:
