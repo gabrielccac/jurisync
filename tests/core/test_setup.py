@@ -56,6 +56,18 @@ class CollectTest(unittest.TestCase):
         self.assertEqual(updates["TRF4_1G_RS_2FA_DATA"], updates["TRF4_1G_SC_2FA_DATA"])
 
 
+class LegacyNamesTest(unittest.TestCase):
+    def test_earlier_variable_names_in_the_file_are_not_asked_again(self):
+        current = {"TJRS_1G_USUARIO": "u", "TJRS_1G_SENHA": "p", "TJRS_1G_EXPORT_DATA": URI}
+
+        def refuse(_prompt):
+            raise AssertionError("não deveria perguntar")
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            updates = setup.collect(["tjrs-1g"], current, qr=None, ask=refuse, ask_secret=refuse, say=lambda _t: None)
+        self.assertEqual(updates, {})
+
+
 class RegistrationTest(unittest.TestCase):
     def test_desktop_registration_merges_and_backs_up(self):
         with tempfile.TemporaryDirectory() as directory:

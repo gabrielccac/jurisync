@@ -4,7 +4,7 @@ import time
 from http.cookiejar import Cookie
 
 from curl_cffi import requests
-from selenium.common.exceptions import UnexpectedAlertPresentException
+from selenium.common.exceptions import StaleElementReferenceException, UnexpectedAlertPresentException
 from seleniumbase import Driver
 
 from jurisync import portals
@@ -119,17 +119,39 @@ def _first_element(driver, selectors, timeout=10):
     return None
 
 
+def _fill_field(driver, selectors, value, *, timeout=10, attempts=4):
+    """Type into the first matching field, finding it again if the page re-renders under us.
+
+    Keycloak (and TJRS in particular) can replace the form between locating a field and typing in it,
+    which raises StaleElementReferenceException. Returns the field, or None when none was found.
+    """
+    for attempt in range(attempts):
+        try:
+            field = _first_element(driver, selectors, timeout=timeout)
+            if field is None:
+                return None
+            field.clear()
+            field.send_keys(value)
+            return field
+        except StaleElementReferenceException:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
+    return None
+
+
 def _submit_otp(driver, code):
-    otp_field = _first_element(driver, LOGIN_FIELDS["otp"], timeout=10)
+    otp_field = _fill_field(driver, LOGIN_FIELDS["otp"], code, timeout=10)
     if otp_field is None:
         raise RuntimeError("Could not find the portal OTP field")
-    otp_field.clear()
-    otp_field.send_keys(code)
     otp_submit = next((selector for selector in LOGIN_FIELDS["otp_submit"] if has(driver, selector, 2)), None)
     if otp_submit:
         driver.click(otp_submit)
     else:
-        otp_field.send_keys("\n")
+        try:
+            otp_field.send_keys("\n")
+        except StaleElementReferenceException:
+            pass  # the page already moved on after the code was typed
     time.sleep(1)
     step = wait_for_step(driver, timeout=30)
     while step == "captcha":
@@ -146,12 +168,10 @@ def login(username, password, account, *, portal):
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
         driver.get(config.login_url)
-        username_field = _first_element(driver, LOGIN_FIELDS["username"], timeout=20)
-        password_field = _first_element(driver, LOGIN_FIELDS["password"], timeout=20)
-        if username_field is None or password_field is None:
+        if _fill_field(driver, LOGIN_FIELDS["username"], username, timeout=20) is None:
             raise RuntimeError("Could not find the portal login fields")
-        username_field.send_keys(username)
-        password_field.send_keys(password)
+        if _fill_field(driver, LOGIN_FIELDS["password"], password, timeout=20) is None:
+            raise RuntimeError("Could not find the portal login fields")
         submit = next((selector for selector in LOGIN_FIELDS["submit"] if has(driver, selector, 1)), None)
         if not submit:
             raise RuntimeError("Could not find the portal login button")

@@ -88,6 +88,16 @@ def portal_keys(requested, customer):
     return [portals.eproc(key).key for key in keys]
 
 
+def stored(values, portal, name):
+    """A portal variable from a parsed env file, under its canonical or earlier (Portuguese/legacy) name."""
+    for prefix in (portal.env_prefix, *portal.legacy_env_prefixes):
+        for candidate in (name, *portals.LEGACY_NAMES.get(name, ())):
+            value = values.get(f"{prefix}_{candidate}")
+            if value:
+                return value
+    return ""
+
+
 def describe(accounts):
     return [f"{n}: {a['issuer'] or '-'} | {a['name'] or '-'}" for n, a in enumerate(accounts, 1)]
 
@@ -100,7 +110,7 @@ def collect(keys, current, *, qr, ask, ask_secret, say):
         say(f"\n== {key} ({portal.host}) ==")
 
         def have(name, portal=portal):
-            return current.get(portal.env_name(name)) or portal.env(name)
+            return stored(current, portal, name) or portal.env(name)
 
         if not have("USERNAME"):
             updates[portal.env_name("USERNAME")] = ask("Usuário (CPF ou login): ").strip()

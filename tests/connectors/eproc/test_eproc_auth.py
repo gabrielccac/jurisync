@@ -1,6 +1,6 @@
 import base64
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from jurisync.connectors.eproc import client
 from jurisync.connectors.eproc.auth import portal_totp_account, session_from_cookies
@@ -98,6 +98,32 @@ class EprocAuthTests(unittest.TestCase):
             )
         finally:
             session.close()
+
+
+class FillFieldTests(unittest.TestCase):
+    def test_field_is_found_again_when_the_page_re_renders(self):
+        from selenium.common.exceptions import StaleElementReferenceException
+
+        from jurisync.connectors.eproc import auth
+
+        class Field:
+            def __init__(self, stale):
+                self.stale, self.typed = stale, []
+
+            def clear(self):
+                if self.stale:
+                    raise StaleElementReferenceException("stale")
+
+            def send_keys(self, value):
+                self.typed.append(value)
+
+        fields = [Field(True), Field(False)]
+        driver = Mock()
+        driver.wait_for_element.side_effect = lambda *_a, **_k: fields[min(driver.wait_for_element.call_count - 1, 1)]
+        with patch.object(auth.time, "sleep"):
+            field = auth._fill_field(driver, ("#otp",), "123456")
+        self.assertIs(field, fields[1])
+        self.assertEqual(fields[1].typed, ["123456"])
 
 
 if __name__ == "__main__":
