@@ -217,6 +217,12 @@ def verify_and_register(keys, args, say):
             if previous_secret and previous_secret == secret:
                 wait_for_fresh_code(secret, say)
             ok, message = check_login(key)
+            if not ok and "Timed out" in message:
+                # A slow first start (driver download, busy portal): one retry on a fresh code. Rejected
+                # credentials are never retried, so a wrong password cannot trip the account lock.
+                say(f"  {key}: demorou demais; tentando mais uma vez com um código novo...")
+                wait_for_fresh_code(secret, say)
+                ok, message = check_login(key)
             say(f"  {key}: {'pronto' if ok else 'FALHOU - ' + message}")
             failures += 0 if ok else 1
             previous_secret = secret

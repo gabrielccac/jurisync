@@ -68,6 +68,30 @@ class LegacyNamesTest(unittest.TestCase):
         self.assertEqual(updates, {})
 
 
+class LoginRetryTest(unittest.TestCase):
+    def run_verify(self, results):
+        args = mock.Mock(no_login=False, register="none", servers="eproc")
+        calls = []
+
+        def fake_login(key):
+            calls.append(key)
+            return results.pop(0)
+
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(setup, "check_login", side_effect=fake_login),
+            mock.patch.object(setup, "wait_for_fresh_code"),
+        ):
+            failures = setup.verify_and_register(["tjrs-1g"], args, lambda _t: None)
+        return failures, calls
+
+    def test_a_timeout_is_retried_once_but_a_rejection_is_not(self):
+        failures, calls = self.run_verify([(False, "RuntimeError: Timed out waiting"), (True, "login ok")])
+        self.assertEqual((failures, len(calls)), (0, 2))
+        failures, calls = self.run_verify([(False, "RuntimeError: eproc rejected the username/password")])
+        self.assertEqual((failures, len(calls)), (1, 1))
+
+
 class RegistrationTest(unittest.TestCase):
     def test_desktop_registration_merges_and_backs_up(self):
         with tempfile.TemporaryDirectory() as directory:

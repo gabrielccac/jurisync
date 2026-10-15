@@ -42,6 +42,19 @@ def has(driver, selector, timeout=0.5):
         return False
 
 
+def page_hint(driver, limit=160):
+    """A short single-line excerpt of what the browser shows, for failure messages (never page source)."""
+    for selector in ("#input-error", ".alert-error", "#kc-error-message", ".alert", "body"):
+        try:
+            if has(driver, selector, 0.5):
+                text = " ".join((driver.get_text(selector) or "").split())
+                if text:
+                    return text[:limit]
+        except Exception:  # noqa: BLE001 - best effort diagnostics
+            continue
+    return ""
+
+
 def wait_for_step(driver, timeout=25):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -57,7 +70,8 @@ def wait_for_step(driver, timeout=25):
         ):
             return "login"
         time.sleep(0.25)
-    raise RuntimeError("Timed out waiting for the next eproc login step")
+    hint = page_hint(driver)
+    raise RuntimeError("Timed out waiting for the next eproc login step" + (f" (page: {hint})" if hint else ""))
 
 
 def submit_captcha(driver):
@@ -183,7 +197,8 @@ def login(username, password, account, *, portal):
             submit_captcha(driver)
             step = wait_for_step(driver)
         if step == "login":
-            raise RuntimeError("eproc rejected the username/password")
+            hint = page_hint(driver)
+            raise RuntimeError("eproc rejected the username/password" + (f" (page: {hint})" if hint else ""))
         if step == "otp":
             step = _submit_otp(driver, totp(account).now())
             if step == "otp":
