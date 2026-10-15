@@ -15,6 +15,10 @@ from dataclasses import dataclass, field
 CNJ = re.compile(r"^\d{7}-\d{2}\.\d{4}\.(\d)\.(\d{2})\.(\d{4})$")
 
 
+# Earlier (Portuguese) secret names still accepted; the canonical names match the PJe connector's.
+LEGACY_NAMES = {"USERNAME": ("USUARIO",), "PASSWORD": ("SENHA",), "2FA_DATA": ("EXPORT_DATA",)}
+
+
 @dataclass(frozen=True)
 class Portal:
     key: str  # unique within its system: "trf1-1g", "trf4-1g-sc"
@@ -27,6 +31,7 @@ class Portal:
     env_prefix: str = ""
     legacy_env_prefixes: tuple[str, ...] = ()
     region: str = ""  # CNJ "TR" segment, e.g. "01"
+    justice: str = "4"  # CNJ "J" segment: "4" federal (default), "8" state courts
     origins: tuple[str, ...] = field(default=())  # CNJ "OOOO" prefixes served by this portal
     wired: bool = True  # False: recognized, but no connector yet
 
@@ -40,7 +45,13 @@ class Portal:
 
     @property
     def login_url(self):
-        return self.url("login.seam" if self.system == "pje" else "externo_controlador.php")
+        if self.system == "pje":
+            return self.url("login.seam")
+        if self.system == "eproc":
+            # The Eproc root redirects to the SSO login. The externo_controlador.php
+            # path is 403-blocked on some deployments (e.g. TJRS behind Cloudflare).
+            return self.base_url
+        return self.url("externo_controlador.php")
 
     @property
     def search_url(self):
@@ -50,11 +61,12 @@ class Portal:
         return self.base_url + path.lstrip("/")
 
     def env(self, name, default=""):
-        """Read ``<PREFIX>_<name>``, falling back to legacy prefixes."""
+        """Read ``<PREFIX>_<name>``, falling back to legacy prefixes and legacy variable names."""
         for prefix in (self.env_prefix, *self.legacy_env_prefixes):
-            value = os.environ.get(f"{prefix}_{name}", "").strip()
-            if value:
-                return value
+            for candidate in (name, *LEGACY_NAMES.get(name, ())):
+                value = os.environ.get(f"{prefix}_{candidate}", "").strip()
+                if value:
+                    return value
         return default
 
     def env_name(self, name):
@@ -70,21 +82,24 @@ PORTALS = {
             "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_1G", region="05"
         ),
         Portal(
-            "trf4-1g-sc", "eproc", "TRF4", "1g", "eproc.jfsc.jus.br", "/eprocV2/", "browser_totp", "JFSC",
-            region="04", origins=("72",),
+            "trf4-1g-sc", "eproc", "TRF4", "1g", "eproc.jfsc.jus.br", "/eprocV2/", "browser_totp", "TRF4_1G_SC",
+            legacy_env_prefixes=("JFSC",), region="04", origins=("72",),
         ),
         Portal(
-            "trf4-1g-rs", "eproc", "TRF4", "1g", "eproc.jfrs.jus.br", "/eprocV2/", "browser_totp", "JFRS",
-            legacy_env_prefixes=("JRFS",), region="04", origins=("71",),
+            "trf4-1g-rs", "eproc", "TRF4", "1g", "eproc.jfrs.jus.br", "/eprocV2/", "browser_totp", "TRF4_1G_RS",
+            legacy_env_prefixes=("JFRS", "JRFS"), region="04", origins=("71",),
         ),
-        # TRF6 serves its Eproc under /eproc/ (not /eprocV2/); both instances share one account (TRF6_*).
+        # TRF6 serves its Eproc under /eproc/ (not /eprocV2/); both instances share one account (TRF6_*),
+        # so the prefix stays shared (intentional exception to prefix == key).
         Portal("trf6-1g", "eproc", "TRF6", "1g", "eproc1g.trf6.jus.br", "/eproc/", "browser_totp", "TRF6", region="06"),
         Portal("trf6-2g", "eproc", "TRF6", "2g", "eproc2g.trf6.jus.br", "/eproc/", "browser_totp", "TRF6", region="06"),
-        Portal("trf4-1g-pr", "eproc", "TRF4", "1g", "eproc.jfpr.jus.br", "/", "browser_totp", region="04",
-               origins=("70",), wired=False),
-        Portal("trf4-2g", "eproc", "TRF4", "2g", "eproc.trf4.jus.br", "/", "browser_totp", region="04",
-               wired=False),
-        Portal("tjrs-1g", "eproc", "TJRS", "1g", "eproc1g.tjrs.jus.br", "/", "browser_totp", wired=False),
+        Portal("trf4-1g-pr", "eproc", "TRF4", "1g", "eproc.jfpr.jus.br", "/", "browser_totp", "TRF4_1G_PR",
+               legacy_env_prefixes=("JFPR",), region="04", origins=("70",), wired=False),
+        Portal("trf4-2g", "eproc", "TRF4", "2g", "eproc.trf4.jus.br", "/", "browser_totp", "TRF4_2G",
+               region="04", wired=False),
+        # TJRS serves its Eproc under /eproc/ (public document links use it); state justice is CNJ J=8, TR=21.
+        Portal("tjrs-1g", "eproc", "TJRS", "1g", "eproc1g.tjrs.jus.br", "/eproc/", "browser_totp", "TJRS_1G",
+               legacy_env_prefixes=("TJRS",), region="21", justice="8", wired=True),
         Portal("stj", "stj", "STJ", "2g", "processo.stj.jus.br", "/", "none", wired=False),
     )
 }  # fmt: skip
@@ -132,10 +147,8 @@ def for_process(number):
     if not match:
         return []
     justice, region, origin = match.groups()
-    if justice != "4":  # federal justice only, for now
-        return []
-    federal = [portal for portal in PORTALS.values() if portal.region == region]
-    by_origin = [portal for portal in federal if any(origin.startswith(prefix) for prefix in portal.origins)]
+    candidates = [portal for portal in PORTALS.values() if portal.justice == justice and portal.region == region]
+    by_origin = [portal for portal in candidates if any(origin.startswith(prefix) for prefix in portal.origins)]
     if by_origin:
         return by_origin
-    return [portal for portal in federal if not portal.origins]
+    return [portal for portal in candidates if not portal.origins]

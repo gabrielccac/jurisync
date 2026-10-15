@@ -24,9 +24,9 @@ LOGIN_FIELDS = {
 def portal_totp_account(portal):
     """Select this portal's TOTP account from its own authenticator export."""
     portal = portals.eproc(portal)
-    data = portal.env("EXPORT_DATA")
+    data = portal.env("2FA_DATA")
     if not data:
-        raise RuntimeError(f"Set {portal.env_name('EXPORT_DATA')} in .env")
+        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} in .env")
     return select_account(
         parse_accounts(data),
         match=portal.env("OTP_PROFILE_MATCH"),

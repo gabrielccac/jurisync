@@ -29,6 +29,7 @@ jurisync-eproc = "jurisync.connectors.eproc.server:main"
 jurisync-juridiq = "jurisync.connectors.juridiq.server:main"
 jurisync-inss = "jurisync.connectors.inss.server:main"
 jurisync-http = "jurisync.serve:main"
+jurisync-setup = "jurisync.setup:main"
 
 [project.optional-dependencies]
 # Local speech-to-text for audio documents. av is pinned: faster-whisper 1.1.1 needs av < 14.

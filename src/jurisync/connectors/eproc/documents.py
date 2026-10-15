@@ -72,9 +72,9 @@ def _wrapper_implementation(wrapper, wrapper_url):
 
 
 def _inventory(process):
-    documents = list(process.get("documentos") or process.get("documentInventory") or [])
-    for event in process.get("eventos", []):
-        documents.extend(event.get("documentos", []))
+    documents = list(process.get("documents") or process.get("documentInventory") or [])
+    for event in process.get("events", []):
+        documents.extend(event.get("documents", []))
     known = {}
     for document in documents:
         identifier = document.get("id")
@@ -89,7 +89,7 @@ def _inventory(process):
 def _item(document):
     return {
         "id": document["id"],
-        "title": document.get("titulo") or document.get("nome", ""),
+        "title": document.get("title") or document.get("name", ""),
         "status": None,
         "content_type": "",
         "format": "",
@@ -105,7 +105,7 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
     if process.get("success") is False:
         raise ValueError("A successful eproc process result is required")
     base_url = portals.eproc(portal).base_url
-    number = process.get("numero") or process.get("numero_processo") or ""
+    number = process.get("number") or process.get("processNumber") or ""
     if not isinstance(number, str):
         raise ValueError("The process number is required")
     validate_document_ids(document_ids)

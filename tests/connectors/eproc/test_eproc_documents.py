@@ -19,7 +19,7 @@ def reply(body, status=200, content_type="text/html"):
 
 
 def process(url=WRAPPER):
-    return {"success": True, "numero": NUMBER, "documentos": [{"id": "9", "titulo": "A", "url": url}]}
+    return {"success": True, "number": NUMBER, "documents": [{"id": "9", "title": "A", "url": url}]}
 
 
 class EprocDocumentTests(unittest.TestCase):

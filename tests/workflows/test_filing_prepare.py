@@ -30,6 +30,7 @@ FACTS = {
     "classification": {"jurisdiction": "PE / Petrolina", "judicialClass": "CLASS"},
     "subject": {"search": "TEST", "code": "1", "name": "TEST"},
     "characteristics": {"claimValue": "5.000,00"},
+    "fiscalDaLei": False,
 }
 
 
@@ -193,6 +194,20 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(payload["classification"]["jurisdiction"], "PE / Petrolina")
         with self.assertRaisesRegex(ValueError, "claimValue"):
             build_payload({**FACTS, "characteristics": {"claimValue": "0"}}, {}, PROFILE.defaults())
+
+    def test_fiscal_da_lei_is_conditional_and_ceab_is_fixed(self):
+        def bodies(facts):
+            payload = build_payload(facts, {}, PROFILE.defaults())
+            return [(body["role"], "when" in body) for body in payload["otherParticipants"]]
+
+        self.assertEqual(bodies(FACTS), [("ÓRGÃO DE CUMPRIMENTO", False)])
+        self.assertEqual(
+            bodies({**FACTS, "fiscalDaLei": True}),
+            [("ÓRGÃO DE CUMPRIMENTO", False), ("FISCAL DA LEI", False)],
+        )
+        missing = {key: value for key, value in FACTS.items() if key != "fiscalDaLei"}
+        with self.assertRaisesRegex(ValueError, "fiscalDaLei"):
+            build_payload(missing, {}, PROFILE.defaults())
 
     def test_review_finalizer_requires_resolution_and_verifies_pdf_contents(self):
         with tempfile.TemporaryDirectory() as directory:

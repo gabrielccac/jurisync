@@ -95,10 +95,26 @@ def require_facts(facts, defaults):
             raise ValueError(f"characteristics.{key} must be a boolean")
 
 
+def select_other_participants(participants, facts):
+    """Keep fixed bodies; keep a conditional body only when its case fact is true (e.g. fiscalDaLei)."""
+    selected = []
+    for participant in participants:
+        body = {key: value for key, value in participant.items() if key != "when"}
+        condition = participant.get("when")
+        if not condition:
+            selected.append(body)
+            continue
+        if not isinstance(facts.get(condition), bool):
+            raise ValueError(f"{condition} (true or false) is required to decide {participant['name']}")
+        if facts[condition]:
+            selected.append(body)
+    return selected
+
+
 def build_payload(facts, documents, defaults):
     require_facts(facts, defaults)
     author = facts["author"]
-    return {
+    payload = {
         **defaults,
         "classification": {"area": "DIREITO PREVIDENCIÁRIO", **facts["classification"]},
         "subjects": facts.get("subjects") or [facts["subject"]],
@@ -111,6 +127,9 @@ def build_payload(facts, documents, defaults):
         },
         "documents": documents,
     }
+    if "otherParticipants" in defaults:
+        payload["otherParticipants"] = select_other_participants(defaults["otherParticipants"], facts)
+    return payload
 
 
 def apply_supporting_fallback(classification, uncertain_type="Outros Documentos"):

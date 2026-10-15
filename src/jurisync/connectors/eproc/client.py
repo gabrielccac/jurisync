@@ -30,10 +30,19 @@ from jurisync.core.redaction import drop_keys
 
 TIMEOUT = 30
 REDIRECTS = {301, 302, 303, 307, 308}
-QUEUE_ACTIONS = {
-    "citacao_intimacao_prazo_aberto_listar",
-    "citacao_intimacao_pendente_listar",
+# Read-only citation/intimation queues, keyed by the tool's `queue` argument.
+# The panel advertises which of these a deployment exposes; the extra kinds are
+# the same "process list" layout as pending/open_deadlines.
+QUEUE_KINDS = {
+    "open_deadlines": "citacao_intimacao_prazo_aberto_listar",
+    "pending": "citacao_intimacao_pendente_listar",
+    "pending_urgent": "citacao_intimacao_pendente_listar_urgente",
+    "pending_agreement": "citacao_intimacao_pendente_listar_acordo",
+    "art334": "citacao_art334_pendente_listar",
+    "expired_deadline": "citacao_intimacao_decurso_prazo_listar",
+    "hearing_notice": "intimacao_de_pauta_listar",
 }
+QUEUE_ACTIONS = set(QUEUE_KINDS.values())
 READ_ACTIONS = QUEUE_ACTIONS | {
     "painel_adv_listar",
     "processo_pesquisa_rapida",
@@ -41,6 +50,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "processo_consulta_listar",
     "acessar_documento",
     "acessar_documento_implementacao",
+    "processo_selecionar_pagina",  # TJRS pages the event table through the process page instead of ajax
 }
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
 CNJ = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
@@ -135,9 +145,9 @@ def request(session, method, url, *, data=None, ajax=False, portal):
 
 def _credentials(portal):
     config = portals.eproc(portal)
-    username, password = config.env("USUARIO"), config.env("SENHA")
+    username, password = config.env("USERNAME"), config.env("PASSWORD")
     if not username or not password:
-        raise RuntimeError(f"Set {config.env_name('USUARIO')} and {config.env_name('SENHA')} in .env")
+        raise RuntimeError(f"Set {config.env_name('USERNAME')} and {config.env_name('PASSWORD')} in .env")
     return username, password
 
 
@@ -157,13 +167,18 @@ def _first(mapping, *keys):
 
 
 def _panel_endpoint(panel, queue):
-    action = {
-        "open_deadlines": "citacao_intimacao_prazo_aberto_listar",
-        "pending": "citacao_intimacao_pendente_listar",
-    }[queue]
+    action = QUEUE_KINDS.get(queue)
+    if action is None:
+        raise ValueError(f"queue must be one of {', '.join(QUEUE_KINDS)}")
     if isinstance(panel, dict):
         queues = _first(panel, "queues", "filas", "queueUrls", "queue_urls") or {}
         value = queues.get(queue) if isinstance(queues, dict) else None
+        if isinstance(value, dict):
+            value = _first(value, "url", "href")
+        if value:
+            return value
+        advertised = panel.get("actions") or panel.get("queueActions") or {}
+        value = advertised.get(action) if isinstance(advertised, dict) else None
         if isinstance(value, dict):
             value = _first(value, "url", "href")
         if value:
@@ -198,7 +213,7 @@ def _search_endpoint(panel_html, panel):
     raise RuntimeError("Authenticated panel did not expose a complete quick process search form")
 
 
-REDACTED_KEYS = {"url", "href", "hash", "action", "requesturl", "request_url", "key", "evento", "mesmograu"}
+REDACTED_KEYS = {"url", "href", "hash", "action", "requesturl", "request_url", "key", "event", "sameinstance"}
 
 
 def _redact(value):
@@ -208,8 +223,8 @@ def _redact(value):
 
 def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal):
     portal = portals.eproc(portal).key  # aliases in, current key out
-    if queue not in ("open_deadlines", "pending"):
-        raise ValueError("queue must be open_deadlines or pending")
+    if queue not in QUEUE_KINDS:
+        raise ValueError(f"queue must be one of {', '.join(QUEUE_KINDS)}")
     owned = session is None
     if owned:
         session, panel_html, panel_url = authenticate(portal)
@@ -250,7 +265,7 @@ def _latest(events):
         return []
 
     def day(item):
-        value = item.get("dataHora", item.get("date", "")) if isinstance(item, dict) else ""
+        value = item.get("dateTime", item.get("date", "")) if isinstance(item, dict) else ""
         return (
             re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", str(value)).group(0)
             if re.search(r"\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}", str(value))
@@ -267,7 +282,7 @@ def _merge_events(existing, incoming):
     for event in [*existing, *incoming]:
         if not isinstance(event, dict):
             continue
-        marker = event.get("id") or (event.get("dataHora"), event.get("descricao"), event.get("label"))
+        marker = event.get("id") or (event.get("dateTime"), event.get("description"), event.get("label"))
         if marker in seen:
             continue
         seen.add(marker)
@@ -296,7 +311,7 @@ def _event_pages(session, detail_url, detail, initial_events, *, portal):
         parsed = parse_event_response(body, portals.eproc(portal).base_url)
         if not isinstance(parsed, dict):
             raise RuntimeError("event_refresh_failed")
-        events = _merge_events(events, parsed.get("eventos", parsed.get("events", [])))
+        events = _merge_events(events, parsed.get("events", []))
         pagination = dict(parsed.get("pagination") or {})
         pagination["loadedPages"] = 1
         next_url = pagination.get("url")
@@ -304,16 +319,19 @@ def _event_pages(session, detail_url, detail, initial_events, *, portal):
         if next_url and isinstance(total, int) and total > 1:
             for page in range(1, min(total, MAX_EVENT_PAGES)):
                 page_url = urljoin(event_url, next_url)
-                require_route(page_url, AJAX_ACTIONS, ajax=True, portal=portal)
+                page_ajax = "acao_ajax=" in page_url
+                require_route(page_url, AJAX_ACTIONS if page_ajax else READ_ACTIONS, ajax=page_ajax, portal=portal)
                 page_data = dict(data)
                 page_data["pagina"] = str(page)
-                page_response, page_body = request(session, "POST", page_url, data=page_data, ajax=True, portal=portal)
+                page_response, page_body = request(
+                    session, "POST", page_url, data=page_data, ajax=page_ajax, portal=portal
+                )
                 if page_response.status_code != 200 or _response_error(page_response, page_body):
                     raise RuntimeError("event_refresh_failed")
                 page_result = parse_event_response(page_body, portals.eproc(portal).base_url)
                 if not isinstance(page_result, dict):
                     raise RuntimeError("event_refresh_failed")
-                events = _merge_events(events, page_result.get("eventos", page_result.get("events", [])))
+                events = _merge_events(events, page_result.get("events", []))
                 pagination = dict(page_result.get("pagination") or pagination)
                 pagination["loadedPages"] = page + 1
                 next_url = pagination.get("url", next_url)
@@ -390,7 +408,7 @@ def fetch_process(
                 "diagnostics": [error],
             }
         detail = parse_process_detail(detail_body, base_url)
-        if detail.get("numero") != process_number:
+        if detail.get("number") != process_number:
             return {
                 "success": False,
                 "source": "eproc",
@@ -399,16 +417,16 @@ def fetch_process(
                 "diagnostics": ["process_not_found"],
             }
         events, pagination, event_diagnostics = _event_pages(
-            session, detail_url, detail, detail.get("eventos", []), portal=portal
+            session, detail_url, detail, detail.get("events", []), portal=portal
         )
         selected_events = _latest(events) if scope == "latest" else events
-        documents = {document.get("id"): document for document in detail.get("documentos", []) if document.get("id")}
+        documents = {document.get("id"): document for document in detail.get("documents", []) if document.get("id")}
         for event in events:
-            for document in event.get("documentos", []):
+            for document in event.get("documents", []):
                 if document.get("id"):
                     documents[document["id"]] = document
         document_inventory = list(documents.values())
-        internal = {**detail, "eventos": selected_events, "documentos": document_inventory}
+        internal = {**detail, "events": selected_events, "documents": document_inventory}
         attachments = []
         if document_ids is not None:
             if read_selected_documents is None:
@@ -419,15 +437,19 @@ def fetch_process(
             "source": "eproc",
             "portal": portal,
             "processNumber": process_number,
-            "numero": detail.get("numero", process_number),
             "scope": scope,
             "scopeSemantics": "latest_date_bucket" if scope == "latest" else "first_timeline_page",
             "metadata": {
-                key: value
-                for key, value in detail.items()
-                if key not in {"partes", "eventos", "documentos", "eventRequest"}
+                **{
+                    key: value
+                    for key, value in detail.items()
+                    if key not in {"parties", "events", "documents", "eventRequest"}
+                },
+                # Counts cover every loaded event page, not just the first one.
+                "eventCount": len(events),
+                "documentCount": len(document_inventory),
             },
-            "parties": detail.get("partes", []),
+            "parties": detail.get("parties", []),
             "timeline": selected_events,
             "documentInventory": document_inventory,
             "attachments": attachments,

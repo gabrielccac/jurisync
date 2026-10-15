@@ -16,7 +16,7 @@ resultado é o rascunho abaixo, para a Elisandra aprovar.
    identificado" e onde procurou.
 2. **Classifique pelo teor** do ato (documento/descrição do evento), não pelo título da
    comunicação.
-3. **Prazo**: o `finalPrazo` da fila do eproc (`eproc_list_notices`); sem ele, os dias do
+3. **Prazo**: o `deadlineEnd` da fila do eproc (`eproc_list_notices`); sem ele, os dias do
    evento "Expedida/certificada a intimação eletrônica" ou do documento, e diga que a data
    final depende da ciência. Prazo pendente sem ciência não tem data final.
 4. **Dados pessoais mínimos** na descrição: número do processo e fatos do ato; o nome do
@@ -31,8 +31,8 @@ resultado é o rascunho abaixo, para a Elisandra aprovar.
    tribunal): TRF4 (eproc JFRS/JFSC), TJRS, TRT4, TRF3. Pagine até `count`, deduplique por
    `id`, use `compact=true`.
 2. **Portal**: pelo número CNJ (`portals.for_process`): origem 71xx = `trf4-1g-rs`,
-   72xx = `trf4-1g-sc`. TJRS, TRT4 e TRF3 não têm enriquecimento ligado: informe só o
-   texto DJEN.
+   72xx = `trf4-1g-sc`; justiça estadual 8.21 = `tjrs-1g`. TRT4 e TRF3 não têm enriquecimento
+   ligado: informe só o texto DJEN.
 3. **Eproc**: `eproc_get_process` (`scope=page`) e `eproc_list_notices` (`open_deadlines`
    e `pending`). Veja `references/enriquecimento-eproc.md`.
 4. **Rascunho**: `references/rascunhos.md` (tipos de ato, descrição, prazo, anexos).

@@ -277,7 +277,7 @@ class DjenChecks(unittest.TestCase):
                 "numero_processo": "52375895520248210001",
             }
         )
-        self.assertEqual((tjrs["system"], tjrs["portal"], tjrs["wired"]), ("eproc", "tjrs-1g", False))
+        self.assertEqual((tjrs["system"], tjrs["portal"], tjrs["wired"]), ("eproc", "tjrs-1g", True))
         stj = documents.resolve_portal(
             {
                 "link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1",
@@ -329,9 +329,9 @@ class DjenChecks(unittest.TestCase):
         self.assertIn(b"doc", blob)
 
     def test_fetch_attachments_guards(self):
-        tjrs = {"link": "https://eproc1g.tjrs.jus.br/eproc/x", "numero_processo": "52375895520248210001"}
+        stj = {"link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1", "numero_processo": "52313092320248217000"}
         with self.assertRaisesRegex(ValueError, "sem conector"):
-            documents.fetch_attachments(tjrs, session=object(), document_ids=["1"])
+            documents.fetch_attachments(stj, session=object(), document_ids=["1"])
         jfrs = {"link": "https://eproc.jfrs.jus.br/eprocV2/x", "numeroprocessocommascara": "5012366-88.2025.4.04.7104"}
         with self.assertRaisesRegex(ValueError, "session"):
             documents.fetch_attachments(jfrs, document_ids=["1"])

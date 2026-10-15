@@ -12,7 +12,14 @@ from selenium.common.exceptions import WebDriverException
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER
-from jurisync.connectors.eproc.client import _response_error, authenticate, fetch_process, list_notices, request
+from jurisync.connectors.eproc.client import (
+    QUEUE_KINDS,
+    _response_error,
+    authenticate,
+    fetch_process,
+    list_notices,
+    request,
+)
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
 
@@ -34,7 +41,7 @@ sessions = SessionPool(login=authenticate, refresh=refresh_panel, close=lambda v
 def configured_portals():
     """Eproc portals whose credentials are set; all wired portals when none are."""
     keys = portals.keys("eproc")
-    ready = tuple(key for key in keys if portals.eproc(key).env("USUARIO") and portals.eproc(key).env("EXPORT_DATA"))
+    ready = tuple(key for key in keys if portals.eproc(key).env("USERNAME") and portals.eproc(key).env("2FA_DATA"))
     return ready or keys
 
 
@@ -45,6 +52,7 @@ def describe(keys):
 def create_server(keys=None):
     keys = tuple(keys or configured_portals())
     Portal = Literal[keys]  # noqa: N806 - a type built from the configured portals
+    Queue = Literal[tuple(QUEUE_KINDS)]  # noqa: N806 - a type built from the queue kinds
     server = MCPServer("eproc", version="1.0.0")
 
     def call(portal, read):
@@ -56,10 +64,14 @@ def create_server(keys=None):
     @server.tool(
         name="eproc_list_notices",
         title="List Eproc notices",
-        description=f"Read one Eproc portal's open-deadline or pending citation/intimation queue. Portals: {describe(keys)}. Read-only.",
+        description=(
+            "Read one citation/intimation queue of an Eproc portal. queue kinds: "
+            + ", ".join(QUEUE_KINDS)
+            + f". Portals: {describe(keys)}. Read-only."
+        ),
         annotations=READ_ONLY,
     )
-    def eproc_list_notices(portal: Portal, queue: Literal["open_deadlines", "pending"]) -> dict[str, Any]:
+    def eproc_list_notices(portal: Portal, queue: Queue) -> dict[str, Any]:
         return call(portal, lambda **context: list_notices(queue, **context))
 
     @server.tool(

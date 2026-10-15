@@ -45,26 +45,39 @@ class EprocAuthTests(unittest.TestCase):
 
     def test_portal_credentials_are_isolated(self):
         environment = {
-            "JFSC_USUARIO": "jfsc-user",
-            "JFSC_SENHA": "jfsc-pass",
-            "JRFS_USUARIO": "jrfs-user",
-            "JRFS_SENHA": "jrfs-pass",
+            "TRF4_1G_SC_USERNAME": "sc-user",
+            "TRF4_1G_SC_PASSWORD": "sc-pass",
+            "TRF4_1G_RS_USERNAME": "rs-user",
+            "TRF4_1G_RS_PASSWORD": "rs-pass",
         }
         with patch.dict("os.environ", environment, clear=True):
+            self.assertEqual(client._credentials("jfsc"), ("sc-user", "sc-pass"))
+            self.assertEqual(client._credentials("jfrs"), ("rs-user", "rs-pass"))
+
+        # Legacy prefixes (JFSC_*, JFRS_*, JRFS_*) still resolve when the canonical names are absent.
+        with patch.dict(
+            "os.environ",
+            {
+                "JFSC_USUARIO": "jfsc-user",
+                "JFSC_SENHA": "jfsc-pass",
+                "JRFS_USUARIO": "jrfs-user",
+                "JRFS_SENHA": "jrfs-pass",
+            },
+            clear=True,
+        ):
             self.assertEqual(client._credentials("jfsc"), ("jfsc-user", "jfsc-pass"))
-            # Legacy JRFS_* variables still work for the jfrs portal.
             self.assertEqual(client._credentials("jfrs"), ("jrfs-user", "jrfs-pass"))
 
         with (
             patch.dict(
                 "os.environ",
                 {
-                    "JFSC_USUARIO": "jfsc-user",
-                    "JFSC_SENHA": "jfsc-pass",
+                    "TRF4_1G_SC_USERNAME": "sc-user",
+                    "TRF4_1G_SC_PASSWORD": "sc-pass",
                 },
                 clear=True,
             ),
-            self.assertRaisesRegex(RuntimeError, "JFRS_USUARIO"),
+            self.assertRaisesRegex(RuntimeError, "TRF4_1G_RS_USERNAME"),
         ):
             client._credentials("jfrs")
 

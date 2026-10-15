@@ -72,10 +72,10 @@ class EprocClientTests(unittest.TestCase):
                 client,
                 "parse_process_detail",
                 return_value={
-                    "numero": NUMBER,
-                    "partes": [{"nome": "Parte"}],
-                    "eventos": [],
-                    "documentos": [],
+                    "number": NUMBER,
+                    "parties": [{"name": "Parte"}],
+                    "events": [],
+                    "documents": [],
                     "hash": "secret",
                     "eventRequest": {
                         "url": "controlador_ajax.php?acao_ajax=montar_tabela_eventos_filtrados&hash=opaque",
@@ -84,7 +84,7 @@ class EprocClientTests(unittest.TestCase):
                 },
             ),
             patch.object(
-                client, "parse_event_response", return_value={"eventos": [], "pagination": {"complete": True}}
+                client, "parse_event_response", return_value={"events": [], "pagination": {"complete": True}}
             ),
         ):
             result = client.fetch_process(NUMBER, session=session, panel_html="", panel_url=BASE, portal="jfsc")
@@ -151,7 +151,7 @@ class EprocClientTests(unittest.TestCase):
             patch.object(
                 client,
                 "parse_process_detail",
-                return_value={"numero": "0000002-23.2026.4.04.7207", "eventos": [], "documentos": []},
+                return_value={"number": "0000002-23.2026.4.04.7207", "events": [], "documents": []},
             ),
         ):
             result = client.fetch_process(NUMBER, session=session, panel_html="", panel_url=BASE, portal="jfsc")
@@ -170,7 +170,7 @@ class EprocClientTests(unittest.TestCase):
                 client,
                 "parse_process_list_page",
                 return_value={
-                    "items": [{"numero": NUMBER, "url": "https://eproc.jfsc.jus.br/private?hash=x"}],
+                    "items": [{"number": NUMBER, "url": "https://eproc.jfsc.jus.br/private?hash=x"}],
                     "pagination": {"page": 0, "totalItems": 8, "itemCount": 1, "complete": False},
                 },
             ),
@@ -201,19 +201,19 @@ class EprocClientTests(unittest.TestCase):
             }
         }
         detail = {
-            "numero": NUMBER,
-            "partes": [],
-            "documentos": [],
-            "eventos": [{"id": "1", "descricao": "detail"}],
+            "number": NUMBER,
+            "parties": [],
+            "documents": [],
+            "events": [{"id": "1", "description": "detail"}],
             "eventRequest": {"url": event_url, "data": {"filtro": "on"}},
         }
         parsed = [
             {
-                "eventos": [{"id": "1", "descricao": "ajax"}],
+                "events": [{"id": "1", "description": "ajax"}],
                 "pagination": {"url": event_url, "totalPages": 2, "complete": False},
             },
             {
-                "eventos": [{"id": "2", "descricao": "page 1", "documentos": [{"id": "12"}]}],
+                "events": [{"id": "2", "description": "page 1", "documents": [{"id": "12"}]}],
                 "pagination": {"url": event_url, "totalPages": 2, "complete": True},
             },
         ]
@@ -251,15 +251,15 @@ class EprocClientTests(unittest.TestCase):
             }
         }
         detail = {
-            "numero": NUMBER,
-            "partes": [],
-            "eventos": [],
-            "documentos": [
+            "number": NUMBER,
+            "parties": [],
+            "events": [],
+            "documents": [
                 {
                     "id": "9",
                     "key": "secret",
-                    "evento": "7",
-                    "mesmoGrau": "S",
+                    "event": "7",
+                    "sameInstance": "S",
                     "hash": "h",
                     "url": "https://eproc.jfsc.jus.br/eprocV2/controlador.php?acao=acessar_documento&hash=h",
                 }
@@ -292,6 +292,16 @@ class EprocClientTests(unittest.TestCase):
                 url.replace("montar_tabela_eventos_filtrados", "delete"), client.AJAX_ACTIONS, ajax=True, portal="jfsc"
             )
 
+    def test_event_pagination_through_the_process_page_is_a_read_action(self):
+        """TJRS pages the event table with controlador.php?acao=processo_selecionar_pagina, not ajax."""
+        from jurisync import portals
+
+        base = portals.eproc("tjrs-1g").base_url
+        url = base + "controlador.php?acao=processo_selecionar_pagina&num_processo=1&hash=x"
+        self.assertEqual(client.require_route(url, portal="tjrs-1g"), url)
+        with self.assertRaises(RuntimeError):
+            client.require_route(url.replace("processo_selecionar_pagina", "processo_excluir"), portal="tjrs-1g")
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -304,3 +314,21 @@ class PortalRootTest(unittest.TestCase):
 
         self.assertEqual(controller_path(portals.eproc("trf4-1g-sc")), "/eprocV2/controlador.php")
         self.assertEqual(controller_path(portals.eproc("trf6-1g"), ajax=True), "/eproc/controlador_ajax.php")
+
+
+class QueueKindsTest(unittest.TestCase):
+    def test_new_kinds_resolve_from_panel_actions(self):
+        url = "controlador.php?acao=citacao_intimacao_pendente_listar_urgente&hash=x"
+        panel = {"actions": {"citacao_intimacao_pendente_listar_urgente": url}}
+        self.assertEqual(client._panel_endpoint(panel, "pending_urgent"), url)
+        # Back-compat: legacy "queues" shape still resolves pending/open_deadlines.
+        legacy = {"queues": {"pending": "controlador.php?acao=citacao_intimacao_pendente_listar&hash=y"}}
+        self.assertIn("hash=y", client._panel_endpoint(legacy, "pending"))
+
+    def test_unknown_kind_is_rejected(self):
+        with self.assertRaises(ValueError):
+            client.list_notices("bogus", session=Session([]), panel_html="", panel_url=BASE, portal="jfsc")
+
+    def test_panel_endpoint_without_advertised_action_raises(self):
+        with self.assertRaises(RuntimeError):
+            client._panel_endpoint({}, "pending_urgent")
