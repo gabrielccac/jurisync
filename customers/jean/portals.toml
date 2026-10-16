@@ -9,6 +9,8 @@ secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA"]
 method = "password_totp"
 secrets = ["PJE_2G_USERNAME", "PJE_2G_PASSWORD", "PJE_2G_2FA_DATA"]
 
-# Juridiq belongs to no portal.
+# Juridiq and INSS-GERID belong to no portal. GERID signs in with an A3 certificate (PIN typed on the
+# machine) plus this authenticator secret, so it is registered but not login-tested during import.
 [env]
-secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]
+secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD", "INSS_GERID_TOTP_SECRET|INSS_GERID_QR_IMAGE"]
+optional = ["INSS_GERID_TOTP_ACCOUNT"]

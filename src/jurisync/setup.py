@@ -29,6 +29,7 @@ SERVERS = {
     "pje": "jurisync-pje",
     "advbox": "jurisync-advbox",
     "juridiq": "jurisync-juridiq",
+    "inss": "jurisync-inss",
     "djen": "jurisync-djen",
 }
 FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
@@ -399,6 +400,10 @@ def export_main(argv, *, ask_secret, say):
             files[path.name] = path.read_bytes()
             file_vars[name] = path.name
             selected[name] = path.name
+        elif name == "INSS_GERID_QR_IMAGE":
+            if "INSS_GERID_TOTP_SECRET" not in selected and path.is_file():
+                selected["INSS_GERID_TOTP_SECRET"] = qr_text(path)
+            del selected[name]
         elif name.endswith("_2FA_QR"):
             data_name = name.removesuffix("_2FA_QR") + "_2FA_DATA"
             if data_name not in selected and path.is_file():
@@ -413,7 +418,10 @@ def export_main(argv, *, ask_secret, say):
         checks.append("advbox")
     if any(name.startswith("JURIDIQ_") for name in selected):
         checks.append("juridiq")
-    servers = sorted({check.split(":")[0] for check in checks} | {"djen"})
+    servers = {check.split(":")[0] for check in checks} | {"djen"}
+    if any(name.startswith("INSS_") for name in selected):
+        servers.add("inss")  # no login check: the A3 certificate asks for its PIN on the first real use
+    servers = sorted(servers)
 
     if args.ask_passphrase:
         passphrase = ask_secret("Senha do pacote: ")
@@ -471,6 +479,10 @@ def import_main(argv, *, ask_secret, say, stdin=None):
                 output.write(raw)
         for variable, name in opened["file_vars"].items():
             values[variable] = str(directory / Path(name).name)
+    if any(name.startswith("INSS_") for name in values):
+        # The default locations sit inside the installed package; keep the Chrome profile and downloads with the config.
+        values.setdefault("INSS_BROWSER_PROFILE", str(env_file.parent / "inss-browser-profile"))
+        values.setdefault("INSS_DOWNLOAD_DIR", str(env_file.parent / "inss-downloads"))
     write_env(env_file, values)
     os.environ.update(values)
     say(f"Credenciais instaladas em {env_file} (somente o seu usuário lê esse arquivo).")

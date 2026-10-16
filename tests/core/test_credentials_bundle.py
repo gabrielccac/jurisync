@@ -180,3 +180,23 @@ class CertificateCustomerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_inss_customer_bundle_registers_server_and_keeps_chrome_profile_with_config(tmp_path, monkeypatch):
+    from jurisync import credentials_bundle, setup
+
+    customers = tmp_path / "customers" / "jeanx"
+    customers.mkdir(parents=True)
+    (customers / "portals.toml").write_text(
+        '[env]\nsecrets = ["INSS_GERID_TOTP_SECRET"]\n', encoding="utf-8"
+    )
+    (customers / ".env").write_text("INSS_GERID_TOTP_SECRET=otpauth://totp/x?secret=ABC\n", encoding="utf-8")
+    monkeypatch.setenv("JURISYNC_CUSTOMERS_DIR", str(tmp_path / "customers"))
+    monkeypatch.setenv("JURISYNC_ENV_FILE", str(tmp_path / "none.env"))
+    out = tmp_path / "b.jurisync"
+    lines = []
+    setup.export_main(["--customer", "jeanx", "--out", str(out)], ask_secret=None, say=lines.append)
+    passphrase = lines[-1].rsplit(": ", 1)[1]
+    opened = credentials_bundle.unseal(out.read_text(encoding="utf-8"), passphrase)
+    assert "inss" in opened["servers"]
+    assert opened["checks"] == []
