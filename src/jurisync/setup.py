@@ -28,6 +28,7 @@ SERVERS = {
     "eproc": "jurisync-eproc",
     "pje": "jurisync-pje",
     "advbox": "jurisync-advbox",
+    "juridiq": "jurisync-juridiq",
     "djen": "jurisync-djen",
 }
 FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
@@ -182,8 +183,19 @@ def check_advbox():
     return True, "sessão ok"
 
 
+def check_juridiq():
+    """Log in to Juridiq with the stored e-mail and password."""
+    from jurisync.connectors.juridiq.api import JuridiqApi
+
+    try:
+        JuridiqApi().token(force_refresh=True)
+    except Exception as error:  # noqa: BLE001
+        return False, f"{type(error).__name__}: {str(error)[:140]}"
+    return True, "sessão ok"
+
+
 def run_check(check):
-    """``eproc:<portal>``, ``pje:<portal>`` or ``advbox`` → (ok, message)."""
+    """``eproc:<portal>``, ``pje:<portal>``, ``advbox`` or ``juridiq`` → (ok, message)."""
     system, _, key = check.partition(":")
     if system == "eproc":
         return check_login(key)
@@ -191,6 +203,8 @@ def run_check(check):
         return check_pje(key)
     if system == "advbox":
         return check_advbox()
+    if system == "juridiq":
+        return check_juridiq()
     return False, f"verificação desconhecida: {check}"
 
 
@@ -397,6 +411,8 @@ def export_main(argv, *, ask_secret, say):
             checks.append(f"{system}:{key}")
     if any(name.startswith("ADVBOX_") for name in selected):
         checks.append("advbox")
+    if any(name.startswith("JURIDIQ_") for name in selected):
+        checks.append("juridiq")
     servers = sorted({check.split(":")[0] for check in checks} | {"djen"})
 
     if args.ask_passphrase:

@@ -1,0 +1,14 @@
+# Jean's portal access. Method and secret names only; the values go in the gitignored
+# customers/jean/.env (or the shared repository .env). "A|B" means either variable is enough.
+
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA"]
+
+[trf1-2g]
+method = "password_totp"
+secrets = ["PJE_2G_USERNAME", "PJE_2G_PASSWORD", "PJE_2G_2FA_DATA"]
+
+# Juridiq belongs to no portal.
+[env]
+secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]
