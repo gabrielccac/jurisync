@@ -1,4 +1,4 @@
-"""PJe MCP server: TRF1/TRF5 process context, the Expedientes panel, Push, and TRF5 drafts.
+"""PJe MCP server: TRF1/TRF5/TJAP process context, the Expedientes panel, Push, and TRF5 drafts.
 
 Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
@@ -24,7 +24,12 @@ from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, 
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
 
-Portal = Literal["trf1-1g", "trf1-2g", "trf5-1g"]
+Portal = Annotated[
+    Literal["trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"],
+    Field(
+        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'tjap-1g' (TJAP 1º grau, password login)."
+    ),
+]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
 DraftReadStage = Literal["classification", "subject-options", "pending"]
 DraftWriteStage = Literal[
@@ -68,10 +73,23 @@ def _notifications(portal, read):
     annotations=READ_ONLY,
 )
 def get_process(
-    processNumber: Annotated[str, Field(min_length=1)],
+    processNumber: Annotated[
+        str, Field(min_length=1, description="CNJ process number with punctuation, e.g. '0005231-50.2026.4.05.8203'.")
+    ],
     portal: Portal,
-    scope: Literal["latest", "page", "all"] = "page",
-    documentIds: Annotated[list[Annotated[str, Field(min_length=1)]], Field(max_length=5)] = [],
+    scope: Annotated[
+        Literal["latest", "page", "all"],
+        Field(
+            description="'page' (default): first timeline page. 'latest': newest date only. 'all': merges bounded pages, slower."
+        ),
+    ] = "page",
+    documentIds: Annotated[
+        list[Annotated[str, Field(min_length=1)]],
+        Field(
+            max_length=5,
+            description='Optional JSON list of up to 5 document ids from documentInventory, e.g. ["195268244"]; empty means no texts.',
+        ),
+    ] = [],
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = fetch_process(processNumber, scope, portal=portal, session=session, document_ids=documentIds or None)
@@ -86,12 +104,29 @@ def get_process(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_documents_tool(
-    processNumber: Annotated[str, Field(min_length=1)],
+    processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
     portal: Portal,
-    documentIds: Annotated[list[Annotated[str, Field(pattern=r"^[0-9]+$")]], Field(min_length=1, max_length=5)],
-    textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
-    save: bool = False,
-    acknowledgeCiencia: bool | None = None,
+    documentIds: Annotated[
+        list[Annotated[str, Field(pattern=r"^[0-9]+$")]],
+        Field(
+            min_length=1,
+            max_length=5,
+            description='JSON list of 1 to 5 numeric document ids (documentId from pje_get_process), e.g. ["195268244"].',
+        ),
+    ],
+    textLimit: Annotated[
+        int, Field(ge=200, le=100000, description="Max characters per text, 200 to 100000; default 20000.")
+    ] = 20000,
+    save: Annotated[
+        bool,
+        Field(description="true stores the original files in the shared documents folder and returns savedAs names."),
+    ] = False,
+    acknowledgeCiencia: Annotated[
+        bool | None,
+        Field(
+            description="Leave empty. true registers the party's ciência and starts the deadline; only use after the user explicitly agrees."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = read_documents(
@@ -116,11 +151,24 @@ def read_documents_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_expediente_ato_tool(
-    processNumber: Annotated[str, Field(min_length=1)],
+    processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
     portal: Portal,
-    expedienteId: Annotated[str, Field(pattern=r"^[0-9]+$")],
-    textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
-    acknowledgeCiencia: bool | None = None,
+    expedienteId: Annotated[
+        str,
+        Field(
+            pattern=r"^[0-9]+$",
+            description="Numeric expediente id from pje_list_inbox or pje_get_process expedientes, e.g. '34932797'.",
+        ),
+    ],
+    textLimit: Annotated[
+        int, Field(ge=200, le=100000, description="Max characters of the act text, 200 to 100000; default 20000.")
+    ] = 20000,
+    acknowledgeCiencia: Annotated[
+        bool | None,
+        Field(
+            description="Leave empty. Pending ciência is refused without it. true registers the ciência and starts the deadline: only after the user explicitly agrees."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = fetch_process(
@@ -150,7 +198,12 @@ def read_expediente_ato_tool(
     description="Read the PJe lawyer panel's Expedientes buckets (the same for every login) with their counts. With regions=true each bucket that has items also lists its regions and inboxes with counts (jurisdictions, boxes the profile has), which vary per user. Opening a bucket or expanding a region does not notify anyone; no expediente row is opened and nothing is acknowledged.",
     annotations=READ_ONLY,
 )
-def expediente_counters(portal: Portal, regions: bool = False) -> dict[str, Any]:
+def expediente_counters(
+    portal: Portal,
+    regions: Annotated[
+        bool, Field(description="true also lists regions and inboxes under each non-empty bucket.")
+    ] = False,
+) -> dict[str, Any]:
     return _notifications(portal, lambda name, session: read_counters(name, session=session, tree=regions))
 
 
@@ -162,13 +215,41 @@ def expediente_counters(portal: Portal, regions: bool = False) -> dict[str, Any]
 )
 def list_inbox(
     portal: Portal,
-    bucket: str | None = None,
-    regions: list[str] | None = None,
-    processNumber: str | None = None,
-    expedidoDe: str | None = None,
-    expedidoAte: str | None = None,
-    expedienteId: Annotated[str | None, Field(pattern=r"^[0-9]+$")] = None,
-    maxPages: Annotated[int, Field(ge=1, le=50)] = 5,
+    bucket: Annotated[
+        str | None,
+        Field(
+            description="Bucket index (e.g. '0') or part of its label, e.g. 'Pendentes de ciência'. Default: bucket 0. See pje_list_expediente_counters."
+        ),
+    ] = None,
+    regions: Annotated[
+        list[str] | None,
+        Field(
+            description='JSON list of texts; keeps inboxes whose path contains any of them, e.g. ["Serra Talhada"]. Not a plain string.'
+        ),
+    ] = None,
+    processNumber: Annotated[
+        str | None, Field(description="CNJ process number with punctuation, runs the inbox search.")
+    ] = None,
+    expedidoDe: Annotated[
+        str | None,
+        Field(
+            pattern=r"^\d{4}-\d{2}-\d{2}$",
+            description="Start of expedition date, ISO YYYY-MM-DD (e.g. '2026-10-15'). DD/MM/AAAA is refused.",
+        ),
+    ] = None,
+    expedidoAte: Annotated[
+        str | None,
+        Field(
+            pattern=r"^\d{4}-\d{2}-\d{2}$",
+            description="End of expedition date, ISO YYYY-MM-DD. Use the same day as expedidoDe for one day.",
+        ),
+    ] = None,
+    expedienteId: Annotated[
+        str | None, Field(pattern=r"^[0-9]+$", description="Numeric expediente id to find one row.")
+    ] = None,
+    maxPages: Annotated[
+        int, Field(ge=1, le=50, description="Pages of 40 rows to read per inbox, 1 to 50; default 5.")
+    ] = 5,
 ) -> dict[str, Any]:
     filters = {
         key: value
@@ -271,8 +352,13 @@ def _draft_stage(label, stage, run_id=None, **options):
 def draft_inspect(
     runId: RunId,
     stage: DraftReadStage,
-    search: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-    page: Annotated[int, Field(ge=1, le=50)] = 1,
+    search: Annotated[
+        str | None,
+        Field(
+            min_length=1, max_length=200, description="Text to search subjects; required for stage 'subject-options'."
+        ),
+    ] = None,
+    page: Annotated[int, Field(ge=1, le=50, description="Page of results, 1 to 50; default 1.")] = 1,
 ) -> dict[str, Any]:
     if stage == "subject-options" and not (search or "").strip():
         raise ToolError("Subject search text is required")
@@ -286,8 +372,12 @@ def draft_inspect(
     annotations=READ_ONLY,
 )
 def search_pending_drafts(
-    name: Annotated[str | None, Field(max_length=200)] = None,
-    cpf: Annotated[str | None, Field(max_length=30)] = None,
+    name: Annotated[
+        str | None, Field(max_length=200, description="Party name, up to 200 characters. Give name, cpf, or both.")
+    ] = None,
+    cpf: Annotated[
+        str | None, Field(max_length=30, description="Party CPF, with or without punctuation. Give name, cpf, or both.")
+    ] = None,
 ) -> dict[str, Any]:
     name, cpf = (name or "").strip() or None, (cpf or "").strip() or None
     if not (name or cpf):

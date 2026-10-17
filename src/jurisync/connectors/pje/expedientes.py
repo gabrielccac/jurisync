@@ -28,9 +28,9 @@ NOTICE = re.compile(
     r"(?P<quem>.+?)\s+(?:registrou|tomou) ciência em\s+(?P<quando>\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)"
 )
 PRAZO = re.compile(r"Prazo:\s*(?:(\d+)\s*dias?|(\d+)\s*sem prazo|sem prazo)", re.I)
-ATO_HREF = re.compile(r"^/pje/Painel/painel_usuario/popup/visualizarExpediente\.seam\?idProcessoParteExpediente=\d+&")
+ATO_HREF = re.compile(r"^/[^/]+/Painel/painel_usuario/popup/visualizarExpediente\.seam\?idProcessoParteExpediente=\d+&")
 RESPONSE_HREF = re.compile(
-    r"^/pje/Painel/painel_usuario/popup/visualizarExpediente\.seam\?.*paramIdProcessoDocumentoBin=\d+"
+    r"^/[^/]+/Painel/painel_usuario/popup/visualizarExpediente\.seam\?.*paramIdProcessoDocumentoBin=\d+"
 )
 ATTACHMENT = re.compile(r"(\d{6,}) - (.+?) Juntado por (.+?) em (\d{2}/\d{2}/\d{4}) \d{2}:\d{2}:\d{2}")
 EXPEDIENTE_BOX = re.compile(

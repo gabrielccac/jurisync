@@ -16,10 +16,9 @@ from jurisync.connectors.pje.process import login_portal
 from jurisync.core.http import IMPERSONATE, UnsafeUrlError, enable_request_logging, require_url
 from jurisync.core.redaction import url_shape
 
-PANEL_PATH = "/pje/Painel/painel_usuario/advogado.seam"
-PUSH_PATH = "/pje/Push/listView.seam?iframe=true"
+PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
+PUSH_SUFFIX = "Push/listView.seam?iframe=true"
 PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b")
-PUSH_PREFIX = "/pje/Push/listView.seam"
 PUSH_TIMEOUT = 90
 
 
@@ -109,13 +108,15 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
         if 1 <= candidate_page <= candidate_total:
             current_page, total_pages = candidate_page, candidate_total
     next_control = None
+    base_path = urlsplit(base_url).path
+    path_prefix = base_path.split("Push/", 1)[0] if "Push/" in base_path else "/"
     for element in soup.find_all(["a", "button", "input"]):
         label = " ".join((element.get_text(" "), element.get("title", ""), element.get("aria-label", ""))).casefold()
         if not any(marker in label for marker in ("próxim", "proxim", "next", "seguinte")):
             continue
         href = element.get("href")
         if href and href not in {"#", "javascript:void(0)"}:
-            _safe_url(urljoin(base_url, href), host=base_host, path_prefix="/pje/")
+            _safe_url(urljoin(base_url, href), host=base_host, path_prefix=path_prefix)
         disabled = element.has_attr("disabled") or "disabled" in (element.get("class") or [])
         next_control = not disabled
         break
@@ -150,8 +151,8 @@ def read_push(name, *, session=None):
     try:
         if owned_session:
             session, _ = login_portal(name)
-        panel_url = _portal_url(name, PANEL_PATH)
-        push_url = _portal_url(name, PUSH_PATH)
+        panel_url = _portal_url(name, f"{config.root}{PANEL_SUFFIX}")
+        push_url = _portal_url(name, f"{config.root}{PUSH_SUFFIX}")
         push = session.get(
             push_url,
             headers={"Referer": panel_url},
@@ -162,14 +163,14 @@ def read_push(name, *, session=None):
         push_url_result = getattr(push, "url", push_url)
         if push.status_code != 200:
             raise RuntimeError(f"Push list returned HTTP {push.status_code}")
-        _safe_url(push_url_result, host=config.host, path_exact=PUSH_PREFIX)
+        _safe_url(push_url_result, host=config.host, path_exact=f"{config.root}Push/listView.seam")
         html = response_html(push)
         items = parse_push_items(html)
         pagination = parse_push_page(html, len(items), base_url=push_url)
         return {
             "success": True,
             "portal": name,
-            "push_url": _safe_url(push_url, host=config.host, path_exact=PUSH_PREFIX),
+            "push_url": _safe_url(push_url, host=config.host, path_exact=f"{config.root}Push/listView.seam"),
             "pagination": pagination,
             **pagination,
             "rows_returned": len(items),

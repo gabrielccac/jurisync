@@ -1,10 +1,10 @@
 """Find a process in any PJe deployment and read its detail page and timeline.
 
-The flow is the same for 1st and 2nd instance (and for TRF1 and TRF5): open the
+The flow is the same for 1st and 2nd instance (and for TRF1, TRF5 and TJAP): open the
 consulta page, submit the CNJ number, select the matching row, open the detail
 page with the returned CA token, then read bounded timeline pages. Live pages
-on trf1-1g, trf1-2g, and trf5-1g expose the same controls; the only per-instance
-difference is the detail URL suffix below.
+on trf1-1g, trf1-2g, trf5-1g and tjap-1g expose the same controls; the only
+per-instance difference is the detail URL suffix below.
 """
 
 import re
@@ -33,7 +33,7 @@ from jurisync.connectors.pje.parsers import (
 MAX_TIMELINE_PAGES = 5
 DETAIL_PATH = "Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam"
 DETAIL_SUFFIX = {"1g": "&aba=", "2g": ""}
-DOWNLOAD_PATTERN = re.compile(r"window\.open\('([^']*/documento/download/TRF\d+/[^']*/\d+/)'")
+DOWNLOAD_PATTERN = re.compile(r"window\.open\('([^']*/documento/download/[A-Za-z0-9]+/[^']*/\d+/)'")
 
 
 def _control_id(element):

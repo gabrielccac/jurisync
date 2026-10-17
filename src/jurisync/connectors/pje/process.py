@@ -1,4 +1,4 @@
-"""Common read interface for TRF1 and TRF5; returns movements, not publications."""
+"""Common read interface for TRF1, TRF5 and TJAP; returns movements, not publications."""
 
 import argparse
 import json
@@ -84,8 +84,7 @@ def fetch_process(
     if scope not in ("latest", "page", "all"):
         raise ValueError("scope must be latest, page or all")
     number_parts = parse_process_number(process_number)
-    expected_tribunal = {"TRF1": "01", "TRF5": "05"}[config.tribunal]
-    if number_parts[4] != expected_tribunal:
+    if number_parts[4] != config.region:
         raise ValueError(f"Process number does not belong to {config.tribunal}")
     if download_dir and not fetch_documents:
         raise ValueError("download_dir requires fetch_documents=True")
@@ -173,8 +172,7 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
 
     config = portals.pje(portal)
     number_parts = parse_process_number(process_number)
-    expected_tribunal = {"TRF1": "01", "TRF5": "05"}[config.tribunal]
-    if number_parts[4] != expected_tribunal:
+    if number_parts[4] != config.region:
         raise ValueError(f"Process number does not belong to {config.tribunal}")
     validate_document_ids(document_ids)
     owned_session = session is None
@@ -328,9 +326,9 @@ publication_candidates = movement_candidates
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Read PJe process movements (TRF1 password login, TRF5 certificate login)"
+        description="Read PJe process movements (TRF1/TJAP password login, TRF5 certificate login)"
     )
-    parser.add_argument("--portal", choices=("trf1-1g", "trf1-2g", "trf5-1g"), required=True)
+    parser.add_argument("--portal", choices=("trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"), required=True)
     parser.add_argument("--process-number", required=True)
     parser.add_argument("--scope", choices=("latest", "page", "all"), default="page")
     parser.add_argument("--save-detail-html", help="Save the authenticated 1G detail response locally")
