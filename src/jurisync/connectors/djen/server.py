@@ -26,20 +26,71 @@ server = MCPServer("djen", version="1.0.0")
     annotations=READ_ONLY,
 )
 def search_communications(
-    inicio: date,
-    fim: date,
-    numeroOab: Annotated[str | None, Field(pattern=r"(?i)^\d+(?:-[ABENOS])?$")] = None,
-    ufOab: Annotated[str | None, Field(pattern=r"(?i)^[A-Z]{2}$")] = None,
-    nomeAdvogado: Annotated[str | None, Field(min_length=3, max_length=120)] = None,
-    nomeParte: Annotated[str | None, Field(min_length=3, max_length=120)] = None,
-    texto: Annotated[str | None, Field(min_length=3, max_length=200)] = None,
-    numeroProcesso: Annotated[str | None, Field(pattern=r"^\d{7,25}$")] = None,
-    meio: Literal["D", "E"] | None = None,
-    tribunal: Annotated[str | None, Field(pattern=r"(?i)^[A-Z0-9]+$")] = None,
-    pagina: Annotated[int, Field(ge=1)] = 1,
-    itens: Annotated[int, Field(ge=5, le=50)] = 10,
-    compact: bool = False,
-    textLimit: Annotated[int, Field(ge=0, le=100_000)] = 0,
+    inicio: Annotated[
+        date,
+        Field(
+            description="Start of the availability window, ISO YYYY-MM-DD (e.g. '2026-10-15'). DD/MM/AAAA is refused."
+        ),
+    ],
+    fim: Annotated[
+        date, Field(description="End of the window, ISO YYYY-MM-DD, inclusive. Same day as inicio for one day.")
+    ],
+    numeroOab: Annotated[
+        str | None,
+        Field(
+            pattern=r"(?i)^\d+(?:-[ABENOS])?$",
+            description="OAB number without the UF, e.g. '14663' or '14663-PB'. Requires ufOab.",
+        ),
+    ] = None,
+    ufOab: Annotated[
+        str | None, Field(pattern=r"(?i)^[A-Z]{2}$", description="Two-letter UF of the OAB, e.g. 'PB'.")
+    ] = None,
+    nomeAdvogado: Annotated[
+        str | None,
+        Field(
+            min_length=3,
+            max_length=120,
+            description="Lawyer name as it appears in the publication, 3 to 120 characters, e.g. 'VICTOR HUGO VALERIANO PINTO'.",
+        ),
+    ] = None,
+    nomeParte: Annotated[
+        str | None, Field(min_length=3, max_length=120, description="Party name, 3 to 120 characters.")
+    ] = None,
+    texto: Annotated[
+        str | None,
+        Field(min_length=3, max_length=200, description="Free text found in the publication, 3 to 200 characters."),
+    ] = None,
+    numeroProcesso: Annotated[
+        str | None,
+        Field(
+            pattern=r"^\d{7,25}$",
+            description="Process number with DIGITS ONLY, no dots or dashes: '50043207620264047104' for 5004320-76.2026.4.04.7104. A formatted number is refused.",
+        ),
+    ] = None,
+    meio: Annotated[
+        Literal["D", "E"] | None,
+        Field(description="Medium: 'D' = Diário (Diário de Justiça), 'E' = eletrônico. Other values are refused."),
+    ] = None,
+    tribunal: Annotated[
+        str | None,
+        Field(
+            pattern=r"(?i)^[A-Z0-9]+$",
+            description="Court acronym, letters and digits, e.g. 'TRF5', 'TJSP'. Leave empty for all courts.",
+        ),
+    ] = None,
+    pagina: Annotated[int, Field(ge=1, description="Page of results, starting at 1.")] = 1,
+    itens: Annotated[int, Field(ge=5, le=50, description="Items per page, 5 to 50; default 10.")] = 10,
+    compact: Annotated[
+        bool, Field(description="true keeps one copy of the text plus the routing fields, which reduces output size.")
+    ] = False,
+    textLimit: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=100_000,
+            description="Max characters per text when compact is used; 0 means no cut. texto_chars keeps the original length.",
+        ),
+    ] = 0,
 ) -> dict[str, Any]:
     params = {
         "dataDisponibilizacaoInicio": inicio.isoformat(),
@@ -72,8 +123,16 @@ def search_communications(
     annotations=READ_ONLY,
 )
 def get_certidao_text(
-    hash: Annotated[str, Field(pattern=r"^[A-Za-z0-9]{1,128}$")],
-    textLimit: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
+    hash: Annotated[
+        str,
+        Field(
+            pattern=r"^[A-Za-z0-9]{1,128}$",
+            description="The 'hash' field of a DJEN item from djen_search_communications, letters and digits only.",
+        ),
+    ],
+    textLimit: Annotated[
+        int, Field(ge=1, le=100_000, description="Max characters of the extracted text, 1 to 100000; default 50000.")
+    ] = 50_000,
 ) -> dict[str, Any]:
     with tool_errors("DJEN", *REQUEST_ERRORS):
         pdf = fetch_certidao(hash)
@@ -94,9 +153,21 @@ def get_certidao_text(
     annotations=READ_ONLY,
 )
 def deadline(
-    availableOn: date,
-    days: Annotated[int, Field(ge=1, le=365)],
-    calendar: Literal["jfpe-2026-q4"] = "jfpe-2026-q4",
+    availableOn: Annotated[
+        date,
+        Field(
+            description="Date the communication became available in the DJEN, ISO YYYY-MM-DD. The publication is the next business day and counting starts after it."
+        ),
+    ],
+    days: Annotated[
+        int, Field(ge=1, le=365, description="Number of business days in the procedural term, 1 to 365, e.g. 5.")
+    ],
+    calendar: Annotated[
+        Literal["jfpe-2026-q4"],
+        Field(
+            description="Court calendar id. Only 'jfpe-2026-q4' exists (JFPE, Q4 2026); dates outside that period are not covered."
+        ),
+    ] = "jfpe-2026-q4",
 ) -> dict[str, Any]:
     with tool_errors("DJEN deadline", ValueError, KeyError, OSError, json.JSONDecodeError):
         return calculate_deadline(availableOn.isoformat(), days, calendar)

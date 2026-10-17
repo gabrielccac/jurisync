@@ -71,7 +71,15 @@ def create_server(keys=None):
         ),
         annotations=READ_ONLY,
     )
-    def eproc_list_notices(portal: Portal, queue: Queue) -> dict[str, Any]:
+    def eproc_list_notices(
+        portal: Annotated[Portal, Field(description="Portal key from the list above, e.g. 'trf4-1g-rs'.")],
+        queue: Annotated[
+            Queue,
+            Field(
+                description="Queue to read: 'open_deadlines' (prazo aberto, a deadline already running) or 'pending' (citação/intimação still waiting for ciência). See the description for all kinds."
+            ),
+        ],
+    ) -> dict[str, Any]:
         return call(portal, lambda **context: list_notices(queue, **context))
 
     @server.tool(
@@ -81,11 +89,28 @@ def create_server(keys=None):
         annotations=READ_ONLY,
     )
     def eproc_get_process(
-        portal: Portal,
-        processNumber: Annotated[str, Field(min_length=1)],
-        scope: Literal["latest", "page"] = "page",
-        documentIds: Annotated[list[Annotated[str, Field(min_length=1)]], Field(max_length=5)] = [],
-        save: bool = False,
+        portal: Annotated[Portal, Field(description="Portal key from the list above.")],
+        processNumber: Annotated[
+            str,
+            Field(min_length=1, description="CNJ process number with punctuation, e.g. '5004320-76.2026.4.04.7104'."),
+        ],
+        scope: Annotated[
+            Literal["latest", "page"],
+            Field(description="'page' (default): first page of the timeline. 'latest': newest date only."),
+        ] = "page",
+        documentIds: Annotated[
+            list[Annotated[str, Field(min_length=1)]],
+            Field(
+                max_length=5,
+                description="Optional JSON list of up to 5 document ids from the documentInventory of the process; empty means no texts.",
+            ),
+        ] = [],
+        save: Annotated[
+            bool,
+            Field(
+                description="true stores each read document in the shared documents folder and returns savedAs names for advbox_create_task."
+            ),
+        ] = False,
     ) -> dict[str, Any]:
         return call(
             portal, lambda **context: fetch_process(processNumber, scope, documentIds or None, save=save, **context)

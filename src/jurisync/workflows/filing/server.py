@@ -105,12 +105,30 @@ def _require_no_draft(directory):
     annotations=LOCAL_WRITE,
 )
 def prepare(
-    profile: ProfileName,
-    runId: RunId,
-    customerId: Digits,
-    facts: dict[str, Any],
-    folder: Annotated[str | None, Field(max_length=200)] = None,
-    useJev: bool = False,
+    profile: Annotated[ProfileName, Field(description="Profile name from filing_profiles, e.g. 'victor'.")],
+    runId: Annotated[
+        RunId,
+        Field(description="New run id, letters digits _ or -, up to 64 characters, e.g. 'ana-2026-10-16'."),
+    ],
+    customerId: Annotated[
+        Digits, Field(description="ADVBOX customer id (digits) whose 00-PROTOCOLAR folder is read, e.g. '10473994'.")
+    ],
+    facts: Annotated[
+        dict[str, Any],
+        Field(
+            description="Partial JSON object with what is known: authorCpf (11 digits), subject or subjects (benefit labels from filing_subjects), author (object), classification (object), characteristics (object, e.g. claimValue and boolean flags). Anything missing becomes a review item."
+        ),
+    ],
+    folder: Annotated[
+        str | None,
+        Field(
+            max_length=200,
+            description="Optional ADVBOX folder path inside the customer, as listed by advbox_list_files.",
+        ),
+    ] = None,
+    useJev: Annotated[
+        bool, Field(description="true sends document text to an outside classifier. Default false.")
+    ] = False,
 ) -> dict[str, Any]:
     directory = run_directory(runId)
     _require_no_draft(directory)
@@ -130,7 +148,9 @@ def prepare(
     description="Return the review of a prepared run again: files with their ids, roles, PJe types and problems, the petition's candidates, and whether a payload exists. Reads local files only.",
     annotations=READ_ONLY,
 )
-def review(runId: RunId) -> dict[str, Any]:
+def review(
+    runId: Annotated[RunId, Field(description="runId of a run that already has filing_prepare output.")],
+) -> dict[str, Any]:
     directory = run_directory(runId)
     report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
     return _review_view(runId, report, (directory / "payload.json").exists())
@@ -143,10 +163,20 @@ def review(runId: RunId) -> dict[str, Any]:
     annotations=LOCAL_WRITE,
 )
 def finalize(
-    profile: ProfileName,
-    runId: RunId,
-    facts: dict[str, Any] | None = None,
-    overrides: dict[str, dict[str, str]] | None = None,
+    profile: Annotated[ProfileName, Field(description="Same profile used in filing_prepare.")],
+    runId: Annotated[RunId, Field(description="runId of a prepared run.")],
+    facts: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description="Full facts object, same shape as filing_prepare. Omit to reuse the facts stored at prepare time."
+        ),
+    ] = None,
+    overrides: Annotated[
+        dict[str, dict[str, str]] | None,
+        Field(
+            description='JSON object keyed by file id from filing_review, e.g. {"<id>": {"role": "main", "type": "<PJe type>"}} or {"<id>": {"role": "skip"}} to leave the file out.'
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     directory = run_directory(runId)
     _require_no_draft(directory)
@@ -201,7 +231,15 @@ def profiles() -> dict[str, Any]:
     annotations=READ_ONLY,
 )
 def subjects(
-    profile: ProfileName, lawsuitRef: Annotated[str | None, Field(min_length=4, max_length=40)] = None
+    profile: Annotated[ProfileName, Field(description="Profile name from filing_profiles.")],
+    lawsuitRef: Annotated[
+        str | None,
+        Field(
+            min_length=4,
+            max_length=40,
+            description="Optional lawsuit id or CNJ number to look up what was filed for that case in the profile's history notes.",
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
