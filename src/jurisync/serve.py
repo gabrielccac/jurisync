@@ -22,6 +22,7 @@ SERVERS = {
     "eproc": ("jurisync.connectors.eproc.server", "create_server()", "sessions.close"),
     "juridiq": ("jurisync.connectors.juridiq.server", "create_server()", None),
     "inss": ("jurisync.connectors.inss.server", "server", None),
+    "gdrive": ("jurisync.connectors.gdrive.server", "server", None),
 }
 DEFAULT_SERVERS = ("pje", "advbox")
 

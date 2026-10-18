@@ -59,6 +59,8 @@ class AdvboxFilingFolderTests(unittest.TestCase):
                     "originPath": "00 - PROTOCOLAR",
                     "originalName": "10-PETIÇÃO INICIAL_1111.pdf",
                     "modifiedAt": "01/10/2026",
+                    "verifiedBy": "jurisync.advbox",
+                    "sha256": hashlib.sha256(b"%PDF-1 u1").hexdigest(),
                 },
             )
             self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
@@ -84,7 +86,7 @@ class AdvboxFilingFolderTests(unittest.TestCase):
             self.assertTrue(result["payloadWritten"], result["review"])
             rows = store.read_json("review.json")["files"]
             self.assertEqual([row["path"] for row in rows], ["inbox/10-PETIÇÃO INICIAL.pdf", "inbox/2-PROCURAÇÃO.pdf"])
-            self.assertEqual(rows[0]["origin"]["kind"], "declared")
+            self.assertEqual(rows[0]["origin"]["kind"], "exported")
             self.assertEqual((rows[0]["origin"]["source"], rows[0]["origin"]["originId"]), ("advbox", "91"))
             self.assertEqual(rows[0]["sha256"], hashlib.sha256(b"%PDF-1 u1").hexdigest())
             documents = store.read_json("payload.json")["documents"]

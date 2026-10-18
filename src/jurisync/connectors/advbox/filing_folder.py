@@ -10,6 +10,7 @@ filing never imports ADVBOX.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -66,7 +67,14 @@ def export_filing_folder(documents, customer_id, destination, *, folder=None):
         )
         path = Path(saved["path"])
         path.chmod(0o600)
-        source = {"file": path.name, "origin": "advbox", "originPath": selected, "originalName": entry["name"]}
+        source = {
+            "file": path.name,
+            "origin": "advbox",
+            "originPath": selected,
+            "originalName": entry["name"],
+            "verifiedBy": "jurisync.advbox",
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
         if entry.get("fileId"):
             source["originId"] = str(entry["fileId"])
         if entry.get("uploadedAt"):

@@ -29,6 +29,7 @@ jurisync-djen = "jurisync.connectors.djen.server:main"
 jurisync-eproc = "jurisync.connectors.eproc.server:main"
 jurisync-juridiq = "jurisync.connectors.juridiq.server:main"
 jurisync-inss = "jurisync.connectors.inss.server:main"
+jurisync-gdrive = "jurisync.connectors.gdrive.server:main"
 jurisync-http = "jurisync.serve:main"
 jurisync-setup = "jurisync.setup:main"
 

@@ -86,7 +86,9 @@ class SourceFolderTests(unittest.TestCase):
     def test_invalid_sources_are_refused_before_anything_is_copied(self):
         good = {"file": "10-PETIÇÃO INICIAL.pdf", "origin": "gerid"}
         cases = {
-            "version must be 1": ([good], 2),
+            "version must be one of 1, 2": ([good], 3),
+            "unknown fields: verifiedBy": ([{**good, "verifiedBy": "x"}], 1),
+            "sha256 must be": ([{**good, "sha256": "abc"}], 2),
             "unknown fields: owner": ([{**good, "owner": "x"}], 1),
             "inside the folder": ([{**good, "file": "../secret.pdf"}], 1),
             "inside the folder,": ([{**good, "file": "/etc/passwd"}], 1),
@@ -104,6 +106,16 @@ class SourceFolderTests(unittest.TestCase):
         (self.folder / "sources.json").write_text("{not json")
         with self.assertRaisesRegex(ValueError, "not valid JSON"):
             load_sources(self.folder)
+
+    def test_an_exported_file_must_still_be_what_its_exporter_wrote(self):
+        laudo = {"file": "laudos/LAUDO MÉDICO.pdf", "origin": "drive", "verifiedBy": "jurisync.gdrive"}
+        self.sources([{**laudo, "sha256": sha(b"%PDF-1.4\nlaudo")}], version=2)
+        inbox = fill_from_folder(self.store, self.folder)
+        entry = next(item for item in inbox["files"] if item["name"] == "LAUDO MÉDICO.pdf")
+        self.assertEqual((entry["origin"]["kind"], entry["origin"]["verifiedBy"]), ("exported", "jurisync.gdrive"))
+        self.sources([{**laudo, "sha256": sha(b"other bytes")}], version=2)
+        with self.assertRaisesRegex(ValueError, "differs from the file its exporter wrote"):
+            fill_from_folder(self.store, self.folder)
 
     def test_symlinks_and_relative_folders_are_refused(self):
         (self.folder / "link.pdf").symlink_to(self.folder / "10-PETIÇÃO INICIAL.pdf")

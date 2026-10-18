@@ -8,6 +8,8 @@ The run's `inbox.json` records, for every inbox file, the sha256 of the bytes co
 
 - `declared`: described by the folder's `sources.json` (whatever produced the folder said so; the filing cannot
   verify it), with the declared `source` (drive, gerid, advbox...) and the optional fields,
+- `exported`: described with `verifiedBy`, i.e. written by a jurisync exporter that fetched it from the origin's API
+  (ADVBOX, Google Drive); its declared sha256 is checked against the bytes copied,
 - `local`: a file the `sources.json` does not describe.
 
 The folder's own location is never recorded, only paths inside it.
@@ -70,12 +72,16 @@ def fill_from_folder(store, folder):
     record, taken = [], set()
     for name in checked["files"]:
         declared = checked["sources"].get(name)
+        content = (folder / name).read_bytes()
         if declared:
-            fields = {key: value for key, value in declared.items() if key != "origin"}
-            origin = {"kind": "declared", "source": declared["origin"], **fields}
+            fields = {key: value for key, value in declared.items() if key not in ("origin", "sha256")}
+            kind = "exported" if declared.get("verifiedBy") else "declared"
+            origin = {"kind": kind, "source": declared["origin"], **fields}
+            if declared.get("sha256") and declared["sha256"] != _sha256(content):
+                raise ValueError(f"{name} differs from the file its exporter wrote (sha256 in sources.json)")
         else:
             origin = {"kind": "local", "source": "local"}
-        _add(store, record, taken, PurePosixPath(name).name, (folder / name).read_bytes(), {**origin, "file": name})
+        _add(store, record, taken, PurePosixPath(name).name, content, {**origin, "file": name})
     store.write_json(INBOX_RECORD, {"version": 1, "filledAt": now(), "files": record})
     return read_inbox(store)
 

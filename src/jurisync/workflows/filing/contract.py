@@ -10,10 +10,10 @@ ADVBOX export, a person) hands over ONE local folder:
 Rules: regular files only (symbolic links are refused), hidden names (starting with ".") are ignored, at most
 MAX_FILES files.
 
-`sources.json`, version 1:
+`sources.json`, version 2 (version 1 is still accepted; it is version 2 without the last two fields):
 
     {
-      "version": 1,
+      "version": 2,
       "files": [
         {
           "file": "laudos/laudo-caps.pdf",       required: the file's path inside the folder
@@ -22,13 +22,16 @@ MAX_FILES files.
           "originPath": "Clientes/Maria/Laudos", optional: folder or path at the origin
           "originalName": "Laudo CAPS.pdf",      optional: the name at the origin
           "modifiedAt": "2026-10-01T12:00:00Z",  optional: last modification at the origin
-          "link": "https://..."                  optional: an http(s) address to open it at the origin
+          "link": "https://...",                 optional: an http(s) address to open it at the origin
+          "verifiedBy": "jurisync.gdrive",       optional (v2): the exporter that fetched it from the origin itself
+          "sha256": "<64 hex>"                   optional (v2): the bytes it wrote; the filing checks them on copy
         }
       ]
     }
 
-The filing records these entries as *declared* origins (it cannot verify them) and files without an entry as
-*local*. Producers write the file with `write_sources`, which validates it against the folder; consumers call
+The filing records these entries as *declared* origins (it cannot verify them), entries with `verifiedBy` as
+*exported* (fetched by a jurisync exporter from the origin's API, not typed in by hand), and files without an entry as
+*local*. A declared `sha256` must match the file the filing copies. Producers write the file with `write_sources`, which validates it against the folder; consumers call
 `validate_folder`. This module depends on the standard library only, so a producer can use it without depending on the
 filing itself.
 """
@@ -40,10 +43,12 @@ import stat
 import tempfile
 from pathlib import Path, PurePosixPath
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
+VERSIONS = (1, 2)
 SOURCES = "sources.json"
 REQUIRED = ("file", "origin")
 OPTIONAL = ("originId", "originPath", "originalName", "modifiedAt", "link")
+OPTIONAL_V2 = ("verifiedBy", "sha256")
 MAX_FILES = 200
 
 
@@ -64,8 +69,10 @@ def validate_sources(data):
     """Check a parsed sources.json; returns {file: {origin, ...optional fields}}."""
     if not isinstance(data, dict) or set(data) - {"version", "files"}:
         raise ValueError(f"{SOURCES} must be an object with only version and files")
-    if data.get("version") != CONTRACT_VERSION:
-        raise ValueError(f"{SOURCES} version must be {CONTRACT_VERSION}")
+    version = data.get("version")
+    if version not in VERSIONS:
+        raise ValueError(f"{SOURCES} version must be one of {', '.join(map(str, VERSIONS))}")
+    allowed = set(REQUIRED) | set(OPTIONAL) | (set(OPTIONAL_V2) if version >= 2 else set())
     files = data.get("files")
     if not isinstance(files, list):
         raise ValueError(f"{SOURCES} files must be a list")
@@ -74,16 +81,18 @@ def validate_sources(data):
         where = f"{SOURCES} files[{index}]"
         if not isinstance(entry, dict):
             raise ValueError(f"{where} must be an object")
-        unknown = sorted(set(entry) - set(REQUIRED) - set(OPTIONAL))
+        unknown = sorted(set(entry) - allowed)
         if unknown:
             raise ValueError(f"{where} has unknown fields: {', '.join(unknown)}")
         name = _inside(_text(entry.get("file"), "file", where, 300), where)
         if name in declared:
             raise ValueError(f"{where}: {name} is described twice")
         origin = {"origin": _text(entry.get("origin"), "origin", where, 40)}
-        for field in OPTIONAL:
+        for field in (*OPTIONAL, *OPTIONAL_V2):
             if field in entry:
                 origin[field] = _text(entry[field], field, where, 1000)
+        if "sha256" in origin and not re.fullmatch(r"[0-9a-f]{64}", origin["sha256"]):
+            raise ValueError(f"{where}: sha256 must be 64 lowercase hex characters")
         if "link" in origin and not re.match(r"https?://", origin["link"]):
             raise ValueError(f"{where}: link must be an http(s) address")
         declared[name] = origin
@@ -141,9 +150,9 @@ def validate_folder(folder):
     return {"files": files, "sources": sources}
 
 
-def write_sources(folder, entries):
+def write_sources(folder, entries, version=CONTRACT_VERSION):
     """Write a validated sources.json (owner-only, atomic) into an input folder that already holds the files."""
-    data = {"version": CONTRACT_VERSION, "files": list(entries)}
+    data = {"version": version, "files": list(entries)}
     validate_sources(data)
     folder = Path(folder)
     descriptor, temp = tempfile.mkstemp(dir=folder, prefix=".sources-")

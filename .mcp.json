@@ -83,6 +83,17 @@
         "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
         "JURISYNC_CUSTOMER": "victor"
       }
+    },
+    "gdrive": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": [
+        "-m",
+        "jurisync.connectors.gdrive.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
+      }
     }
   }
 }
