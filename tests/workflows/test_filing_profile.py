@@ -10,7 +10,6 @@ from jurisync.workflows.filing.profile import load_profile, profile_names
 BASE = {
     "portal": "trf5-1g",
     "defaults": {
-        "attorney": {"cpfEnv": ["OFFICE_ATTORNEY_CPF"], "name": "A", "oabNumber": "1", "oabState": "PE"},
         "passive": {"search": "x", "cnpj": "1", "name": "X"},
     },
 }
@@ -28,14 +27,12 @@ class ProfileTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return folder
 
-    def test_victors_profile_loads_and_keeps_the_attorney_cpf_out_of_the_file(self):
+    def test_victors_profile_holds_only_protocol_settings(self):
         profile = load_profile("victor")
         self.assertIn("victor", profile_names())
-        self.assertNotIn("cpf", profile.defaults_template["attorney"])
+        self.assertNotIn("attorney", profile.defaults())
         with mock.patch.dict(os.environ, {"VICTOR_PJE_GRAZIELE_CPF": "11122233344"}):
-            self.assertEqual(profile.defaults()["attorney"]["cpf"], "11122233344")
-        with mock.patch.dict(os.environ, {"VICTOR_PJE_GRAZIELE_CPF": "", "VICTOR_PJE_ATTORNEY_CPF": ""}):
-            self.assertEqual(profile.defaults()["attorney"]["cpf"], "")
+            self.assertNotIn("11122233344", json.dumps(profile.defaults()), "nothing is read from the environment")
 
     def test_any_customer_folder_with_a_profile_file_is_available(self):
         self.profiles_dir()
@@ -50,8 +47,11 @@ class ProfileTests(unittest.TestCase):
         self.profiles_dir(folderPatterns=["PROTOCOLAR$"])
         with self.assertRaisesRegex(ValueError, "belongs to the source's exporter"):
             load_profile("office")
-        self.profiles_dir(defaults={"attorney": {}})
+        self.profiles_dir(defaults={})
         with self.assertRaisesRegex(ValueError, "defaults.passive"):
+            load_profile("office")
+        self.profiles_dir(defaults={**BASE["defaults"], "attorney": {"name": "A"}})
+        with self.assertRaisesRegex(ValueError, "come with each case's facts"):
             load_profile("office")
         with self.assertRaisesRegex(ValueError, "lowercase"):
             load_profile("../etc")

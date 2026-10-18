@@ -4,12 +4,6 @@
   "portal": "trf5-1g",
   "uncertainType": "Outros Documentos",
   "defaults": {
-    "attorney": {
-      "cpfEnv": ["VICTOR_PJE_GRAZIELE_CPF", "VICTOR_PJE_ATTORNEY_CPF"],
-      "name": "GRAZIELE ALVES DA SILVA",
-      "oabNumber": "48647",
-      "oabState": "PE"
-    },
     "passive": {"search": "inss", "cnpj": "29979036000140", "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"},
     "otherParticipants": [
       {"role": "ÓRGÃO DE CUMPRIMENTO", "search": "ceab", "cnpj": "29979036001465", "name": "CEAB-DJ INSS"},

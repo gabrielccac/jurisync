@@ -63,8 +63,14 @@ class FillMixin:
                 "author",
                 lambda p: self.add_author(draft_url, payload["authorCpf"], author["name"], author.get("address"), p),
             )
-            if "attorney" in payload:
-                out["attorney"] = add("attorney", lambda p: self.add_attorney(draft_url, payload["attorney"], p))
+            # The attorney logged in to PJe is on the draft by default; these are the extra ones, if any.
+            if payload.get("attorneys"):
+                out["attorneys"] = [
+                    add("attorney", lambda p, item=item: self.add_attorney(draft_url, item, p), party=item.get("name"))
+                    for item in payload["attorneys"]
+                ]
+            if author.get("representative"):
+                out["representative"] = self.representative_manual_step(checkpoint, author, save)
             if "passive" in payload:
                 out["passive"] = add("passive body", lambda p: self.add_passive_body(draft_url, payload["passive"], p))
             if "otherParticipants" in payload:

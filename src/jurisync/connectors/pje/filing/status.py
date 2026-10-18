@@ -66,6 +66,11 @@ def run_status(store, payload=None, client=None):
             result["conclusion"] = "incomplete"
     else:
         result["conclusion"] = "not_checked"
+    if checkpoint.get("manualSteps"):
+        # Things the fill could not do in PJe and a person must, before protocol.
+        result["manualSteps"] = checkpoint["manualSteps"]
+        if result["conclusion"] == "verified":
+            result["conclusion"] = "verified_manual_steps_pending"
     return result
 
 

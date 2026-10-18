@@ -193,7 +193,7 @@ def run_stage(
                         for body in payload["otherParticipants"]
                     ]
             elif stage == "attorney":
-                result = client.add_attorney(checkpoint["draftUrl"], payload["attorney"])
+                result = [client.add_attorney(checkpoint["draftUrl"], item) for item in payload.get("attorneys", [])]
             elif stage == "characteristics":
                 result = client.save_characteristics(checkpoint["draftUrl"], payload["characteristics"])
             elif stage == "main-document":

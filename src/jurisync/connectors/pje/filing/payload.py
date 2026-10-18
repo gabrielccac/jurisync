@@ -79,6 +79,22 @@ def validate_fill_payload(payload):
     masked_cpf(payload["authorCpf"])
     if author.get("address") is not None:
         address_cep(author["address"])
+    representative = author.get("representative")
+    if representative is not None:
+        if not isinstance(representative, dict) or not all(representative.get(key) for key in ("cpf", "name", "kind")):
+            raise ValueError("author.representative needs cpf, name and kind")
+        masked_cpf(representative["cpf"])
+    if "attorney" in payload:
+        raise ValueError("Use attorneys (a list of extra attorneys), not attorney: finalize the payload again")
+    attorneys = payload.get("attorneys", [])
+    if not isinstance(attorneys, list):
+        raise ValueError("attorneys must be a list")
+    for index, attorney in enumerate(attorneys):
+        if not isinstance(attorney, dict) or not all(
+            attorney.get(key) for key in ("cpf", "name", "oabNumber", "oabState")
+        ):
+            raise ValueError(f"attorneys[{index}] needs cpf, name, oabNumber and oabState")
+        masked_cpf(attorney["cpf"])
     if "characteristics" in payload:
         validate_characteristics(payload["characteristics"])
     documents = payload.get("documents")

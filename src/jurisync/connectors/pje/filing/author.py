@@ -13,8 +13,35 @@ from jurisync.connectors.pje.parsers import jsf_data
 
 log = logging.getLogger("jurisync.pje.filing")
 
+# What is known of the representative flow: the browser capture of 2026-10-05 associated one REPRESENTANTE (by CPF)
+# through the same "Vincular representante" toolbar as the attorney (comboRepresentacao), but the form ids and field
+# names of the representative lookup, any "kind of representation" choice, and how PJe lists the result were not
+# recorded. Until that is captured, the fill does not guess: it records a manual step instead.
+REPRESENTATIVE_PENDING = (
+    "Associating the author's legal representative is not automated yet (the PJe REPRESENTANTE flow has not been "
+    "captured); add it to the author in PJe by hand before protocol"
+)
+
 
 class AuthorMixin:
+    def representative_manual_step(self, checkpoint, author, save=None):
+        """Record, in the checkpoint, that the author's legal representative must be associated by hand in PJe."""
+        representative = author["representative"]
+        digits = re.sub(r"\D", "", representative["cpf"])
+        step = {
+            "step": "legal representative",
+            "name": representative["name"],
+            "cpf": f"{digits[:3]}.***.***-{digits[-2:]}",
+            "kind": representative["kind"],
+            "reason": REPRESENTATIVE_PENDING,
+        }
+        steps = checkpoint.setdefault("manualSteps", [])
+        if step not in steps:
+            steps.append(step)
+            if save:
+                save(checkpoint)
+        return {"pending": True, "manual": True, **step}
+
     def add_author(self, draft_url, author_cpf, expected_name, address=None, panel=None, inline_address=True):
         cpf_mask = masked_cpf(author_cpf)
         html = panel if panel is not None else self.party_panel(draft_url)

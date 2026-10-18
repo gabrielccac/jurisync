@@ -75,8 +75,8 @@ class AdvboxFilingFolderTests(unittest.TestCase):
         profile = load_profile("victor")
         with (
             tempfile.TemporaryDirectory() as tmp,
-            mock.patch.dict(os.environ, {"VICTOR_PJE_ATTORNEY_CPF": "12345678909"}),
-            mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [])),
+            mock.patch.dict(os.environ, {}),
+            mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [], [])),
         ):
             source = export_filing_folder(Folder(), "7", Path(tmp, "input"))["sourceFolder"]
             store = LocalRunStore(Path(tmp, "run1")).ensure()

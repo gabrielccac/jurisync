@@ -114,6 +114,19 @@ class RunStatusTests(unittest.TestCase):
         self.assertEqual(run_state({"stage": "documents_complete"}), "complete")
         self.assertEqual(run_state({"stage": "created"}), "unknown")
 
+    def test_manual_steps_are_reported_and_keep_a_draft_from_counting_as_done(self):
+        class Pje:
+            def _pending_row(self, draft_id, name):
+                return {"draftId": draft_id, "draftUrl": "review"}
+
+        step = {"step": "legal representative", "name": "MARIA MAE", "cpf": "999.***.***-66", "kind": "mae"}
+        with tempfile.TemporaryDirectory() as tmp:
+            prints = phase_fingerprints(PAYLOAD)
+            store = self.write(tmp, {"draftId": "1", "status": "complete", "completed": prints, "manualSteps": [step]})
+            result = run_status(store, PAYLOAD, Pje())
+        self.assertEqual(result["manualSteps"], [step])
+        self.assertEqual(result["conclusion"], "verified_manual_steps_pending")
+
     def test_phases_compare_the_ledger_with_the_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             prints = phase_fingerprints(PAYLOAD)

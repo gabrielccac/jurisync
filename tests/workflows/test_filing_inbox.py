@@ -139,10 +139,10 @@ class ImageTests(unittest.TestCase):
 
 class FolderToPayloadTests(unittest.TestCase):
     def setUp(self):
-        patch = mock.patch.dict(os.environ, {"VICTOR_PJE_ATTORNEY_CPF": "12345678909"})
+        patch = mock.patch.dict(os.environ, {})
         patch.start()
         self.addCleanup(patch.stop)
-        candidates = mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], []))
+        candidates = mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [], []))
         candidates.start()
         self.addCleanup(candidates.stop)
 

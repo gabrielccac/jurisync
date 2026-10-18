@@ -29,6 +29,7 @@ from .classify import claim_value_candidates, classify_document, cpf_candidates,
 from .images import IMAGE_SUFFIXES, image_to_pdf
 from .inbox import fill_from_folder, read_inbox
 from .profile import load_profile
+from .representation import REPRESENTATIVE_KINDS, parse_birth_date, representation_problems, representation_signals
 from .split import split_pdf
 
 PJE_LIMIT = 10_000_000
@@ -75,11 +76,19 @@ def require_facts(facts, defaults):
         "classification.jurisdiction": classification.get("jurisdiction"),
         "classification.judicialClass": classification.get("judicialClass"),
         "characteristics.claimValue": characteristics.get("claimValue"),
-        "VICTOR_PJE_GRAZIELE_CPF": defaults["attorney"]["cpf"],
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
-        raise ValueError(f"Missing case facts or office setting: {', '.join(missing)}")
+        raise ValueError(f"Missing case facts: {', '.join(missing)}")
+    if "attorney" in facts:
+        raise ValueError("Use attorneys (a list of extra attorneys), not attorney")
+    _check_attorneys(facts.get("attorneys", []))
+    if "representative" in author:
+        _check_representative(author["representative"])
+    if "birthDate" in author:
+        parse_birth_date(author["birthDate"])
+    if "selfRepresented" in author and not isinstance(author["selfRepresented"], bool):
+        raise ValueError("author.selfRepresented must be true or false")
     if not re.fullmatch(r"\d{11}", _digits(facts["authorCpf"])):
         raise ValueError("authorCpf must have 11 digits")
     if "address" in author:
@@ -93,6 +102,54 @@ def require_facts(facts, defaults):
     for key in ("legalAid", "injunction"):
         if key in characteristics and not isinstance(characteristics[key], bool):
             raise ValueError(f"characteristics.{key} must be a boolean")
+
+
+def _check_cpf(value, label):
+    if not isinstance(value, str) or not re.fullmatch(r"\d{11}", _digits(value)):
+        raise ValueError(f"{label} must have 11 digits")
+
+
+def _check_attorneys(attorneys):
+    """Extra attorneys to associate with the author, besides the one logged in to PJe (who is there by default)."""
+    if not isinstance(attorneys, list):
+        raise ValueError("attorneys must be a list (empty or omitted when only the logged-in attorney files)")
+    seen = set()
+    for index, attorney in enumerate(attorneys):
+        label = f"attorneys[{index}]"
+        if not isinstance(attorney, dict) or set(attorney) != {"cpf", "name", "oabNumber", "oabState"}:
+            raise ValueError(f"{label} needs exactly cpf, name, oabNumber and oabState")
+        _check_cpf(attorney["cpf"], f"{label}.cpf")
+        if not isinstance(attorney["name"], str) or not attorney["name"].strip():
+            raise ValueError(f"{label}.name is required")
+        if not re.fullmatch(r"\d{1,7}", str(attorney["oabNumber"])):
+            raise ValueError(f"{label}.oabNumber must be digits")
+        if not re.fullmatch(r"[A-Z]{2}", str(attorney["oabState"])):
+            raise ValueError(f"{label}.oabState must be a two-letter UF, e.g. PE")
+        if _digits(attorney["cpf"]) in seen:
+            raise ValueError(f"{label} repeats an attorney")
+        seen.add(_digits(attorney["cpf"]))
+
+
+def _check_representative(representative):
+    """The author's legal representative: who signs for a minor or a represented author."""
+    if not isinstance(representative, dict) or set(representative) != {"cpf", "name", "kind"}:
+        raise ValueError("author.representative needs exactly cpf, name and kind")
+    _check_cpf(representative["cpf"], "author.representative.cpf")
+    if not isinstance(representative["name"], str) or not representative["name"].strip():
+        raise ValueError("author.representative.name is required")
+    if representative["kind"] not in REPRESENTATIVE_KINDS:
+        raise ValueError(f"author.representative.kind must be one of {', '.join(REPRESENTATIVE_KINDS)}")
+
+
+def _author(author):
+    """The author as the payload carries it: name, optional address, optional legal representative."""
+    result = {"name": author["name"]}
+    if author.get("address"):
+        result["address"] = author["address"]
+    if author.get("representative"):
+        representative = author["representative"]
+        result["representative"] = {**representative, "cpf": _digits(representative["cpf"])}
+    return result
 
 
 def select_other_participants(participants, facts):
@@ -119,7 +176,7 @@ def build_payload(facts, documents, defaults):
         "classification": {"area": "DIREITO PREVIDENCIÁRIO", **facts["classification"]},
         "subjects": facts.get("subjects") or [facts["subject"]],
         "authorCpf": _digits(facts["authorCpf"]),
-        "author": {"name": author["name"], **({"address": author["address"]} if author.get("address") else {})},
+        "author": _author(author),
         "characteristics": {
             **defaults["characteristics"],
             **facts["characteristics"],
@@ -129,6 +186,8 @@ def build_payload(facts, documents, defaults):
     }
     if "otherParticipants" in defaults:
         payload["otherParticipants"] = select_other_participants(defaults["otherParticipants"], facts)
+    if facts.get("attorneys"):
+        payload["attorneys"] = [{**item, "cpf": _digits(item["cpf"])} for item in facts["attorneys"]]
     return payload
 
 
@@ -149,8 +208,9 @@ def apply_supporting_fallback(classification, uncertain_type="Outros Documentos"
 
 
 def _petition_candidates(path):
+    """What the petition states: claim values, formatted CPFs and phrases saying the author is represented."""
     markdown = analyze_document(Path(path).read_bytes(), Path(path).name).get("markdown") or ""
-    return claim_value_candidates(markdown), cpf_candidates(markdown)
+    return claim_value_candidates(markdown), cpf_candidates(markdown), representation_signals(markdown)
 
 
 def _safe_classify(name, text, jev_options=None, rules=None):
@@ -407,9 +467,11 @@ def prepare_inbox(store, facts, *, profile, jev=True):
     review = [{"id": row["id"], "name": row["name"], "reason": row["review"]} for row in rows if row.get("review")]
     if len(mains) != 1:
         review.append({"name": "petition", "reason": f"Expected one main petition, found {len(mains)}"})
-    candidates = {"claimValues": [], "cpfs": []}
+    candidates = {"claimValues": [], "cpfs": [], "representation": []}
     if len(mains) == 1 and mains[0].get("uploadSha256"):
-        candidates["claimValues"], candidates["cpfs"] = _petition_candidates(store.local_path(mains[0]["path"]))
+        candidates["claimValues"], candidates["cpfs"], candidates["representation"] = _petition_candidates(
+            store.local_path(mains[0]["path"])
+        )
         claim_value = (facts.get("characteristics") or {}).get("claimValue")
         if claim_value and candidates["claimValues"] and claim_value not in candidates["claimValues"]:
             review.append({"name": "claimValue", "reason": "Case fact differs from the petition's stated claim value"})
@@ -419,6 +481,8 @@ def prepare_inbox(store, facts, *, profile, jev=True):
             )
     try:
         require_facts(facts, profile.defaults())
+        for reason in representation_problems(facts, candidates["cpfs"], candidates["representation"]):
+            review.append({"name": "legal representative", "reason": reason})
     except ValueError as error:
         review.append({"name": "case facts", "reason": str(error)})
     if not review:
@@ -527,12 +591,15 @@ def finalize_review(store, facts, overrides=None, *, profile):
     mains = [row for row in rows if row["role"] == "main"]
     if len(mains) != 1:
         raise ValueError(f"Expected one main petition, found {len(mains)}")
-    claim_values, cpfs = _petition_candidates(store.local_path(mains[0]["path"]))
+    claim_values, cpfs, signals = _petition_candidates(store.local_path(mains[0]["path"]))
     if claim_values and (facts.get("characteristics") or {}).get("claimValue") not in claim_values:
         raise ValueError("Case claimValue differs from the selected petition's stated value")
     if cpfs and _digits(facts.get("authorCpf")) not in cpfs:
         raise ValueError("Author CPF was not found among the selected petition's formatted CPFs")
-    build_payload(facts, {}, profile.defaults())  # facts problems surface before any file is assembled
+    build_payload(facts, {}, profile.defaults())
+    problems = representation_problems(facts, cpfs, signals)
+    if problems:
+        raise ValueError("; ".join(problems))  # facts problems surface before any file is assembled
     if drafted:
         documents = assemble(store, rows, write=False)
         if documents != previous:

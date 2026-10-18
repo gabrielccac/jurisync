@@ -212,10 +212,9 @@ class UploadNameTest(unittest.TestCase):
 
 class PayloadTest(unittest.TestCase):
     def setUp(self):
-        patch = mock.patch.dict(os.environ, {"VICTOR_PJE_ATTORNEY_CPF": "12345678909"})
+        patch = mock.patch.dict(os.environ, {})
         patch.start()
         self.addCleanup(patch.stop)
-        os.environ.pop("VICTOR_PJE_GRAZIELE_CPF", None)
 
     def test_uncertain_supporting_files_fall_back_without_blocking(self):
         flagged = apply_supporting_fallback(
@@ -245,12 +244,39 @@ class PayloadTest(unittest.TestCase):
         payload = build_payload(
             FACTS, {"main": {"path": "/tmp/test.pdf", "type": "Petição inicial"}, "supporting": []}, PROFILE.defaults()
         )
-        self.assertEqual(payload["attorney"]["name"], "GRAZIELE ALVES DA SILVA")
+        self.assertNotIn("attorneys", payload, "without extra attorneys only the logged-in one files")
         self.assertTrue(payload["characteristics"]["legalAid"])
         self.assertEqual(payload["characteristics"]["claimValue"], "5.000,00")
         self.assertEqual(payload["classification"]["jurisdiction"], "PE / Petrolina")
         with self.assertRaisesRegex(ValueError, "claimValue"):
             build_payload({**FACTS, "characteristics": {"claimValue": "0"}}, {}, PROFILE.defaults())
+
+    def test_extra_attorneys_come_from_the_case_facts(self):
+        graziele = {"cpf": "111.222.333-44", "name": "GRAZIELE ALVES DA SILVA", "oabNumber": "48647", "oabState": "PE"}
+        other = {"cpf": "55566677788", "name": "OUTRA ADVOGADA", "oabNumber": "1234", "oabState": "PB"}
+        payload = build_payload({**FACTS, "attorneys": [graziele, other]}, {}, PROFILE.defaults())
+        self.assertEqual(payload["attorneys"], [{**graziele, "cpf": "11122233344"}, other])
+        bad = {
+            "needs exactly cpf": [{"cpf": "11122233344", "name": "X"}],
+            "11 digits": [{**graziele, "cpf": "123"}],
+            "two-letter UF": [{**graziele, "oabState": "Pernambuco"}],
+            "repeats": [graziele, graziele],
+        }
+        for message, attorneys in bad.items():
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                build_payload({**FACTS, "attorneys": attorneys}, {}, PROFILE.defaults())
+        with self.assertRaisesRegex(ValueError, "Use attorneys"):
+            build_payload({**FACTS, "attorney": graziele}, {}, PROFILE.defaults())
+
+    def test_the_legal_representative_goes_with_the_author(self):
+        mother = {"cpf": "999.888.777-66", "name": "MARIA MAE", "kind": "mae"}
+        facts = {**FACTS, "author": {"name": "EXAMPLE", "birthDate": "01/02/2015", "representative": mother}}
+        payload = build_payload(facts, {}, PROFILE.defaults())
+        self.assertEqual(payload["author"], {"name": "EXAMPLE", "representative": {**mother, "cpf": "99988877766"}})
+        with self.assertRaisesRegex(ValueError, "kind must be one of"):
+            build_payload(
+                {**facts, "author": {"name": "X", "representative": {**mother, "kind": "avó"}}}, {}, PROFILE.defaults()
+            )
 
     def test_fiscal_da_lei_is_conditional_and_ceab_is_fixed(self):
         def bodies(facts):

@@ -15,7 +15,7 @@ PAYLOAD = {
     "subject": {"search": "s", "code": "1", "name": "S"},
     "authorCpf": "12345678909",
     "author": {"name": "EXAMPLE"},
-    "attorney": {"cpf": "1", "name": "A", "oabNumber": "1", "oabState": "PE"},
+    "attorneys": [{"cpf": "1", "name": "A", "oabNumber": "1", "oabState": "PE"}],
     "passive": {"cnpj": "1", "search": "x"},
     "characteristics": {"claimValue": "1,00", "legalAid": True, "injunction": False},
 }
@@ -100,6 +100,29 @@ class PhaseTests(unittest.TestCase):
             client.fill_draft(checkpoint(), payload)
             attorney = next(call for call in client.calls if call[0] == "attorney")
             self.assertEqual(attorney[1], expected, changed)
+
+    def test_extra_attorneys_are_optional_and_each_is_associated(self):
+        alone = {key: value for key, value in PAYLOAD.items() if key != "attorneys"}
+        client = Recorder(present=False)
+        client.fill_draft(checkpoint(), alone)
+        self.assertNotIn("attorney", client.names(), "only the attorney logged in to PJe files")
+        second = {"cpf": "2", "name": "B", "oabNumber": "2", "oabState": "PB"}
+        client = Recorder(present=False)
+        result = client.fill_draft(checkpoint(), {**PAYLOAD, "attorneys": [*PAYLOAD["attorneys"], second]})
+        self.assertEqual(client.names().count("attorney"), 2)
+        self.assertEqual(len(result["attorneys"]), 2)
+
+    def test_a_legal_representative_becomes_a_recorded_manual_step(self):
+        mother = {"cpf": "99988877766", "name": "MARIA MAE", "kind": "mae"}
+        payload = {**PAYLOAD, "author": {"name": "EXAMPLE", "representative": mother}}
+        point, saved = checkpoint(), []
+        result = Recorder(present=False).fill_draft(point, payload, save=lambda data: saved.append(data))
+        step = point["manualSteps"][0]
+        self.assertEqual((step["step"], step["cpf"], step["kind"]), ("legal representative", "999.***.***-66", "mae"))
+        self.assertIn("not automated yet", step["reason"])
+        self.assertTrue(result["representative"]["pending"])
+        Recorder(present=True).fill_draft(point, payload, verify_all=True)
+        self.assertEqual(len(point["manualSteps"]), 1, "a re-run does not repeat the step")
 
     def test_rerun_skips_completed_phases_and_only_checks_the_draft_exists(self):
         first = Recorder()

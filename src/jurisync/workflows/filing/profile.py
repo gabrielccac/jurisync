@@ -1,7 +1,9 @@
 """Customer filing profiles: an office's defaults and conventions, kept as data and selected by name.
 
 A profile is `customers/<name>/filing-profile.json`. Shared code only reads that file; it never imports customer code.
-Secrets are never stored in it: the attorney's CPF is read from the environment variables the profile names.
+It holds only what belongs to the protocol (parties every filing of the office has, characteristics, references, type
+rules). Case data, including any extra attorney, comes with each case's facts; the attorney logged in to PJe is on
+every draft by default.
 """
 
 import copy
@@ -29,12 +31,8 @@ class Profile:
     description: str = ""
 
     def defaults(self):
-        """The office defaults for a payload, with the attorney's CPF taken from the environment."""
-        defaults = copy.deepcopy(self.defaults_template)
-        attorney = defaults["attorney"]
-        names = attorney.pop("cpfEnv", [])
-        attorney["cpf"] = next((os.environ[name] for name in names if os.environ.get(name)), "")
-        return {"portal": self.portal, **defaults}
+        """The office defaults for a payload."""
+        return {"portal": self.portal, **copy.deepcopy(self.defaults_template)}
 
     def reference(self, key):
         """Absolute path of a reference file the profile names, kept inside the profile's own folder."""
@@ -69,9 +67,13 @@ def load_profile(name):
             "not to the filing profile"
         )
     defaults = data.get("defaults") or {}
-    for key in ("attorney", "passive"):
-        if not isinstance(defaults.get(key), dict):
-            raise ValueError(f"Profile {name} needs defaults.{key}")
+    if "attorney" in defaults:
+        raise ValueError(
+            f"Profile {name} has defaults.attorney: extra attorneys come with each case's facts (attorneys), and the "
+            "attorney logged in to PJe is on the draft by default"
+        )
+    if not isinstance(defaults.get("passive"), dict):
+        raise ValueError(f"Profile {name} needs defaults.passive")
     if not data.get("portal"):
         raise ValueError(f"Profile {name} needs a portal")
     rules = data.get("documentRules")

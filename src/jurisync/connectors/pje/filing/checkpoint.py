@@ -43,7 +43,7 @@ def phase_fingerprints(payload):
     prints = {
         "subjects": fingerprint(payload_subjects(payload)),
         "parties": fingerprint(
-            {key: payload.get(key) for key in ("authorCpf", "author", "attorney", "passive", "otherParticipants")}
+            {key: payload.get(key) for key in ("authorCpf", "author", "attorneys", "passive", "otherParticipants")}
         ),
     }
     if "characteristics" in payload:

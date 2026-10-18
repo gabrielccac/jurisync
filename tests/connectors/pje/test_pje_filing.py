@@ -44,6 +44,22 @@ class DraftPayloadTests(unittest.TestCase):
         result = client.fill_draft({"draftUrl": "draft", "draftId": "1"}, payload)
         self.assertEqual(set(result), {"subject", "author", "pending"})
 
+    def test_extra_attorneys_are_a_list_and_the_old_single_key_is_refused(self):
+        payload = {
+            "subject": {"search": "test", "code": "1", "name": "TEST"},
+            "authorCpf": "12345678909",
+            "author": {"name": "EXAMPLE", "representative": {"cpf": "99988877766", "name": "M", "kind": "mae"}},
+            "attorneys": [{"cpf": "11122233344", "name": "G", "oabNumber": "1", "oabState": "PE"}],
+        }
+        validate_fill_payload(payload)
+        attorney = payload["attorneys"][0]
+        with self.assertRaisesRegex(ValueError, "Use attorneys"):
+            validate_fill_payload({**payload, "attorney": attorney})
+        with self.assertRaisesRegex(ValueError, "attorneys\\[0\\] needs"):
+            validate_fill_payload({**payload, "attorneys": [{"cpf": "11122233344"}]})
+        with self.assertRaisesRegex(ValueError, "representative needs"):
+            validate_fill_payload({**payload, "author": {"name": "E", "representative": {"cpf": "1"}}})
+
     def test_document_path_is_checked_before_login_or_creation(self):
         payload = {
             "subject": {"search": "test", "code": "1", "name": "TEST"},
