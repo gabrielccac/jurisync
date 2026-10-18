@@ -31,9 +31,11 @@ def documents_fingerprint(documents):
 
 
 def run_directory(run_id):
-    """The folder of one filing run. Every server and tool that touches a run must use this same root."""
-    root = Path(os.environ.get("JURISYNC_FILING_DIR") or Path.home() / ".local/share/jurisync/filings").resolve()
-    return root / run_id
+    """The folder of one filing run (<filing root>/runs/<runId>). Every server and tool that touches a run must use
+    this same root."""
+    from jurisync.paths import filing_folder
+
+    return filing_folder("runs") / run_id
 
 
 def phase_fingerprints(payload):

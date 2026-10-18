@@ -19,7 +19,7 @@ from pathlib import Path
 
 from jurisync.connectors.advbox.client import AdvboxClient
 from jurisync.connectors.advbox.documents import AdvboxDocuments
-from jurisync.paths import STATE_DIR
+from jurisync.paths import filing_folder
 from jurisync.workflows.filing.contract import write_sources
 
 # The office convention for "documents ready to protocol": `00 - PROTOCOLAR`, sometimes `00 - PROTOCOLAR JUD`.
@@ -41,8 +41,8 @@ def protocol_folder(documents, customer_id, patterns=PROTOCOL_FOLDER_PATTERNS):
 
 
 def default_destination(customer_id):
-    """A new folder under JURISYNC_FILING_INPUT_DIR (default: <state>/filing-input)."""
-    root = Path(os.environ.get("JURISYNC_FILING_INPUT_DIR") or STATE_DIR / "filing-input")
+    """A new folder under the filing inputs folder (<filing root>/inputs)."""
+    root = filing_folder("inputs")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     return root / f"advbox-{customer_id}-{stamp}"
 

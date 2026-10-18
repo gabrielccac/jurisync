@@ -184,8 +184,8 @@ class BackgroundFillTests(unittest.TestCase):
             release.wait(5)
 
         with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp, "run1")
-            run_dir.mkdir()
+            run_dir = Path(tmp, "runs", "run1")
+            run_dir.mkdir(parents=True)
             run_dir.joinpath("payload.json").write_text(json.dumps(PAYLOAD))
             approve(LocalRunStore(run_dir))
             env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}
@@ -207,8 +207,8 @@ class BackgroundFillTests(unittest.TestCase):
 
         calls = []
         with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp, "run1")
-            run_dir.mkdir()
+            run_dir = Path(tmp, "runs", "run1")
+            run_dir.mkdir(parents=True)
             payload = run_dir / "payload.json"
             payload.write_text(json.dumps(PAYLOAD))
             env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}

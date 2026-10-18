@@ -48,7 +48,7 @@ class FilingServerTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {"JURISYNC_FILING_DIR": self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.run_dir = Path(self.tmp.name, "run1")
+        self.run_dir = Path(self.tmp.name, "runs", "run1")
 
     def fake_prepare(self, calls):
         def prepare(source, facts, store, *, profile, jev=True):
@@ -142,7 +142,7 @@ class FilingServerTests(unittest.TestCase):
         self.assertTrue(calls[0]["jev"])
 
     def test_a_run_with_a_draft_cannot_be_prepared_or_finalized_again(self):
-        self.run_dir.mkdir()
+        self.run_dir.mkdir(parents=True)
         self.run_dir.joinpath("checkpoint.json").write_text("{}")
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         for name, arguments in (
@@ -157,7 +157,7 @@ class FilingServerTests(unittest.TestCase):
             self.assertIn("new runId", result.content[0].text)
 
     def test_finalize_rejects_overrides_for_unknown_files_and_masks_the_cpf(self):
-        self.run_dir.mkdir()
+        self.run_dir.mkdir(parents=True)
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         self.run_dir.joinpath("facts.json").write_text("{}")
         bad = call(
@@ -194,7 +194,7 @@ class FilingServerTests(unittest.TestCase):
         self.assertNotIn("/secret", json.dumps(ok.structured_content))
 
     def test_approve_records_the_payload_and_document_hashes_and_voids_on_any_change(self):
-        self.run_dir.mkdir()
+        self.run_dir.mkdir(parents=True)
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         self.assertTrue(call("pje_filing_approve", {"runId": "run1"}).is_error)
         petition = self.run_dir / "documents" / "petition.pdf"
@@ -230,7 +230,7 @@ class FilingServerTests(unittest.TestCase):
         self.assertIn("changed since approval", refused.content[0].text)
 
     def test_finalize_drops_an_earlier_approval(self):
-        self.run_dir.mkdir()
+        self.run_dir.mkdir(parents=True)
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         self.run_dir.joinpath("facts.json").write_text("{}")
         self.run_dir.joinpath("approval.json").write_text("{}")

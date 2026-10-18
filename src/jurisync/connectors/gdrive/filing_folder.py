@@ -20,7 +20,7 @@ from pathlib import Path
 
 from jurisync.connectors.gdrive.auth import SCOPE, ServiceAccount, key_path
 from jurisync.connectors.gdrive.client import EXPORTABLE, FOLDER, DriveClient, DriveError, TooLarge
-from jurisync.paths import STATE_DIR
+from jurisync.paths import filing_folder
 from jurisync.workflows.filing.contract import MAX_FILES, write_sources
 
 EXPORTER = "jurisync.gdrive"
@@ -41,7 +41,7 @@ def folder_id(reference):
 
 
 def default_destination(folder):
-    root = Path(os.environ.get("JURISYNC_FILING_INPUT_DIR") or STATE_DIR / "filing-input")
+    root = filing_folder("inputs")
     return root / f"drive-{folder[:12]}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
 
 
