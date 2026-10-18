@@ -131,3 +131,15 @@ class UploadNameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_party_matches_minor_shown_by_initials():
+    """O TRF1 lista autor menor só pelas iniciais; CPF + iniciais identificam a parte."""
+    from jurisync.connectors.pje.filing.parsing import party_matches
+
+    row = "D. L. J. - CPF: 104.739.182-18 (AUTOR)"
+    assert party_matches(row, "DAVI LEÃO JARDIM", "10473918218")
+    assert not party_matches(row, "DAVI LEÃO JARDIM", "00000000000")  # CPF diferente
+    assert not party_matches(row, "MARIA LEÃO JARDIM", "10473918218")  # iniciais diferentes
+    assert party_matches("JOSÉ DA SILVA - CPF: 111", "José da Silva")  # nome completo continua valendo
+    assert party_matches("J. S. - CPF: 123.456.789-00", "JOSÉ DOS SANTOS", "12345678900")  # partículas ignoradas

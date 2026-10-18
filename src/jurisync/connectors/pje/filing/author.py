@@ -6,7 +6,7 @@ import re
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.parsing import has_identifier, name_matches
+from jurisync.connectors.pje.filing.parsing import has_identifier, name_matches, party_matches
 from jurisync.connectors.pje.filing.payload import address_cep, masked_cpf
 from jurisync.connectors.pje.parsers import jsf_data
 
@@ -48,7 +48,7 @@ class AuthorMixin:
         html = panel if panel is not None else self.party_panel(draft_url)
         soup = BeautifulSoup(html, "html.parser")
         active = soup.find(id="poloAtivoDatalistDiv")
-        if active is not None and name_matches(active.get_text(" ", strip=True), expected_name):
+        if active is not None and party_matches(active.get_text(" ", strip=True), expected_name, author_cpf):
             result = {"alreadyAdded": True, "authorNameMatched": True}
             if address is not None:
                 result["address"] = self.ensure_author_address(draft_url, author_cpf, expected_name, address)
@@ -128,10 +128,10 @@ class AuthorMixin:
                 {"tabPartes": "tabPartes", "ajaxSingle": "tabPartes"},
             )
             active = BeautifulSoup(html, "html.parser").find(id="poloAtivoDatalistDiv")
-        if active is None or not name_matches(active.get_text(" ", strip=True), expected_name):
+        if active is None or not party_matches(active.get_text(" ", strip=True), expected_name, author_cpf):
             raise RuntimeError("PJe did not render the author in the active-party list")
         if self.filing.party_roles and not any(
-            name_matches(row.get_text(" ", strip=True), expected_name)
+            party_matches(row.get_text(" ", strip=True), expected_name, author_cpf)
             and has_identifier(row.get_text(" ", strip=True), author_cpf)
             for row in active.find_all("tr")
         ):
@@ -207,7 +207,7 @@ class AuthorMixin:
             row = link.find_parent("tr", class_="rich-table-row")
             if (
                 row
-                and name_matches(row.get_text(" ", strip=True), expected_name)
+                and party_matches(row.get_text(" ", strip=True), expected_name, author_cpf)
                 and has_identifier(row.get_text(" ", strip=True), author_cpf)
             ):
                 matches.append(link)
