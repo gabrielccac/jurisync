@@ -105,9 +105,13 @@ and skip the other. Then finalize using the downloaded files:
 
 ```bash
 .venv/bin/python -m jurisync.workflows.filing finalize --profile victor \
-  --review /private/run/review.json --facts /private/case-facts.json \
+  --run /private/run --facts /private/case-facts.json \
   --overrides /private/overrides.json
 ```
+
+Finalize assembles the chosen PDFs in `/private/run/documents/` (`01-PETICAO INICIAL.pdf`, `02-...`, in filing
+order) and writes `manifest.json` and `payload.json` with paths relative to the run, so the run folder can be moved
+or copied whole.
 
 The finalizer checks PDF hashes and validates the selected PJe document types.
 Every document in `payload.json` carries its `sha256`. Nothing is written to PJe

@@ -22,6 +22,7 @@ src/jurisync/connectors/pje/filing/
   timeline.py         per-step timing       payload.py / names.py / parsing.py   validation and helpers
   run.py              stages and the command line (client.py composes the sections into DraftClient)
   approval.py         approval.json: the recorded approval every payload write stage requires
+  store.py            RunStore: the only reader and writer of a run's files (LocalRunStore today)
 ```
 
 `fill` and `create-fill` work in four phases: subjects, parties, characteristics, documents. Each phase reads the
@@ -43,9 +44,9 @@ process. Neither tool exposes **Protocolar**.
 `pje_search_pending_drafts` searches the first **Não Protocolados** results
 page by party name, CPF, or both, without requiring a filing run.
 
-The inspection and write tools take a `runId` and read `payload.json` and `checkpoint.json` from
+The inspection and write tools take a `runId` and open that run's store,
 `$JURISYNC_FILING_DIR/<runId>` (default:
-`~/.local/share/jurisync/filings/<runId>`). Prepare Victor's reviewed payload
+`~/.local/share/jurisync/filings/<runId>`; see the self-contained run section below). Prepare Victor's reviewed payload
 with `--out` set to that same directory. Keep one unique run ID per draft;
 after **Incluir**, reuse its checkpoint and never call `create` again for that
 run. The desktop workflow is described in
@@ -104,14 +105,14 @@ The current working mock payload is private at
   },
   "documents": {
     "main": {
-      "path": "/absolute/path/peticao.pdf",
+      "path": "documents/01-PETICAO INICIAL.pdf",
       "type": "Petição inicial",
       "description": "Petição inicial",
       "sha256": "<sha256 do PDF aprovado>"
     },
     "supporting": [
       {
-        "path": "/absolute/path/anexo.pdf",
+        "path": "documents/02-ANEXO.pdf",
         "type": "Documento Comprobatório",
         "description": "Anexo",
         "sha256": "<sha256 do PDF aprovado>"
@@ -122,8 +123,8 @@ The current working mock payload is private at
 ```
 
 The example identifiers and classifications reflect the captured mock case;
-replace them for each real matter. PDF paths must exist on the machine running
-the script. The live TRF5 upload panel shows PDF files up to 10.0 MB; this
+replace them for each real matter. Document paths are relative to the run folder and must be inside its
+`documents/`; the connector resolves them through the run's store. The live TRF5 upload panel shows PDF files up to 10.0 MB; this
 client uses a conservative 10,000,000-byte limit per file. DOC/DOCX sources
 must be converted before this adapter receives them. `number` is an optional
 document field; supporting `description` defaults to the filename stem.
@@ -150,7 +151,7 @@ now list its current choices without adding one to a draft:
 ```bash
 .venv/bin/python -m jurisync.connectors.pje.filing \
   --stage subject-options \
-  --checkpoint /home/gabriel/.local/share/jurisync/pje-draft-checkpoint-new.json \
+  --run ~/.local/share/jurisync/filings/<runId> \
   --search "Incapacidade Temporária" --page 1
 ```
 
@@ -195,13 +196,49 @@ O que vai para o PJe tem de ser exatamente o que o advogado revisou. Por isso:
   `pje_draft_status` com `checkPje: true` informa em `contentNotConfirmed` os documentos cujo conteúdo no rascunho não
   é confirmado pelo registro, e nesse caso a conclusão não é `verified`.
 - **Nomes únicos.** A limpeza do nome (sem acentos, sem o sufixo aleatório do ADVBOX) pode juntar dois arquivos
-  diferentes num só nome: `A_1111.pdf` e `Ã_2222.pdf` → `A.pdf`. O staging (`stage_uploads`) dá a cada arquivo, na
-  ordem da pasta, um nome único no run, comparando como o PJe compara (sem acento e sem diferenciar maiúsculas): o
-  primeiro mantém o nome limpo e os seguintes ganham um sufixo curto do hash (`A-1a2b3c4d.pdf`). Volumes de um PDF
-  dividido seguem o nome do arquivo (`B-vol-01.pdf`). Não acrescentamos `NN-` porque as pastas do escritório já
-  trazem a numeração (`10-PETIÇÃO INICIAL`).
+  diferentes num só nome: `A_1111.pdf` e `Ã_2222.pdf` → `A.pdf`. Desde a Fase 2 cada arquivo da montagem ganha o
+  número da sua posição (`02-A.pdf`, `03-A.pdf`), o que já os separa; `CanonicalNames` continua como defesa e, se dois
+  nomes ainda coincidirem (comparados como o PJe compara, sem acento e sem diferenciar maiúsculas), acrescenta um
+  sufixo curto do hash.
 - **Overrides restritos.** Em `filing_finalize`, `overrides` só aceita `role` (`main`, `supporting`, `skip`), `type`
   e `description`, todos texto não vazio; qualquer outra chave (como `path` ou `uploadSha256`) é erro.
+
+## Montagem autocontida e RunStore (Fase 2)
+
+Um run é uma pasta autocontida. Nada no `review.json`, no `payload.json` ou no `manifest.json` guarda caminho
+absoluto: copiada para outra pasta (ou, no futuro, para um bucket), ela continua válida, inclusive a aprovação.
+
+```text
+<runId>/
+  facts.json  review.json  payload.json  approval.json  manifest.json  checkpoint.json  filing-steps.json
+  documents/01-PETICAO INICIAL.pdf  02-PROCURACAO.pdf  03-LAUDOS-vol-01.pdf ...   a montagem final
+  work/files/  work/converted/  work/split/                                        área de trabalho do prepare
+```
+
+- **`documents/` é a montagem.** O finalize (e o prepare, quando não há pendências) copia para `documents/` só os
+  arquivos escolhidos, na ordem do protocolo: a petição inicial é `01`, depois os anexos na ordem da pasta, cada
+  volume de PDF dividido com seu próprio número (`03-LAUDOS-vol-01.pdf`). O número da pasta do escritório
+  (`10-PETIÇÃO INICIAL`) dá lugar ao nosso. Cada arquivo só é copiado depois de conferir o `uploadSha256` da revisão.
+  Todo prepare e todo finalize refazem a montagem do zero (apagam `documents/`, `manifest.json`, `payload.json` e
+  `approval.json`). As antigas pastas `files/`, `converted/`, `split/` e `upload/` deram lugar a `work/` + `documents/`.
+- **`manifest.json`** lista cada arquivo montado: caminho, sha256, tamanho, papel, tipo, descrição, volume e de qual
+  linha da revisão veio (`reviewId`, `sourceName`). Na Fase 3 é aqui que a origem (`advbox`, `drive`, `local`) de
+  cada arquivo vai se ligar ao `sources.json`.
+- **Caminhos relativos no payload.** Cada documento é `documents/NN-nome.pdf` + `sha256`; o conector resolve pelo
+  store do run. **Decisão: payload antigo com caminho absoluto é recusado**, com a mensagem de rodar `filing_finalize`
+  de novo (ou usar novo `runId`, se já há rascunho). Desde a Fase 1 todo payload real já precisava ser refeito por
+  causa do `sha256`, e um caminho absoluto aponta para fora da montagem aprovada. O `status` continua lendo esses
+  runs (sem comparar fases). Caminhos fora de `documents/` ou com `..` também são recusados.
+- **Run com rascunho.** Depois do `checkpoint.json`, o prepare recusa e o finalize do CLI só aceita mudar fatos do
+  caso: se a montagem resultante for diferente da que já está no payload, ele recusa sem tocar em `documents/`
+  (o `filing_finalize` do MCP continua recusando qualquer mudança). A aprovação é sempre exigida de novo.
+- **RunStore** (`connectors/pje/filing/store.py`) é a única porta de leitura e escrita do run, para prepare,
+  finalize, approve, o conector, o status e a linha do tempo: `exists`, `read_bytes`, `read_json`, `write_bytes`,
+  `write_json` (atômicos, 0600, pastas 0700), `delete`, `delete_tree`, `list`, mais `local_path` (um arquivo local com
+  o conteúdo, para leitores de PDF e uploads) e `workspace` (pasta local para ferramentas que escrevem arquivos:
+  download, conversão, divisão) e `name_of` (caminho local → nome do run; fora do run é recusado). Os nomes são
+  relativos e validados. `open_run(runId)` devolve hoje um `LocalRunStore`; uma versão em nuvem (S3/GCS) implementa
+  os mesmos métodos, com `local_path`/`workspace` como cache local, sem mudar prepare, finalize ou o conector.
 
 ## Run and review
 
@@ -212,15 +249,14 @@ the JSON payload. With those values loaded:
 ```bash
 .venv/bin/python -m jurisync.connectors.pje.filing \
   --stage create-fill \
-  --payload /home/gabriel/.local/share/jurisync/pje-draft-payload.json \
-  --checkpoint /home/gabriel/.local/share/jurisync/pje-draft-checkpoint-next.json
+  --run ~/.local/share/jurisync/filings/<runId>
 ```
 
-The payload must have been approved first (`approval.json` next to it; see the integrity section above), otherwise
-every stage that writes payload content stops before logging in. Use a new checkpoint filename for each new draft. **Incluir** creates the
-draft; the script saves its ID and URL to the checkpoint immediately. A later
-failure does not erase that draft. Resume the same draft with `--stage fill`,
-the same payload, and that checkpoint. `--stage documents` only handles the
+`--run` is the run folder: its `payload.json`, `approval.json`, `checkpoint.json` and `documents/` are used from there
+(the old `--payload`/`--checkpoint` options are gone). The payload must have been approved first (see the integrity
+section above), otherwise every stage that writes payload content stops before logging in. Use a new run for each new
+draft. **Incluir** creates the draft; the script saves its ID and URL to the run's checkpoint immediately. A later
+failure does not erase that draft. Resume the same draft with `--stage fill` and the same run. `--stage documents` only handles the
 PDFs on an existing draft. These stages authenticate once per run and keep the
 same session for that run.
 

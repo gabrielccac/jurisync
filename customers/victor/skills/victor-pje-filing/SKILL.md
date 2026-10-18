@@ -42,12 +42,13 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    --customer <id> --facts <facts.json> --out <run-directory>` from the repo root
    (it loads the repo `.env` itself).
    Do not create a separate `documents.json`; this script downloads and
-   classifies the files, then writes `review.json` and, when ready, `payload.json`.
-   Treat both files as script outputs; do not write or replace them manually.
+   classifies the files, then writes `review.json` and, when ready, `payload.json` plus the assembled PDFs in
+   `documents/` (numbered in filing order) and `manifest.json`. Paths in them are relative to the run folder.
+   Treat all of these as script outputs; do not write, rename or replace them manually.
    `review.json` must contain a `files` array for the `finalize` command.
    Read `review.json`: inspect every file, suggested PJe type, fallback,
    duplicate, and size/split flag. If needed, use the same module's `finalize`
-   command with `--review` and `--overrides` to resolve selections (`overrides` accepts only `role`, `type` and
+   command with `--run <run-directory>` and `--overrides` to resolve selections (`overrides` accepts only `role`, `type` and
    `description`). Continue only when it emits `ready: true` and `payload.json` exists.
    A `payload.json` is never approved by itself, even when prepare wrote it with no review items.
 3. Show the user the reviewed facts, selected subjects, address status,
@@ -65,8 +66,9 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    payload and files ("Document changed since approval" means a file changed: finalize and ask again). The adapter writes
    `checkpoint.json` immediately after **Incluir**. If filling later fails,
    inspect that checkpoint and the live draft. Correct case facts and
-   regenerate `payload.json` with `finalize --review <run-directory>/review.json
-   --facts <facts.json>` rather than editing it by hand, then show it and get a new approval. Resume with the
+   regenerate `payload.json` with `finalize --run <run-directory>
+   --facts <facts.json>` rather than editing it by hand, then show it and get a new approval. With a draft in place
+   only case facts may change; a different document selection needs a new `runId`. Resume with the
    targeted `pje_draft_write` stage (`characteristics`, then `documents`, for
    a characteristics failure); do not repeat `create` or `create-fill`.
    If fill stops because a document on the draft has other content than the approved file (or no upload record),
