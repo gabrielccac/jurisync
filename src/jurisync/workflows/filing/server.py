@@ -36,7 +36,23 @@ RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,6
 
 ProfileName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,40}$")]
 
-server = MCPServer("filing", version="1.0.0")
+# The tools are declared once and registered on any server: this filing server and the PJe server, which offers
+# them next to pje_draft_write so a whole filing runs through one MCP server.
+TOOLS = []
+
+
+def _tool(**options):
+    def add(function):
+        TOOLS.append((function, options))
+        return function
+
+    return add
+
+
+def register(target):
+    """Add every filing tool to `target` (an MCPServer)."""
+    for function, options in TOOLS:
+        target.add_tool(function, **options)
 
 
 def _file_view(row):
@@ -130,7 +146,7 @@ def _require_no_draft(store):
         raise ToolError("This run already has a PJe draft, so its payload can no longer change; use a new runId")
 
 
-@server.tool(
+@_tool(
     name="filing_prepare",
     title="Prepare a TRF5 filing from an input folder",
     description="Copy the input folder into the run's inbox (hashing each file), convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. `sourceFolder` is an absolute local folder in the filing input contract: the documents (any subfolders, no symlinks) plus an optional sources.json declaring each file's origin. Fill it yourself from Drive, GERID or other connectors, or with a source's exporter (advbox_export_filing_folder). Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
@@ -155,7 +171,7 @@ def prepare(
     return _review_view(runId, report, store)
 
 
-@server.tool(
+@_tool(
     name="filing_review",
     title="Read a prepared filing review",
     description="Return the review of a prepared run again: files with their ids, roles, PJe types and problems, the petition's candidates, and whether a payload exists. Reads local files only.",
@@ -167,7 +183,7 @@ def review(runId: RunId) -> dict[str, Any]:
     return _review_view(runId, report, store)
 
 
-@server.tool(
+@_tool(
     name="filing_finalize",
     title="Write the filing payload for a prepared run",
     description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition. `overrides` maps a file id from the review to {role, type, description} (only those keys), or {role: 'skip'} to leave a file out. Omit `facts` to reuse the facts given to prepare. Every finalize drops any earlier approval. Returns a summary of what the draft will contain, to show the user before filing_approve.",
@@ -202,7 +218,7 @@ def finalize(
     }
 
 
-@server.tool(
+@_tool(
     name="filing_approve",
     title="Record the user's approval of a finalized filing payload",
     description="Record that the user approved the summary filing_finalize showed: writes approval.json with the time, the payload's sha256 and each document's sha256, after checking every document still matches. pje_draft_write refuses without an approval that matches the current payload. Call it only after the user explicitly confirms that summary; never on your own.",
@@ -232,7 +248,7 @@ def _subject_table(path):
     return rows
 
 
-@server.tool(
+@_tool(
     name="filing_profiles",
     title="List the available filing profiles",
     description="List the customer filing profiles this server can use (name, portal, description). A profile holds one office's defaults and conventions; the customer's skill says which one to pass to the other filing tools.",
@@ -248,7 +264,7 @@ def profiles() -> dict[str, Any]:
         }
 
 
-@server.tool(
+@_tool(
     name="filing_subjects",
     title="Candidate PJe subjects (assuntos) for a filing",
     description="Return the profile's reference table of benefit labels and the PJe subject codes seen for them, plus, when lawsuitRef (a lawsuit ID or CNJ number) is given, the paragraphs of the profile's history notes that record what was filed for that exact case. These are candidates for the user to confirm, never defaults.",
@@ -265,6 +281,10 @@ def subjects(
             paragraphs = re.split(r"\n\s*\n", history_path.read_text(encoding="utf-8"))
             history = [" ".join(text.split())[:900] for text in paragraphs if lawsuitRef in text][:4]
         return {"candidates": _subject_table(selected.reference("subjects")), "history": history}
+
+
+server = MCPServer("filing", version="1.0.0")
+register(server)
 
 
 def main():

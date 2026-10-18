@@ -41,6 +41,23 @@ checkpoint: run ID, step, document or party, status, seconds, and PJe requests (
 
 ## Codex desktop chat and MCP
 
+### Todo o protocolo pelo MCP do PJe
+
+O servidor do PJe (`jurisync-pje`) oferece também as ferramentas de preparo do filing (`filing_profiles`,
+`filing_subjects`, `filing_prepare`, `filing_review`, `filing_finalize`, `filing_approve`), com os mesmos nomes,
+parâmetros e textos do servidor `filing`, que continua existindo para quem quer só o preparo. O fluxo inteiro fica:
+`filing_prepare` → `filing_review` → (`filing_finalize` se algo mudar) → `filing_approve` (só com o "sim" do usuário)
+→ `pje_draft_write create-fill` → `pje_draft_status`. O código do preparo continua em `workflows/filing`: as ferramentas
+são declaradas uma vez e registradas nos dois servidores (`workflows/filing/server.py`, `register`). Só o módulo do
+servidor do PJe importa o workflow; a biblioteca `connectors/pje/filing` nunca o faz, e um teste de arquitetura garante.
+
+**Perfis no pacote instalado.** Os perfis ficam em `customers/<nome>/filing-profile*.json`, que não vão para dentro do
+pacote. A pasta de clientes é procurada nesta ordem: `JURISYNC_CUSTOMERS_DIR`; a pasta `customers/` do checkout, quando
+o código roda do repositório; **a pasta de onde o pacote foi instalado**, que o instalador registra no `direct_url.json`
+(PEP 610) quando se usa `uv tool install ~/code/jurisync`; e por fim `~/.config/jurisync/customers`. Assim, reinstalar
+a partir do checkout basta, sem configuração. Se o checkout mudar de lugar, reinstale a partir do novo caminho (ou
+defina `JURISYNC_CUSTOMERS_DIR`).
+
 The PJe MCP exposes `pje_draft_inspect` for current classification choices,
 subject choices, and **Não Protocolados** checks. `pje_draft_write` exposes the
 CLI's create/fill stages and requires `PJE_ALLOW_DRAFT_WRITES=true` in the MCP

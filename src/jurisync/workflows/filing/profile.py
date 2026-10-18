@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from jurisync.paths import REPO_ROOT
+from jurisync.paths import customers_root
 
 PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 PROFILE_FILE = "filing-profile.json"
@@ -65,7 +65,7 @@ class Profile:
 
 
 def _profile_files():
-    root = Path(os.environ.get("JURISYNC_PROFILES_DIR") or REPO_ROOT / "customers")
+    root = Path(os.environ["JURISYNC_PROFILES_DIR"]) if os.environ.get("JURISYNC_PROFILES_DIR") else customers_root()
     return sorted([*root.glob(f"*/{PROFILE_FILE}"), *root.glob("*/filing-profile.*.json")])
 
 

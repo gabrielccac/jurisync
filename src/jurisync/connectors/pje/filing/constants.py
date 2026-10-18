@@ -51,17 +51,11 @@ FILING_PORTALS = {
     "trf1-1g": FilingPortal(
         "trf1-1g",
         writes=True,
-        note="surveyed read-only (docs/connectors/pje-trf1-filing-recon.md); the steps after Incluir follow the TRF5 "
-        "flow and have not run on TRF1 yet",
+        note="two supervised drafts completed every phase (15508678 and 15508705, October 2026); the paths below have "
+        "not run on TRF1 yet",
         unverified=(
-            "Incluir (create the draft) and the fields PJe 2.13 may ask for after the class",
-            "subject association (selecting a search result)",
-            "author lookup and insertion",
+            "registering a new address for the author (both drafts reused an address PJe already had)",
             "extra attorney association",
-            "INSS in the passive pole",
-            "characteristics and priority save",
-            "main petition upload in PDF mode",
-            "supporting uploads, their type list and size limit",
         ),
         party_roles={"active": "AUTOR", "passive": "REU"},
         author_required_details=(),

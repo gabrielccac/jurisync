@@ -34,6 +34,16 @@ class FilingArchitectureTests(unittest.TestCase):
                         offenders.append(f"{path.relative_to(SRC)} imports {name}")
         self.assertEqual(offenders, [])
 
+    def test_the_pje_filing_library_never_imports_the_workflow(self):
+        # The PJe server offers the workflow's tools, but only the server module may import the workflow.
+        offenders = [
+            f"{path.relative_to(SRC)} imports {name}"
+            for path in sorted((SRC / "jurisync/connectors/pje/filing").rglob("*.py"))
+            for name in _imports(path)
+            if name.startswith("jurisync.workflows")
+        ]
+        self.assertEqual(offenders, [])
+
     def test_the_input_contract_depends_on_the_standard_library_only(self):
         names = list(_imports(SRC / "jurisync/workflows/filing/contract.py"))
         self.assertEqual([name for name in names if name.startswith("jurisync")], [])

@@ -25,6 +25,7 @@ from jurisync.connectors.pje.push import read_push
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
+from jurisync.workflows.filing.server import register as register_filing_tools
 
 Portal = Literal["trf1-1g", "trf1-2g", "trf5-1g"]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
@@ -345,6 +346,12 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
     if job is not None and job.is_alive() and response["result"]["state"] == "unknown":
         response["result"]["state"] = "running"
     return response
+
+
+# The filing preparation tools (filing_prepare, filing_review, filing_finalize, filing_approve...) are offered here
+# too, so one PJe server takes a filing from the input folder to the draft. Only this server module imports the
+# workflow; the connector's own filing package never does (tests/workflows/test_filing_architecture.py).
+register_filing_tools(server)
 
 
 def main():
