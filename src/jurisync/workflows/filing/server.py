@@ -1,9 +1,10 @@
 """Filing MCP server: prepare and finalize a PJe draft payload without a shell.
 
-The PJe MCP fills a draft from `payload.json` in a filing run, but something has to build that file from the ADVBOX
-`00-PROTOCOLAR` folder. That used to be a command-line step; these tools make it callable by an agent that only has
-MCP access. They wrap `prepare.py`, so the agent never passes file paths and never writes
-`review.json` or `payload.json` itself.
+The PJe MCP fills a draft from `payload.json` in a filing run, but something has to build that file from the documents:
+a local folder the agent gathered (with an optional `sources.json` declaring each file's origin) or the ADVBOX
+`00-PROTOCOLAR` folder. Either is copied into the run's `inbox/` first, and everything after reads only the run. These
+tools wrap `prepare.py`; the only path the agent ever passes is that source folder, and it never writes `review.json`
+or `payload.json` itself. Views show each document's origin but never a local path or hash.
 
 Nothing reaches PJe on the strength of a written payload alone: `filing_approve` records the user's approval of that
 exact payload (its sha256 and every document's) in `approval.json`, and `pje_draft_write` refuses without it.
@@ -20,10 +21,11 @@ from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
 from jurisync.connectors.pje.filing.approval import approve, require_approval, revoke
-from jurisync.connectors.pje.filing.store import CHECKPOINT, FACTS, PAYLOAD, REVIEW, open_run
+from jurisync.connectors.pje.filing.store import CHECKPOINT, FACTS, MANIFEST, PAYLOAD, REVIEW, open_run
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 from jurisync.paths import REPO_ROOT
-from jurisync.workflows.filing.prepare import finalize_review, prepare_customer
+from jurisync.workflows.filing.inbox import origin_view
+from jurisync.workflows.filing.prepare import finalize_review, prepare_customer, prepare_folder
 from jurisync.workflows.filing.profile import load_profile, profile_names
 
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
@@ -43,6 +45,8 @@ def _file_view(row):
         view["suggestedType"] = row["suggestedType"]
     if row.get("parts"):
         view["volumes"] = len(row["parts"])
+    if row.get("origin"):
+        view["origin"] = origin_view(row["origin"])
     return view
 
 
@@ -58,6 +62,7 @@ def _review_view(run_id, report, store):
     """The review without local paths or hashes: the agent needs ids, names, types and problems."""
     return {
         "runId": run_id,
+        "source": report.get("source"),
         "customerId": report.get("customerId"),
         "folder": report.get("folder"),
         "ready": bool(report.get("ready")),
@@ -75,9 +80,10 @@ def _mask_cpf(value):
     return f"{digits[:3]}.***.***-{digits[-2:]}" if len(digits) == 11 else None
 
 
-def _payload_view(payload):
+def _payload_view(payload, manifest=None):
     documents = payload.get("documents") or {}
     items = [documents["main"], *documents.get("supporting", [])] if documents.get("main") else []
+    origins = {entry["path"]: entry.get("origin") for entry in (manifest or {}).get("documents", [])}
     return {
         "classification": payload.get("classification"),
         "subjects": [{"code": item["code"], "name": item["name"]} for item in payload.get("subjects", [])],
@@ -93,6 +99,7 @@ def _payload_view(payload):
                 "type": item.get("type"),
                 "description": item.get("description"),
                 **({"volume": item["number"]} if item.get("number") else {}),
+                **({"origin": origin_view(origins[item["path"]])} if origins.get(item["path"]) else {}),
             }
             for item in items
         ],
@@ -112,25 +119,33 @@ def _require_no_draft(store):
 
 @server.tool(
     name="filing_prepare",
-    title="Prepare a TRF5 filing from the ADVBOX protocol folder",
-    description="Download the customer's 00-PROTOCOLAR folder from ADVBOX, convert Word files to PDF, split PDFs over 10 MB, classify every file and write the run's review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
+    title="Prepare a TRF5 filing from a document folder or the ADVBOX protocol folder",
+    description="Copy the documents into the run's inbox, convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. Give either `sourceFolder` (an absolute local folder you filled from Drive, GERID, ADVBOX..., optionally with a sources.json declaring each file's origin; no symlinks) or `customerId` (downloads that customer's ADVBOX 00-PROTOCOLAR folder, or `folder`). Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
     annotations=LOCAL_WRITE,
 )
 def prepare(
     profile: ProfileName,
     runId: RunId,
-    customerId: Digits,
     facts: dict[str, Any],
+    customerId: Digits | None = None,
+    sourceFolder: Annotated[str | None, Field(min_length=2, max_length=1000)] = None,
     folder: Annotated[str | None, Field(max_length=200)] = None,
     useJev: bool = False,
 ) -> dict[str, Any]:
+    if (customerId is None) == (sourceFolder is None):
+        raise ToolError("Give either sourceFolder (a local document folder) or customerId (ADVBOX), not both")
+    if sourceFolder is not None and folder is not None:
+        raise ToolError("folder names an ADVBOX folder; it only goes with customerId")
     store = open_run(runId)
     _require_no_draft(store)
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
         store.ensure()
         store.write_json(FACTS, facts)
-        prepare_customer(customerId, facts, store, profile=selected, folder=folder, jev=useJev)
+        if sourceFolder is not None:
+            prepare_folder(sourceFolder, facts, store, profile=selected, jev=useJev)
+        else:
+            prepare_customer(customerId, facts, store, profile=selected, folder=folder, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(store, REVIEW, "Prepare did not write a review")
     return _review_view(runId, report, store)
@@ -177,7 +192,7 @@ def finalize(
     return {
         "runId": runId,
         "ready": bool(result.get("ready")),
-        "payload": _payload_view(payload),
+        "payload": _payload_view(payload, store.read_json(MANIFEST) if store.exists(MANIFEST) else None),
         "approved": False,
         "next": "Show this summary to the user. Only after they explicitly approve it, call filing_approve with this runId; then call pje_draft_write with stage create-fill and follow it with pje_draft_status. If anything changes, finalize again: that needs a new approval.",
     }

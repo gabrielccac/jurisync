@@ -381,7 +381,16 @@ class PayloadTest(unittest.TestCase):
             self.assertTrue(result["payloadWritten"], result["review"])
             self.assertFalse(store.exists("approval.json"), "prepare never leaves an approval behind")
             rows = store.read_json("review.json")["files"]
-            self.assertTrue(all(row["path"].startswith("work/files/") for row in rows))
+            # ADVBOX now only fills the inbox: rows point at it, with the fetched origin and the copy's hash.
+            self.assertEqual(
+                [row["path"] for row in rows], ["inbox/10-PETIÇÃO INICIAL_1111.pdf", "inbox/2-PROCURAÇÃO_2222.pdf"]
+            )
+            inbox = store.read_json("inbox.json")
+            self.assertEqual((inbox["from"], inbox["customerId"], inbox["folder"]), ("advbox", "1", "00-PROTOCOLAR"))
+            self.assertEqual(rows[0]["origin"]["source"], "advbox")
+            self.assertEqual(rows[0]["origin"]["kind"], "fetched")
+            self.assertEqual(rows[0]["sha256"], hashlib.sha256(b"%PDF-1 u1").hexdigest())
+            self.assertEqual(store.list("work"), [], "the download area is emptied once the inbox is filled")
             documents = store.read_json("payload.json")["documents"]
             self.assertEqual(
                 [documents["main"]["path"], *(item["path"] for item in documents["supporting"])],

@@ -1,6 +1,7 @@
 """Prepare a TRF5 PJe draft payload from a customer's Advbox protocol folder, driven by a filing profile.
 
     python -m jurisync.workflows.filing prepare --profile NAME --customer ID --facts case-facts.json --out RUN_DIR
+    python -m jurisync.workflows.filing prepare --profile NAME --from FOLDER --facts case-facts.json --out RUN_DIR
     python -m jurisync.workflows.filing finalize --profile NAME --run RUN_DIR --facts case-facts.json [--overrides overrides.json]
     python -m jurisync.workflows.filing approve --run RUN_DIR
 
@@ -28,6 +29,8 @@ from jurisync.core.pdf import analyze_document
 from jurisync.core.word_to_pdf import convert_word_to_pdf
 
 from .classify import claim_value_candidates, classify_document, cpf_candidates, document_kind
+from .images import IMAGE_SUFFIXES, image_to_pdf
+from .inbox import fill_from_advbox, fill_from_folder, read_inbox
 from .profile import load_profile
 from .split import split_pdf
 
@@ -233,8 +236,8 @@ def assemble(store, rows, *, write=True):
             }
             if parts:
                 entry["number"] = f"{index}/{len(parts)}"
-            entries.append((entry, row, len(content)))
-    documents = [entry for entry, _, _ in entries]
+            entries.append((entry, row, len(content), item.get("inputSha256") or row.get("sha256")))
+    documents = [entry for entry, *_ in entries]
     if not write:
         return {"main": documents[0], "supporting": documents[1:]}
     store.write_json(
@@ -243,24 +246,42 @@ def assemble(store, rows, *, write=True):
             "version": 1,
             "assembledAt": now(),
             "documents": [
-                {**entry, "role": row["role"], "size": size, "reviewId": row["id"], "sourceName": row["name"]}
-                for entry, row, size in entries
+                {
+                    **entry,
+                    "role": row["role"],
+                    "size": size,
+                    "reviewId": row["id"],
+                    "sourceName": row["name"],
+                    "inputSha256": input_sha256,
+                    "inbox": row.get("inbox"),
+                    "derivedBy": row.get("derivedBy"),
+                    "origin": row.get("origin") or {},
+                }
+                for entry, row, size, input_sha256 in entries
             ],
         },
     )
     return {"main": documents[0], "supporting": documents[1:]}
 
 
-def _prepare_row(entry, index, store, documents, unlabeled_petition, seen_hashes, profile, jev_options=None):
-    """Download, convert and split one file in the run's work area; the row names its files relative to the run."""
-    file = documents.download_file(
-        entry.get("downloadUrl") or entry["url"],
-        filename=entry["name"],
-        directory=store.workspace(f"{WORK}/files"),
-        inspect=False,
-    )
-    content = Path(file["path"]).read_bytes()
-    sha256 = _sha256(content)
+def _prepare_row(entry, index, store, unlabeled_petition, seen_hashes, profile, jev_options=None):
+    """Convert, classify and split one inbox file in the run's work area; the row names its files relative to the run.
+
+    `sha256` is the inbox hash taken when the file was copied in; every derived file (conversion, volumes) records it
+    as `inputSha256`, so each uploaded PDF traces back to the file and origin it came from.
+    """
+    sha256 = entry["sha256"]
+    content = store.read_bytes(entry["path"])
+    if _sha256(content) != sha256:
+        raise ValueError(f"Inbox file changed after it was copied: {entry['name']}")
+    source_path, derived_by, conversion_error = entry["path"], "copy", None
+    if Path(entry["name"]).suffix.lower() in IMAGE_SUFFIXES:
+        try:
+            target = store.workspace(f"{WORK}/converted/{sha256}") / f"{Path(entry['name']).stem}.pdf"
+            source_path = store.name_of(image_to_pdf(store.local_path(entry["path"]), target, PJE_LIMIT))
+            content, derived_by = store.read_bytes(source_path), "image-to-pdf"
+        except Exception as error:  # an unreadable or unsupported image becomes a review item
+            conversion_error = f"Image conversion failed: {error}"
     ambiguous = document_kind(entry["name"], profile.document_rules) in ("decision", "medical", "unknown")
     analysis = (
         analyze_document(content, entry["name"]) if ambiguous and len(content) <= PJE_LIMIT and _is_pdf(content) else {}
@@ -290,12 +311,17 @@ def _prepare_row(entry, index, store, documents, unlabeled_petition, seen_hashes
     row = {
         "id": f"{sha256[:12]}:{index}",
         "name": entry["name"],
-        "path": file["path"],
+        "path": str(store.local_path(source_path)),
         "sha256": sha256,
+        "inbox": entry["path"],
+        "origin": entry.get("origin") or {},
+        "derivedBy": derived_by,
         "pages": analysis.get("pageCount"),
         "textCharacters": analysis.get("textCharacters") or 0,
         **apply_supporting_fallback(classification, profile.uncertain_type),
     }
+    if conversion_error:
+        row["review"] = conversion_error
     if sha256 in seen_hashes:
         row["review"] = "Duplicate file contents in folder"
     seen_hashes.add(sha256)
@@ -303,12 +329,13 @@ def _prepare_row(entry, index, store, documents, unlabeled_petition, seen_hashes
     if path.suffix.lower() != ".pdf":
         if path.suffix.lower() in (".doc", ".docx"):
             try:
-                converted = store.workspace(f"{WORK}/converted/{sha256}") / f"{path.stem}.pdf"
+                converted = store.workspace(f"{WORK}/converted/{sha256}") / f"{Path(entry['name']).stem}.pdf"
                 row["path"] = str(convert_word_to_pdf(path, converted))
+                row["derivedBy"] = "word-to-pdf"
             except Exception as error:
                 row["review"] = f"PDF conversion failed: {error}"
-        else:
-            row["review"] = "Document is not a PDF or convertible Word file"
+        elif not conversion_error:
+            row["review"] = "Document is not a PDF, an image or a convertible Word file"
     if Path(row["path"]).suffix.lower() == ".pdf":
         upload = Path(row["path"]).read_bytes()
         row["uploadSha256"] = _sha256(upload)
@@ -322,6 +349,7 @@ def _prepare_row(entry, index, store, documents, unlabeled_petition, seen_hashes
                     row["parts"] = split_pdf(row["path"], store.workspace(f"{WORK}/split/{sha256}"))
                     for part in row["parts"]:
                         part["uploadSha256"] = _sha256(Path(part["path"]).read_bytes())
+                        part["inputSha256"] = sha256
                     row["review"] = "; ".join(
                         filter(None, [row.get("review"), "Confirm split PDF page ranges before upload"])
                     )
@@ -341,15 +369,14 @@ def _void_assembly(store):
     store.delete_tree(DOCUMENTS)
 
 
-def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=None, jev=True):
-    """Download, convert, split and classify the protocol folder into the run `store` (a RunStore).
-
-    `jev=False` keeps document text off the network.
-    """
-    jev_options = None if jev else {"openrouter_key": "", "api_key": ""}
+def _require_no_draft(store):
     if store.exists(CHECKPOINT):
         raise ValueError("This run already has a PJe draft, so it cannot be prepared again; use a new runId")
-    _void_assembly(store)
+
+
+def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=None, jev=True):
+    """Fill the run's inbox from the customer's ADVBOX protocol folder, then prepare it (see prepare_inbox)."""
+    _require_no_draft(store)
     documents = AdvboxDocuments(client or AdvboxClient())
     root = documents.list_customer_files(customer_id)
     selected = folder or next(
@@ -363,9 +390,30 @@ def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=
     )
     if not selected:
         raise ValueError(f"No 00-PROTOCOLAR folder found for customer {customer_id}")
-    files = documents.list_customer_files(customer_id, selected)["files"]
+    fill_from_advbox(store, documents, customer_id, selected)
+    return prepare_inbox(store, facts, profile=profile, jev=jev)
+
+
+def prepare_folder(source, facts, store, *, profile, jev=True):
+    """Copy a local folder (and its optional sources.json) into the run's inbox, then prepare it."""
+    _require_no_draft(store)
+    fill_from_folder(store, source)
+    return prepare_inbox(store, facts, profile=profile, jev=jev)
+
+
+def prepare_inbox(store, facts, *, profile, jev=True):
+    """Convert, split and classify the files in the run's inbox, and write review.json (and, when nothing is left to
+    review, the assembly and an unapproved payload). Reads nothing outside the run. `jev=False` keeps document text
+    off the network.
+    """
+    jev_options = None if jev else {"openrouter_key": "", "api_key": ""}
+    _require_no_draft(store)
+    _void_assembly(store)
+    store.delete_tree(WORK)
+    inbox = read_inbox(store)
+    files = inbox["files"]
     if not files:
-        raise ValueError(f"The selected folder has no files: {selected}")
+        raise ValueError("The inbox has no files")
     editable = [entry for entry in files if re.search(r"\.docx?$", entry["name"], re.I)]
     unlabeled = (
         editable[0]
@@ -375,8 +423,7 @@ def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=
     )
     seen = set()
     rows = [
-        _prepare_row(entry, index, store, documents, unlabeled, seen, profile, jev_options)
-        for index, entry in enumerate(files)
+        _prepare_row(entry, index, store, unlabeled, seen, profile, jev_options) for index, entry in enumerate(files)
     ]
 
     mains = [row for row in rows if row["role"] == "main"]
@@ -416,8 +463,9 @@ def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=
         if row.get("fallbackReason")
     ]
     report = {
-        "customerId": str(customer_id),
-        "folder": selected,
+        "source": inbox.get("from"),
+        "customerId": inbox.get("customerId"),
+        "folder": inbox.get("folder"),
         "files": rows,
         "candidates": candidates,
         "review": review,
@@ -428,7 +476,8 @@ def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=
     return {
         "ready": report["ready"],
         "review": review,
-        "folder": selected,
+        "source": inbox.get("from"),
+        "folder": inbox.get("folder"),
         "fileCount": len(rows),
         "fallbackCount": len(fallbacks),
         "payloadWritten": store.exists(PAYLOAD),
@@ -529,7 +578,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Prepare a PJe filing payload from a customer's protocol folder")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare")
-    prepare.add_argument("--customer", required=True)
+    origin = prepare.add_mutually_exclusive_group(required=True)
+    origin.add_argument("--customer", help="ADVBOX customer id: download its protocol folder into the inbox")
+    origin.add_argument(
+        "--from", dest="source", type=Path, help="Local document folder (optional sources.json) to copy into the inbox"
+    )
     prepare.add_argument("--facts", required=True, type=Path)
     prepare.add_argument("--out", required=True, type=Path)
     prepare.add_argument("--folder")
@@ -549,14 +602,13 @@ def main(argv=None):
     profile = load_profile(args.profile)
     facts = json.loads(args.facts.read_text(encoding="utf-8"))
     if args.command == "prepare":
-        result = prepare_customer(
-            args.customer,
-            facts,
-            LocalRunStore(args.out).ensure(),
-            profile=profile,
-            folder=args.folder,
-            jev=not args.no_jev,
-        )
+        store = LocalRunStore(args.out).ensure()
+        if args.source:
+            result = prepare_folder(args.source.resolve(), facts, store, profile=profile, jev=not args.no_jev)
+        else:
+            result = prepare_customer(
+                args.customer, facts, store, profile=profile, folder=args.folder, jev=not args.no_jev
+            )
     else:
         overrides = json.loads(args.overrides.read_text(encoding="utf-8")) if args.overrides else {}
         result = finalize_review(LocalRunStore(args.run), facts, overrides, profile=profile)

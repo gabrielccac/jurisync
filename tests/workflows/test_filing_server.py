@@ -106,6 +106,30 @@ class FilingServerTests(unittest.TestCase):
             self.assertNotIn(hidden, text)
         self.assertEqual(json.loads(self.run_dir.joinpath("facts.json").read_text()), {"a": 1})
 
+    def test_prepare_takes_a_source_folder_or_an_advbox_customer_but_not_both(self):
+        calls = []
+
+        def prepare_folder(source, facts, store, *, profile, jev=True):
+            calls.append(source)
+            review = {**REVIEW, "source": "folder", "customerId": None, "folder": None}
+            review["files"] = [
+                {**REVIEW["files"][0], "origin": {"kind": "declared", "source": "gerid", "file": "a.pdf"}}
+            ]
+            store.write_json("review.json", review)
+
+        base = {"profile": "victor", "runId": "run1", "facts": {}}
+        with mock.patch.object(filing, "prepare_folder", prepare_folder), self.fake_prepare([]):
+            both = call("filing_prepare", {**base, "customerId": "1", "sourceFolder": "/data/gathered"})
+            neither = call("filing_prepare", base)
+            mixed = call("filing_prepare", {**base, "sourceFolder": "/data/gathered", "folder": "00-PROTOCOLAR"})
+            view = call("filing_prepare", {**base, "sourceFolder": "/data/gathered"}).structured_content
+        for result in (both, neither, mixed):
+            self.assertTrue(result.is_error)
+        self.assertEqual(calls, ["/data/gathered"])
+        self.assertEqual(view["source"], "folder")
+        self.assertEqual(view["files"][0]["origin"], {"kind": "declared", "source": "gerid", "file": "a.pdf"})
+        self.assertNotIn("/secret", json.dumps(view))
+
     def test_jev_is_only_used_when_asked(self):
         calls = []
         with self.fake_prepare(calls):
