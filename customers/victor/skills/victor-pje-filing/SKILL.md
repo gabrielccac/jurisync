@@ -1,6 +1,6 @@
 ---
 name: victor-pje-filing
-description: Prepare Victor's Advbox 00-PROTOCOLAR files and create or review a TRF5 PJe 1G process draft through the PJe MCP. Use for initial-filing preparation and Não Protocolados drafts; never for final Protocolar submission.
+description: Export Victor's Advbox 00-PROTOCOLAR files as a filing input folder, prepare it, and create or review a TRF5 PJe 1G process draft through the PJe MCP. Use for initial-filing preparation and Não Protocolados drafts; never for final Protocolar submission.
 ---
 
 # Victor: Advbox to PJe draft
@@ -37,11 +37,12 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    PJe MCP's configured `JURISYNC_FILING_DIR`. Use a root writable in the
    current ChatGPT workspace; the agent and MCP must use the same root. Do not
    assume the fallback `~/.local/share/jurisync/filings` is writable.
-   Write reviewed facts to a private JSON file, then run
+   Write reviewed facts to a private JSON file, then, from the repo root, export the ADVBOX folder and prepare it
+   (two separate steps: the filing never talks to ADVBOX):
+   `.venv/bin/python -m jurisync.connectors.advbox.filing_folder --customer <id> --out <input-folder>` and
    `.venv/bin/python -m jurisync.workflows.filing prepare --profile victor
-   --customer <id> --facts <facts.json> --out <run-directory>` from the repo root
-   (it loads the repo `.env` itself).
-   Do not create a separate `documents.json`; this script downloads and
+   --from <input-folder> --facts <facts.json> --out <run-directory>`.
+   Do not create a separate `documents.json`; the prepare step copies the folder into the run's `inbox/` and
    classifies the files, then writes `review.json` and, when ready, `payload.json` plus the assembled PDFs in
    `documents/` (numbered in filing order) and `manifest.json`. Paths in them are relative to the run folder.
    Treat all of these as script outputs; do not write, rename or replace them manually.
@@ -89,9 +90,11 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
 1. `filing_profiles` lists the available profiles (confirm `victor` is there). `filing_subjects` with
    `profile: "victor"` (and optionally the lawsuit ID or CNJ) returns the reference subject codes and the README record
    of what was filed for that exact case. They are candidates for the user to confirm, never defaults.
-2. `filing_prepare` with `profile: "victor"`, a new `runId`, the reviewed facts and either the ADVBOX `customerId` (its
-   `00-PROTOCOLAR` folder) or `sourceFolder`: an absolute local folder where you saved the documents you gathered
-   through the Drive, GERID or ADVBOX connectors. With `sourceFolder`, also write a `sources.json` at its root
+2. Get the input folder, then call `filing_prepare` with `profile: "victor"`, a new `runId`, the reviewed facts and
+   `sourceFolder` (the folder's absolute path). For Victor's usual case, `advbox_export_filing_folder` with the ADVBOX
+   `customerId` downloads the `00 - PROTOCOLAR` folder and returns `sourceFolder` (its `sources.json` is already
+   written). For documents you gather yourself through the Drive, GERID or other connectors, save them in one local
+   folder and write a `sources.json` at its root
    (`{"version": 1, "files": [{"file": "<path in the folder>", "origin": "drive|gerid|advbox|...", "originId",
    "originPath", "originalName", "modifiedAt", "link"}]}`; only `file` and `origin` are required) so every file's
    origin is on record; files it leaves out are recorded as `local`. No symlinks. Photos (JPG, PNG) become PDFs; a HEIC

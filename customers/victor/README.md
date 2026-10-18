@@ -43,8 +43,9 @@ The existing TRF1 spreadsheet watcher runs from the repository root with
 `python -m customers.victor.workflows.pje1g_watch --help`.
 
 `filing-profile.json` holds the office defaults the generic filing tools
-(`src/jurisync/workflows/filing`) use to prepare a TRF5 draft payload from an Advbox
-`00-PROTOCOLAR` folder. It downloads files, converts DOC/DOCX files to PDF,
+(`src/jurisync/workflows/filing`) use to prepare a TRF5 draft payload from an input
+folder. Victor's documents come from the Advbox `00 - PROTOCOLAR` folder, which the ADVBOX exporter turns into that
+input folder first. The filing then converts DOC/DOCX files to PDF,
 classifies clear filenames, reads decision letters, and asks TypeSafe AI Jev
 about ambiguous readable documents. Uncertain supporting files fall back to
 `Outros Documentos` and appear in `review.json` under `fallbacks` with the
@@ -90,15 +91,18 @@ Always verify the case facts against source documents before running PJe.
 otherwise the CEP lookup must return one suggestion and `numero` is required
 to add the address. The adapter rereads the selected address after saving.
 
+Two steps: the ADVBOX side exports the protocol folder, then the filing prepares it.
+
 ```bash
+.venv/bin/python -m jurisync.connectors.advbox.filing_folder --customer 6540591 --out /private/input
 .venv/bin/python -m jurisync.workflows.filing prepare --profile victor \
-  --customer 6540591 --facts /private/case-facts.json --out /private/run
+  --from /private/input --facts /private/case-facts.json --out /private/run
 ```
 
-Instead of `--customer`, `--from /private/gathered` prepares a local folder the agent filled (from Drive, GERID or
-ADVBOX), with an optional `sources.json` declaring where each file came from; see the inbox section of
-`docs/connectors/pje-trf5-filing.md`. Either way the files are first copied into `/private/run/inbox/` with their
-hashes, and JPG/PNG photos become PDFs.
+The export writes the files (without ADVBOX's random name suffix) and a `sources.json` declaring each file's ADVBOX
+origin. A folder the agent filled from Drive or GERID works the same way; see the input contract section of
+`docs/connectors/pje-trf5-filing.md`. The files are copied into `/private/run/inbox/` with their hashes, and JPG/PNG
+photos become PDFs.
 
 Read `/private/run/review.json`, especially `fallbacks`: these files will be
 uploaded as `Outros Documentos` unless you override their type or skip them.

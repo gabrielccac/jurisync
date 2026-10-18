@@ -195,7 +195,7 @@ O que vai para o PJe tem de ser exatamente o que o advogado revisou. Por isso:
   ficou. O usuário remove o documento antigo no PJe (ou começa um novo `runId`) e roda `fill` de novo.
   `pje_draft_status` com `checkPje: true` informa em `contentNotConfirmed` os documentos cujo conteúdo no rascunho não
   é confirmado pelo registro, e nesse caso a conclusão não é `verified`.
-- **Nomes únicos.** A limpeza do nome (sem acentos, sem o sufixo aleatório do ADVBOX) pode juntar dois arquivos
+- **Nomes únicos.** A limpeza do nome (sem acentos, sem símbolos, sem diferenciar maiúsculas) pode juntar dois arquivos
   diferentes num só nome: `A_1111.pdf` e `Ã_2222.pdf` → `A.pdf`. Desde a Fase 2 cada arquivo da montagem ganha o
   número da sua posição (`02-A.pdf`, `03-A.pdf`), o que já os separa; `CanonicalNames` continua como defesa e, se dois
   nomes ainda coincidirem (comparados como o PJe compara, sem acento e sem diferenciar maiúsculas), acrescenta um
@@ -241,22 +241,42 @@ absoluto: copiada para outra pasta (ou, no futuro, para um bucket), ela continua
   relativos e validados. `open_run(runId)` devolve hoje um `LocalRunStore`; uma versão em nuvem (S3/GCS) implementa
   os mesmos métodos, com `local_path`/`workspace` como cache local, sem mudar prepare, finalize ou o conector.
 
-## Entrada única: inbox/ e sources.json (Fase 3)
+## Entrada única: o contrato da pasta de entrada (Fase 3)
 
-O jurisync não busca documentos por conta própria. Quem os obtém é o agente, pelos conectores (Drive, GERID,
-ADVBOX...), numa pasta local; o jurisync recebe essa pasta e cuida de preparar e protocolar. A única busca embutida é a
-da pasta `00-PROTOCOLAR` do ADVBOX, mantida por compatibilidade, e ela agora só preenche a mesma entrada.
+**O filing é independente da origem dos dados.** Ele não importa nem conhece ADVBOX, Drive, GERID ou qualquer outra
+fonte (um teste de arquitetura, `tests/workflows/test_filing_architecture.py`, falha se algum módulo de
+`workflows/filing/` ou `connectors/pje/filing/` importar um conector que não seja o do PJe). Ele aceita uma única
+entrada: **uma pasta local no formato do contrato de entrada**, a interface pública do filing, definida e validada em
+`src/jurisync/workflows/filing/contract.py` (só biblioteca padrão, para que quem produz a pasta dependa do contrato e
+nunca do filing).
 
-- **Entrada.** `filing_prepare` com `sourceFolder` (caminho absoluto da pasta) ou `customerId` (ADVBOX), nunca os
-  dois; no CLI, `prepare --from PASTA` ou `prepare --customer ID`. A pasta é copiada (com subpastas) para
+Quem produz a pasta é responsabilidade de quem conhece a origem:
+
+| Responsabilidade | Onde fica |
+| --- | --- |
+| Obter documentos do Drive, GERID etc. e gravar a pasta + `sources.json` | o agente, pelos conectores dessas fontes |
+| Obter a pasta `00 - PROTOCOLAR` do ADVBOX e gravá-la no formato do contrato | `connectors/advbox/filing_folder.py` (CLI `python -m jurisync.connectors.advbox.filing_folder --customer ID`, MCP `advbox_export_filing_folder`) |
+| Definir e validar o formato da pasta | `workflows/filing/contract.py` (`validate_folder`, `validate_sources`, `write_sources`) |
+| Copiar a pasta para o run, preparar, montar, aprovar | `workflows/filing/` (`filing_prepare` / `prepare --from`) |
+| Escrever no PJe | `connectors/pje/filing/` |
+
+O exportador do ADVBOX escolhe a pasta do cliente pela convenção do escritório (`00 - PROTOCOLAR`, ou
+`00 - PROTOCOLAR JUD`; outra pasta com `folder`), baixa os arquivos tirando o sufixo numérico aleatório que o ADVBOX
+acrescenta (`LAUDO_1524.pdf` → `LAUDO.pdf`) e grava o `sources.json` com `origin: "advbox"`, id do arquivo, pasta, nome
+original e data de envio, validando pelo contrato. Ele grava em `JURISYNC_FILING_INPUT_DIR` (padrão
+`<estado>/filing-input/advbox-<cliente>-<data>`) e devolve `sourceFolder`. Essas regras (padrões de pasta, sufixo) saíram
+do perfil e do prepare do filing; um perfil que ainda tenha `folderPatterns` é recusado com essa explicação.
+
+- **Entrada.** `filing_prepare` recebe `sourceFolder` (caminho absoluto da pasta); no CLI, `prepare --from PASTA`.
+  Não há mais `customerId`/`--customer` no filing. A pasta é copiada (com subpastas) para
   `<run>/inbox/`; arquivos ocultos (`.DS_Store`) são ignorados, links simbólicos são recusados, no máximo 200 arquivos.
   O caminho local da pasta não é gravado em lugar nenhum, só os caminhos dentro dela.
 - **Hash na entrada.** `inbox.json` registra, por arquivo, o SHA-256 dos bytes copiados, tamanho, horário da cópia e
   origem. O prepare lê **só** a `inbox/` e reconfere esses hashes antes de começar.
-- **Origem.** `declared` quando o `sources.json` da pasta descreve o arquivo (o jurisync registra o que o agente
-  declarou, sem poder verificar); `local` quando o arquivo não aparece no `sources.json`; `fetched` quando o próprio
-  jurisync baixou (ADVBOX: id do arquivo, pasta, nome original e data de envio).
-- **Esquema do `sources.json` (versão 1)**, escrito pelo agente na raiz da pasta:
+- **Origem.** `declared` quando o `sources.json` da pasta descreve o arquivo (o filing registra o que quem produziu a
+  pasta declarou, sem poder verificar; vale também para o exportador do ADVBOX); `local` quando o arquivo não aparece
+  no `sources.json`.
+- **Esquema do `sources.json` (versão 1)**, escrito por quem produz a pasta, na raiz dela:
 
   ```json
   {

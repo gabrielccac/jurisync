@@ -33,7 +33,7 @@ src/jurisync/
     advbox/             ADVBOX web session: customers, lawsuits, activities, files, tasks
   workflows/
     publications/       Juridiq publication → task pipeline and evidence validation
-    filing/             Profile-driven filing prep (ADVBOX protocol folder → PJe payload) and its MCP server
+    filing/             Profile-driven filing prep (input folder contract → PJe payload) and its MCP server
 customers/
   jean/                 Juridiq publication triage: profile, runner, skill, notes
   victor/               DJEN → ADVBOX routing skill, TRF5 filing prep, TRF1 watcher
@@ -130,12 +130,12 @@ for an installed package and beside the code in a checkout.
 | Server | Tools | Login | Writes |
 |---|---|---|---|
 | `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_inbox`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1: password + TOTP. TRF5: A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
-| `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`*, `filing_approve`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | ADVBOX session (only for `customerId`; `sourceFolder` needs none) | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
+| `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`*, `filing_approve`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | none (takes a local input folder; see `advbox_export_filing_folder` for ADVBOX) | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
 | `eproc` | `eproc_list_notices`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | Browser login + TOTP, once per portal | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
 | `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_get_attachment`*, `inss_get_process`*, `inss_read_document` | Chrome + A3 PIN (by the user) + TOTP | local downloads only (`get` tools save the file and return its parsed text) |
 | `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
-| `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
+| `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_export_filing_folder`* (a protocol folder as a filing input folder) + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
 
 Long-running servers keep each portal's authenticated session in memory, so
 only the first call logs in; later calls reuse it until it expires.
