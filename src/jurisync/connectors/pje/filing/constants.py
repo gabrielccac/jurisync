@@ -2,7 +2,9 @@
 
 The draft flow (classification, parties, characteristics, documents, Não Protocolados) is PJe's own and the same code
 drives it on every portal; a portal's entry here says where it lives and whether drafts may be written there. A portal
-is only switched to `writes=True` once its flow has been checked against the live site.
+may write before every step has been seen live, but then `unverified` names those steps: each one still reads the
+draft back after acting and fails with PJe's own message when the result is not there, and runs report the list so
+the first real filing is watched step by step.
 """
 
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ class FilingPortal:
     key: str
     writes: bool
     note: str = ""
+    unverified: tuple = ()
 
     @property
     def portal(self):
@@ -37,9 +40,19 @@ FILING_PORTALS = {
     "trf5-1g": FilingPortal("trf5-1g", writes=True),
     "trf1-1g": FilingPortal(
         "trf1-1g",
-        writes=False,
-        note="read-only: the classification form was surveyed (docs/connectors/pje-trf1-filing-recon.md); "
-        "draft writes wait for a test draft",
+        writes=True,
+        note="surveyed read-only (docs/connectors/pje-trf1-filing-recon.md); the steps after Incluir follow the TRF5 "
+        "flow and have not run on TRF1 yet",
+        unverified=(
+            "Incluir (create the draft) and the fields PJe 2.13 may ask for after the class",
+            "subject association (selecting a search result)",
+            "author lookup and insertion",
+            "extra attorney association",
+            "INSS in the passive pole",
+            "characteristics and priority save",
+            "main petition upload in PDF mode",
+            "supporting uploads, their type list and size limit",
+        ),
     ),
 }
 DEFAULT_PORTAL = "trf5-1g"

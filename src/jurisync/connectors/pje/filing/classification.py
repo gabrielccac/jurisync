@@ -114,7 +114,16 @@ class ClassificationMixin:
             or parsed.path != urlsplit(self.update_url).path
             or len(process_ids) != 1
         ):
-            raise RuntimeError("PJe did not return a new draft URL after Incluir")
+            # Say what PJe said (a required field it asked for, a validation message), and that a draft may exist.
+            messages = [
+                " ".join(node.get_text(" ", strip=True).split())
+                for node in soup.select(".rich-messages-label, [id$='processoTrfFormMessage']")
+                if node.get_text(strip=True)
+            ]
+            detail = f": {'; '.join(dict.fromkeys(messages))}" if messages else ""
+            raise RuntimeError(
+                f"PJe did not return a new draft URL after Incluir{detail}. Check Não Protocolados before trying again"
+            )
         opened = self.get(draft_url)
         jsf.view_state(opened)
         return {"draftId": process_ids[0], "draftUrl": draft_url, "classification": options}

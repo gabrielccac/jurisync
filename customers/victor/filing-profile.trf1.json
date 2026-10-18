@@ -1,0 +1,103 @@
+{
+  "name": "victor-trf1",
+  "description": "Victor's office: TRF1 1G initial filings (SJAP). Unverified until the first supervised test draft; see docs/connectors/pje-trf1-filing-recon.md",
+  "portal": "trf1-1g",
+  "uncertainType": "Documentos Diversos",
+  "supportingTypes": [
+    "Documentos Diversos",
+    "Comprovante (Outros)",
+    "Processo administrativo",
+    "Carta de Concessão",
+    "Exame médico",
+    "Procuração",
+    "Apresentação de quesitos",
+    "Declaração de hipossuficiência/pobreza"
+  ],
+  "typeMap": {
+    "Planilha": "Documentos Diversos",
+    "Outros Documentos": "Documentos Diversos",
+    "Documento de Identificação": "Documentos Diversos",
+    "Processo Administrativo": "Processo administrativo",
+    "Documento Comprobatório": "Comprovante (Outros)",
+    "Carta de Indeferimento": "Documentos Diversos",
+    "Carta de Concessão": "Carta de Concessão",
+    "Laudo Médico": "Exame médico"
+  },
+  "documentRules": [
+    [
+      "HIPOSSUFICIENCIA|DECLARACAO DE POBREZA",
+      "Declaração de hipossuficiência/pobreza"
+    ],
+    [
+      "PETI?CAO|MANDADO DE SEGURANCA",
+      "petition"
+    ],
+    [
+      "^INDEFERIMENTO$",
+      "Carta de Indeferimento"
+    ],
+    [
+      "^CONCESSAO$",
+      "Carta de Concessão"
+    ],
+    [
+      "COMUNICAD[OA].*DECISAO|COMUNICACAO.*DECISAO|COMUNICAD[OA].*CESSACAO",
+      "decision"
+    ],
+    [
+      "VALOR DA CAUSA|PLANILHA|\\bRMI\\b",
+      "Planilha"
+    ],
+    [
+      "QUESITOS",
+      "Apresentação de quesitos"
+    ],
+    [
+      "PROCURACAO",
+      "Procuração"
+    ],
+    [
+      "CONTRATO",
+      "Outros Documentos"
+    ],
+    [
+      "IDENTIFI.*REPRESENTAN",
+      "Documento Comprobatório"
+    ],
+    [
+      "DOCUMENTO DE IDENTIFICACAO|\\bRG\\b|\\bCNH\\b",
+      "Documento de Identificação"
+    ],
+    [
+      "^PA\\b|PROCESSO ADMINISTRATIVO",
+      "Processo Administrativo"
+    ],
+    [
+      "LAUDO|MEDIC|RECEITUARIO|EXAME",
+      "medical"
+    ],
+    [
+      "CNIS|CTPS|RESIDENCIA|ATIVIDADE RURAL|PROVAS RURAIS|GRUPO FAMILIAR|CADUNICO|LOAS|COMPROVANTE|CERTIDAO DE OBITO|DEPENDENCIA ECONOMICA",
+      "Documento Comprobatório"
+    ]
+  ],
+  "defaults": {
+    "classification": {
+      "area": "DIREITO ASSISTENCIAL"
+    },
+    "passive": {
+      "search": "inss",
+      "cnpj": "29979036000140",
+      "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"
+    },
+    "characteristics": {
+      "legalAid": true,
+      "injunction": false,
+      "priority": false
+    }
+  },
+  "references": {
+    "subjects": "skills/victor-pje-filing/references/subjects.md",
+    "history": "README.md"
+  }
+}

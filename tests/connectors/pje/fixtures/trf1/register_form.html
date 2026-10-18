@@ -1,0 +1,159 @@
+<!-- TRF1 PJe 2.13.3.0, captured read-only on 2026-10-17 (Etapa A); fragment without personal data. -->
+<form action="/pje/Processo/cadastrar.seam" class="edit" enctype="application/x-www-form-urlencoded" id="processoTrfForm" method="post" name="processoTrfForm"><div class="rich-panel" id="processoTrfForm:j_id173"><div class="rich-panel-body" id="processoTrfForm:j_id173_body">
+<script type="text/javascript">		
+	(function($) {
+		function getDialogMessageNotEmpty() {
+			return '*[id=dialogMessage]:has(dt span), .modal-popup:has(dt span)';
+		}
+		
+		function getAllDialogMessage() {
+			return '*[id=dialogMessage], .modal-popup';
+		}
+		
+		function hideClosestDialogMessage(element) {
+			hideDialog($(element).closest('*[id=dialogMessage]'));
+		}
+		
+		function showAndCloseDialogMessage() {
+			var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');
+			showDialogMessage(functionSetTimeout);
+		}
+		
+		function showDialogMessage(functionSetTimeout) {
+			cancelAllHideDialogMessages();
+			showDialog(getDialogMessageNotEmpty());
+		}
+		
+		function cancelAllHideDialogMessages() {
+			var functionTimeout = $(window).data('timeoutDialogMessage');
+			if (functionTimeout) {
+				clearTimeout(functionTimeout);
+			}
+		}
+		
+		function hideDialogMessage(element) {
+			if (element) {
+				//ao apertar botao de fechar
+				cancelAllHideDialogMessages();
+				hideClosestDialogMessage(element);
+			} else {
+				//ao fechar sozinho (timeout)
+				hideDialog(getDialogMessageNotEmpty());
+			}
+		}	
+		
+		function actionDialogMessage() {
+			var globalMessages = 'false'; 
+			if(globalMessages == 'true') {	
+				if('true' == 'true') {		
+					if($('dt[class=error]').html() == null) {
+						var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');					
+						showDialogMessage(functionSetTimeout);
+					} else {
+						showDialogMessage();
+					}	
+				}			
+			}	
+		}	
+		
+		function hideDialog(selector) {
+			var $dialog = $(selector);
+			if($dialog.size() == 0) {
+				$dialog = $(getAllDialogMessage());							
+			}
+			
+			$dialog.css('visibility', 'hidden');
+			$dialog.css('opacity', '0');
+		}
+		
+		function showDialog(selector) {
+			var $dialog = $(selector);
+			
+			if($dialog.size() > 0) {
+				$dialog.css('visibility', 'visible');
+				$dialog.css('opacity', '1');
+				if (functionSetTimeout) {
+					$(window).data('timeoutDialogMessage', functionSetTimeout);
+				}
+			}
+		}
+		
+		window.showDialogMessage = showDialogMessage;
+		window.hideDialogMessage = hideDialogMessage;
+		window.showAndCloseDialogMessage = showAndCloseDialogMessage;
+		
+		//Executar o dialog ao fazer uma requisição AJAX ou NÃO-AJAX no formulário.	
+		window.onload = function() {
+			actionDialogMessage();	
+		}		
+		actionDialogMessage();
+	})(jQuery_21);
+	</script>
+<div class="modal-popup" id="dialogMessage">
+<div class="modal-header" id="title">Mensagem
+			<span class="btn-fechar" onclick="hideDialogMessage(this);"><i class="icon-fechar"></i></span>
+</div>
+<div class="modal-content text-center"><dl class="rich-messages" id="processoTrfForm:processoTrfFormMessage" style="display: none; "><dt></dt></dl>
+</div>
+</div><span id="processoTrfForm:classeJudicial"><div class="col-sm-12" id="processoTrfForm:classeJudicial:areaDireitoDiv">
+<div class="propertyView col-sm-8"><div class="name" id="processoTrfForm:classeJudicial:j_id207:fieldclasseJudicialDiv"><label class="" for="processoTrfForm:classeJudicial:j_id207:areaDireitoCombo">
+Matéria<span class="required" id="processoTrfForm:classeJudicial:j_id207:j_id211">*</span></label></div>
+<div class="value col-sm-12"><select id="processoTrfForm:classeJudicial:j_id207:areaDireitoCombo" name="processoTrfForm:classeJudicial:j_id207:areaDireitoCombo" onchange="A4J.AJAX.Submit('processoTrfForm',event,{'similarityGroupingId':'processoTrfForm:classeJudicial:j_id207:j_id218','control':this,'parameters':{'processoTrfForm:classeJudicial:j_id207:j_id218':'processoTrfForm:classeJudicial:j_id207:j_id218','ajaxSingle':'processoTrfForm:classeJudicial:j_id207:areaDireitoCombo'} } )" size="1"> <option selected="selected" value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option>
+<option value="1861">DIREITO ADMINISTRATIVO E OUTRAS MATÉRIAS DE DIREITO PÚBLICO </option>
+<option value="2015">DIREITO AMBIENTAL </option>
+<option value="3297">DIREITO ASSISTENCIAL </option>
+<option value="1137">DIREITO CIVIL &gt; COISAS </option>
+<option value="1066">DIREITO CIVIL &gt; EMPRESAS </option>
+<option value="915">DIREITO CIVIL &gt; FAMíLIA </option>
+<option value="1061">DIREITO CIVIL &gt; FATOS JURíDICOS </option>
+<option value="954">DIREITO CIVIL &gt; OBRIGAçõES </option>
+<option value="1108">DIREITO CIVIL &gt; PESSOAS JURíDICAS </option>
+<option value="940">DIREITO CIVIL &gt; PESSOAS NATURAIS </option>
+<option value="1125">DIREITO CIVIL &gt; RESPONSABILIDADE CIVIL </option>
+<option value="945">DIREITO CIVIL &gt; SUCESSõES </option>
+<option value="1496">DIREITO DA CRIANÇA E DO ADOLESCENTE </option>
+<option value="3302">DIREITO DA SAÚDE </option>
+<option value="1215">DIREITO DO CONSUMIDOR </option>
+<option value="2820">DIREITO ELEITORAL </option>
+<option value="1340">DIREITO INTERNACIONAL </option>
+<option value="1192">DIREITO MARÍTIMO </option>
+<option value="328">DIREITO PENAL </option>
+<option value="229">DIREITO PREVIDENCIÁRIO </option>
+<option value="1382">DIREITO PROCESSUAL CIVIL E DO TRABALHO </option>
+<option value="1266">DIREITO PROCESSUAL PENAL </option>
+<option value="2">DIREITO TRIBUTÁRIO </option>
+<option value="3560">DIREITO À EDUCAÇÃO </option>
+<option value="3221">QUESTÕES DE ALTA COMPLEXIDADE, GRANDE IMPACTO E REPERCUSSÃO </option>
+<option value="3221">QUESTõES DE ALTA COMPLEXIDADE, GRANDE IMPACTO E REPERCUSSãO </option>
+<option value="1365">REGISTROS PÚBLICOS </option>
+</select>
+</div>
+</div></div><div class="col-sm-12" id="processoTrfForm:classeJudicial:jurisdicaoDiv">
+<div class="propertyView col-sm-8"><div class="name" id="processoTrfForm:classeJudicial:jurisdicaoComboDecoration:fieldjurisdicaoComboDiv"><label class="" for="processoTrfForm:classeJudicial:jurisdicaoComboDecoration:jurisdicaoCombo">
+<span style=""> Jurisdição </span><span class="required" id="processoTrfForm:classeJudicial:jurisdicaoComboDecoration:j_id224">*</span></label></div>
+<div class="value col-sm-12"><select class="" id="processoTrfForm:classeJudicial:jurisdicaoComboDecoration:jurisdicaoCombo" name="processoTrfForm:classeJudicial:jurisdicaoComboDecoration:jurisdicaoCombo" onchange="A4J.AJAX.Submit('processoTrfForm',event,{'similarityGroupingId':'processoTrfForm:classeJudicial:jurisdicaoComboDecoration:j_id231','control':this,'parameters':{'processoTrfForm:classeJudicial:jurisdicaoComboDecoration:j_id231':'processoTrfForm:classeJudicial:jurisdicaoComboDecoration:j_id231','ajaxSingle':'processoTrfForm:classeJudicial:jurisdicaoComboDecoration:jurisdicaoCombo'} } )" onclick="" size="1" tabindex=""> <option selected="selected" value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option>
+</select>
+</div>
+</div></div><div class="col-sm-12" id="processoTrfForm:classeJudicial:classeJudicialDiv">
+<div class="propertyView col-sm-8"><div class="name" id="processoTrfForm:classeJudicial:classeJudicialComboDecoration:fieldclasseJudicialComboDiv"><label class="" for="processoTrfForm:classeJudicial:classeJudicialComboDecoration:classeJudicialCombo">
+<span style=""> Classe judicial </span><span class="required" id="processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id237">*</span></label></div>
+<div class="value col-sm-12"><script id="processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id245" type="text/javascript">//<![CDATA[
+		limparProcessoReferencia=function(){A4J.AJAX.Submit('processoTrfForm',null,{'similarityGroupingId':'processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id245','parameters':{'processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id245':'processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id245'} } )};
+		//]]></script><select class="" id="processoTrfForm:classeJudicial:classeJudicialComboDecoration:classeJudicialCombo" name="processoTrfForm:classeJudicial:classeJudicialComboDecoration:classeJudicialCombo" onchange="limparProcessoReferencia();A4J.AJAX.Submit('processoTrfForm',event,{'similarityGroupingId':'processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id244','control':this,'parameters':{'ajaxSingle':'processoTrfForm:classeJudicial:classeJudicialComboDecoration:classeJudicialCombo','processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id244':'processoTrfForm:classeJudicial:classeJudicialComboDecoration:j_id244'} } )" onclick="" size="1" tabindex=""> <option selected="selected" value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option>
+</select>
+</div>
+</div></div><div class="col-sm-12" id="processoTrfForm:classeJudicial:processoReferenciaDiv"><div id="processoTrfForm:classeJudicial:j_id261"></div><div id="processoTrfForm:classeJudicial:j_id285"></div></div>
+<div class="col-sm-12">
+<a href="https://www.cnj.jus.br/sgt/consulta_publica_classes.php" rel="noopener" target="_blank">Em caso de dúvidas acerca da classificação do processo, consulte aqui as Tabelas Processuais Unificadas.</a>
+</div></span>
+<div class="col-sm-12 clearfix"><script id="processoTrfForm:j_id313" type="text/javascript">//<![CDATA[
+		exibeConfirmacaoComplementos=function(){A4J.AJAX.Submit('processoTrfForm',null,{'similarityGroupingId':'processoTrfForm:j_id313','oncomplete':function(request,event,data){if(!alert('')){ document.getElementById('complementoClasse_shifted').click();}},'parameters':{'processoTrfForm:j_id313':'processoTrfForm:j_id313'} } )};
+		//]]></script>
+<div class="actionButtons"><input class="btn btn-primary" id="processoTrfForm:incluiProcessoButton" name="processoTrfForm:incluiProcessoButton" onclick="A4J.AJAX.Submit('processoTrfForm',event,{'similarityGroupingId':'processoTrfForm:incluiProcessoButton','parameters':{'processoTrfForm:incluiProcessoButton':'processoTrfForm:incluiProcessoButton'} } );return false;" type="button" value="Incluir"/>
+</div>
+</div></div></div><input autocomplete="off" name="processoTrfForm" type="hidden" value="processoTrfForm"/><input autocomplete="off" name="autoScroll" type="hidden" value=""/><input autocomplete="off" name="processoTrfForm:j_idcl" type="hidden" value=""/><input autocomplete="off" name="processoTrfForm:_link_hidden_" type="hidden" value=""/><script type="text/javascript">function clear_processoTrfForm() {
+_clearJSFFormParameters('processoTrfForm','',['processoTrfForm:j_idcl','processoTrfForm:_link_hidden_']);
+}
+function clearFormHiddenParams_processoTrfForm(){clear_processoTrfForm();}
+function clearFormHiddenParams_processoTrfForm(){clear_processoTrfForm();}
+clear_processoTrfForm();</script><input autocomplete="off" id="javax.faces.ViewState" name="javax.faces.ViewState" type="hidden" value="j_id4"/></form>

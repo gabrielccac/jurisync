@@ -236,6 +236,8 @@ def run_stage(
                     payload["author"]["name"],
                     payload["author"].get("address"),
                 )
+        if config.unverified and stage in WRITE_STAGES and isinstance(result, dict):
+            result = {**result, "portal": config.key, "unverifiedSteps": list(config.unverified)}
         return result
     finally:
         if owned:

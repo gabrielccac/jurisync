@@ -337,7 +337,7 @@ class SubjectBatchTests(unittest.TestCase):
     def test_page_is_read_once_until_a_subject_is_added(self):
         client = DraftClient(None)
         reads, seen = [], []
-        client.get = lambda url: reads.append(url) or f"page{len(reads)}"
+        client.get = lambda url: reads.append(url) or f"page{len(reads)} r_processoAssuntoListSearchForm"
 
         def add(url, subject, page=None):
             seen.append(page)
@@ -345,7 +345,7 @@ class SubjectBatchTests(unittest.TestCase):
 
         client.add_subject = add
         client.add_subjects("u", [{"code": "1"}, {"code": "2"}, {"code": "3"}])
-        self.assertEqual(seen, ["page1", "page1", "page2"])
+        self.assertEqual([page.split()[0] for page in seen], ["page1", "page1", "page2"])
         self.assertEqual(len(reads), 2)
 
 

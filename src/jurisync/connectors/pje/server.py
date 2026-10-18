@@ -16,6 +16,7 @@ from pydantic import Field, StringConstraints
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
 from jurisync.connectors.pje.filing.approval import require_approval
+from jurisync.connectors.pje.filing.constants import FILING_PORTALS
 from jurisync.connectors.pje.filing.payload import resolve_documents
 from jurisync.connectors.pje.filing.store import CHECKPOINT, PAYLOAD, open_run
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
@@ -208,7 +209,7 @@ fill_errors = {}
 
 def _fill_job(run_id, stage):
     try:
-        filing.run_stage(stage, run=open_run(run_id), portal="trf5-1g")
+        filing.run_stage(stage, run=open_run(run_id), portal=_run_portal(open_run(run_id)))
         fill_errors.pop(run_id, None)
     except BaseException as error:
         fill_errors[run_id] = f"{type(error).__name__}: {str(error)[:300]}"
@@ -241,6 +242,18 @@ def _start_fill(run_id, stage):
     }
 
 
+def _run_portal(run):
+    """The portal a run files on (its payload's `portal`); runs without a payload, and other stages, use TRF5."""
+    if run is not None and run.exists(PAYLOAD):
+        try:
+            portal = run.read_json(PAYLOAD).get("portal")
+        except ValueError:
+            portal = None
+        if portal in FILING_PORTALS:
+            return portal
+    return "trf5-1g"
+
+
 def _draft_stage(label, stage, run_id=None, **options):
     if stage in filing.WRITE_STAGES and os.environ.get("PJE_ALLOW_DRAFT_WRITES") != "true":
         raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
@@ -250,9 +263,9 @@ def _draft_stage(label, stage, run_id=None, **options):
         with tool_errors(label, *ERRORS):
             result = filing.run_stage(stage, **options)
     else:
-        # These tools serve TRF5 drafts only: a run whose payload names another portal is refused, not sent here.
-        with tool_errors(label, *ERRORS), sessions.session("trf5-1g") as session:
-            result = filing.run_stage(stage, session=session, portal="trf5-1g", **options)
+        portal = _run_portal(options.get("run"))
+        with tool_errors(label, *ERRORS), sessions.session(portal) as session:
+            result = filing.run_stage(stage, session=session, portal=portal, **options)
     return {**({"runId": run_id} if run_id is not None else {}), "success": True, "stage": stage, "result": result}
 
 
@@ -291,8 +304,8 @@ def search_pending_drafts(
 
 @server.tool(
     name="pje_draft_write",
-    title="Create or fill TRF5 PJe draft",
-    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Refuses unless filing_approve recorded the user's approval of this exact payload and every document still has its approved sha256. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
+    title="Create or fill a TRF5 or TRF1 PJe draft",
+    description="Create or fill a TRF5 1G or TRF1 1G draft (the payload's portal; TRF1 steps after Incluir are not yet verified live and are listed in unverifiedSteps) using a reviewed payload.json in a named local filing run. Refuses unless filing_approve recorded the user's approval of this exact payload and every document still has its approved sha256. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:

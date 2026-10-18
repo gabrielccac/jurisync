@@ -23,11 +23,24 @@ def has_subject_code(table, code):
 
 
 class SubjectsMixin:
+    def _subject_page(self, draft_url):
+        """The draft page holding the subject forms. TRF5 renders them with the draft; TRF1 (PJe 2.13) only after the
+        assunto tab is loaded, and that tab's response carries both the associated list and the search form."""
+        html = self.get(draft_url)
+        if "r_processoAssuntoListSearchForm" in html:
+            return html
+        html = self.ajax(
+            self.update_url, jsf.view_state(html), {}, "_viewRoot", {"assunto": "assunto", "ajaxSingle": "assunto"}
+        )
+        if "r_processoAssuntoListSearchForm" not in html or "l_processoAssuntoListList" not in html:
+            raise RuntimeError("PJe did not render the subject forms, not even on the assunto tab")
+        return html
+
     def search_subjects(self, draft_url, search_term, page=1):
         """List PJe assunto choices without associating one with the draft."""
         if not search_term.strip() or page < 1:
             raise ValueError("Subject search needs text and a positive page number")
-        html = self.get(draft_url)
+        html = self._subject_page(draft_url)
         soup = BeautifulSoup(html, "html.parser")
         fields = jsf.form_fields(html, "r_processoAssuntoListSearchForm")
         query = jsf.field(soup, "assuntoCompleto")
@@ -56,7 +69,7 @@ class SubjectsMixin:
         """Associate every subject; the draft page is read once and again only after a change."""
         page, results = None, []
         for subject in subjects:
-            page = page if page is not None else self.get(draft_url)
+            page = page if page is not None else self._subject_page(draft_url)
             result = self.add_subject(draft_url, subject, page=page)
             if not result["alreadyAdded"]:
                 page = None
@@ -64,7 +77,7 @@ class SubjectsMixin:
         return results
 
     def add_subject(self, draft_url, subject, page=None):
-        html = page if page is not None else self.get(draft_url)
+        html = page if page is not None else self._subject_page(draft_url)
         soup = BeautifulSoup(html, "html.parser")
         associated = soup.find(id="l_processoAssuntoListList")
         already_added = has_subject_code(associated, subject["code"])

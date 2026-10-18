@@ -7,6 +7,7 @@ PJe can answer, so `check_pje` reads the draft's documents and compares them wit
 from pathlib import Path
 
 from jurisync.connectors.pje.filing.checkpoint import UploadLedger, phase_fingerprints, pid_alive
+from jurisync.connectors.pje.filing.constants import FILING_PORTALS
 from jurisync.connectors.pje.filing.documents import expected_documents
 from jurisync.connectors.pje.filing.store import CHECKPOINT, STEPS
 
@@ -66,6 +67,10 @@ def run_status(store, payload=None, client=None):
             result["conclusion"] = "incomplete"
     else:
         result["conclusion"] = "not_checked"
+    portal = (payload or {}).get("portal")
+    if portal in FILING_PORTALS and FILING_PORTALS[portal].unverified:
+        # Steps this portal has not yet shown working live: watch them in PJe on this run.
+        result["portal"], result["unverifiedSteps"] = portal, list(FILING_PORTALS[portal].unverified)
     if checkpoint.get("manualSteps"):
         # Things the fill could not do in PJe and a person must, before protocol.
         result["manualSteps"] = checkpoint["manualSteps"]

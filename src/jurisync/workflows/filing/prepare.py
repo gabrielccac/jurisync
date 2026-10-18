@@ -35,16 +35,6 @@ from .split import split_pdf
 PJE_LIMIT = 10_000_000
 # What a reviewer may change about a file in filing_finalize. Paths and hashes come only from prepare.
 OVERRIDE_KEYS = frozenset({"role", "type", "description"})
-SUPPORTING_TYPES = {
-    "Planilha",
-    "Outros Documentos",
-    "Documento de Identificação",
-    "Processo Administrativo",
-    "Documento Comprobatório",
-    "Carta de Indeferimento",
-    "Carta de Concessão",
-    "Laudo Médico",
-}
 
 
 def _sha256(content):
@@ -173,14 +163,18 @@ def build_payload(facts, documents, defaults):
     author = facts["author"]
     payload = {
         **defaults,
-        "classification": {"area": "DIREITO PREVIDENCIÁRIO", **facts["classification"]},
+        "classification": {
+            "area": "DIREITO PREVIDENCIÁRIO",
+            **(defaults.get("classification") or {}),
+            **facts["classification"],
+        },
         "subjects": facts.get("subjects") or [facts["subject"]],
         "authorCpf": _digits(facts["authorCpf"]),
         "author": _author(author),
         "characteristics": {
             **defaults["characteristics"],
             **facts["characteristics"],
-            "priority": defaults["characteristics"]["priority"],
+            "priority": defaults["characteristics"].get("priority", False),
         },
         "documents": documents,
     }
@@ -204,6 +198,16 @@ def apply_supporting_fallback(classification, uncertain_type="Outros Documentos"
     }
     if classification.get("type"):
         result["suggestedType"] = classification["type"]
+    return result
+
+
+def _portal_types(classification, profile):
+    """Classification speaks TRF5's type names; the profile turns them into its portal's labels."""
+    result = dict(classification)
+    if result.get("role") == "supporting":
+        for key in ("type", "suggestedType"):
+            if result.get(key):
+                result[key] = profile.portal_type(result[key])
     return result
 
 
@@ -375,7 +379,7 @@ def _prepare_row(entry, index, store, unlabeled_petition, seen_hashes, profile, 
         "derivedBy": derived_by,
         "pages": analysis.get("pageCount"),
         "textCharacters": analysis.get("textCharacters") or 0,
-        **apply_supporting_fallback(classification, profile.uncertain_type),
+        **apply_supporting_fallback(_portal_types(classification, profile), profile.uncertain_type),
     }
     if conversion_error:
         row["review"] = conversion_error
@@ -520,7 +524,7 @@ def prepare_inbox(store, facts, *, profile, jev=True):
     }
 
 
-def _verify_row(store, row):
+def _verify_row(store, row, profile):
     if row["role"] not in ("main", "supporting"):
         raise ValueError(f"Invalid role for {row['name']}")
     if row["role"] == "main" and row.get("type") != "Petição inicial":
@@ -530,7 +534,7 @@ def _verify_row(store, row):
         raise ValueError(f"Invalid PDF volumes: {row['name']}")
     if row["role"] == "main" and parts:
         raise ValueError(f"Main petition must be one PDF: {row['name']}")
-    if row["role"] == "supporting" and row.get("type") not in SUPPORTING_TYPES:
+    if row["role"] == "supporting" and row.get("type") not in profile.supporting_types:
         raise ValueError(f"Invalid PJe type for {row['name']}")
     if row.get("review") or not row.get("type") or not row.get("uploadSha256"):
         raise ValueError(f"Document needs review: {row['name']}")
@@ -586,7 +590,7 @@ def finalize_review(store, facts, overrides=None, *, profile):
             row.pop("review", None)
         if row["role"] == "skip":
             continue
-        _verify_row(store, row)
+        _verify_row(store, row, profile)
         rows.append(row)
     mains = [row for row in rows if row["role"] == "main"]
     if len(mains) != 1:
