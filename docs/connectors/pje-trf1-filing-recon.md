@@ -185,3 +185,29 @@ achando o select pelas opções, e confere que o pré-cadastro abriu; no TRF5 na
 **Ainda não visto:** tudo depois de Pesquisar (o nome devolvido pela Receita, Confirmar, os dados da parte, a aba
 Endereços com CEP/número/Incluir e o botão final, que o roteiro do escritório chama de "Vincular parte ao processo"; o
 código procura `btnInserirParteProcesso`, como no TRF5). Cada um desses passos falha dizendo qual campo não encontrou.
+
+### Depois da pesquisa do CPF (lido no mesmo rascunho, 18/10/2026)
+
+Para ver a tela de detalhes foi preciso repetir **Pesquisar** e **Confirmar** do pré-cadastro, como o estágio real já
+tinha feito; nada foi incluído, selecionado como endereço, vinculado ou inserido.
+
+- **Estado do rascunho:** o polo ativo tem só uma linha, de ADVOGADO (o advogado que o PJe lista sozinho); não há autor
+  nem parte pela metade. O polo passivo está vazio.
+- **Pesquisar:** devolve o nome civil (`dsNomeCivil`) e o botão **Confirmar** (`btnConfirmarCadastro`), como no TRF5.
+- **Detalhes da parte (`formInserirParteProcesso`):** nome preenchido, nome social, `nomeGenitor` (pai, vazio), óbito,
+  etnia, estado civil, escolaridade, profissão, nacionalidade, UF/município, sigilo, morador de rua e representante
+  (`comboRepresentante` = núcleos de prática jurídica). **Nome da genitora e data de nascimento aparecem só como
+  rótulos**, sem campo, e a tabela de validação da Receita veio quase vazia (só "Sexo"). Por isso o TRF5 exigia esses
+  dois campos e o TRF1 não exige (`author_required_details`): a identidade é conferida pelo nome devolvido e, depois de
+  vincular, por nome **e CPF** na mesma linha do polo ativo.
+- **Abas:** Informações pessoais, **Endereços**, Meios de contato, Outras filiações.
+- **Endereços:** mesmos ids do TRF5 (CEP com sugestão, número, complemento, **Incluir**, grade "Usar no processo").
+  A pessoa já tinha um endereço cadastrado com o CEP e o número do caso, ainda não marcado: o fluxo o marca e não
+  cadastra outro.
+- **Botão final:** `btnInserirParteProcesso`, com o texto **"Vincular parte ao processo"**.
+- **INSS:** REU → Jurídica + Órgão Público → "INSS" → Pesquisar devolve uma linha (Autarquia Federal, CNPJ
+  29.979.036/0001-40), que se seleciona por um link; aparece **Inserir** (`btnInserirOrgPub`) e, só como texto, a
+  procuradoria. Igual ao TRF5.
+
+Fixtures: `tests/connectors/pje/fixtures/trf1/author_*.html` e `inss_*.html` (dados pessoais trocados por valores de
+exemplo).

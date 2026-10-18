@@ -97,7 +97,7 @@ class AuthorMixin:
         detail_name = jsf.field(details, "nomeDecoration:nome").get("value", "")
         if not name_matches(detail_name, expected_name):
             raise RuntimeError("Author details did not match the CPF lookup")
-        for suffix in ("nomeGenitoraDecoration:nomeGenitora", "dataNascimentoDecoration:dataNascimentoInputDate"):
+        for suffix in self.filing.author_required_details:
             if not jsf.field(details, suffix).get("value"):
                 raise RuntimeError(f"PJe returned no author detail: {suffix}")
         insert = jsf.field(details, "btnInserirParteProcesso")
@@ -130,6 +130,13 @@ class AuthorMixin:
             active = BeautifulSoup(html, "html.parser").find(id="poloAtivoDatalistDiv")
         if active is None or not name_matches(active.get_text(" ", strip=True), expected_name):
             raise RuntimeError("PJe did not render the author in the active-party list")
+        if self.filing.party_roles and not any(
+            name_matches(row.get_text(" ", strip=True), expected_name)
+            and has_identifier(row.get_text(" ", strip=True), author_cpf)
+            for row in active.find_all("tr")
+        ):
+            # TRF1 also lists the logged-in attorney in the active pole: the author's own row must carry name and CPF.
+            raise RuntimeError("PJe lists no active-party row with the author's name and CPF")
         result = {"alreadyAdded": False, "authorNameMatched": True}
         if address is not None:
             result["address"] = self.ensure_author_address(draft_url, author_cpf, expected_name, address, html)

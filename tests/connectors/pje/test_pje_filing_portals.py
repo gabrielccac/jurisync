@@ -211,8 +211,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class Trf1PartyModalTests(unittest.TestCase):
-    """The TRF1 'Associar parte ao processo' modal, captured read-only on a real draft (display steps only)."""
+class PartyModalBase(unittest.TestCase):
+    """Replays captured PJe responses in order; the call after the last one stops the flow."""
 
     class Stop(Exception):
         pass
@@ -229,6 +229,10 @@ class Trf1PartyModalTests(unittest.TestCase):
 
         client.ajax = ajax
         return client, calls
+
+
+class Trf1PartyModalTests(PartyModalBase):
+    """The TRF1 'Associar parte ao processo' modal, captured read-only on a real draft (display steps only)."""
 
     def test_the_author_answers_tipo_da_parte_autor_before_the_cpf_lookup(self):
         client, calls = self.client(["party_add_active.html", "party_role_autor.html", "party_person_fisica.html"])
@@ -277,3 +281,59 @@ class Trf1PartyModalTests(unittest.TestCase):
         trf5, calls = self.client([], portal="trf5-1g")
         self.assertEqual(trf5._choose_party_role("<html></html>", "active"), "<html></html>")
         self.assertEqual(calls, [])
+
+
+class Trf1AuthorFlowTests(PartyModalBase):
+    """The rest of the author and INSS steps, replayed from responses captured on a real TRF1 draft (anonymized)."""
+
+    ADDRESS = {"cep": "68900-000", "numero": "10"}
+
+    @staticmethod
+    def selected_addresses():
+        return fixture("author_addresses.html").replace("radio-button-uncheck_16x16.png", "radio-button_16x16.png")
+
+    def test_the_author_reaches_vincular_with_the_registered_address_selected(self):
+        responses = [
+            "party_add_active.html",
+            "party_role_autor.html",
+            "party_person_fisica.html",
+            "author_lookup.html",
+            "author_details.html",
+            "author_addresses.html",
+        ]
+        client, calls = self.client(responses)
+        original = client.ajax
+
+        def ajax(url, state, fields, container, action):
+            if len(calls) == 6:  # "Usar no processo" on the registered address
+                calls.append((dict(fields), dict(action)))
+                return self.selected_addresses()
+            return original(url, state, fields, container, action)
+
+        client.ajax = ajax
+        with self.assertRaises(self.Stop):
+            client.add_author(
+                "draft", "12345678909", "PARTE EXEMPLO", address=self.ADDRESS, panel=fixture("party_toolbars.html")
+            )
+        insert_fields, insert_action = calls[-1]
+        self.assertIn("formInserirParteProcesso:btnInserirParteProcesso", insert_action)
+        for suffix in ("tpParteAlteracao", "comboParteSigilosa", "comboMoradorRua", "comboRepresentante"):
+            self.assertTrue(any(name.endswith(suffix) for name in insert_fields), suffix)
+        cep = next(name for name in insert_fields if name.endswith("cadastroPartePessoaEnderecoCEP"))
+        self.assertIn(cep, insert_fields)
+
+    def test_trf5_still_requires_mother_and_birth_date_from_the_registry(self):
+        self.assertEqual(
+            filing_portal("trf5-1g").author_required_details,
+            ("nomeGenitoraDecoration:nomeGenitora", "dataNascimentoDecoration:dataNascimentoInputDate"),
+        )
+        self.assertEqual(filing_portal("trf1-1g").author_required_details, ())
+
+    def test_inss_is_found_by_cnpj_and_reaches_inserir(self):
+        client, calls = self.client(
+            ["party_add_passive.html", "party_role_reu.html", "inss_search.html", "inss_selected.html"]
+        )
+        body = {"search": "INSS", "cnpj": "29979036000140", "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"}
+        with self.assertRaises(self.Stop):
+            client.add_passive_body("draft", body, panel=fixture("party_toolbars.html"))
+        self.assertIn("preCadastroPessoaFisicaForm:btnInserirOrgPub", calls[-1][1])

@@ -21,6 +21,13 @@ class FilingPortal:
     # PJe 2.13 (TRF1) opens "Associar parte ao processo" on a "Tipo da Parte" select before the pre-registration form;
     # these are its labels for the author and for the defendant (seen live on 2026-10-18).
     party_roles: dict | None = None
+    # Party details PJe must have filled from the Receita lookup before the author is inserted. TRF1 (PJe 2.13) shows
+    # mother's name and birth date only as labels there and its Receita table came back almost empty (2026-10-18), so
+    # identity rests on the looked-up name and, after insertion, the name and CPF in the active pole.
+    author_required_details: tuple = (
+        "nomeGenitoraDecoration:nomeGenitora",
+        "dataNascimentoDecoration:dataNascimentoInputDate",
+    )
 
     @property
     def portal(self):
@@ -57,6 +64,7 @@ FILING_PORTALS = {
             "supporting uploads, their type list and size limit",
         ),
         party_roles={"active": "AUTOR", "passive": "REU"},
+        author_required_details=(),
     ),
 }
 DEFAULT_PORTAL = "trf5-1g"
