@@ -77,3 +77,67 @@ Como repetir a parte do cadastro (só leitura; o estágio nunca envia Incluir):
 - **Estimativa:** cerca de 1 a 2 dias de trabalho, sendo meio dia de sessão acompanhada no portal (rascunho de teste
   e captura) e o restante em código e testes. O maior risco é o upload de documentos e o modal de representação, se
   o TRF1 2.13 tiver mudado esses formulários em relação ao TRF5 2.11.
+
+## Etapa B: o que foi implementado (sem criar rascunho)
+
+Nenhum rascunho foi criado para implementar esta etapa. O `trf1-1g` passou a escrever com o mesmo fluxo do TRF5
+(fases, checkpoint, aprovação, hashes e registro de uploads da Fase 1) e com estas diferenças:
+
+- **Configuração do portal:** `trf1-1g` tem `writes=True` e uma lista `unverified` dos passos que ainda não rodaram no
+  TRF1. Essa lista sai em `unverifiedSteps` no resultado de cada estágio que escreve e no `pje_draft_status`.
+- **Assunto (verificado na Etapa A):** quando a página do rascunho não traz o formulário de assunto, o fluxo carrega a
+  aba `assunto`, cuja resposta tem a lista de assuntos associados e o formulário de busca.
+- **Incluir:** se o PJe não devolver o endereço do novo rascunho, o erro traz as mensagens do próprio PJe (campo
+  obrigatório etc.) e manda conferir Não Protocolados antes de tentar de novo.
+- **Perfil `victor-trf1`** (`customers/victor/filing-profile.trf1.json`): área padrão `DIREITO ASSISTENCIAL`, INSS no
+  polo passivo, nenhum outro participante, sem prioridade e os tipos do TRF1:
+
+  | Classificação (vocabulário do TRF5) | Tipo no TRF1 |
+  | --- | --- |
+  | Laudo Médico | Exame médico |
+  | Documento Comprobatório | Comprovante (Outros) |
+  | Processo Administrativo | Processo administrativo |
+  | Carta de Concessão | Carta de Concessão |
+  | Carta de Indeferimento, Documento de Identificação, Planilha, Outros Documentos | Documentos Diversos |
+  | (pelo nome do arquivo) procuração, quesitos, declaração de hipossuficiência | Procuração, Apresentação de quesitos, Declaração de hipossuficiência/pobreza |
+
+  Todos esses rótulos constam da lista de tipos do documento principal vista no TRF1. A lista dos **anexos** ainda não
+  foi vista: se algum rótulo faltar nela, o passo do anexo falha dizendo qual opção não existe.
+- **O que continua igual e se confere sozinho:** cada passo relê o rascunho depois de agir (assunto associado, autor no
+  polo ativo, advogado com CPF/nome/OAB, órgão público pelo CNPJ, características gravadas, documentos no
+  Informativo) e falha com mensagem clara se o dado não estiver lá. Nada segue às cegas.
+- **Representante legal:** continua como passo manual registrado (igual ao TRF5).
+
+### Verificado de verdade no TRF1 × não verificado
+
+| Passo | Situação |
+| --- | --- |
+| Login senha + TOTP, URLs, telas de cadastro e Não Protocolados, áreas, jurisdições, classe, códigos de assunto, aba de assunto, ids da barra de partes, tipos do documento principal | **verificado** (Etapa A, só leitura) |
+| Incluir e o que vier depois da classe (órgão julgador, processo de referência) | não verificado |
+| Selecionar o assunto na busca e vê-lo associado | não verificado |
+| Autor por CPF (pré-cadastro, endereço) | não verificado |
+| Advogado extra (modal de representação) | não verificado |
+| INSS no polo passivo (busca "inss" + CNPJ 29.979.036/0001-40) | não verificado |
+| Características (justiça gratuita, tutela, valor da causa) | não verificado |
+| Petição em PDF, anexos, tipos dos anexos, limite de tamanho (mantido em 10 MB) | não verificado |
+
+### Roteiro do primeiro teste real (acompanhado)
+
+Use um caso real com o usuário olhando o PJe ao mesmo tempo, perfil `victor-trf1`, `facts.classification` com
+`"jurisdiction": "Seção Judiciária do Amapá"` e `"judicialClass": "PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL (436)"`.
+Rode por estágios, não `create-fill` de uma vez, e confira no portal depois de cada um:
+
+1. `create`: o rascunho aparece em Não Protocolados? Se falhar, leia a mensagem do PJe (campo pedido depois da
+   classe) e anote; confira se algum rascunho ficou criado.
+2. `subject`: o assunto 11946 (ou o do caso) aparece na aba Assunto?
+3. `author`: autor certo no polo ativo, com o endereço esperado?
+4. `attorney` (se houver advogado extra): advogado com OAB certa?
+5. `public-bodies`: o INSS entrou? A SJAP pede órgão de cumprimento ou MPF (se sim, acrescentar ao perfil)?
+6. `characteristics`: justiça gratuita, tutela e valor da causa gravados? Existe a prioridade "Juízo 100% Digital" no
+   TRF1 (se sim, pôr no perfil)?
+7. `documents`: a petição sobe em PDF? Os anexos aceitam os tipos do perfil? Qual o limite de tamanho mostrado?
+8. `pje_draft_status` com `checkPje: true`: conclusão `verified`, ou `verified_manual_steps_pending` se houver
+   representante.
+
+O que divergir vira ajuste no perfil `victor-trf1` ou no código. Quando tudo tiver passado, os itens podem sair da
+lista `unverified` de `trf1-1g`.
