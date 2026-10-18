@@ -13,19 +13,43 @@
     "Apresentação de quesitos",
     "Declaração de hipossuficiência/pobreza",
     "Comprovante de residência",
-    "Cadastro Nacional de Informações Sociais - CNIS"
+    "Cadastro Nacional de Informações Sociais - CNIS",
+    "Carteira de identidade",
+    "Carta de indeferimento de benefício",
+    "Comprovante de situação cadastral no CPF",
+    "Certidão de nascimento"
   ],
   "typeMap": {
     "Planilha": "Documentos Diversos",
     "Outros Documentos": "Documentos Diversos",
-    "Documento de Identificação": "Documentos Diversos",
+    "Documento de Identificação": "Carteira de identidade",
     "Processo Administrativo": "Processo administrativo",
     "Documento Comprobatório": "Comprovante (Outros)",
-    "Carta de Indeferimento": "Documentos Diversos",
+    "Carta de Indeferimento": "Carta de indeferimento de benefício",
     "Carta de Concessão": "Carta de Concessão",
     "Laudo Médico": "Atestado médico"
   },
   "documentRules": [
+    [
+      "CERTIDAO(?:[\\s_]|$)|CERTIDAO DE NASCIMENTO|NASCIMENTO",
+      "Certidão de nascimento"
+    ],
+    [
+      "(?:^|[\\s_])CPF(?:[\\s_]|$)",
+      "Comprovante de situação cadastral no CPF"
+    ],
+    [
+      "(?:^|[\\s_])(?:RG|CNH|IDENTIDADE)(?:[\\s_]|$)",
+      "Carteira de identidade"
+    ],
+    [
+      "INDEFERIMENTO",
+      "Carta de indeferimento de benefício"
+    ],
+    [
+      "DEFICIENCIA COMPROVADA|COMPROVADA",
+      "Comprovante (Outros)"
+    ],
     [
       "HIPOSSUFICIENCIA|DECLARACAO DE POBREZA",
       "Declaração de hipossuficiência/pobreza"
