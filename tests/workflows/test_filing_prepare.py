@@ -389,6 +389,23 @@ class PayloadTest(unittest.TestCase):
             )
             self.assertNotIn(tmp, Path(tmp, "run1", "review.json").read_text())
 
+    def test_a_run_with_a_draft_may_only_change_case_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _, _ = self.run_with_review(tmp)
+            choice = {"file:0": {"role": "main", "type": "Petição inicial"}}
+            finalize_review(store, FACTS, choice, profile=PROFILE)
+            approve(store)
+            store.write_json("checkpoint.json", {"draftId": "1"})
+            assembled = {name: store.read_bytes(name) for name in store.list("documents")}
+            finalize_review(store, {**FACTS, "author": {"name": "EXAMPLE FIXED"}}, choice, profile=PROFILE)
+            self.assertEqual(store.read_json("payload.json")["author"]["name"], "EXAMPLE FIXED")
+            self.assertFalse(store.exists("approval.json"))
+            with self.assertRaisesRegex(ValueError, "documents can no longer change"):
+                finalize_review(store, FACTS, {**choice, "file:1": {"role": "skip"}}, profile=PROFILE)
+            self.assertEqual({name: store.read_bytes(name) for name in store.list("documents")}, assembled)
+            with self.assertRaisesRegex(ValueError, "cannot be prepared again"):
+                prepare_customer("1", FACTS, store, profile=PROFILE, client=object())
+
     def test_a_run_copied_to_another_folder_stays_valid(self):
         with tempfile.TemporaryDirectory() as tmp:
             store, _, _ = self.run_with_review(tmp)

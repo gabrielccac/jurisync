@@ -23,7 +23,7 @@ from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.approval import revoke as revoke_approval
 from jurisync.connectors.pje.filing.checkpoint import now
-from jurisync.connectors.pje.filing.store import DOCUMENTS, MANIFEST, PAYLOAD, REVIEW, WORK, LocalRunStore
+from jurisync.connectors.pje.filing.store import CHECKPOINT, DOCUMENTS, MANIFEST, PAYLOAD, REVIEW, WORK, LocalRunStore
 from jurisync.core.pdf import analyze_document
 from jurisync.core.word_to_pdf import convert_word_to_pdf
 
@@ -197,8 +197,10 @@ def _label(name):
     return re.sub(r"^\d+\s*[-.]\s*", "", stem).strip() or "documento"
 
 
-def assemble(store, rows):
+def assemble(store, rows, *, write=True):
     """Write the run's documents/ folder from the chosen rows and return the payload's `documents`.
+
+    `write=False` only works out (and hash-checks) what the assembly would be, leaving the run untouched.
 
     Filing order is explicit: the main petition is 01, then each supporting file in folder order, each volume of a
     split PDF with its own number (`03-LAUDOS-vol-01.pdf`). Names are unique within the run (see CanonicalNames). Each
@@ -206,8 +208,9 @@ def assemble(store, rows):
     records what every assembled file is and which review row it came from; the payload names the files relative to
     the run, so the run stays valid wherever it is copied.
     """
-    store.delete_tree(DOCUMENTS)
-    store.delete(MANIFEST)
+    if write:
+        store.delete_tree(DOCUMENTS)
+        store.delete(MANIFEST)
     main = next(row for row in rows if row["role"] == "main")
     ordered = [main, *(row for row in rows if row["role"] == "supporting")]
     names, entries = CanonicalNames(), []
@@ -220,7 +223,8 @@ def assemble(store, rows):
                 raise ValueError(f"Document changed: {row['name']}")
             label = f"{_label(row['name'])}-vol-{index:02}" if parts else _label(row["name"])
             name = names.claim(f"{len(entries) + 1:02}-{label}.pdf", item["uploadSha256"])
-            store.write_bytes(f"{DOCUMENTS}/{name}", content)
+            if write:
+                store.write_bytes(f"{DOCUMENTS}/{name}", content)
             entry = {
                 "path": f"{DOCUMENTS}/{name}",
                 "type": row["type"],
@@ -230,6 +234,9 @@ def assemble(store, rows):
             if parts:
                 entry["number"] = f"{index}/{len(parts)}"
             entries.append((entry, row, len(content)))
+    documents = [entry for entry, _, _ in entries]
+    if not write:
+        return {"main": documents[0], "supporting": documents[1:]}
     store.write_json(
         MANIFEST,
         {
@@ -241,7 +248,6 @@ def assemble(store, rows):
             ],
         },
     )
-    documents = [entry for entry, _, _ in entries]
     return {"main": documents[0], "supporting": documents[1:]}
 
 
@@ -341,6 +347,8 @@ def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=
     `jev=False` keeps document text off the network.
     """
     jev_options = None if jev else {"openrouter_key": "", "api_key": ""}
+    if store.exists(CHECKPOINT):
+        raise ValueError("This run already has a PJe draft, so it cannot be prepared again; use a new runId")
     _void_assembly(store)
     documents = AdvboxDocuments(client or AdvboxClient())
     root = documents.list_customer_files(customer_id)
@@ -478,7 +486,13 @@ def finalize_review(store, facts, overrides=None, *, profile):
     if unknown:
         raise ValueError(f"Overrides name files that are not in the review: {', '.join(unknown)}")
     choices = {file_id: _checked_override(file_id, choice) for file_id, choice in overrides.items()}
-    _void_assembly(store)
+    # Once a draft exists its documents are on PJe under their assembled names: only case facts may still change.
+    drafted = store.exists(CHECKPOINT)
+    previous = (store.read_json(PAYLOAD).get("documents") if store.exists(PAYLOAD) else None) if drafted else None
+    if drafted:
+        revoke_approval(store)
+    else:
+        _void_assembly(store)
     rows = []
     for original in report["files"]:
         choice = choices.get(original["id"])
@@ -498,7 +512,15 @@ def finalize_review(store, facts, overrides=None, *, profile):
     if cpfs and _digits(facts.get("authorCpf")) not in cpfs:
         raise ValueError("Author CPF was not found among the selected petition's formatted CPFs")
     build_payload(facts, {}, profile.defaults())  # facts problems surface before any file is assembled
-    documents = assemble(store, rows)
+    if drafted:
+        documents = assemble(store, rows, write=False)
+        if documents != previous:
+            raise ValueError(
+                "This run already has a PJe draft, so its documents can no longer change (only case facts can); "
+                "use a new runId"
+            )
+    else:
+        documents = assemble(store, rows)
     store.write_json(PAYLOAD, build_payload(facts, documents, profile.defaults()))
     return {"ready": True, "documentCount": 1 + len(documents["supporting"])}
 
