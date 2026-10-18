@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -51,6 +52,25 @@ class DraftPayloadTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "existing PDF"):
             validate_fill_payload(payload)
+
+    def test_documents_must_carry_the_approved_sha256_and_still_match_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            petition = Path(tmp, "petition.pdf")
+            petition.write_bytes(b"%PDF-1 approved")
+            main = {"path": str(petition), "type": "Petição inicial"}
+            payload = {
+                "subject": {"search": "test", "code": "1", "name": "TEST"},
+                "authorCpf": "12345678909",
+                "author": {"name": "EXAMPLE"},
+                "documents": {"main": main},
+            }
+            with self.assertRaisesRegex(ValueError, "no sha256.*filing_finalize again"):
+                validate_fill_payload(payload)
+            main["sha256"] = hashlib.sha256(b"%PDF-1 approved").hexdigest()
+            validate_fill_payload(payload)
+            petition.write_bytes(b"%PDF-1 edited later")
+            with self.assertRaisesRegex(ValueError, "changed since approval: petition.pdf"):
+                validate_fill_payload(payload)
 
 
 class StepTimelineTest(unittest.TestCase):

@@ -16,6 +16,7 @@ from pydantic import Field, StringConstraints
 
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
+from jurisync.connectors.pje.filing.approval import require_approval
 from jurisync.connectors.pje.filing.checkpoint import run_directory
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
@@ -228,6 +229,7 @@ def _start_fill(run_id, stage):
     payload, checkpoint = draft_paths(run_id)
     with tool_errors("PJe draft", *ERRORS):
         filing.validate_fill_payload(json.loads(payload.read_text(encoding="utf-8")))
+        require_approval(payload)
         if stage == "create-fill" and checkpoint.exists():
             raise ToolError("This run already has a draft; use stage fill to continue it")
         if stage == "fill" and not checkpoint.exists():
@@ -298,7 +300,7 @@ def search_pending_drafts(
 @server.tool(
     name="pje_draft_write",
     title="Create or fill TRF5 PJe draft",
-    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
+    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Refuses unless filing_approve recorded the user's approval of this exact payload and every document still has its approved sha256. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:

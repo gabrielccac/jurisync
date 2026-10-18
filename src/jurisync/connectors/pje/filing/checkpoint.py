@@ -7,6 +7,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from jurisync.connectors.pje.filing.names import fold, upload_name
+
 
 def fingerprint(value):
     """Stable digest of the payload slice a phase worked from; a changed slice means the phase must run again."""
@@ -66,11 +68,61 @@ def now():
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def write_checkpoint(path, data):
-    """Replace the checkpoint atomically (owner-only), so an interrupted write never leaves a broken file."""
+def write_private_json(path, data):
+    """Replace a run file atomically (owner-only), so an interrupted write never leaves a broken file."""
     destination = Path(path)
-    descriptor, temp = tempfile.mkstemp(dir=destination.parent, prefix=".checkpoint-")
+    descriptor, temp = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.stem}-")
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
         json.dump(data, output, ensure_ascii=False, indent=2)
     os.chmod(temp, 0o600)
     os.replace(temp, destination)
+
+
+def write_checkpoint(path, data):
+    write_private_json(path, data)
+
+
+def file_sha256(path):
+    return hashlib.sha256(Path(path).expanduser().read_bytes()).hexdigest()
+
+
+class UploadLedger:
+    """Which content this run sent to PJe under which file name.
+
+    PJe lists a draft's documents by file name only, so a name on the draft says nothing about its bytes. Before each
+    upload the run records `checkpoint["uploads"][sha256] = {name, type}`; a listed name then counts as this document
+    only when the record for that name holds the document's own sha256.
+    """
+
+    def __init__(self, checkpoint=None, save=None):
+        self.checkpoint = checkpoint if checkpoint is not None else {}
+        self.save = save
+
+    @property
+    def uploads(self):
+        return self.checkpoint.setdefault("uploads", {})
+
+    def recorded(self, path):
+        """The sha256 values recorded under this file name (PJe's name comparison: ASCII-folded, case-insensitive)."""
+        name = fold(upload_name(Path(path)))
+        return [sha for sha, entry in self.uploads.items() if fold(entry["name"]) == name]
+
+    def record(self, document):
+        """Note the content about to be sent under this name, replacing any earlier record of the same name."""
+        path = Path(document["path"]).expanduser()
+        for sha in self.recorded(path):
+            del self.uploads[sha]
+        self.uploads[document["sha256"]] = {"name": upload_name(path), "type": document.get("type")}
+        self.checkpoint["updatedAt"] = now()
+        if self.save:
+            self.save(self.checkpoint)
+
+    def mismatch(self, document):
+        """Why the copy of this document's name on the draft may not be this content, or None when it is."""
+        path = Path(document["path"]).expanduser()
+        recorded = self.recorded(path)
+        if document.get("sha256") in recorded:
+            return None
+        if recorded:
+            return f"{path.name} is on the draft with other content than the approved file (it changed after upload)"
+        return f"{path.name} is on the draft, but this run has no record of which content was uploaded under that name"

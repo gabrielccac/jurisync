@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 
 from jurisync.connectors.pje.auth.certificate import trf5_cert_login
-from jurisync.connectors.pje.filing.checkpoint import now, pid_alive, write_checkpoint
+from jurisync.connectors.pje.filing.approval import require_approval
+from jurisync.connectors.pje.filing.checkpoint import UploadLedger, now, pid_alive, write_checkpoint
 from jurisync.connectors.pje.filing.client import DraftClient
 from jurisync.connectors.pje.filing.payload import payload_subjects, validate_fill_payload
 from jurisync.connectors.pje.filing.status import run_status
@@ -143,8 +144,10 @@ def run_stage(
             payload = json.load(source)
     if payload and payload.get("portal") != "trf5-1g":
         raise ValueError("Only trf5-1g is supported")
-    if stage in ("create-fill", "fill"):
+    if stage in WRITE_STAGES and stage != "delete-draft":
+        # Every stage that writes payload content needs the user's recorded approval of this exact payload.
         validate_fill_payload(payload)
+        require_approval(payload_path)
     owned = session is None
     if owned:
         session = trf5_cert_login()
@@ -179,6 +182,7 @@ def run_stage(
                 raise ValueError("--checkpoint is required after classification")
             with open(checkpoint_path, encoding="utf-8") as source:
                 checkpoint = json.load(source)
+            ledger = UploadLedger(checkpoint, lambda data: write_checkpoint(checkpoint_path, data))
             if stage == "status-check":
                 result = run_status(checkpoint_path, payload, client)
             elif stage == "subject-options":
@@ -205,13 +209,15 @@ def run_stage(
                 result = client.save_characteristics(checkpoint["draftUrl"], payload["characteristics"])
             elif stage == "main-document":
                 draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_main_document(draft_url, payload["documents"]["main"])
+                result = client.add_main_document(draft_url, payload["documents"]["main"], ledger=ledger)
             elif stage == "supporting-documents":
                 draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_supporting_documents(draft_url, payload["documents"].get("supporting", []))
+                result = client.add_supporting_documents(
+                    draft_url, payload["documents"].get("supporting", []), ledger=ledger
+                )
             elif stage == "documents":
                 draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_documents(draft_url, payload["documents"])
+                result = client.add_documents(draft_url, payload["documents"], ledger=ledger)
             else:
                 result = client.add_author(
                     checkpoint["draftUrl"],

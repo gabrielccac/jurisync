@@ -4,6 +4,9 @@ The PJe MCP fills a draft from `payload.json` in a filing run, but something has
 `00-PROTOCOLAR` folder. That used to be a command-line step; these tools make it callable by an agent that only has
 MCP access. They wrap `prepare.py`, so the agent never passes file paths and never writes
 `review.json` or `payload.json` itself.
+
+Nothing reaches PJe on the strength of a written payload alone: `filing_approve` records the user's approval of that
+exact payload (its sha256 and every document's) in `approval.json`, and `pje_draft_write` refuses without it.
 """
 
 import json
@@ -17,6 +20,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
+from jurisync.connectors.pje.filing.approval import APPROVAL, approve, require_approval
 from jurisync.connectors.pje.filing.checkpoint import run_directory
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 from jurisync.paths import REPO_ROOT
@@ -43,14 +47,23 @@ def _file_view(row):
     return view
 
 
-def _review_view(run_id, report, payload_ready):
+def _approved(directory):
+    try:
+        require_approval(directory / "payload.json")
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _review_view(run_id, report, directory):
     """The review without local paths or hashes: the agent needs ids, names, types and problems."""
     return {
         "runId": run_id,
         "customerId": report.get("customerId"),
         "folder": report.get("folder"),
         "ready": bool(report.get("ready")),
-        "payloadReady": payload_ready,
+        "payloadReady": (directory / "payload.json").exists(),
+        "approved": _approved(directory),
         "files": [_file_view(row) for row in report.get("files", [])],
         "review": report.get("review", []),
         "candidates": report.get("candidates", {}),
@@ -121,7 +134,7 @@ def prepare(
         prepare_customer(customerId, facts, directory, profile=selected, folder=folder, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(directory / "review.json", "Prepare did not write a review")
-    return _review_view(runId, report, (directory / "payload.json").exists())
+    return _review_view(runId, report, directory)
 
 
 @server.tool(
@@ -133,13 +146,13 @@ def prepare(
 def review(runId: RunId) -> dict[str, Any]:
     directory = run_directory(runId)
     report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
-    return _review_view(runId, report, (directory / "payload.json").exists())
+    return _review_view(runId, report, directory)
 
 
 @server.tool(
     name="filing_finalize",
     title="Write the filing payload for a prepared run",
-    description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition. `overrides` maps a file id from the review to {role, type}, or {role: 'skip'} to leave a file out. Omit `facts` to reuse the facts given to prepare. Returns a summary of what the draft will contain.",
+    description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition. `overrides` maps a file id from the review to {role, type, description} (only those keys), or {role: 'skip'} to leave a file out. Omit `facts` to reuse the facts given to prepare. Every finalize drops any earlier approval. Returns a summary of what the draft will contain, to show the user before filing_approve.",
     annotations=LOCAL_WRITE,
 )
 def finalize(
@@ -158,6 +171,7 @@ def finalize(
     unknown = sorted(set(overrides or {}) - {row["id"] for row in report.get("files", [])})
     if unknown:
         raise ToolError(f"Overrides name files that are not in the review: {', '.join(unknown)}")
+    (directory / APPROVAL).unlink(missing_ok=True)
     with tool_errors("Filing", *ERRORS):
         result = finalize_review(directory / "review.json", facts, overrides or {}, profile=load_profile(profile))
     payload = _read_json(directory / "payload.json", "The payload was not written")
@@ -165,7 +179,29 @@ def finalize(
         "runId": runId,
         "ready": bool(result.get("ready")),
         "payload": _payload_view(payload),
-        "next": "Show this to the user. When they approve, call pje_draft_write with stage create-fill, then follow it with pje_draft_status.",
+        "approved": False,
+        "next": "Show this summary to the user. Only after they explicitly approve it, call filing_approve with this runId; then call pje_draft_write with stage create-fill and follow it with pje_draft_status. If anything changes, finalize again: that needs a new approval.",
+    }
+
+
+@server.tool(
+    name="filing_approve",
+    title="Record the user's approval of a finalized filing payload",
+    description="Record that the user approved the summary filing_finalize showed: writes approval.json with the time, the payload's sha256 and each document's sha256, after checking every document still matches. pje_draft_write refuses without an approval that matches the current payload. Call it only after the user explicitly confirms that summary; never on your own.",
+    annotations=LOCAL_WRITE,
+)
+def approve_payload(runId: RunId) -> dict[str, Any]:
+    directory = run_directory(runId)
+    if not (directory / "payload.json").exists():
+        raise ToolError("This run has no payload yet; call filing_finalize first")
+    with tool_errors("Filing", *ERRORS):
+        approval = approve(directory)
+    return {
+        "runId": runId,
+        "approved": True,
+        "approvedAt": approval["approvedAt"],
+        "documents": [{"name": item["name"], "type": item["type"]} for item in approval["documents"]],
+        "next": "Call pje_draft_write with stage create-fill (or fill for an existing draft), then pje_draft_status.",
     }
 
 

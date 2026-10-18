@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import tempfile
@@ -70,6 +71,7 @@ class FilingServerTests(unittest.TestCase):
                 "filing_prepare": False,
                 "filing_review": True,
                 "filing_finalize": False,
+                "filing_approve": False,
                 "filing_profiles": True,
                 "filing_subjects": True,
             },
@@ -154,6 +156,57 @@ class FilingServerTests(unittest.TestCase):
         self.assertEqual(view["author"]["cpf"], "123.***.***-09")
         self.assertEqual(view["documents"][0]["name"], "p.pdf")
         self.assertNotIn("/secret", json.dumps(ok.structured_content))
+
+    def test_approve_records_the_payload_and_document_hashes_and_voids_on_any_change(self):
+        self.run_dir.mkdir()
+        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
+        self.assertTrue(call("filing_approve", {"runId": "run1"}).is_error)
+        petition = self.run_dir / "petition.pdf"
+        petition.write_bytes(b"%PDF-1 petition")
+        sha = hashlib.sha256(petition.read_bytes()).hexdigest()
+        payload = {
+            "subjects": [{"search": "s", "code": "1", "name": "S"}],
+            "authorCpf": "12345678909",
+            "author": {"name": "EXAMPLE"},
+            "documents": {"main": {"path": str(petition), "type": "Petição inicial", "sha256": sha}},
+        }
+        payload_path = self.run_dir / "payload.json"
+        payload_path.write_text(json.dumps(payload))
+        self.assertFalse(call("filing_review", {"runId": "run1"}).structured_content["approved"])
+
+        result = call("filing_approve", {"runId": "run1"}).structured_content
+        self.assertTrue(result["approved"])
+        self.assertEqual(result["documents"], [{"name": "petition.pdf", "type": "Petição inicial"}])
+        approval_path = self.run_dir / "approval.json"
+        approval = json.loads(approval_path.read_text())
+        self.assertEqual(approval["payloadSha256"], hashlib.sha256(payload_path.read_bytes()).hexdigest())
+        self.assertEqual(approval["documents"][0]["sha256"], sha)
+        self.assertEqual(approval_path.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(call("filing_review", {"runId": "run1"}).structured_content["approved"])
+
+        payload_path.write_text(json.dumps({**payload, "authorCpf": "98765432100"}))
+        self.assertFalse(call("filing_review", {"runId": "run1"}).structured_content["approved"])
+        payload_path.write_text(json.dumps(payload))
+        petition.write_bytes(b"%PDF-1 edited after review")
+        refused = call("filing_approve", {"runId": "run1"})
+        self.assertTrue(refused.is_error)
+        self.assertIn("changed since approval", refused.content[0].text)
+
+    def test_finalize_drops_an_earlier_approval(self):
+        self.run_dir.mkdir()
+        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
+        self.run_dir.joinpath("facts.json").write_text("{}")
+        self.run_dir.joinpath("approval.json").write_text("{}")
+
+        def finalize(review_path, facts, overrides=None, *, profile):
+            Path(review_path).with_name("payload.json").write_text(json.dumps({"author": {"name": "X"}}))
+            return {"ready": True}
+
+        with mock.patch.object(filing, "finalize_review", finalize):
+            result = call("filing_finalize", {"profile": "victor", "runId": "run1"}).structured_content
+        self.assertFalse(result["approved"])
+        self.assertIn("filing_approve", result["next"])
+        self.assertFalse(self.run_dir.joinpath("approval.json").exists())
 
     def test_subjects_come_from_the_profiles_own_reference_files(self):
         view = call("filing_subjects", {"profile": "victor", "lawsuitRef": "17519594"}).structured_content

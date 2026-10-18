@@ -1,7 +1,11 @@
 """Payload validation and value formats; runs before any network call."""
 
+import hashlib
 import re
 from pathlib import Path
+
+PDF_LIMIT = 10_000_000
+SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 def masked_cpf(value):
@@ -85,5 +89,26 @@ def validate_fill_payload(payload):
             raise ValueError("documents.main.path is required")
         for item in (documents["main"], *documents.get("supporting", [])):
             source = Path(item.get("path", "")).expanduser()
-            if source.suffix.lower() != ".pdf" or not source.is_file() or source.stat().st_size > 10_000_000:
+            if source.suffix.lower() != ".pdf" or not source.is_file() or source.stat().st_size > PDF_LIMIT:
                 raise ValueError(f"Document must be an existing PDF of at most 10 MB: {source}")
+            approved_content(item)
+
+
+def approved_content(document):
+    """The document's bytes, read once and checked against the sha256 that was reviewed and approved.
+
+    Payloads written before documents carried a sha256 cannot prove what was approved, so they are refused.
+    """
+    path = Path(document["path"]).expanduser()
+    expected = document.get("sha256")
+    if not isinstance(expected, str) or not SHA256.fullmatch(expected):
+        raise ValueError(
+            f"Document {path.name} has no sha256 in the payload (written before integrity checks): "
+            "run filing_finalize again and approve the new payload; a run that already has a draft needs a new runId"
+        )
+    content = path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != expected:
+        raise ValueError(
+            f"Document changed since approval: {path.name}. Run filing_finalize again and get a new approval"
+        )
+    return content

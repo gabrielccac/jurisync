@@ -40,8 +40,10 @@ class Transport:
         )
         return self._html(response)
 
-    def multipart(self, url, data, field, path, *, resource=False):
+    def multipart(self, url, data, field, path, *, content=None, resource=False):
+        """Upload `content` (the file's verified bytes) under the file's upload name; read the file when omitted."""
         self.requests += 1
+        content = path.read_bytes() if content is None else content
         boundary = "----geckoformboundary" + uuid.uuid4().hex
         body = bytearray()
 
@@ -57,10 +59,10 @@ class Transport:
 
         for name, value in data.items():
             if name == "javax.faces.ViewState" and not resource:
-                part(field, path.read_bytes(), upload_name(path))
+                part(field, content, upload_name(path))
             part(name, str(value).encode("utf-8" if resource else "iso-8859-1"))
         if resource or "javax.faces.ViewState" not in data:
-            part(field, path.read_bytes(), upload_name(path))
+            part(field, content, upload_name(path))
         body.extend(f"--{boundary}--\r\n".encode())
         response = self.session.post(
             url,

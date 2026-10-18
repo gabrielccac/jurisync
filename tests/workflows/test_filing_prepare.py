@@ -15,10 +15,10 @@ from jurisync.workflows.filing.classify import (
     document_kind,
 )
 from jurisync.workflows.filing.prepare import (
-    _stage_upload,
     apply_supporting_fallback,
     build_payload,
     finalize_review,
+    stage_uploads,
     upload_filename,
 )
 from jurisync.workflows.filing.profile import load_profile
@@ -141,16 +141,30 @@ class UploadNameTest(unittest.TestCase):
         for name, clean in expected.items():
             self.assertEqual(upload_filename(name), clean, name)
 
-    def test_staged_copy_keeps_content_and_never_collides(self):
+    def test_staged_names_are_unique_in_the_run_even_when_cleaning_collides(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            first, second = root / "A_1111.pdf", root / "Ã_2222.pdf"
-            first.write_bytes(b"%PDF-1")
-            second.write_bytes(b"%PDF-2")
-            a, b = Path(_stage_upload(first, root)), Path(_stage_upload(second, root))
-            self.assertEqual((a.name, b.name), ("A.pdf", "A.pdf"))
-            self.assertNotEqual(a.parent, b.parent)
-            self.assertEqual((a.read_bytes(), b.read_bytes()), (b"%PDF-1", b"%PDF-2"))
+            rows = []
+            for name, content in (("A_1111.pdf", b"%PDF-1"), ("Ã_2222.pdf", b"%PDF-2"), ("a_3333.pdf", b"%PDF-3")):
+                path = root / name
+                path.write_bytes(content)
+                sha = hashlib.sha256(content).hexdigest()
+                rows.append({"name": name, "path": str(path), "uploadSha256": sha})
+            big = root / "B_4444.pdf"
+            big.write_bytes(b"%PDF-big")
+            volumes = []
+            for index in (1, 2):
+                part = root / f"part{index}.pdf"
+                part.write_bytes(b"%PDF-vol" + bytes([index]))
+                volumes.append({"path": str(part), "uploadSha256": hashlib.sha256(part.read_bytes()).hexdigest()})
+            rows.append({"name": "B_4444.pdf", "path": str(big), "uploadSha256": "9" * 64, "parts": volumes})
+            stage_uploads(rows, root)
+            names = [Path(row["path"]).name for row in rows]
+            sha = [row["uploadSha256"] for row in rows]
+            # The first keeps the clean name; later ones that PJe would confuse with it get a content-hash suffix.
+            self.assertEqual(names, ["A.pdf", f"A-{sha[1][:8]}.pdf", f"a-{sha[2][:8]}.pdf", "B.pdf"])
+            self.assertEqual([Path(part["path"]).name for part in rows[3]["parts"]], ["B-vol-01.pdf", "B-vol-02.pdf"])
+            self.assertEqual(Path(rows[1]["path"]).read_bytes(), b"%PDF-2")
 
 
 class PayloadTest(unittest.TestCase):
@@ -252,10 +266,33 @@ class PayloadTest(unittest.TestCase):
             self.assertTrue(result["ready"])
             documents = json.loads(Path(result["payloadPath"]).read_text())["documents"]
             self.assertEqual(documents["main"]["path"], str(petition))
+            self.assertEqual(documents["main"]["sha256"], digest(petition))
             self.assertEqual(
                 documents["supporting"],
-                [{"path": str(supporting), "type": "Outros Documentos", "description": "supporting"}],
+                [
+                    {
+                        "path": str(supporting),
+                        "type": "Outros Documentos",
+                        "description": "supporting",
+                        "sha256": digest(supporting),
+                    }
+                ],
             )
+            directory.joinpath("approval.json").write_text("{}")
+            described = {**choice, "file:1": {"type": "Laudo Médico", "description": "Laudo do CAPS"}}
+            finalize_review(report, FACTS, described, profile=PROFILE)
+            supporting_item = json.loads(Path(result["payloadPath"]).read_text())["documents"]["supporting"][0]
+            self.assertEqual(
+                (supporting_item["type"], supporting_item["description"]), ("Laudo Médico", "Laudo do CAPS")
+            )
+            self.assertFalse(directory.joinpath("approval.json").exists(), "a new payload needs a new approval")
+            for forbidden in ({"path": "/tmp/other.pdf"}, {"uploadSha256": "0" * 64}, {"role": "main", "sha256": "x"}):
+                with self.assertRaisesRegex(ValueError, "cannot be changed"):
+                    finalize_review(report, FACTS, {**choice, "file:1": forbidden}, profile=PROFILE)
+            with self.assertRaisesRegex(ValueError, "main, supporting or skip"):
+                finalize_review(report, FACTS, {**choice, "file:1": {"role": "other"}}, profile=PROFILE)
+            with self.assertRaisesRegex(ValueError, "nope"):
+                finalize_review(report, FACTS, {"nope": {"role": "skip"}}, profile=PROFILE)
             self.assertEqual(oct(Path(result["payloadPath"]).stat().st_mode & 0o777), "0o600")
             petition.write_bytes(b"%PDF-1.4\nchanged")
             with self.assertRaisesRegex(ValueError, "Document changed"):

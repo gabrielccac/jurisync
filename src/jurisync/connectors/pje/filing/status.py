@@ -7,7 +7,8 @@ PJe can answer, so `check_pje` reads the draft's documents and compares them wit
 import json
 from pathlib import Path
 
-from jurisync.connectors.pje.filing.checkpoint import phase_fingerprints, pid_alive
+from jurisync.connectors.pje.filing.checkpoint import UploadLedger, phase_fingerprints, pid_alive
+from jurisync.connectors.pje.filing.documents import expected_documents
 
 LEGACY_COMPLETE = {"documents_complete", "characteristics_complete", "parties_complete"}
 
@@ -71,17 +72,20 @@ def run_status(checkpoint_path, payload=None, client=None):
 def _check_pje(client, checkpoint, payload):
     row = client._pending_row(checkpoint["draftId"], payload["author"]["name"])
     check = {"inNaoProtocolados": row is not None}
-    expected = []
-    if "documents" in payload:
-        main = payload["documents"]["main"]
-        expected = [{"path": main["path"], "type": main.get("type", "Petição inicial")}]
-        expected += payload["documents"].get("supporting", [])
+    expected = expected_documents(payload["documents"]) if "documents" in payload else []
     if row is None:
         check.update(documents={"expected": len(expected), "missing": [Path(i["path"]).name for i in expected]})
         check["verified"] = False
         return check
     listed = client.review_documents(row["draftUrl"]) if expected else []
     missing = client._missing_documents(listed, expected) if expected else []
+    # A listed name proves nothing about its bytes: the run's upload ledger must hold this document's sha256 for it.
+    ledger = UploadLedger(checkpoint)
+    unconfirmed = [
+        Path(item["path"]).name for item in expected if Path(item["path"]).name not in missing and ledger.mismatch(item)
+    ]
     check["documents"] = {"expected": len(expected), "listed": len(listed), "missing": missing}
-    check["verified"] = not missing
+    if unconfirmed:
+        check["documents"]["contentNotConfirmed"] = unconfirmed
+    check["verified"] = not missing and not unconfirmed
     return check

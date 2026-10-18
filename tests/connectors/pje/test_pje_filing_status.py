@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from jurisync.connectors.pje.filing import DraftClient, StepTimeline
+from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.checkpoint import phase_fingerprints
 from jurisync.connectors.pje.filing.run import _fill
 from jurisync.connectors.pje.filing.status import run_state, run_status
@@ -135,15 +137,24 @@ class RunStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pdf = Path(tmp, "0-A.pdf")
             pdf.write_bytes(b"%PDF-1")
-            payload = {**PAYLOAD, "documents": {"main": {"path": str(pdf), "type": "Petição inicial"}}}
-            path = self.write(tmp, {"draftId": "1", "status": "complete", "completed": {}}, [])
+            sha = hashlib.sha256(b"%PDF-1").hexdigest()
+            main = {"path": str(pdf), "type": "Petição inicial", "sha256": sha}
+            payload = {**PAYLOAD, "documents": {"main": main}}
+            uploads = {sha: {"name": "0-A.pdf", "type": "Petição inicial"}}
+            path = self.write(tmp, {"draftId": "1", "status": "complete", "completed": {}, "uploads": uploads}, [])
             on_draft = [{"name": "0-A.pdf", "type": "Petição inicial"}]
             stale = run_status(path, payload, Pje(on_draft))
             missing = run_status(path, payload, Pje([]))
+            other = {"f" * 64: {"name": "0-A.pdf", "type": "Petição inicial"}}
+            path = self.write(tmp, {"draftId": "1", "status": "complete", "completed": {}, "uploads": other}, [])
+            changed = run_status(path, payload, Pje(on_draft))
         self.assertEqual(stale["conclusion"], "complete_in_pje_record_incomplete")
         self.assertTrue(stale["pje"]["verified"])
         self.assertEqual(missing["conclusion"], "incomplete")
         self.assertEqual(missing["pje"]["documents"]["missing"], ["0-A.pdf"])
+        # The name is on the draft, but the run uploaded other bytes under it: not verified.
+        self.assertFalse(changed["pje"]["verified"])
+        self.assertEqual(changed["pje"]["documents"]["contentNotConfirmed"], ["0-A.pdf"])
 
 
 class BackgroundFillTests(unittest.TestCase):
@@ -162,6 +173,7 @@ class BackgroundFillTests(unittest.TestCase):
             run_dir = Path(tmp, "run1")
             run_dir.mkdir()
             run_dir.joinpath("payload.json").write_text(json.dumps(PAYLOAD))
+            approve(run_dir)
             env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}
             with mock.patch.dict(os.environ, env), mock.patch.object(server.filing, "run_stage", slow_run_stage):
                 first = server._start_fill("run1", "create-fill")
@@ -173,6 +185,40 @@ class BackgroundFillTests(unittest.TestCase):
         self.assertEqual(first["state"], "started")
         self.assertEqual(again["state"], "already-running")
         self.assertEqual(status["result"]["state"], "starting")
+
+    def test_draft_write_is_refused_without_an_approval_matching_the_payload(self):
+        from mcp.server.mcpserver.exceptions import ToolError
+
+        from jurisync.connectors.pje import server
+
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp, "run1")
+            run_dir.mkdir()
+            payload = run_dir / "payload.json"
+            payload.write_text(json.dumps(PAYLOAD))
+            env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}
+            run = lambda stage, **options: calls.append(stage)
+            with mock.patch.dict(os.environ, env), mock.patch.object(server.filing, "run_stage", run):
+                with self.assertRaisesRegex(ToolError, "not been approved"):
+                    server.draft_write("run1", "create-fill")
+                approve(run_dir)
+                payload.write_text(json.dumps({**PAYLOAD, "author": {"name": "SOMEONE ELSE"}}))
+                with self.assertRaisesRegex(ToolError, "changed after it was approved"):
+                    server.draft_write("run1", "create-fill")
+        self.assertEqual(calls, [])
+
+    def test_every_payload_write_stage_needs_approval_before_login(self):
+        from jurisync.connectors.pje.filing import WRITE_STAGES, run_stage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp, "payload.json")
+            payload.write_text(json.dumps({**PAYLOAD, "portal": "trf5-1g"}))
+            login = mock.patch("jurisync.connectors.pje.filing.run.trf5_cert_login", side_effect=AssertionError)
+            with login:
+                for stage in sorted(WRITE_STAGES - {"delete-draft"}):
+                    with self.subTest(stage), self.assertRaisesRegex(ValueError, "not been approved"):
+                        run_stage(stage, payload_path=str(payload), checkpoint_path=str(Path(tmp, "cp.json")))
 
     def test_writes_stay_disabled_without_the_flag(self):
         from mcp.server.mcpserver.exceptions import ToolError

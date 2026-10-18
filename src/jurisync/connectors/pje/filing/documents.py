@@ -8,10 +8,18 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje.filing.checkpoint import UploadLedger
 from jurisync.connectors.pje.filing.constants import PORTAL, UPDATE_URL
 from jurisync.connectors.pje.filing.names import same_name, upload_name
+from jurisync.connectors.pje.filing.payload import approved_content
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 from jurisync.connectors.pje.parsers import jsf_data
+
+
+def expected_documents(documents):
+    """The payload's documents as the draft should list them: the main petition first, with its type filled in."""
+    main = documents["main"]
+    return [{**main, "type": main.get("type", "Petição inicial")}, *documents.get("supporting", [])]
 
 
 class DocumentsMixin:
@@ -73,16 +81,32 @@ class DocumentsMixin:
             )
         return documents
 
-    def add_main_document(self, draft_url, document, existing=None):
+    @staticmethod
+    def _require_same_content(document, ledger):
+        """A name already on the draft counts only when the ledger says this run sent this exact content under it.
+
+        Otherwise fail: PJe would keep the old bytes under the same name, and nothing here removes a saved document.
+        """
+        problem = ledger.mismatch(document)
+        if problem:
+            raise RuntimeError(
+                f"{problem}. It was not uploaded again: remove it from the draft in PJe (or start a new runId), "
+                "then run fill again"
+            )
+
+    def add_main_document(self, draft_url, document, existing=None, ledger=None):
+        ledger = ledger if ledger is not None else UploadLedger()
         path = Path(document["path"]).expanduser()
         if path.suffix.lower() != ".pdf" or not path.is_file() or path.stat().st_size > 10_000_000:
             raise ValueError("Main document must be an existing PDF of at most 10 MB")
         with path.open("rb") as source:
             if source.read(5) != b"%PDF-":
                 raise ValueError("Main document is not a PDF")
+        approved_content(document)
         listed = existing if existing is not None else self.review_documents(draft_url)
         main_documents = [item for item in listed if item["type"] == document.get("type", "Petição inicial")]
         if main_documents and len(main_documents) == 1 and same_name(main_documents[0]["name"], path):
+            self._require_same_content(document, ledger)
             return {"alreadyAdded": True, "name": path.name}
         # PJe keeps one main petition per draft: uploading a different one overrides the saved one.
         html = self.documents_panel(draft_url)
@@ -90,6 +114,7 @@ class DocumentsMixin:
         existing = soup.select_one("#divNomeArquivo .outNomeArquivo")
         existing_name = existing.get_text(" ", strip=True) if existing else ""
         if existing_name and same_name(existing_name, path):
+            self._require_same_content(document, ledger)
             return {"alreadyAdded": True, "name": path.name}
         if (
             soup.find("input", attrs={"name": "uploadDocumentoPrincipalDecoration:uploadDocumentoPrincipal:file"})
@@ -146,7 +171,9 @@ class DocumentsMixin:
             mode["name"]: "PDF",
             "javax.faces.ViewState": jsf.view_state(html),
         }
-        self._html(self.multipart(upload_url, multipart, upload_control + ":file", path))
+        content = approved_content(document)  # checked again right before the bytes leave
+        ledger.record(document)
+        self._html(self.multipart(upload_url, multipart, upload_control + ":file", path, content=content))
         self.post(UPDATE_URL, progress)
         completion = re.search(
             r"onuploadcomplete':function\(event\)\{A4J\.AJAX\.Submit\('formularioUpload',event,\{"
@@ -179,20 +206,23 @@ class DocumentsMixin:
             raise RuntimeError(f"PJe did not retain the main PDF on the draft{detail}")
         return {"alreadyAdded": False, "name": path.name}
 
-    def add_supporting_document(self, draft_url, document, existing=None):
+    def add_supporting_document(self, draft_url, document, existing=None, ledger=None):
         """One supporting PDF: a batch of one."""
-        return self.add_supporting_documents(draft_url, [document], existing=existing)[0]
+        return self.add_supporting_documents(draft_url, [document], existing=existing, ledger=ledger)[0]
 
-    def add_supporting_documents(self, draft_url, documents, existing=None, timeline=None):
+    def add_supporting_documents(self, draft_url, documents, existing=None, timeline=None, ledger=None):
         """Upload the supporting PDFs that are not on the draft yet, all in one batch.
 
         With `existing` (a documents listing) no listing is read here and the caller verifies the whole set.
         """
         timeline = timeline or StepTimeline(None, self, None)
+        ledger = ledger if ledger is not None else UploadLedger()
         listed = existing if existing is not None else self.review_documents(draft_url)
-        missing = [item for item in documents if not self._is_listed(listed, item)]
+        missing = [item for item in documents if not self._is_listed(listed, item, ledger)]
+        for item in missing:
+            approved_content(item)  # every file, before any upload row is registered
         if missing:
-            self._upload_batch(draft_url, missing, timeline)
+            self._upload_batch(draft_url, missing, timeline, ledger)
             if existing is None:
                 self._require_listed(self.review_documents(draft_url), missing)
         return [
@@ -211,19 +241,22 @@ class DocumentsMixin:
                 missing.append(path.name)
         return missing
 
-    def _require_listed(self, listed, documents):
-        """Every document must appear exactly once on the draft with its type; name the ones that do not."""
+    def _require_listed(self, listed, documents, ledger=None):
+        """Every document must appear exactly once on the draft with its type (and, given a ledger, its content)."""
         missing = self._missing_documents(listed, documents)
         if missing:
             raise RuntimeError(f"PJe did not retain these documents on the draft: {', '.join(missing)}")
+        for document in documents if ledger is not None else ():
+            self._require_same_content(document, ledger)
 
-    def _is_listed(self, listed, item):
+    def _is_listed(self, listed, item, ledger):
         path = Path(item["path"]).expanduser()
         saved = [entry for entry in listed if same_name(entry["name"], path)]
         if not saved:
             return False
         if len(saved) != 1 or saved[0]["type"] != item["type"]:
             raise RuntimeError(f"Draft has {path.name} with a different document type")
+        self._require_same_content(item, ledger)
         return True
 
     @staticmethod
@@ -237,7 +270,7 @@ class DocumentsMixin:
             node = node.parent
         return None
 
-    def _upload_batch(self, draft_url, items, timeline):
+    def _upload_batch(self, draft_url, items, timeline, ledger):
         """Register every missing supporting file in one postback, then set type, upload and save each row.
 
         All of it runs in one page session: rows registered here exist only in that session, so a reload loses them.
@@ -326,7 +359,9 @@ class DocumentsMixin:
                 html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
                 fields["javax.faces.ViewState"] = jsf.view_state(html)
                 upload_url = PORTAL.base_url + "seam/resource/upload?cid=" + cid["value"]
-                response = self.multipart(upload_url, fields, "file[]", path, resource=True)
+                content = approved_content(item)  # checked again right before the bytes leave
+                ledger.record(item)
+                response = self.multipart(upload_url, fields, "file[]", path, content=content, resource=True)
                 confirmation = response.json()
                 files = confirmation.get("arquivos", [])
                 if not confirmation.get("requisicao") or len(files) != 1 or not files[0].get("upload"):
@@ -342,20 +377,24 @@ class DocumentsMixin:
                 container_id, action = jsf.ajax_event(save)
                 html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
 
-    def add_documents(self, draft_url, documents, timeline=None):
-        """Upload what is missing: the main petition, then every missing supporting file in one batch."""
+    def add_documents(self, draft_url, documents, timeline=None, ledger=None):
+        """Upload what is missing: the main petition, then every missing supporting file in one batch.
+
+        `ledger` (an UploadLedger over the run's checkpoint) records what content went up under which name; without
+        one, any document already on the draft is refused because its content cannot be confirmed.
+        """
         timeline = timeline or StepTimeline(None, self, None)
+        ledger = ledger if ledger is not None else UploadLedger()
         with timeline.step("documents snapshot"):
             listed = self.review_documents(draft_url)
         main_item = documents["main"]
         with timeline.step("main document", document=Path(main_item["path"]).name):
-            main = self.add_main_document(draft_url, main_item, existing=listed)
+            main = self.add_main_document(draft_url, main_item, existing=listed, ledger=ledger)
         supporting_items = documents.get("supporting", [])
-        supporting = self.add_supporting_documents(draft_url, supporting_items, existing=listed, timeline=timeline)
+        supporting = self.add_supporting_documents(
+            draft_url, supporting_items, existing=listed, timeline=timeline, ledger=ledger
+        )
         if not (main["alreadyAdded"] and all(item["alreadyAdded"] for item in supporting)):
             with timeline.step("documents verify"):
-                self._require_listed(
-                    self.review_documents(draft_url),
-                    [{"path": main_item["path"], "type": main_item.get("type", "Petição inicial")}, *supporting_items],
-                )
+                self._require_listed(self.review_documents(draft_url), expected_documents(documents), ledger)
         return {"main": main, "supporting": supporting}

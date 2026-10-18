@@ -1,9 +1,15 @@
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 
 from jurisync.connectors.pje.filing import DraftClient, StepTimeline
-from jurisync.connectors.pje.filing.checkpoint import documents_fingerprint, fingerprint, write_checkpoint
+from jurisync.connectors.pje.filing.checkpoint import (
+    UploadLedger,
+    documents_fingerprint,
+    fingerprint,
+    write_checkpoint,
+)
 
 PAYLOAD = {
     "subject": {"search": "s", "code": "1", "name": "S"},
@@ -46,7 +52,7 @@ class Recorder(DraftClient):
     def save_characteristics(self, draft_url, characteristics):
         return self._answer("characteristics")
 
-    def add_documents(self, draft_url, documents, timeline=None):
+    def add_documents(self, draft_url, documents, timeline=None, ledger=None):
         return self._answer("documents")
 
     def _pending_row(self, draft_id, author_name):
@@ -156,12 +162,23 @@ class DocumentBatchTests(unittest.TestCase):
         paths = []
         for index in range(count):
             path = Path(tmp, f"{index}-DOC.pdf")
-            path.write_bytes(b"%PDF-1")
+            path.write_bytes(b"%PDF-1 " + str(index).encode())
             paths.append(path)
+        digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
         return {
-            "main": {"path": str(paths[0]), "type": "Petição inicial"},
-            "supporting": [{"path": str(path), "type": "Outros Documentos"} for path in paths[1:]],
+            "main": {"path": str(paths[0]), "type": "Petição inicial", "sha256": digest(paths[0])},
+            "supporting": [
+                {"path": str(path), "type": "Outros Documentos", "sha256": digest(path)} for path in paths[1:]
+            ],
         }
+
+    @staticmethod
+    def uploaded(docs):
+        """A ledger that records every document as sent by this run, as a finished fill leaves it."""
+        ledger = UploadLedger()
+        for item in (docs["main"], *docs["supporting"]):
+            ledger.record(item)
+        return ledger
 
     def client(self, listings, uploaded):
         client = DraftClient(None)
@@ -173,8 +190,10 @@ class DocumentBatchTests(unittest.TestCase):
             return listings[min(len(reads), len(listings)) - 1]
 
         client.review_documents = review
-        client.add_main_document = lambda url, doc, existing=None: {"alreadyAdded": "main" not in uploaded}
-        client._upload_batch = lambda url, items, timeline: batches.append([Path(i["path"]).name for i in items])
+        client.add_main_document = lambda url, doc, existing=None, ledger=None: {"alreadyAdded": "main" not in uploaded}
+        client._upload_batch = lambda url, items, timeline, ledger: batches.append(
+            [Path(i["path"]).name for i in items]
+        )
         return client, reads, batches
 
     def test_everything_present_costs_one_read_and_no_batch(self):
@@ -185,7 +204,7 @@ class DocumentBatchTests(unittest.TestCase):
                 {"name": "1-DOC.pdf", "type": "Outros Documentos"},
             ]
             client, reads, batches = self.client([listing], uploaded=())
-            client.add_documents("url", docs)
+            client.add_documents("url", docs, ledger=self.uploaded(docs))
         self.assertEqual(len(reads), 1)
         self.assertEqual(batches, [])
 
@@ -199,7 +218,7 @@ class DocumentBatchTests(unittest.TestCase):
                 {"name": "2-DOC.pdf", "type": "Outros Documentos"},
             ]
             client, reads, batches = self.client([listing, complete], uploaded=())
-            client.add_documents("url", docs)
+            client.add_documents("url", docs, ledger=self.uploaded(docs))
         self.assertEqual(batches, [["1-DOC.pdf", "2-DOC.pdf"]])
         self.assertEqual(len(reads), 2)
 
@@ -231,12 +250,53 @@ class DocumentBatchTests(unittest.TestCase):
                 {"name": "1-DOC.pdf", "type": "Outros Documentos"},
             ]
             client, reads, batches = self.client([listing], uploaded=())
-            result = client.add_supporting_document("url", item)
+            ledger = self.uploaded(docs)
+            result = client.add_supporting_document("url", item, ledger=ledger)
             self.assertTrue(result["alreadyAdded"])
             self.assertEqual((batches, len(reads)), ([], 1))
             wrong = {**item, "type": "Laudo Médico"}
             with self.assertRaisesRegex(RuntimeError, "different document type"):
-                client.add_supporting_document("url", wrong)
+                client.add_supporting_document("url", wrong, ledger=ledger)
+
+    def test_a_listed_name_with_other_or_unknown_content_is_never_skipped_silently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = self.documents(tmp)
+            item = docs["supporting"][0]
+            listing = [
+                {"name": "0-DOC.pdf", "type": "Petição inicial"},
+                {"name": "1-DOC.pdf", "type": "Outros Documentos"},
+            ]
+            client, _, batches = self.client([listing], uploaded=())
+            # This run uploaded other bytes under 1-DOC.pdf: PJe keeps those, so the name proves nothing.
+            ledger = UploadLedger()
+            ledger.record({**item, "sha256": "e" * 64})
+            with self.assertRaisesRegex(RuntimeError, "other content than the approved file.*not uploaded again"):
+                client.add_supporting_document("url", item, ledger=ledger)
+            # No record at all of what went up under that name: refused too.
+            with self.assertRaisesRegex(RuntimeError, "no record of which content"):
+                client.add_supporting_document("url", item)
+            self.assertEqual(batches, [])
+
+    def test_a_file_changed_after_approval_stops_before_anything_is_sent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = self.documents(tmp, count=3)
+            Path(docs["supporting"][1]["path"]).write_bytes(b"%PDF-1 altered after approval")
+            client, reads, batches = self.client([[]], uploaded=())
+            client.add_main_document = DraftClient.add_main_document.__get__(client)
+            with self.assertRaisesRegex(ValueError, "changed since approval: 2-DOC.pdf"):
+                client.add_supporting_documents("url", docs["supporting"], existing=[])
+            Path(docs["main"]["path"]).write_bytes(b"%PDF-1 new petition")
+            with self.assertRaisesRegex(ValueError, "changed since approval: 0-DOC.pdf"):
+                client.add_main_document("url", docs["main"], existing=[])
+        self.assertEqual((batches, reads), ([], []))
+
+    def test_the_ledger_keeps_one_content_per_name_and_compares_as_pje_does(self):
+        ledger = UploadLedger()
+        ledger.record({"path": "/x/LAUDO.pdf", "type": "Laudo Médico", "sha256": "a" * 64})
+        ledger.record({"path": "/y/laudo.pdf", "type": "Laudo Médico", "sha256": "b" * 64})
+        self.assertEqual(ledger.uploads, {"b" * 64: {"name": "laudo.pdf", "type": "Laudo Médico"}})
+        self.assertIsNone(ledger.mismatch({"path": "/z/Laudo.pdf", "sha256": "b" * 64}))
+        self.assertIn("other content", ledger.mismatch({"path": "/z/LAUDO.pdf", "sha256": "a" * 64}))
 
     def test_row_name_pairs_each_type_select_with_its_file(self):
         from bs4 import BeautifulSoup

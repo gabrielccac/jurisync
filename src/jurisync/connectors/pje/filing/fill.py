@@ -5,7 +5,8 @@ the payload it worked from. A re-run skips phases whose fingerprint still matche
 re-reads everything instead.
 """
 
-from jurisync.connectors.pje.filing.checkpoint import now, phase_fingerprints
+from jurisync.connectors.pje.filing.checkpoint import UploadLedger, now, phase_fingerprints
+from jurisync.connectors.pje.filing.documents import expected_documents
 from jurisync.connectors.pje.filing.payload import payload_subjects
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 
@@ -16,6 +17,7 @@ class FillMixin:
         draft_url, draft_id = checkpoint["draftUrl"], checkpoint["draftId"]
         author = payload["author"]
         completed = checkpoint.setdefault("completed", {})
+        ledger = UploadLedger(checkpoint, save)
         found = {}
 
         def phase(name, key, run):
@@ -81,7 +83,7 @@ class FillMixin:
                 return self.save_characteristics(draft_url, payload["characteristics"])
 
         def documents():
-            return self.add_documents(draft_listing()["draftUrl"], payload["documents"], timeline)
+            return self.add_documents(draft_listing()["draftUrl"], payload["documents"], timeline, ledger=ledger)
 
         prints = phase_fingerprints(payload)
         added = phase("subjects", prints["subjects"], subjects)
@@ -95,12 +97,10 @@ class FillMixin:
             result["documents"] = phase("documents", prints["documents"], documents)
         if "documents" in payload and result["documents"].get("skipped"):
             # The ledger skipped the upload, so confirm in PJe that the documents are still on the draft.
-            main = payload["documents"]["main"]
-            expected = [{"path": main["path"], "type": main.get("type", "Petição inicial")}]
-            expected += payload["documents"].get("supporting", [])
+            expected = expected_documents(payload["documents"])
             with timeline.step("documents check"):
                 try:
-                    self._require_listed(self.review_documents(draft_listing()["draftUrl"]), expected)
+                    self._require_listed(self.review_documents(draft_listing()["draftUrl"]), expected, ledger)
                 except RuntimeError:
                     completed.pop("documents", None)  # the next run uploads what is missing
                     if save:
