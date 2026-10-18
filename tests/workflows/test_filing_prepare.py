@@ -22,7 +22,7 @@ from jurisync.workflows.filing.prepare import (
     assemble,
     build_payload,
     finalize_review,
-    prepare_customer,
+    prepare_folder,
     upload_filename,
 )
 from jurisync.workflows.filing.profile import load_profile
@@ -43,7 +43,7 @@ class DocumentClassificationTest(unittest.TestCase):
         expected = {
             "2-LAUDOS MÉDCIOS E RECEITUARIOS_9352.pdf": "medical",
             "3-PROVAS RURAIS_9436.pdf": "Documento Comprobatório",
-            "0-PA_3489.pdf": "Processo Administrativo",
+            "0-PA.pdf": "Processo Administrativo",
             "11-PETÇÃO INICIAL_8308.docx": "petition",
             "1-INDEFERIMENTO_9328.pdf": "Carta de Indeferimento",
             "2-CERTIDÃO DE ÓBITO E DOCUMENTOS_6017.pdf": "Documento Comprobatório",
@@ -131,14 +131,14 @@ class DocumentClassificationTest(unittest.TestCase):
 
 
 class UploadNameTest(unittest.TestCase):
-    def test_names_lose_accents_and_advbox_suffix_but_keep_order_and_volumes(self):
+    def test_names_lose_accents_and_unsafe_characters_but_keep_order_and_volumes(self):
         expected = {
-            "10-PETIÇÃO INICIAL_6630.pdf": "10-PETICAO INICIAL.pdf",
-            "2-LAUDOS MÉDICOS E EXAMES_1524.pdf": "2-LAUDOS MEDICOS E EXAMES.pdf",
-            "6-DOCUMENTO DE IDENTIFICAÇÃO_7949.pdf": "6-DOCUMENTO DE IDENTIFICACAO.pdf",
-            "0-PA_3489.pdf": "0-PA.pdf",
-            "3-PROVAS DA ATIVIDADE RURAL_4492-vol-02.pdf": "3-PROVAS DA ATIVIDADE RURAL-vol-02.pdf",
-            "8-PROCURAÇÃO #1 & final_9722.docx": "8-PROCURACAO 1 final.pdf",
+            "10-PETIÇÃO INICIAL.pdf": "10-PETICAO INICIAL.pdf",
+            "2-LAUDOS MÉDICOS E EXAMES.pdf": "2-LAUDOS MEDICOS E EXAMES.pdf",
+            "6-DOCUMENTO DE IDENTIFICAÇÃO.pdf": "6-DOCUMENTO DE IDENTIFICACAO.pdf",
+            "0-PA.pdf": "0-PA.pdf",
+            "3-PROVAS DA ATIVIDADE RURAL-vol-02.pdf": "3-PROVAS DA ATIVIDADE RURAL-vol-02.pdf",
+            "8-PROCURAÇÃO #1 & final.docx": "8-PROCURACAO 1 final.pdf",
             "çãõ.pdf": "cao.pdf",
             "???.pdf": "documento.pdf",
         }
@@ -156,28 +156,28 @@ class UploadNameTest(unittest.TestCase):
             rows = [
                 {
                     "id": "a",
-                    "name": "3-A_1111.pdf",
+                    "name": "3-A.pdf",
                     "role": "supporting",
                     "type": "Outros Documentos",
                     **work("a", b"%PDF-1"),
                 },
                 {
                     "id": "b",
-                    "name": "Ã_2222.pdf",
+                    "name": "Ã.pdf",
                     "role": "supporting",
                     "type": "Outros Documentos",
                     **work("b", b"%PDF-2"),
                 },
                 {
                     "id": "p",
-                    "name": "10-PETIÇÃO INICIAL_6630.pdf",
+                    "name": "10-PETIÇÃO INICIAL.pdf",
                     "role": "main",
                     "type": "Petição inicial",
                     **work("p", b"%PDF-p"),
                 },
                 {
                     "id": "c",
-                    "name": "B_4444.pdf",
+                    "name": "B.pdf",
                     "role": "supporting",
                     "type": "Laudo Médico",
                     **work("c", b"%PDF-big"),
@@ -199,14 +199,14 @@ class UploadNameTest(unittest.TestCase):
             )
             self.assertEqual(store.list("documents"), sorted(item["path"] for item in items))
             self.assertEqual(store.read_bytes("documents/03-A.pdf"), b"%PDF-2")
-            self.assertEqual((items[3]["number"], items[3]["description"]), ("1/2", "B_4444 - volume 1/2"))
+            self.assertEqual((items[3]["number"], items[3]["description"]), ("1/2", "B - volume 1/2"))
             manifest = store.read_json("manifest.json")
             self.assertEqual([entry["reviewId"] for entry in manifest["documents"]], ["p", "a", "b", "c", "c"])
             self.assertEqual(manifest["documents"][0]["sha256"], items[0]["sha256"])
             self.assertEqual(Path(tmp, "documents").stat().st_mode & 0o777, 0o700)
             self.assertEqual(Path(tmp, "documents/02-A.pdf").stat().st_mode & 0o777, 0o600)
             store.write_bytes("work/files/b", b"%PDF-2 edited")
-            with self.assertRaisesRegex(ValueError, "Document changed: Ã_2222.pdf"):
+            with self.assertRaisesRegex(ValueError, "Document changed: Ã.pdf"):
                 assemble(store, rows)
 
 
@@ -353,51 +353,6 @@ class PayloadTest(unittest.TestCase):
                 finalize_review(store, FACTS, choice, profile=PROFILE)
             self.assertFalse(store.exists("payload.json"), "a failed finalize leaves no payload behind")
 
-    def test_prepare_keeps_work_files_and_documents_inside_the_run(self):
-        class Folder:
-            def list_customer_files(self, customer_id, path=None):
-                if path is None:
-                    return {"folders": [{"path": "00-PROTOCOLAR"}]}
-                return {
-                    "files": [
-                        {"name": "10-PETIÇÃO INICIAL_1111.pdf", "url": "u1"},
-                        {"name": "2-PROCURAÇÃO_2222.pdf", "url": "u2"},
-                    ]
-                }
-
-            def download_file(self, url, *, filename, directory, inspect):
-                target = Path(directory, filename)
-                target.write_bytes(b"%PDF-1 " + url.encode())
-                return {"path": str(target)}
-
-        with tempfile.TemporaryDirectory() as tmp:
-            store = LocalRunStore(Path(tmp, "run1")).ensure()
-            store.write_json("approval.json", {})
-            with (
-                mock.patch("jurisync.workflows.filing.prepare.AdvboxDocuments", lambda client: Folder()),
-                mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [])),
-            ):
-                result = prepare_customer("1", FACTS, store, profile=PROFILE, client=object(), jev=False)
-            self.assertTrue(result["payloadWritten"], result["review"])
-            self.assertFalse(store.exists("approval.json"), "prepare never leaves an approval behind")
-            rows = store.read_json("review.json")["files"]
-            # ADVBOX now only fills the inbox: rows point at it, with the fetched origin and the copy's hash.
-            self.assertEqual(
-                [row["path"] for row in rows], ["inbox/10-PETIÇÃO INICIAL_1111.pdf", "inbox/2-PROCURAÇÃO_2222.pdf"]
-            )
-            inbox = store.read_json("inbox.json")
-            self.assertEqual((inbox["from"], inbox["customerId"], inbox["folder"]), ("advbox", "1", "00-PROTOCOLAR"))
-            self.assertEqual(rows[0]["origin"]["source"], "advbox")
-            self.assertEqual(rows[0]["origin"]["kind"], "fetched")
-            self.assertEqual(rows[0]["sha256"], hashlib.sha256(b"%PDF-1 u1").hexdigest())
-            self.assertEqual(store.list("work"), [], "the download area is emptied once the inbox is filled")
-            documents = store.read_json("payload.json")["documents"]
-            self.assertEqual(
-                [documents["main"]["path"], *(item["path"] for item in documents["supporting"])],
-                ["documents/01-PETICAO INICIAL.pdf", "documents/02-PROCURACAO.pdf"],
-            )
-            self.assertNotIn(tmp, Path(tmp, "run1", "review.json").read_text())
-
     def test_a_run_with_a_draft_may_only_change_case_facts(self):
         with tempfile.TemporaryDirectory() as tmp:
             store, _, _ = self.run_with_review(tmp)
@@ -413,7 +368,7 @@ class PayloadTest(unittest.TestCase):
                 finalize_review(store, FACTS, {**choice, "file:1": {"role": "skip"}}, profile=PROFILE)
             self.assertEqual({name: store.read_bytes(name) for name in store.list("documents")}, assembled)
             with self.assertRaisesRegex(ValueError, "cannot be prepared again"):
-                prepare_customer("1", FACTS, store, profile=PROFILE, client=object())
+                prepare_folder(Path(tmp), FACTS, store, profile=PROFILE)
 
     def test_a_run_copied_to_another_folder_stays_valid(self):
         with tempfile.TemporaryDirectory() as tmp:

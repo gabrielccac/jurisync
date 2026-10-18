@@ -1,10 +1,11 @@
 """Filing MCP server: prepare and finalize a PJe draft payload without a shell.
 
-The PJe MCP fills a draft from `payload.json` in a filing run, but something has to build that file from the documents:
-a local folder the agent gathered (with an optional `sources.json` declaring each file's origin) or the ADVBOX
-`00-PROTOCOLAR` folder. Either is copied into the run's `inbox/` first, and everything after reads only the run. These
-tools wrap `prepare.py`; the only path the agent ever passes is that source folder, and it never writes `review.json`
-or `payload.json` itself. Views show each document's origin but never a local path or hash.
+The PJe MCP fills a draft from `payload.json` in a filing run, but something has to build that file from the documents.
+The filing takes them from one input folder in the shape of the filing input contract (`contract.py`: files plus an
+optional `sources.json` declaring each file's origin), whoever produced it: the agent through its connectors, or a
+source's own exporter such as the ADVBOX one. The folder is copied into the run's `inbox/` and everything after reads
+only the run. These tools wrap `prepare.py`; the only path the agent ever passes is that input folder, and it never
+writes `review.json` or `payload.json` itself. Views show each document's origin but never a local path or hash.
 
 Nothing reaches PJe on the strength of a written payload alone: `filing_approve` records the user's approval of that
 exact payload (its sha256 and every document's) in `approval.json`, and `pje_draft_write` refuses without it.
@@ -25,14 +26,13 @@ from jurisync.connectors.pje.filing.store import CHECKPOINT, FACTS, MANIFEST, PA
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 from jurisync.paths import REPO_ROOT
 from jurisync.workflows.filing.inbox import origin_view
-from jurisync.workflows.filing.prepare import finalize_review, prepare_customer, prepare_folder
+from jurisync.workflows.filing.prepare import finalize_review, prepare_folder
 from jurisync.workflows.filing.profile import load_profile, profile_names
 
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
-Digits = Annotated[str, StringConstraints(pattern=r"^\d{1,12}$")]
 
 ProfileName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,40}$")]
 
@@ -62,9 +62,6 @@ def _review_view(run_id, report, store):
     """The review without local paths or hashes: the agent needs ids, names, types and problems."""
     return {
         "runId": run_id,
-        "source": report.get("source"),
-        "customerId": report.get("customerId"),
-        "folder": report.get("folder"),
         "ready": bool(report.get("ready")),
         "payloadReady": store.exists(PAYLOAD),
         "approved": _approved(store),
@@ -119,33 +116,24 @@ def _require_no_draft(store):
 
 @server.tool(
     name="filing_prepare",
-    title="Prepare a TRF5 filing from a document folder or the ADVBOX protocol folder",
-    description="Copy the documents into the run's inbox, convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. Give either `sourceFolder` (an absolute local folder you filled from Drive, GERID, ADVBOX..., optionally with a sources.json declaring each file's origin; no symlinks) or `customerId` (downloads that customer's ADVBOX 00-PROTOCOLAR folder, or `folder`). Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
+    title="Prepare a TRF5 filing from an input folder",
+    description="Copy the input folder into the run's inbox (hashing each file), convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. `sourceFolder` is an absolute local folder in the filing input contract: the documents (any subfolders, no symlinks) plus an optional sources.json declaring each file's origin. Fill it yourself from Drive, GERID or other connectors, or with a source's exporter (advbox_export_filing_folder). Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
     annotations=LOCAL_WRITE,
 )
 def prepare(
     profile: ProfileName,
     runId: RunId,
     facts: dict[str, Any],
-    customerId: Digits | None = None,
-    sourceFolder: Annotated[str | None, Field(min_length=2, max_length=1000)] = None,
-    folder: Annotated[str | None, Field(max_length=200)] = None,
+    sourceFolder: Annotated[str, Field(min_length=2, max_length=1000)],
     useJev: bool = False,
 ) -> dict[str, Any]:
-    if (customerId is None) == (sourceFolder is None):
-        raise ToolError("Give either sourceFolder (a local document folder) or customerId (ADVBOX), not both")
-    if sourceFolder is not None and folder is not None:
-        raise ToolError("folder names an ADVBOX folder; it only goes with customerId")
     store = open_run(runId)
     _require_no_draft(store)
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
         store.ensure()
         store.write_json(FACTS, facts)
-        if sourceFolder is not None:
-            prepare_folder(sourceFolder, facts, store, profile=selected, jev=useJev)
-        else:
-            prepare_customer(customerId, facts, store, profile=selected, folder=folder, jev=useJev)
+        prepare_folder(sourceFolder, facts, store, profile=selected, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(store, REVIEW, "Prepare did not write a review")
     return _review_view(runId, report, store)

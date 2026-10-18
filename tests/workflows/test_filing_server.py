@@ -12,8 +12,6 @@ from mcp.client.client import Client
 from jurisync.workflows.filing import server as filing
 
 REVIEW = {
-    "customerId": "1",
-    "folder": "00-PROTOCOLAR",
     "ready": False,
     "files": [
         {
@@ -53,12 +51,12 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir = Path(self.tmp.name, "run1")
 
     def fake_prepare(self, calls):
-        def prepare(customer_id, facts, store, *, profile, folder=None, client=None, jev=True):
-            calls.append({"customer": customer_id, "folder": folder, "jev": jev, "profile": profile.name})
+        def prepare(source, facts, store, *, profile, jev=True):
+            calls.append({"source": source, "jev": jev, "profile": profile.name})
             store.write_json("review.json", REVIEW)
             return {"ready": False}
 
-        return mock.patch.object(filing, "prepare_customer", prepare)
+        return mock.patch.object(filing, "prepare_folder", prepare)
 
     def test_tools_are_registered_and_only_prepare_and_finalize_write(self):
         async def listing():
@@ -86,7 +84,9 @@ class FilingServerTests(unittest.TestCase):
     def test_an_unknown_profile_is_rejected_before_any_work(self):
         calls = []
         with self.fake_prepare(calls):
-            result = call("filing_prepare", {"profile": "nobody", "runId": "run1", "customerId": "1", "facts": {}})
+            result = call(
+                "filing_prepare", {"profile": "nobody", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}}
+            )
         self.assertTrue(result.is_error)
         self.assertIn("No filing profile named nobody", result.content[0].text)
         self.assertEqual(calls, [])
@@ -95,10 +95,11 @@ class FilingServerTests(unittest.TestCase):
         calls = []
         with self.fake_prepare(calls):
             result = call(
-                "filing_prepare", {"profile": "victor", "runId": "run1", "customerId": "1", "facts": {"a": 1}}
+                "filing_prepare",
+                {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {"a": 1}},
             )
         view = result.structured_content
-        self.assertEqual(calls, [{"customer": "1", "folder": None, "jev": False, "profile": "victor"}])
+        self.assertEqual(calls, [{"source": "/data/gathered", "jev": False, "profile": "victor"}])
         self.assertEqual([file["id"] for file in view["files"]], ["aaa:0", "bbb:1"])
         self.assertEqual(view["candidates"]["cpfs"], ["12345678909"])
         text = json.dumps(view)
@@ -106,27 +107,23 @@ class FilingServerTests(unittest.TestCase):
             self.assertNotIn(hidden, text)
         self.assertEqual(json.loads(self.run_dir.joinpath("facts.json").read_text()), {"a": 1})
 
-    def test_prepare_takes_a_source_folder_or_an_advbox_customer_but_not_both(self):
+    def test_prepare_takes_only_an_input_folder_and_shows_each_files_origin(self):
         calls = []
 
         def prepare_folder(source, facts, store, *, profile, jev=True):
             calls.append(source)
-            review = {**REVIEW, "source": "folder", "customerId": None, "folder": None}
+            review = {**REVIEW}
             review["files"] = [
                 {**REVIEW["files"][0], "origin": {"kind": "declared", "source": "gerid", "file": "a.pdf"}}
             ]
             store.write_json("review.json", review)
 
         base = {"profile": "victor", "runId": "run1", "facts": {}}
-        with mock.patch.object(filing, "prepare_folder", prepare_folder), self.fake_prepare([]):
-            both = call("filing_prepare", {**base, "customerId": "1", "sourceFolder": "/data/gathered"})
-            neither = call("filing_prepare", base)
-            mixed = call("filing_prepare", {**base, "sourceFolder": "/data/gathered", "folder": "00-PROTOCOLAR"})
+        with mock.patch.object(filing, "prepare_folder", prepare_folder):
+            missing = call("filing_prepare", base)
             view = call("filing_prepare", {**base, "sourceFolder": "/data/gathered"}).structured_content
-        for result in (both, neither, mixed):
-            self.assertTrue(result.is_error)
+        self.assertTrue(missing.is_error)
         self.assertEqual(calls, ["/data/gathered"])
-        self.assertEqual(view["source"], "folder")
         self.assertEqual(view["files"][0]["origin"], {"kind": "declared", "source": "gerid", "file": "a.pdf"})
         self.assertNotIn("/secret", json.dumps(view))
 
@@ -135,7 +132,7 @@ class FilingServerTests(unittest.TestCase):
         with self.fake_prepare(calls):
             call(
                 "filing_prepare",
-                {"profile": "victor", "runId": "run1", "customerId": "1", "facts": {}, "useJev": True},
+                {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}, "useJev": True},
             )
         self.assertTrue(calls[0]["jev"])
 
@@ -144,7 +141,7 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir.joinpath("checkpoint.json").write_text("{}")
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         for name, arguments in (
-            ("filing_prepare", {"profile": "victor", "runId": "run1", "customerId": "1", "facts": {}}),
+            ("filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}}),
             ("filing_finalize", {"profile": "victor", "runId": "run1", "facts": {}}),
         ):
             result = call(name, arguments)

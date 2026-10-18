@@ -9,7 +9,6 @@ from jurisync.workflows.filing.profile import load_profile, profile_names
 
 BASE = {
     "portal": "trf5-1g",
-    "folderPatterns": ["PROTOCOLAR$"],
     "defaults": {
         "attorney": {"cpfEnv": ["OFFICE_ATTORNEY_CPF"], "name": "A", "oabNumber": "1", "oabState": "PE"},
         "passive": {"search": "x", "cnpj": "1", "name": "X"},
@@ -45,8 +44,11 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual((profile.portal, profile.uncertain_type), ("trf5-1g", "Outros Documentos"))
 
     def test_bad_profiles_are_rejected_with_a_clear_reason(self):
-        self.profiles_dir(folderPatterns=["("])
+        self.profiles_dir(documentRules=[["(", "petition"]])
         with self.assertRaises(Exception):
+            load_profile("office")
+        self.profiles_dir(folderPatterns=["PROTOCOLAR$"])
+        with self.assertRaisesRegex(ValueError, "belongs to the source's exporter"):
             load_profile("office")
         self.profiles_dir(defaults={"attorney": {}})
         with self.assertRaisesRegex(ValueError, "defaults.passive"):

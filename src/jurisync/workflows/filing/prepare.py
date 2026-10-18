@@ -1,11 +1,10 @@
-"""Prepare a TRF5 PJe draft payload from a customer's Advbox protocol folder, driven by a filing profile.
+"""Prepare a TRF5 PJe draft payload from an input folder (see contract.py), driven by a filing profile.
 
-    python -m jurisync.workflows.filing prepare --profile NAME --customer ID --facts case-facts.json --out RUN_DIR
     python -m jurisync.workflows.filing prepare --profile NAME --from FOLDER --facts case-facts.json --out RUN_DIR
     python -m jurisync.workflows.filing finalize --profile NAME --run RUN_DIR --facts case-facts.json [--overrides overrides.json]
     python -m jurisync.workflows.filing approve --run RUN_DIR
 
-Downloads the folder, converts DOC/DOCX to PDF, classifies documents, splits
+Copies the folder into the run's inbox, converts DOC/DOCX and images to PDF, classifies documents, splits
 oversized supporting PDFs, and writes review.json (plus payload.json once no
 blocker remains). The PJe connector receives that explicit payload; it never
 runs customer policy, and it writes nothing until `approve` (after the user has
@@ -19,8 +18,6 @@ import re
 import unicodedata
 from pathlib import Path
 
-from jurisync.connectors.advbox.client import AdvboxClient
-from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.approval import revoke as revoke_approval
 from jurisync.connectors.pje.filing.checkpoint import now
@@ -30,7 +27,7 @@ from jurisync.core.word_to_pdf import convert_word_to_pdf
 
 from .classify import claim_value_candidates, classify_document, cpf_candidates, document_kind
 from .images import IMAGE_SUFFIXES, image_to_pdf
-from .inbox import fill_from_advbox, fill_from_folder, read_inbox
+from .inbox import fill_from_folder, read_inbox
 from .profile import load_profile
 from .split import split_pdf
 
@@ -168,8 +165,8 @@ def _is_pdf(content):
 
 
 def upload_filename(name):
-    """Clean upload name: no accents (PJe garbles them), no ADVBOX random suffix, one space between words."""
-    stem = re.sub(r"_\d{3,}(?=(-vol-\d+)?$)", "", Path(name).stem)
+    """Clean upload name: no accents (PJe garbles them), no unsafe characters, one space between words."""
+    stem = Path(name).stem
     folded = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
     folded = re.sub(r'[\x00-\x1f<>:"/\\|?*#%&]', " ", folded)
     return f"{re.sub(r'[ _]{2,}', ' ', folded).strip() or 'documento'}.pdf"
@@ -178,8 +175,8 @@ def upload_filename(name):
 class CanonicalNames:
     """Unique upload names for one run.
 
-    PJe identifies a draft's documents by file name, and cleaning (accents, ADVBOX suffix) can turn two different files
-    into one name: "A_1111.pdf" and "Ã_2222.pdf" both become "A.pdf". The first keeps the clean name; a later file
+    PJe identifies a draft's documents by file name, and cleaning (accents, case, symbols) can turn two different files
+    into one name: "Ã.pdf" and "a.pdf" both read as "A.pdf" to PJe. The first keeps the clean name; a later file
     whose name collides (compared as PJe compares, case- and accent-insensitive) gets a short content-hash suffix.
     """
 
@@ -374,28 +371,8 @@ def _require_no_draft(store):
         raise ValueError("This run already has a PJe draft, so it cannot be prepared again; use a new runId")
 
 
-def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=None, jev=True):
-    """Fill the run's inbox from the customer's ADVBOX protocol folder, then prepare it (see prepare_inbox)."""
-    _require_no_draft(store)
-    documents = AdvboxDocuments(client or AdvboxClient())
-    root = documents.list_customer_files(customer_id)
-    selected = folder or next(
-        (
-            entry["path"]
-            for pattern in profile.folder_patterns
-            for entry in root["folders"]
-            if re.search(pattern, entry["path"].strip(), re.I)
-        ),
-        None,
-    )
-    if not selected:
-        raise ValueError(f"No 00-PROTOCOLAR folder found for customer {customer_id}")
-    fill_from_advbox(store, documents, customer_id, selected)
-    return prepare_inbox(store, facts, profile=profile, jev=jev)
-
-
 def prepare_folder(source, facts, store, *, profile, jev=True):
-    """Copy a local folder (and its optional sources.json) into the run's inbox, then prepare it."""
+    """The filing's one entry point: copy an input folder (see contract.py) into the run's inbox, then prepare it."""
     _require_no_draft(store)
     fill_from_folder(store, source)
     return prepare_inbox(store, facts, profile=profile, jev=jev)
@@ -463,9 +440,6 @@ def prepare_inbox(store, facts, *, profile, jev=True):
         if row.get("fallbackReason")
     ]
     report = {
-        "source": inbox.get("from"),
-        "customerId": inbox.get("customerId"),
-        "folder": inbox.get("folder"),
         "files": rows,
         "candidates": candidates,
         "review": review,
@@ -476,8 +450,6 @@ def prepare_inbox(store, facts, *, profile, jev=True):
     return {
         "ready": report["ready"],
         "review": review,
-        "source": inbox.get("from"),
-        "folder": inbox.get("folder"),
         "fileCount": len(rows),
         "fallbackCount": len(fallbacks),
         "payloadWritten": store.exists(PAYLOAD),
@@ -575,17 +547,14 @@ def finalize_review(store, facts, overrides=None, *, profile):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Prepare a PJe filing payload from a customer's protocol folder")
+    parser = argparse.ArgumentParser(description="Prepare a PJe filing payload from an input folder")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare")
-    origin = prepare.add_mutually_exclusive_group(required=True)
-    origin.add_argument("--customer", help="ADVBOX customer id: download its protocol folder into the inbox")
-    origin.add_argument(
-        "--from", dest="source", type=Path, help="Local document folder (optional sources.json) to copy into the inbox"
+    prepare.add_argument(
+        "--from", dest="source", required=True, type=Path, help="Input folder (files + optional sources.json)"
     )
     prepare.add_argument("--facts", required=True, type=Path)
     prepare.add_argument("--out", required=True, type=Path)
-    prepare.add_argument("--folder")
     prepare.add_argument("--no-jev", action="store_true", help="Keep document text off the network")
     finalize = commands.add_parser("finalize")
     finalize.add_argument("--run", required=True, type=Path, help="The run folder prepare wrote (holds review.json)")
@@ -603,12 +572,7 @@ def main(argv=None):
     facts = json.loads(args.facts.read_text(encoding="utf-8"))
     if args.command == "prepare":
         store = LocalRunStore(args.out).ensure()
-        if args.source:
-            result = prepare_folder(args.source.resolve(), facts, store, profile=profile, jev=not args.no_jev)
-        else:
-            result = prepare_customer(
-                args.customer, facts, store, profile=profile, folder=args.folder, jev=not args.no_jev
-            )
+        result = prepare_folder(args.source.resolve(), facts, store, profile=profile, jev=not args.no_jev)
     else:
         overrides = json.loads(args.overrides.read_text(encoding="utf-8")) if args.overrides else {}
         result = finalize_review(LocalRunStore(args.run), facts, overrides, profile=profile)

@@ -12,6 +12,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
+from jurisync.connectors.advbox import filing_folder
 from jurisync.connectors.advbox.client import AdvboxClient
 from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.connectors.advbox.parsers import compact_lawsuit_report
@@ -302,6 +303,22 @@ def download_folder(
     content += [_text(f"--- {file['name']} ---\n\n{file['markdown']}") for file in files if file.get("markdown")]
     return CallToolResult(
         content=content, structured_content={**result, "filesParsed": sum(1 for file in files if file.get("markdown"))}
+    )
+
+
+@server.tool(
+    name="advbox_export_filing_folder",
+    title="Export an ADVBOX folder for filing",
+    description="Download a customer's protocol folder (default: the one named 00 - PROTOCOLAR; or `folder`) into a new local folder in the filing input contract: the files (ADVBOX's random name suffix removed) plus a sources.json declaring each file's ADVBOX origin (file id, folder, original name, upload date). Returns `sourceFolder`, the path to give filing_prepare. Writes only that local folder.",
+    annotations=LOCAL_WRITE,
+)
+def export_filing_folder(
+    customerId: Id, folder: Annotated[str | None, Field(min_length=1, max_length=255)] = None
+) -> dict[str, Any]:
+    return call(
+        lambda: filing_folder.export_filing_folder(
+            documents, customerId, filing_folder.default_destination(customerId), folder=folder
+        )
     )
 
 

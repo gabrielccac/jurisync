@@ -1,11 +1,7 @@
 {
   "name": "victor",
-  "description": "Victor's office: TRF5 1G initial filings from the ADVBOX 00-PROTOCOLAR folder",
+  "description": "Victor's office: TRF5 1G initial filings",
   "portal": "trf5-1g",
-  "folderPatterns": [
-    "(?:^|/)00\\s*-\\s*PROTOCOLAR$",
-    "(?:^|/)00\\s*-\\s*PROTOCOLAR\\s+JUD$"
-  ],
   "uncertainType": "Outros Documentos",
   "defaults": {
     "attorney": {

@@ -22,7 +22,6 @@ class Profile:
     name: str
     directory: Path
     portal: str
-    folder_patterns: tuple
     uncertain_type: str
     defaults_template: dict
     document_rules: tuple | None = None
@@ -57,14 +56,6 @@ def profile_names():
     return [path.parent.name for path in _profile_files()]
 
 
-def _pattern_list(values, label):
-    if not isinstance(values, list) or not values:
-        raise ValueError(f"Profile {label} must be a nonempty list")
-    for value in values:
-        re.compile(value)
-    return tuple(values)
-
-
 def load_profile(name):
     if not isinstance(name, str) or not PROFILE_NAME.fullmatch(name):
         raise ValueError("Profile names use lowercase letters, digits and hyphens")
@@ -72,6 +63,11 @@ def load_profile(name):
     if path is None:
         raise ValueError(f"No filing profile named {name}; available: {', '.join(profile_names()) or 'none'}")
     data = json.loads(path.read_text(encoding="utf-8"))
+    if "folderPatterns" in data:
+        raise ValueError(
+            f"Profile {name} has folderPatterns: choosing a source folder belongs to the source's exporter, "
+            "not to the filing profile"
+        )
     defaults = data.get("defaults") or {}
     for key in ("attorney", "passive"):
         if not isinstance(defaults.get(key), dict):
@@ -89,7 +85,6 @@ def load_profile(name):
         name=name,
         directory=path.parent,
         portal=data["portal"],
-        folder_patterns=_pattern_list(data.get("folderPatterns"), "folderPatterns"),
         uncertain_type=data.get("uncertainType") or "Outros Documentos",
         defaults_template=defaults,
         document_rules=rules,

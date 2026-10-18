@@ -13,8 +13,9 @@ from PIL import Image
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.store import LocalRunStore
 from jurisync.workflows.filing import server as filing_server
+from jurisync.workflows.filing.contract import load_sources
 from jurisync.workflows.filing.images import image_to_pdf
-from jurisync.workflows.filing.inbox import fill_from_folder, load_sources, read_inbox
+from jurisync.workflows.filing.inbox import fill_from_folder, read_inbox
 from jurisync.workflows.filing.prepare import finalize_review, prepare_folder
 from jurisync.workflows.filing.profile import load_profile
 
