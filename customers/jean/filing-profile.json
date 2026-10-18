@@ -14,18 +14,18 @@
     "Declaração de hipossuficiência/pobreza",
     "Comprovante de residência",
     "Cadastro Nacional de Informações Sociais - CNIS",
-    "Carteira de identidade",
-    "Carta de indeferimento de benefício",
+    "Cédula de Identidade",
+    "Carta de Indeferimento",
     "Comprovante de situação cadastral no CPF",
     "Certidão de nascimento"
   ],
   "typeMap": {
     "Planilha": "Documentos Diversos",
     "Outros Documentos": "Documentos Diversos",
-    "Documento de Identificação": "Carteira de identidade",
+    "Documento de Identificação": "Cédula de Identidade",
     "Processo Administrativo": "Processo administrativo",
     "Documento Comprobatório": "Comprovante (Outros)",
-    "Carta de Indeferimento": "Carta de indeferimento de benefício",
+    "Carta de Indeferimento": "Carta de Indeferimento",
     "Carta de Concessão": "Carta de Concessão",
     "Laudo Médico": "Atestado médico"
   },
@@ -40,11 +40,11 @@
     ],
     [
       "(?:^|[\\s_])(?:RG|CNH|IDENTIDADE)(?:[\\s_]|$)",
-      "Carteira de identidade"
+      "Cédula de Identidade"
     ],
     [
       "INDEFERIMENTO",
-      "Carta de indeferimento de benefício"
+      "Carta de Indeferimento"
     ],
     [
       "DEFICIENCIA COMPROVADA|COMPROVADA",

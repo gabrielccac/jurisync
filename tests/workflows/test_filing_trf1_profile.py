@@ -60,7 +60,7 @@ class Trf1PrepareTests(unittest.TestCase):
                     "Comprovante de residência",
                     "Cadastro Nacional de Informações Sociais - CNIS",
                     "Processo administrativo",
-                    "Carteira de identidade",  # rótulo usado pelo escritório no protocolo real de 2025
+                    "Cédula de Identidade",  # rótulo da lista de tipos de anexo do TRF1
                     "Atestado médico",
                 ],
             )

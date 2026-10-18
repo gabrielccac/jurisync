@@ -109,11 +109,12 @@ OFFICE_GUIDE_LABELS = {
     "Cadastro Nacional de Informações Sociais - CNIS",
     "Atestado médico",
 }
-# Tipos de ANEXO que o próprio TRF1 aceitou num protocolo real do escritório (comprovante de 19/06/2025); a lista
+# Rótulos da lista de tipos de ANEXO do TRF1 (lida no rascunho real 15508678; o comprovante de protocolo mostra nomes de
+# exibição diferentes, ex.: "Carteira de identidade" para "Cédula de Identidade"); a lista
 # capturada em document_types.html é a do documento principal, que é menor que a dos anexos.
 OFFICE_FILED_ATTACHMENT_LABELS = {
-    "Carteira de identidade",
-    "Carta de indeferimento de benefício",
+    "Cédula de Identidade",
+    "Carta de Indeferimento",
     "Comprovante de situação cadastral no CPF",
     "Certidão de nascimento",
 }
