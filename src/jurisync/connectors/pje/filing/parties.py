@@ -20,6 +20,34 @@ class PartiesMixin:
             {"tabPartes": "tabPartes", "ajaxSingle": "tabPartes"},
         )
 
+    def _choose_party_role(self, html, pole):
+        """Answer the "Tipo da Parte" step PJe 2.13 asks before the pre-registration form, when the portal has it.
+
+        The select has generated ids, so it is found by its options; the pre-registration form must follow.
+        """
+        label = (self.filing.party_roles or {}).get(pole)
+        if not label:
+            return html
+        soup = BeautifulSoup(html, "html.parser")
+        selects = [
+            select
+            for select in soup.find_all("select")
+            if any(option.get_text(" ", strip=True) == label for option in select.find_all("option"))
+        ]
+        if len(selects) != 1 or selects[0].find_parent("form") is None:
+            raise RuntimeError(f"PJe did not render the 'Tipo da Parte' step with the option {label}")
+        select = selects[0]
+        value = next(
+            option["value"] for option in select.find_all("option") if option.get_text(" ", strip=True) == label
+        )
+        fields = jsf.form_fields(html, select.find_parent("form")["id"])
+        fields[select["name"]] = value
+        container, action = jsf.ajax_event(select)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
+        if BeautifulSoup(html, "html.parser").find("form", id="preCadastroPessoaFisicaForm") is None:
+            raise RuntimeError(f"PJe did not open the pre-registration form after choosing {label}")
+        return html
+
     def _public_body(self, draft_url, body, *, role=None, panel=None):
         html = panel if panel is not None else self.party_panel(draft_url)
         panel_id = "poloPassivoDatalistDiv" if role is None else "outrosParticipantesDatalistDiv"
@@ -37,7 +65,9 @@ class PartiesMixin:
         toolbar_action = "supResetarVincPartePP" if role is None else "supResetarVincParteOP"
         container, action = jsf.ajax_event(action_in_form(html, toolbar_id, toolbar_action))
         html = self.ajax(self.update_url, jsf.view_state(html), jsf.form_fields(html, toolbar_id), container, action)
-        if role is not None:
+        if role is None:
+            html = self._choose_party_role(html, "passive")
+        else:
             role_form = "formPasso1AssociarParticipante"
             soup = BeautifulSoup(html, "html.parser")
             selector, role_value, _ = jsf.select_option(soup, "comboParticipacao", role)

@@ -127,7 +127,9 @@ class Trf1ProfileTests(unittest.TestCase):
             for option in BeautifulSoup(fixture("document_types.html"), "html.parser").find_all("option")
         }
         self.assertEqual(profile.portal, "trf1-1g")
-        self.assertLessEqual(set(profile.supporting_types), offered | OFFICE_GUIDE_LABELS | OFFICE_FILED_ATTACHMENT_LABELS)
+        self.assertLessEqual(
+            set(profile.supporting_types), offered | OFFICE_GUIDE_LABELS | OFFICE_FILED_ATTACHMENT_LABELS
+        )
         self.assertIn("Petição inicial", offered)
         self.assertEqual(profile.portal_type("Laudo Médico"), "Atestado médico")
         self.assertEqual(profile.portal_type("Documento Comprobatório"), "Comprovante (Outros)")
@@ -207,3 +209,71 @@ class Trf1CharacteristicsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Trf1PartyModalTests(unittest.TestCase):
+    """The TRF1 'Associar parte ao processo' modal, captured read-only on a real draft (display steps only)."""
+
+    class Stop(Exception):
+        pass
+
+    def client(self, responses, portal="trf1-1g"):
+        client = DraftClient(None, portal=portal)
+        calls = []
+
+        def ajax(url, state, fields, container, action):
+            calls.append((dict(fields), dict(action)))
+            if not responses:
+                raise self.Stop
+            return fixture(responses.pop(0))
+
+        client.ajax = ajax
+        return client, calls
+
+    def test_the_author_answers_tipo_da_parte_autor_before_the_cpf_lookup(self):
+        client, calls = self.client(["party_add_active.html", "party_role_autor.html", "party_person_fisica.html"])
+        with self.assertRaises(self.Stop):
+            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
+        opened, role, person, lookup = calls
+        self.assertIn("formVincularPoloAtivo:supResertarVincPartePA", opened[1])
+        self.assertEqual(role[0]["j_id2888:j_id2892"], "3", "AUTOR")
+        self.assertEqual(person[0]["preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa"], "F")
+        cpf = "preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nrCPFDecoration:preCadastroPessoaFisica_nrCPF"
+        self.assertEqual(lookup[0][cpf], "123.456.789-09")
+        self.assertIn("preCadastroPessoaFisicaForm:pesquisarDocumentoPrincipal", lookup[1])
+
+    def test_inss_answers_tipo_da_parte_reu_then_searches_the_public_body(self):
+        client, calls = self.client(["party_add_passive.html", "party_role_reu.html"])
+        body = {"search": "INSS", "cnpj": "29979036000140", "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"}
+        with self.assertRaises(self.Stop):
+            client.add_passive_body("draft", body, panel=fixture("party_toolbars.html"))
+        opened, role, search = calls
+        self.assertIn("formVincularPoloPassivo:supResetarVincPartePP", opened[1])
+        self.assertEqual(
+            role[0]["j_id2888:j_id2892"],
+            next(
+                option["value"]
+                for option in BeautifulSoup(fixture("party_add_passive.html"), "html.parser").find_all("option")
+                if option.get_text(strip=True) == "REU"
+            ),
+        )
+        fields = search[0]
+        self.assertEqual(fields["preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa"], "J")
+        self.assertEqual(
+            fields["preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio"], "true"
+        )
+        self.assertEqual(
+            fields[
+                "preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:preCadastroPessoaFisica_nomePJ"
+            ],
+            "INSS",
+        )
+        self.assertIn("preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico", search[1])
+
+    def test_a_missing_role_option_fails_clearly_and_trf5_has_no_role_step(self):
+        client, _ = self.client(["party_add_passive.html"])
+        with self.assertRaisesRegex(RuntimeError, "'Tipo da Parte' step with the option AUTOR"):
+            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
+        trf5, calls = self.client([], portal="trf5-1g")
+        self.assertEqual(trf5._choose_party_role("<html></html>", "active"), "<html></html>")
+        self.assertEqual(calls, [])

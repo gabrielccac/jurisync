@@ -63,6 +63,7 @@ class AuthorMixin:
         html = self.ajax(
             self.update_url, jsf.view_state(html), jsf.form_fields(html, "formVincularPoloAtivo"), container, action
         )
+        html = self._choose_party_role(html, "active")
         soup = BeautifulSoup(html, "html.parser")
         person = jsf.field(soup, "tipoPessoa:0")
         fields = jsf.form_fields(html, "preCadastroPessoaFisicaForm")

@@ -18,6 +18,9 @@ class FilingPortal:
     writes: bool
     note: str = ""
     unverified: tuple = ()
+    # PJe 2.13 (TRF1) opens "Associar parte ao processo" on a "Tipo da Parte" select before the pre-registration form;
+    # these are its labels for the author and for the defendant (seen live on 2026-10-18).
+    party_roles: dict | None = None
 
     @property
     def portal(self):
@@ -53,6 +56,7 @@ FILING_PORTALS = {
             "main petition upload in PDF mode",
             "supporting uploads, their type list and size limit",
         ),
+        party_roles={"active": "AUTOR", "passive": "REU"},
     ),
 }
 DEFAULT_PORTAL = "trf5-1g"

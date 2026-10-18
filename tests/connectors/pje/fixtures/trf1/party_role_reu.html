@@ -1,0 +1,207 @@
+<!-- TRF1 PJe 2.13 'Associar parte ao processo' modal, Ajax response captured read-only on 2026-10-18 (display steps only); no personal data. -->
+<?xml version="1.0"?>
+<html lang="pt_BR" xmlns="http://www.w3.org/1999/xhtml"><head><title></title><script id="org.ajax4jsf.queue_script" type="text/javascript">//<![CDATA[
+if (typeof A4J != 'undefined') { if (A4J.AJAX) { with (A4J.AJAX) {if (!EventQueue.getQueue('preCadastroPessoaFisicaForm:queueReceita')) { EventQueue.addQueue(new EventQueue('preCadastroPessoaFisicaForm:queueReceita',{'size':1} ,null)) };if (!EventQueue.getQueue('org.richfaces.queue.global')) { EventQueue.addQueue(new EventQueue('org.richfaces.queue.global',null,null)) };}}};
+//]]>
+</script><link class="user" href="/pje/stylesheet/estilos/bootstrap/bootstrap.min.css" rel="stylesheet" type="text/css" /><link class="user" href="/pje/stylesheet/dropzone/dropzone.min.css" rel="stylesheet" type="text/css" /><link class="user" href="/pje/stylesheet/estilos/richfaces/tema.min.css" rel="stylesheet" type="text/css" /><link class="user" href="/pje/stylesheet/padrao.min.css" rel="stylesheet" type="text/css" /><link class="user" href="/pje/stylesheet/autos-digitais.min.css" rel="stylesheet" type="text/css" /><link class="user" href="/pje/stylesheet/estilos/select2/select2.min.css" rel="stylesheet" type="text/css" /><script src="/pje/js/modernizr.custom.min.js" type="text/javascript">
+</script><script src="/pje/js/jquery-ui-1.8.1.min.custom.js" type="text/javascript">
+</script><script src="/pje/js/jquery-2.1.4.min.js" type="text/javascript">
+</script><script src="/pje/js/select2/select2.min.js" type="text/javascript">
+</script><script src="/pje/js/fuse.min.js" type="text/javascript">
+</script><script src="/pje/js/bootstrap/bootstrap.min.js" type="text/javascript">
+</script><script src="/pje/js/jquery.maskedinput.min.js" type="text/javascript">
+</script><script src="/pje/js/mousetrap/mousetrap.min.js" type="text/javascript">
+</script><script src="/pje/js/mousetrap/plugins/global-bind/mousetrap-global-bind.min.js" type="text/javascript">
+</script><script src="/pje/js/pje/menu.min.js" type="text/javascript">
+</script><script src="/pje/js/global.min.js" type="text/javascript">
+</script><script src="/pje/js/jquery.maskMoney.js" type="text/javascript">
+</script><script src="/pje/js/jqueryModais.js" type="text/javascript">
+</script><script src="/pje/js/qrious.js" type="text/javascript">
+</script><script src="/pje/js/dropzone/dropzone.js?v=1" type="text/javascript">
+</script><script src="/pje/js/dropzone/pje-dropzone.js?v=1" type="text/javascript">
+</script><script src="/pje/js/pje.js" type="text/javascript">
+</script><script src="/pje/js/pjeOffice.js" type="text/javascript">
+</script><script src="/pje/js/signerApplet.js" type="text/javascript">
+</script></head><body><dl id="Message" class="rich-messages" style="display: none;"><dt></dt></dl><dl id="globalMessagesPCPBdialogMessage" class="rich-messages" style="display: none;"><dt></dt></dl><div id="divTipoPartePolo"><div class="rich-panel" id="j_id2887"><div class="rich-panel-header" id="j_id2887_header">1 Passo → Tipo de Vinculação</div><div class="rich-panel-body" id="j_id2887_body"><form id="j_id2888" name="j_id2888" method="post" action="/pje/Processo/update.seam"><b>Tipo da Parte</b><select name="j_id2888:j_id2892" size="1" onchange="A4J.AJAX.Submit('j_id2888',event,{'similarityGroupingId':'j_id2888:j_id2894','control':this,'containerId':'regionAssociarParte','oncomplete':function(request,event,data){showOnComplete();},'parameters':{'j_id2888:j_id2894':'j_id2888:j_id2894','ajaxSingle':'j_id2888:j_id2892'} } )"><option value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option><option value="0">TESTEMUNHA</option><option value="1">TERCEIRO INTERESSADO</option><option value="2" selected="selected">REU</option><option value="3">LITISCONSORTE</option></select><input type="hidden" autocomplete="off" name="j_id2888" value="j_id2888" /><input type="hidden" autocomplete="off" name="autoScroll" value="" /><input type="hidden" autocomplete="off" name="j_id2888:_link_hidden_" value="" /><input type="hidden" autocomplete="off" name="j_id2888:j_idcl" value="" /><script type="text/javascript">//<![CDATA[
+function clear_j_id2888() {
+_clearJSFFormParameters('j_id2888','',['j_id2888:_link_hidden_','j_id2888:j_idcl']);
+}
+function clearFormHiddenParams_j_id2888(){clear_j_id2888();}
+function clearFormHiddenParams_j_id2888(){clear_j_id2888();}
+clear_j_id2888();
+//]]>
+</script><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id51" autocomplete="off" /></form></div></div><div id="passo1AssociarParte"><div class="rich-panel" id="panelPasso1"><div class="rich-panel-header" id="panelPasso1_header">1º Passo • Pré-cadastro</div><div class="rich-panel-body" id="panelPasso1_body"><form id="preCadastroPessoaFisicaForm" name="preCadastroPessoaFisicaForm" method="post" class="form-pre-cadastro-bean" action="/pje/Processo/update.seam"><input type="hidden" name="destino" value="" /> <input type="hidden" name="tipoPessoa" value="" /> <input type="hidden" name="isBrasileiro" value="" /> <input type="hidden" name="tipoEspecializado" value="" /><div id="preCadastroPessoaFisicaForm:divFluxoTipoPessoa" class="col-sm-12"><div id="preCadastroPessoaFisicaForm:divMsgOrgaoPublico" class="alert alert-success">As principais entidades já se encontram cadastradas no sistema com o CNPJ nacional, tais como <b>UNIÃO FEDERAL, INSS, FAZENDA NACIONAL, CEF, IBAMA, ENTIDADES DE ENSINO e etc</b></div><div id="preCadastroPessoaFisicaForm:divTipoPessoa" class="col-sm-12"><div class="propertyView col-sm-12"><div id="preCadastroPessoaFisicaForm:tipoPessoaDecoration:fieldtipoPessoaDiv" class="name"><label for="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa" class="">Tipo de pessoa</label><a class="ml-5 mt-15" href="#" id="preCadastroPessoaFisicaForm:tipoPessoaDecoration:j_id2906" name="preCadastroPessoaFisicaForm:tipoPessoaDecoration:j_id2906" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:j_id2906','containerId':'preCadastroPessoaFisicaForm:preCadastroPessoaFisicaRegion','parameters':{'preCadastroPessoaFisicaForm:tipoPessoaDecoration:j_id2906':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:j_id2906','ajaxSingle':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:j_id2906'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar " /></a></div><div class="value col-sm-12"><table id="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa" class="radio"><tbody><tr><td><input type="radio" name="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa" id="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa:0" value="F" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:supTipoPessoa','control':this,'containerId':'preCadastroPessoaFisicaForm:preCadastroPessoaFisicaRegion','oncomplete':function(request,event,data){setarFocoTipoPessoa(this.value);},'parameters':{'ajaxSingle':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa','preCadastroPessoaFisicaForm:tipoPessoaDecoration:supTipoPessoa':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:supTipoPessoa'} } )" /> <label for="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa:0">Física</label></td><td><input type="radio" checked="checked" name="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa" id="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa:1" value="J" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:supTipoPessoa','control':this,'containerId':'preCadastroPessoaFisicaForm:preCadastroPessoaFisicaRegion','oncomplete':function(request,event,data){setarFocoTipoPessoa(this.value);},'parameters':{'ajaxSingle':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa','preCadastroPessoaFisicaForm:tipoPessoaDecoration:supTipoPessoa':'preCadastroPessoaFisicaForm:tipoPessoaDecoration:supTipoPessoa'} } )" /> <label for="preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa:1">Jurídica</label></td></tr></tbody></table></div></div></div><div id="preCadastroPessoaFisicaForm:divFluxoPessoaIndividualizada" class="col-sm-12"><div id="preCadastroPessoaFisicaForm:divDocumentoPessoal" class="col-sm-12"><div id="preCadastroPessoaFisicaForm:divDocumentoPrincipal" class="clearfix pull-left col-sm-12"><div id="preCadastroPessoaFisicaForm:divPessoaJuridica"><div id="preCadastroPessoaFisicaForm:divOrgaoPublico"><div class="propertyView col-sm-12 clearfix"><div id="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:fieldisOrgaoPublico1Div" class="name"><label for="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio" class="">Órgão Público?</label><a class="ml-5 mt-15" href="#" id="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:j_id2984" name="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:j_id2984" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:j_id2984','containerId':'preCadastroPessoaFisicaForm:regionDocumentoPrincipal','parameters':{'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:j_id2984':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:j_id2984','ajaxSingle':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:j_id2984'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar " /></a></div><div class="value col-sm-12"><table id="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio" class="radio"><tbody><tr><td><input type="radio" checked="checked" name="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio" id="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio:0" value="true" onchange="" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:supIsOrgaoPublico','control':this,'containerId':'preCadastroPessoaFisicaForm:regionDocumentoPrincipal','oncomplete':function(request,event,data){setarFocoIsOrgao(this.value);},'parameters':{'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:supIsOrgaoPublico':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:supIsOrgaoPublico','ajaxSingle':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio'} } )" /> <label for="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio:0">Sim</label></td><td><input type="radio" name="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio" id="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio:1" value="false" onchange="" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:supIsOrgaoPublico','control':this,'containerId':'preCadastroPessoaFisicaForm:regionDocumentoPrincipal','oncomplete':function(request,event,data){setarFocoIsOrgao(this.value);},'parameters':{'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:supIsOrgaoPublico':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:supIsOrgaoPublico','ajaxSingle':'preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio'} } )" /> <label for="preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio:1">Não</label></td></tr></tbody></table></div></div><script type="text/javascript">//<![CDATA[
+ 
+            // utilizarValorPadrao deve ser setado como true caso, mesmo o value 
+            // tendo um valor, esse valor não esteja listado dentre os valores possíveis do radiobox
+                if ('true' == '') {
+                        if ("" != "") { // Usando o wi:form
+                                obj = $('::Decoration::0');
+                        } else { //Usando o wi:dataForm
+                                obj = $(':isOrgaoPublico1Decoration:isOrgaoPublico1:0');
+                        }       
+                        if (obj) {
+                                obj.checked = true;
+                        }
+                }
+        //]]>
+</script></div><script type="text/javascript">        //<![CDATA[
+        (function($){
+                  $(document).ready(function() {
+                        var selector = 'preCadastroPessoaFisica_nrCPJ';
+
+                        //Seleciona elemento por id
+                        var $input = $("input[id$='" + selector + "']");
+                        
+                        if($input.length < 1){
+                                //Seleciona elemento por class
+                                $input = $("input" + selector);
+                        }
+
+                        var mask = '**.***.***/****-99';
+
+                        if (!mask) {
+                                $input.unmask();
+                        } else {
+                                // Detecta se é maskedinput (antigo)
+                                var isOldMask = $.fn.mask && $.fn.mask.toString().indexOf('caret') !== -1;
+                                if (!isOldMask) {
+                                        // Converte padrão antigo (*) para novo (A)
+                                        mask = mask.replace(/\*/g, 'A');
+                                }
+                                $input.mask(mask);
+                        }
+                 });
+        })(jQuery_21);
+        //]]>
+        </script></div><div id="preCadastroPessoaFisicaForm:orgaoPublicoDiv" class="col-sm-12 clearfix"><div class="propertyView col-sm-3 clearfix"><div id="preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:fieldpreCadastroPessoaFisica_nomePJDiv" class="name"><label for="preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:preCadastroPessoaFisica_nomePJ" class="">Nome</label><a class="ml-5 mt-15" href="#" id="preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:j_id3040" name="preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:j_id3040" onclick="A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:j_id3040','containerId':'preCadastroPessoaFisicaForm:regionDocumentoPrincipal','parameters':{'preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:j_id3040':'preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:j_id3040','ajaxSingle':'preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:j_id3040'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar " /></a></div><div class="value col-sm-12"><input id="preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:preCadastroPessoaFisica_nomePJ" type="text" name="preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:preCadastroPessoaFisica_nomePJ" class="" alt="#(alt)" maxlength="255" onblur="" onchange="" onfocus="" onkeypress="" onkeyup="" size="0" tabindex="" /></div></div><input class="btn btn-primary pull-left mt-30" id="preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico" name="preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico" onclick="showLoading();A4J.AJAX.Submit('preCadastroPessoaFisicaForm',event,{'similarityGroupingId':'preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico','containerId':'preCadastroPessoaFisicaForm:regionDocumentoPrincipal','oncomplete':function(request,event,data){hideLoading()},'parameters':{'preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico':'preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico'} ,'status':'_viewRoot:status'} );return false;" value="Pesquisar" type="button" /><span id="preCadastroPessoaFisicaForm:j_id3049" style="display:none"><script type="text/javascript">//<![CDATA[
+new Richfaces.hotKey('preCadastroPessoaFisicaForm:j_id3049','return','.form\x2Dpre\x2Dcadastro\x2Dbean', {timing:'immediate',disableInInput:false}, function(event) { document.getElementById('preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico').click();event.stopPropagation();event.preventDefault(); return false; });
+//]]>
+</script></span><div id="preCadastroPessoaFisicaForm:divProcOrgaoPublico" class="col-sm-12"><br /><br /></div></div><span id="preCadastroPessoaFisicaForm:j_id3140" style="display:none"><script type="text/javascript">//<![CDATA[
+new Richfaces.hotKey('preCadastroPessoaFisicaForm:j_id3140','return','.form\x2Dpre\x2Dcadastro\x2Dbean', {timing:'immediate',disableInInput:false}, function(event) { document.getElementById('preCadastroPessoaFisicaForm:pesquisarDocumentoPrincipal').click();event.stopPropagation();event.preventDefault(); return false; });
+//]]>
+</script></span></div></div></div><div id="preCadastroPessoaFisicaForm:nomePessoaErroReceitaDiv"></div><div id="preCadastroPessoaFisicaForm:divIsPessoaNaoIndividualizada"></div></div><div id="preCadastroPessoaFisicaForm:divResultadoPesquisaPessoa"><div id="preCadastroPessoaFisicaForm:divPFEncontrada" class="clearfix"></div><div id="preCadastroPessoaFisicaForm:divPJEncontrada" class="clearfix"></div><div id="preCadastroPessoaFisicaForm:divAdvogadoEncontrado" class="clearfix"></div></div><div id="preCadastroPessoaFisicaForm:divConfirmarCadastro" class="clearfix"></div><div id="preCadastroPessoaFisicaForm:divErrosPreCadastro"><script type="text/javascript">//<![CDATA[
+         
+        (function($) {
+                function getDialogMessageNotEmpty() {
+                        return '*[id=dialogMessage]:has(dt span), .modal-popup:has(dt span)';
+                }
+                
+                function getAllDialogMessage() {
+                        return '*[id=dialogMessage], .modal-popup';
+                }
+                
+                function hideClosestDialogMessage(element) {
+                        hideDialog($(element).closest('*[id=dialogMessage]'));
+                }
+                
+                function showAndCloseDialogMessage() {
+                        var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');
+                        showDialogMessage(functionSetTimeout);
+                }
+                
+                function showDialogMessage(functionSetTimeout) {
+                        cancelAllHideDialogMessages();
+                        showDialog(getDialogMessageNotEmpty());
+                }
+                
+                function cancelAllHideDialogMessages() {
+                        var functionTimeout = $(window).data('timeoutDialogMessage');
+                        if (functionTimeout) {
+                                clearTimeout(functionTimeout);
+                        }
+                }
+                
+                function hideDialogMessage(element) {
+                        if (element) {
+                                //ao apertar botao de fechar
+                                cancelAllHideDialogMessages();
+                                hideClosestDialogMessage(element);
+                        } else {
+                                //ao fechar sozinho (timeout)
+                                hideDialog(getDialogMessageNotEmpty());
+                        }
+                }       
+                
+                function actionDialogMessage() {
+                        var globalMessages = 'false'; 
+                        if(globalMessages == 'true') {  
+                                if('true' == 'true') {          
+                                        if($('dt[class=error]').html() == null) {
+                                                var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');                                     
+                                                showDialogMessage(functionSetTimeout);
+                                        } else {
+                                                showDialogMessage();
+                                        }       
+                                }                       
+                        }       
+                }       
+                
+                function hideDialog(selector) {
+                        var $dialog = $(selector);
+                        if($dialog.size() == 0) {
+                                $dialog = $(getAllDialogMessage());                                                     
+                        }
+                        
+                        $dialog.css('visibility', 'hidden');
+                        $dialog.css('opacity', '0');
+                }
+                
+                function showDialog(selector) {
+                        var $dialog = $(selector);
+                        
+                        if($dialog.size() > 0) {
+                                $dialog.css('visibility', 'visible');
+                                $dialog.css('opacity', '1');
+                                if (functionSetTimeout) {
+                                        $(window).data('timeoutDialogMessage', functionSetTimeout);
+                                }
+                        }
+                }
+                
+                window.showDialogMessage = showDialogMessage;
+                window.hideDialogMessage = hideDialogMessage;
+                window.showAndCloseDialogMessage = showAndCloseDialogMessage;
+                
+                //Executar o dialog ao fazer uma requisição AJAX ou NÃO-AJAX no formulário.     
+                window.onload = function() {
+                        actionDialogMessage();  
+                }               
+                actionDialogMessage();
+        })(jQuery_21);
+        //]]>
+</script> <div id="dialogMessage" class="modal-popup"><div id="title" class="modal-header">Mensagem <span class="btn-fechar" onclick="hideDialogMessage(this);"><i class="icon-fechar"></i></span></div><div class="modal-content text-center"><dl id="preCadastroPessoaFisicaForm:preCadastroPessoaFisicaglobalMessagesPCPBMessage" class="rich-messages" style="display: none;"><dt></dt></dl></div></div></div><input type="hidden" autocomplete="off" name="preCadastroPessoaFisicaForm" value="preCadastroPessoaFisicaForm" /><input type="hidden" autocomplete="off" name="autoScroll" value="" /><input type="hidden" autocomplete="off" name="preCadastroPessoaFisicaForm:j_idcl" value="" /><input type="hidden" autocomplete="off" name="preCadastroPessoaFisicaForm:_link_hidden_" value="" /><script type="text/javascript">//<![CDATA[
+function clear_preCadastroPessoaFisicaForm() {
+_clearJSFFormParameters('preCadastroPessoaFisicaForm','',['preCadastroPessoaFisicaForm:j_idcl','preCadastroPessoaFisicaForm:_link_hidden_']);
+}
+function clearFormHiddenParams_preCadastroPessoaFisicaForm(){clear_preCadastroPessoaFisicaForm();}
+function clearFormHiddenParams_preCadastroPessoaFisicaForm(){clear_preCadastroPessoaFisicaForm();}
+clear_preCadastroPessoaFisicaForm();
+//]]>
+</script><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id51" autocomplete="off" /></form><script type="text/javascript">//<![CDATA[
+                function setarFoco() {
+                if (false) {
+                    changeFocus('preCadastroPessoaFisica_nrCPF');
+                } else if (true) {
+                    changeFocus('preCadastroPessoaFisica_nrCPJ');
+                }
+            }
+                function setarFocoTipoPessoa(tipoPessoa) {
+            if (tipoPessoa == 'F') {
+                changeFocus('preCadastroPessoaFisica_nrCPF');
+            } else if (tipoPessoa == 'J') {
+                changeFocus('preCadastroPessoaFisica_nrCPJ');
+            }
+        }
+                function setarFocoIsBrasileiro(valor) {
+            if (valor) {
+                changeFocus('preCadastroPessoaFisica_nrCPF');
+            }
+        }
+                function setarFocoIsOrgao(isOrgao) {
+            if (isOrgao != true) {
+                changeFocus('preCadastroPessoaFisica_nrCPJ');
+            }
+        }
+        //]]>
+</script></div></div></div></div><dl id="gridPartesPoloAtivoList:0:j_id1672:aproveitarAdvOutrosProcessosForm:msgFrm" class="rich-messages" style="display: none;"><dt></dt></dl><dl id="j_id1055" class="rich-messages" style="display: none;"><dt></dt></dl><meta name="Ajax-Update-Ids" content="Message,globalMessagesPCPBdialogMessage,divTipoPartePolo,gridPartesPoloAtivoList:0:j_id1672:aproveitarAdvOutrosProcessosForm:msgFrm,j_id1055" /><span id="ajax-view-state"><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id51" autocomplete="off" /></span><meta id="Ajax-Response" name="Ajax-Response" content="true" /><span id="org.ajax4jsf.oncomplete">showOnComplete();</span><meta name="Ajax-Update-Ids" content="Message,globalMessagesPCPBdialogMessage,divTipoPartePolo,gridPartesPoloAtivoList:0:j_id1672:aproveitarAdvOutrosProcessosForm:msgFrm,j_id1055" /><span id="ajax-view-state"><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id51" autocomplete="off" /></span><meta id="Ajax-Response" name="Ajax-Response" content="true" /><span id="org.ajax4jsf.oncomplete">showOnComplete();</span></body></html>
