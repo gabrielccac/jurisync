@@ -37,12 +37,3 @@ Everything runs through the PJe MCP server, which also offers the filing tools (
    the error; rerunning `fill` skips what is already done.
 5. A legal representative is a manual step: `pje_draft_status` lists name, CPF, kind and address; the user adds it in
    the Partes tab before protocol. Never protocol: the user does Protocolar.
-
-## TRF1 2º grau
-
-For an originating action at the 2nd degree (e.g. Agravo de Instrumento in the SJAP/SJPA Turmas Recursais), use
-`profile: "jean-trf1-2g"`. The facts must carry `classification.judicialClass` (e.g. `AGRAVO DE INSTRUMENTO (202)`),
-`classification.referenceProcess` (the CNJ number of the case of origin, when the class asks for it), `subject`, and
-`partyRoles` with the PJe "Tipo da Parte" labels for the class (e.g. `{"active": "AGRAVANTE", "passive": "AGRAVADO"}`;
-if they are wrong, the author stage fails listing the options PJe offers). Nothing after Incluir has run on the 2nd
-degree yet: run the stages one at a time with the user watching, as on the first 1st-degree filing.

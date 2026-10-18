@@ -30,10 +30,13 @@ class PortalConfigurationTests(unittest.TestCase):
         trf1, trf5 = filing_portal("trf1-1g"), filing_portal("trf5-1g")
         self.assertEqual(trf1.register_url, "https://pje1g.trf1.jus.br/pje/Processo/cadastrar.seam")
         self.assertEqual(trf5.update_url, "https://pje1g.trf5.jus.br/pje/Processo/update.seam")
+        self.assertEqual(
+            {key: config.writes for key, config in FILING_PORTALS.items()}, {"trf5-1g": True, "trf1-1g": True}
+        )
         client = DraftClient(None, portal="trf1-1g")
         self.assertEqual((client.portal.host, client.pending_url), ("pje1g.trf1.jus.br", trf1.pending_url))
-        with self.assertRaisesRegex(ValueError, "does not support trf4-1g-sc"):
-            filing_portal("trf4-1g-sc")
+        with self.assertRaisesRegex(ValueError, "does not support trf1-2g"):
+            filing_portal("trf1-2g")
 
     def test_trf1_writes_still_need_an_approved_payload_and_a_matching_portal(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -45,8 +48,8 @@ class PortalConfigurationTests(unittest.TestCase):
                         run_stage(stage, run=store, portal="trf1-1g")
                 with self.assertRaisesRegex(ValueError, "payload is for trf1-1g, not trf5-1g"):
                     run_stage("classification", run=store, portal="trf5-1g")
-                Path(tmp, "payload.json").write_text(json.dumps({**PAYLOAD, "portal": "trf4-1g-sc"}))
-                with self.assertRaisesRegex(ValueError, "does not support trf4-1g-sc"):
+                Path(tmp, "payload.json").write_text(json.dumps({**PAYLOAD, "portal": "trf1-2g"}))
+                with self.assertRaisesRegex(ValueError, "does not support trf1-2g"):
                     run_stage("fill", run=store)
 
     def test_status_of_a_trf1_run_names_the_steps_to_watch(self):
@@ -299,61 +302,3 @@ class Trf1PartyTests(PartyModalBase):
         trf5, calls = self.client([], portal="trf5-1g")
         self.assertEqual(trf5._choose_party_role("<html></html>", "active"), "<html></html>")
         self.assertEqual(calls, [])
-
-
-class Trf1SecondDegreeTests(PartyModalBase):
-    """TRF1 2nd degree: Processo referência on the register form (captured read-only) and roles from the case."""
-
-    @staticmethod
-    def select(name, label, value):
-        onchange = f"A4J.AJAX.Submit('processoTrfForm',event,{{'similarityGroupingId':'processoTrfForm:{name}'}})"
-        return (
-            f'<select name="processoTrfForm:classeJudicial:{name}" onchange="{onchange}">'
-            f'<option value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option>'
-            f'<option value="{value}">{label}</option></select>'
-            '<input type="hidden" name="javax.faces.ViewState" value="v"/>'
-        )
-
-    def client_2g(self):
-        client = DraftClient(None, portal="trf1-2g")
-        pages = [
-            self.select(
-                "jurisdicaoComboDecoration:jurisdicaoCombo",
-                "Turmas Recursais dos Juizados Especiais Federais da SJAP e da SJPA",
-                "9",
-            ),
-            self.select("classeJudicialComboDecoration:classeJudicialCombo", "AGRAVO DE INSTRUMENTO (202)", "202"),
-            fixture("register_agravo_2g.html"),
-        ]
-        client.get = lambda url: fixture("register_form.html")
-        client.post = lambda url, data: pages.pop(0)
-        sent = []
-        client.ajax = lambda url, state, fields, container, action: sent.append(dict(fields)) or "<html></html>"
-        return client, sent
-
-    CLASSIFICATION = {
-        "area": "DIREITO PREVIDENCIÁRIO",
-        "jurisdiction": "Turmas Recursais dos Juizados Especiais Federais da SJAP e da SJPA",
-        "judicialClass": "AGRAVO DE INSTRUMENTO (202)",
-    }
-
-    def test_agravo_needs_the_reference_process_before_incluir(self):
-        client, sent = self.client_2g()
-        with self.assertRaisesRegex(ValueError, "Processo referência.*classification.referenceProcess"):
-            client.create_draft(self.CLASSIFICATION)
-        self.assertEqual(sent, [], "nothing is sent without it")
-        client, sent = self.client_2g()
-        with self.assertRaisesRegex(RuntimeError, "did not return a new draft URL"):
-            client.create_draft({**self.CLASSIFICATION, "referenceProcess": "10012345620264013100"})
-        reference = next(value for name, value in sent[0].items() if name.endswith("processoReferenciaInput"))
-        self.assertEqual(reference, "1001234-56.2026.4.01.3100")
-
-    def test_party_roles_come_from_the_case_and_their_absence_lists_the_options(self):
-        client, _ = self.client(["party_add_active.html"], portal="trf1-2g")
-        with self.assertRaisesRegex(RuntimeError, "Tipo da Parte' of the active pole .*AUTOR.*set partyRoles.active"):
-            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
-        client, calls = self.client(["party_add_active.html", "party_role_autor.html"], portal="trf1-2g")
-        client.party_roles = {"active": "AUTOR"}
-        with self.assertRaises(self.Stop):
-            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
-        self.assertEqual(calls[1][0]["j_id2888:j_id2892"], "3")

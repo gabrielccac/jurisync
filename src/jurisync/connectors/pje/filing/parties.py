@@ -25,22 +25,10 @@ class PartiesMixin:
 
         The select has generated ids, so it is found by its options; the pre-registration form must follow.
         """
-        label = (getattr(self, "party_roles", None) or self.filing.party_roles or {}).get(pole)
-        soup = BeautifulSoup(html, "html.parser")
+        label = (self.filing.party_roles or {}).get(pole)
         if not label:
-            if soup.find("form", id="preCadastroPessoaFisicaForm") is None:
-                offered = [
-                    option.get_text(" ", strip=True)
-                    for select in soup.find_all("select")
-                    for option in select.find_all("option")[1:]
-                ]
-                if offered:
-                    # The role depends on the class on 2nd degree (AGRAVANTE/AGRAVADO, IMPETRANTE...): it comes from the case.
-                    raise RuntimeError(
-                        f"PJe asks for the 'Tipo da Parte' of the {pole} pole (options: {', '.join(offered)}); "
-                        f"set partyRoles.{pole} in the case facts"
-                    )
             return html
+        soup = BeautifulSoup(html, "html.parser")
         selects = [
             select
             for select in soup.find_all("select")

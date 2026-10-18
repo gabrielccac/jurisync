@@ -233,10 +233,6 @@ Protocolados do 2º grau estava vazia):
   `partyRoles: {"active": "...", "passive": "..."}`; se o PJe perguntar e não houver papel definido, o erro lista as
   opções que o PJe mostra.
 
-**Configuração:** `trf1-2g` está liberado para escrita com a lista `unverified` (tudo depois do Incluir), como foi o 1º
-grau antes do primeiro teste. Perfil do escritório **`jean-trf1-2g`** (`customers/jean/filing-profile.trf1-2g.json`):
-previdenciário, Turmas Recursais de SJAP/SJPA, INSS, justiça gratuita, tutela, segredo não e prioridade PcD; a classe,
-o assunto, o processo de referência e os papéis vêm de cada caso. Sem o campo de Juízo 100% Digital até vê-lo no 2º
-grau. **Ainda não visto:** tudo depois do Incluir (o modal de partes com os papéis da classe, autoridade coatora em
-mandado de segurança, características, tipos de documento e limite de anexos). O primeiro rascunho do 2º grau deve
-seguir o mesmo roteiro acompanhado do 1º grau, estágio por estágio.
+**Decisão (18/10/2026):** o escritório não protocola no 2º grau, só no 1º. A escrita de rascunho no `trf1-2g`, o perfil
+`jean-trf1-2g`, o `referenceProcess` e o `partyRoles` foram retirados; o 2º grau continua só para leitura (processos,
+expedientes, documentos). O reconhecimento acima fica como registro, caso isso mude.

@@ -61,23 +61,6 @@ FILING_PORTALS = {
         author_required_details=(),
     ),
 }
-FILING_PORTALS["trf1-2g"] = FilingPortal(
-    "trf1-2g",
-    writes=True,
-    note="2nd degree (originating actions such as Agravo de Instrumento or Mandado de Segurança): the register form "
-    "and its 'Processo referência' were surveyed read-only on 2026-10-18; nothing after Incluir has run there yet",
-    unverified=(
-        "Incluir with Processo referência",
-        "subject association",
-        "the 'Tipo da Parte' labels for the class (they come from the case: partyRoles)",
-        "author lookup and insertion",
-        "passive party (INSS or the authority)",
-        "characteristics and priority save",
-        "main petition and supporting uploads, their type lists and size limit",
-    ),
-    party_roles=None,
-    author_required_details=(),
-)
 DEFAULT_PORTAL = "trf5-1g"
 
 

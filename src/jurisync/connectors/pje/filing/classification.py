@@ -1,19 +1,10 @@
 """Draft creation: the classification form (Dados iniciais) and the Incluir action."""
 
-import re
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-
-
-def cnj_number(value):
-    """A CNJ process number in PJe's mask, NNNNNNN-DD.AAAA.J.TR.OOOO, from digits or an already formatted number."""
-    digits = re.sub(r"\D", "", str(value or ""))
-    if len(digits) != 20:
-        raise ValueError("classification.referenceProcess must be a CNJ number with 20 digits")
-    return f"{digits[:7]}-{digits[7:9]}.{digits[9:13]}.{digits[13]}.{digits[14:16]}.{digits[16:]}"
 
 
 class ClassificationMixin:
@@ -61,16 +52,6 @@ class ClassificationMixin:
             "judicialClass": classification["judicialClass"],
             "classOptions": class_count,
         }
-        # 2nd-degree classes such as Agravo de Instrumento render a required "Processo referência" (the case of origin)
-        # once chosen; it is plain text with a CNJ mask and goes with Incluir.
-        reference = BeautifulSoup(html, "html.parser").find(
-            "input", attrs={"name": lambda name: (name or "").endswith("processoReferenciaInput")}
-        )
-        if reference is not None:
-            options["referenceProcessRequired"] = True
-            if classification.get("referenceProcess"):
-                fields[reference["name"]] = cnj_number(classification["referenceProcess"])
-                options["referenceProcess"] = fields[reference["name"]]
         return html, fields, include, options
 
     @staticmethod
@@ -120,11 +101,6 @@ class ClassificationMixin:
 
     def create_draft(self, classification):
         html, fields, include, options = self._classification_form(classification)
-        if options.get("referenceProcessRequired") and not options.get("referenceProcess"):
-            raise ValueError(
-                f"{classification['judicialClass']} asks for 'Processo referência': set classification.referenceProcess "
-                "to the CNJ number of the case of origin"
-            )
         fields[include] = include
         html = self.ajax(self.register_url, jsf.view_state(html), fields, "_viewRoot", {})
         soup = BeautifulSoup(html, "html.parser")

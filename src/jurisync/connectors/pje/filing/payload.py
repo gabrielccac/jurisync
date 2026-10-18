@@ -82,16 +82,6 @@ def priority_labels(characteristics):
 
 def validate_fill_payload(payload):
     payload_subjects(payload)
-    reference = (payload.get("classification") or {}).get("referenceProcess")
-    if reference is not None and len(re.sub(r"\D", "", str(reference))) != 20:
-        raise ValueError("classification.referenceProcess must be a CNJ number with 20 digits")
-    roles = payload.get("partyRoles")
-    if roles is not None and (
-        not isinstance(roles, dict)
-        or set(roles) - {"active", "passive"}
-        or not all(isinstance(value, str) and value.strip() for value in roles.values())
-    ):
-        raise ValueError("partyRoles maps active/passive to PJe 'Tipo da Parte' labels, e.g. AGRAVANTE")
     author = payload.get("author") or {}
     required = (("authorCpf", payload.get("authorCpf")), ("author.name", author.get("name")))
     missing = [name for name, value in required if not value]
