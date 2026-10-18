@@ -211,3 +211,32 @@ tinha feito; nada foi incluído, selecionado como endereço, vinculado ou inseri
 
 Fixtures: `tests/connectors/pje/fixtures/trf1/author_*.html` e `inss_*.html` (dados pessoais trocados por valores de
 exemplo).
+
+## TRF1 2º grau (`trf1-2g`): reconhecimento e configuração (18/10/2026)
+
+Lido só com leitura (tela de cadastro e suas atualizações Ajax até a classe; nenhum Incluir; a lista de Não
+Protocolados do 2º grau estava vazia):
+
+- **Mesma tela e ids do 1º grau:** `cadastrar.seam`, `processoTrfForm`, área → jurisdição → classe, Não Protocolados.
+  Login por senha + TOTP (`PJE_2G_*`). 28 áreas, com DIREITO PREVIDENCIÁRIO e DIREITO ASSISTENCIAL.
+- **Jurisdições:** o próprio Tribunal Regional Federal da 1ª Região, os Núcleos de Justiça 4.0, a Turma Regional de
+  Uniformização e as Turmas Recursais dos JEFs, entre elas **"Turmas Recursais dos Juizados Especiais Federais da SJAP
+  e da SJPA"**.
+- **Classes (ações originárias):** no TRF1, 43 (AGRAVO DE INSTRUMENTO, MANDADO DE SEGURANÇA CÍVEL, AÇÃO RESCISÓRIA,
+  PETIÇÃO CÍVEL, RECLAMAÇÃO, TUTELA CAUTELAR ANTECEDENTE...); nas Turmas Recursais de SJAP/SJPA, 10 (AGRAVO DE
+  INSTRUMENTO, MANDADO DE SEGURANÇA CÍVEL, PETIÇÃO CÍVEL, RECLAMAÇÃO, RECURSO DE MEDIDA CAUTELAR CÍVEL...).
+- **Processo referência:** ao escolher Agravo de Instrumento aparece o campo obrigatório **"Processo referência \*"**
+  (`processoReferenciaInput`, texto com máscara CNJ, sem evento Ajax). O conector o preenche com
+  `classification.referenceProcess` e recusa o Incluir se a classe o pedir e o caso não o trouxer.
+- **Papéis das partes:** no 2º grau o "Tipo da Parte" depende da classe (agravante/agravado, impetrante/impetrado...),
+  e o modal só existe dentro de um rascunho, então os rótulos ainda não foram vistos. Eles vêm do caso, em
+  `partyRoles: {"active": "...", "passive": "..."}`; se o PJe perguntar e não houver papel definido, o erro lista as
+  opções que o PJe mostra.
+
+**Configuração:** `trf1-2g` está liberado para escrita com a lista `unverified` (tudo depois do Incluir), como foi o 1º
+grau antes do primeiro teste. Perfil do escritório **`jean-trf1-2g`** (`customers/jean/filing-profile.trf1-2g.json`):
+previdenciário, Turmas Recursais de SJAP/SJPA, INSS, justiça gratuita, tutela, segredo não e prioridade PcD; a classe,
+o assunto, o processo de referência e os papéis vêm de cada caso. Sem o campo de Juízo 100% Digital até vê-lo no 2º
+grau. **Ainda não visto:** tudo depois do Incluir (o modal de partes com os papéis da classe, autoridade coatora em
+mandado de segurança, características, tipos de documento e limite de anexos). O primeiro rascunho do 2º grau deve
+seguir o mesmo roteiro acompanhado do 1º grau, estágio por estágio.

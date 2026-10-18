@@ -173,6 +173,8 @@ def run_stage(
         session = _login(config.key)
     try:
         client = DraftClient(session, portal=config.key)
+        if (payload or {}).get("partyRoles"):
+            client.party_roles = payload["partyRoles"]
         if stage == "register-options":
             result = client.register_options(area=area, jurisdiction=jurisdiction)
         elif stage == "pending-search":

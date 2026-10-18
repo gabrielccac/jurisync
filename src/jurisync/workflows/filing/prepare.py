@@ -83,6 +83,11 @@ def _case_characteristics(facts, defaults):
     return {**profile, **case, "priority": priorities}
 
 
+def _party_roles(facts, defaults):
+    """The 'Tipo da Parte' labels for each pole: the profile's, the case's on top (2nd degree: they follow the class)."""
+    return {**(defaults.get("partyRoles") or {}), **(facts.get("partyRoles") or {})}
+
+
 def require_facts(facts, defaults):
     subjects = _case_subjects(facts, defaults)
     if not isinstance(subjects, list) or not subjects:
@@ -108,6 +113,11 @@ def require_facts(facts, defaults):
         raise ValueError(f"Missing case facts: {', '.join(missing)}")
     if "attorney" in facts:
         raise ValueError("Use attorneys (a list of extra attorneys), not attorney")
+    if classification.get("referenceProcess") is not None and len(_digits(classification["referenceProcess"])) != 20:
+        raise ValueError("classification.referenceProcess must be the CNJ number (20 digits) of the case of origin")
+    roles = _party_roles(facts, defaults)
+    if set(roles) - {"active", "passive"} or not all(isinstance(v, str) and v.strip() for v in roles.values()):
+        raise ValueError("partyRoles maps active/passive to PJe 'Tipo da Parte' labels, e.g. AGRAVANTE / AGRAVADO")
     _check_attorneys(facts.get("attorneys", []))
     if "representative" in author:
         _check_representative(author["representative"])
@@ -224,6 +234,9 @@ def build_payload(facts, documents, defaults):
         payload["otherParticipants"] = select_other_participants(defaults["otherParticipants"], facts)
     if facts.get("attorneys"):
         payload["attorneys"] = [{**item, "cpf": _digits(item["cpf"])} for item in facts["attorneys"]]
+    payload.pop("partyRoles", None)
+    if _party_roles(facts, defaults):
+        payload["partyRoles"] = _party_roles(facts, defaults)
     return payload
 
 
