@@ -21,9 +21,18 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    check is needed. The `create-fill` path itself matches each code and name
    against PJe's lookup before adding it. Ask for missing or conflicting
    facts; never substitute another case's mock values.
-   Graziele is the attorney added to the author; the logged-in Victor is not
-   the `attorney` payload entry. Her CPF comes from the private
-   `VICTOR_PJE_GRAZIELE_CPF` setting. This office always includes
+   Victor files as the user logged in to PJe, so he is on every draft already; never list him. Graziele is
+   the extra attorney: put her in the case facts as
+   `"attorneys": [{"cpf": "<her CPF>", "name": "GRAZIELE ALVES DA SILVA", "oabNumber": "48647", "oabState": "PE"}]`.
+   Her CPF is not stored in the repository or the environment: take it from this conversation, or ask the user once.
+   Leave `attorneys` out only if the user says she is not on this case.
+   If the author is a minor or acts through someone (mother, father, guardian, curator, attorney-in-fact), which the
+   petition usually states, add `author.representative` with `cpf`, `name` and `kind` (`mae`, `pai`, `tutor`,
+   `curador`, `procurador` or `outro`), and `author.birthDate` when known. Prepare holds the run for review when the
+   petition or the birth date point to a representative and none is given, or when the representative's CPF is not in
+   the petition; if the petition only seems to say so and the user confirms the author acts in person, set
+   `author.selfRepresented: true`. The fill cannot yet add the representative in PJe: `pje_draft_status` lists it under
+   `manualSteps`, and you must tell the user to add it in the Partes tab before protocol. This office always includes
    `Juízo 100% Digital`; the workflow sets that priority regardless of
    any priority text in case facts. Do not ask for or edit that field.
    Compare any address in the petition with the Advbox customer record. If

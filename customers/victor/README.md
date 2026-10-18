@@ -56,8 +56,9 @@ payload and never invokes customer policy or Jev. Clear filenames bypass PDF
 text extraction; the selected petition is inspected separately to validate
 case facts.
 
-Provide `VICTOR_PJE_GRAZIELE_CPF` and, for ambiguous documents,
-`OPENROUTER_API_KEY` in the private environment. The OpenRouter Decisions API
+For ambiguous documents, provide `OPENROUTER_API_KEY` in the private environment.
+Graziele, the extra attorney on Victor's filings, comes in each case's facts as
+`attorneys` (see the skill), not from the environment. The OpenRouter Decisions API
 calls TypeSafe Jev 1.13. A direct `TYPESAFE_API_KEY` is an alternative. The
 request sends the filename and at most 12,000 extracted text characters; it
 does not send the original PDF. Missing keys or illegible supporting documents
@@ -80,8 +81,8 @@ value can change by matter. A private `case-facts.json` has this shape:
 ```
 
 The workflow fills Victor's verified office choices: previdenciário area,
-Graziele's name and OAB, INSS, CEAB, Ministério Público, Justiça gratuita,
-no injunction, and Juízo 100% Digital. The attorney CPF is private. A petition's
+INSS, CEAB, Ministério Público, Justiça gratuita, no injunction, and Juízo 100% Digital.
+Victor himself files as the logged-in user; Graziele is passed per case in `attorneys`. A petition's
 stated claim value and formatted CPFs are extracted as candidates and checked
 against the supplied claim value and author CPF.
 The Victor workflow always sets the exact PJe priority label

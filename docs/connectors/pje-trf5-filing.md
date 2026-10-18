@@ -71,13 +71,14 @@ The current working mock payload is private at
     {"search": "Assistencial", "code": "11946", "name": "Pessoa com Deficiência"}
   ],
   "authorCpf": "<CPF do autor>",
-  "author": {"name": "<nome esperado no cadastro do PJe>", "address": {"cep": "<8 dígitos>", "numero": "<número>"}},
-  "attorney": {
-    "cpf": "<CPF da advogada>",
-    "name": "GRAZIELE ALVES DA SILVA",
-    "oabNumber": "48647",
-    "oabState": "PE"
+  "author": {
+    "name": "<nome esperado no cadastro do PJe>",
+    "address": {"cep": "<8 dígitos>", "numero": "<número>"},
+    "representative": {"cpf": "<CPF do representante>", "name": "<nome>", "kind": "mae"}
   },
+  "attorneys": [
+    {"cpf": "<CPF da advogada>", "name": "GRAZIELE ALVES DA SILVA", "oabNumber": "48647", "oabState": "PE"}
+  ],
   "passive": {
     "search": "inss",
     "cnpj": "29979036000140",
@@ -164,9 +165,39 @@ more distinct entries in `subjects`; each is looked up and verified on the
 draft. The older singular `subject` form remains accepted. Resolve the full
 subject set from the petition and case review before filling a real draft.
 
-The logged-in certificate user is not an `attorney` payload entry. The script
-explicitly associates Graziele by CPF; it does not add or verify Victor as a
+The logged-in certificate user is not an `attorneys` payload entry. The script
+explicitly associates each extra attorney by CPF; it does not add or verify Victor as a
 separate representative. Review the actual Partes tab before protocol.
+
+## Advogados extras e representante legal
+
+- **Advogado padrão = quem está logado no PJe** (no Victor, ele mesmo); o PJe já o coloca no rascunho. O payload só
+  traz advogados **extras**, em `attorneys` (lista; vazia ou ausente quando só o logado atua). Cada um precisa de
+  `cpf`, `name`, `oabNumber` e `oabState`, e vem nos `facts` do caso (`filing_prepare`/`filing_finalize`), informados
+  pela skill ou pelo prompt. Nada vem de variável de ambiente, e o perfil de filing não tem mais advogado (um perfil
+  com `defaults.attorney` é recusado). **Decisão: lista**, porque há casos com mais de um advogado associado e o custo
+  é o mesmo; cada extra é associado e conferido (CPF, nome e OAB) no polo ativo. A chave antiga `attorney` (um só
+  objeto) é recusada com a explicação.
+- **Representante legal do autor** (autor menor de idade, ou representado por mãe/pai, tutor, curador, procurador):
+  `author.representative {cpf, name, kind}` nos `facts`, com `kind` entre `mae`, `pai`, `tutor`, `curador`,
+  `procurador` e `outro`. Os `facts` aceitam ainda `author.birthDate` (DD/MM/AAAA ou AAAA-MM-DD) e
+  `author.selfRepresented`.
+- **Conferência no preparo** (itens de revisão no `filing_prepare`; o `filing_finalize` recusa):
+  - autor menor de 18 anos pela `birthDate` e sem representante;
+  - petição com frases de representação (`representado por`, `menor impúbere`, `curador`, `tutor`, `representante
+    legal`...) e sem representante, a menos que o revisor confirme `author.selfRepresented: true` (essa confirmação
+    nunca dispensa a regra da idade);
+  - CPF do representante que não aparece entre os CPFs formatados da petição.
+  As frases encontradas aparecem em `candidates.representation` da revisão.
+- **No PJe, o representante ainda é passo manual.** A captura de 2026-10-05 mostra que o navegador associou um
+  `REPRESENTANTE` pelo CPF, pela mesma barra "vincular representante" do advogado (`comboRepresentacao`), mas não
+  registrou os ids do formulário de busca do representante, se há escolha do tipo de representação, nem como o PJe
+  lista o resultado no polo ativo, e essa captura não está disponível aqui. Em vez de adivinhar, o fill grava em
+  `checkpoint.json` → `manualSteps` "associar o representante X (CPF parcial) ao autor no PJe", e o
+  `pje_draft_status` mostra esse passo, com a conclusão `verified_manual_steps_pending` em vez de `verified`.
+  **Para automatizar, falta capturar:** no rascunho de teste, Partes → vincular representante ao autor → tipo
+  `REPRESENTANTE` (e o tipo de representação, se o PJe pedir) → busca por CPF → confirmar → incluir, e a releitura do
+  polo ativo mostrando o representante.
 
 ## Integridade: hash, aprovação e nomes (Fase 1)
 
@@ -336,7 +367,7 @@ same session for that run.
 The sequence is:
 
 1. Select area, jurisdiction, then class, and press **Incluir** to create the draft.
-2. Search and associate each subject, then the author, attorney, passive INSS, CEAB, and Ministério Público.
+2. Search and associate each subject, then the author, any extra attorneys, passive INSS, CEAB, and Ministério Público (an author's legal representative is still a manual step).
 3. Save Justiça gratuita, tutela/liminar, and valor da causa; separately include Juízo 100% Digital when requested. Set `priority` to `false` or omit it to leave the priority list unchanged; `"NÃO"` is not a PJe option label.
 4. Upload and save the single main petition PDF, then upload, classify, and save each supporting PDF. Read the **Informativo** document grid back to confirm them.
 5. Confirm the draft appears in **Não Protocolados**. Open it in PJe and review all fields and PDFs. Submit **Protocolar** manually when the real case is ready.
