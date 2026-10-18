@@ -99,7 +99,8 @@ Read `/private/run/review.json`, especially `fallbacks`: these files will be
 uploaded as `Outros Documentos` unless you override their type or skip them.
 Create a private `overrides.json` keyed by the file's `id` if needed. An
 override can set `{"role":"supporting","type":"Documento Comprobatório"}`
-or `{"role":"skip"}`. If the folder has two petitions, select one as `main`
+or `{"role":"skip"}`; `description` is the only other key allowed (paths and
+hashes cannot be overridden). If the folder has two petitions, select one as `main`
 and skip the other. Then finalize using the downloaded files:
 
 ```bash
@@ -109,6 +110,14 @@ and skip the other. Then finalize using the downloaded files:
 ```
 
 The finalizer checks PDF hashes and validates the selected PJe document types.
+Every document in `payload.json` carries its `sha256`. Nothing is written to PJe
+until the user approves that payload: after showing it, record the approval with
+
+```bash
+.venv/bin/python -m jurisync.workflows.filing approve --run /private/run
+```
+
+(or `filing_approve` in the MCP). Any new prepare or finalize drops the approval.
 Word conversion is available as an importable function and a command:
 
 ```bash

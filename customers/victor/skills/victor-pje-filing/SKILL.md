@@ -47,23 +47,30 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    `review.json` must contain a `files` array for the `finalize` command.
    Read `review.json`: inspect every file, suggested PJe type, fallback,
    duplicate, and size/split flag. If needed, use the same module's `finalize`
-   command with `--review` and `--overrides` to resolve selections. Continue only when it emits
-   `ready: true` and `payload.json` exists.
+   command with `--review` and `--overrides` to resolve selections (`overrides` accepts only `role`, `type` and
+   `description`). Continue only when it emits `ready: true` and `payload.json` exists.
+   A `payload.json` is never approved by itself, even when prepare wrote it with no review items.
 3. Show the user the reviewed facts, selected subjects, address status,
    document list and classifications, and unresolved limitations. Use
    `pje_draft_inspect` with `stage: classification` and the run ID to check
    current PJe choices. Search
    **Não Protocolados** with `pje_search_pending_drafts` using the author's CPF
    before creating a new draft; show possible existing drafts for review.
+   Only after the user explicitly approves that summary, record it with
+   `.venv/bin/python -m jurisync.workflows.filing approve --run <run-directory>` (or `filing_approve`).
+   Never approve on your own. Any later prepare or finalize drops the approval; show the new summary and ask again.
 4. When the user has asked to create the draft, call `pje_draft_write` with
    `stage: create-fill` and the same run ID. Draft writes require
-   `PJE_ALLOW_DRAFT_WRITES=true` in the PJe MCP process. The adapter writes
+   `PJE_ALLOW_DRAFT_WRITES=true` in the PJe MCP process and refuses without an approval that matches the current
+   payload and files ("Document changed since approval" means a file changed: finalize and ask again). The adapter writes
    `checkpoint.json` immediately after **Incluir**. If filling later fails,
    inspect that checkpoint and the live draft. Correct case facts and
    regenerate `payload.json` with `finalize --review <run-directory>/review.json
-   --facts <facts.json>` rather than editing it by hand. Resume with the
+   --facts <facts.json>` rather than editing it by hand, then show it and get a new approval. Resume with the
    targeted `pje_draft_write` stage (`characteristics`, then `documents`, for
    a characteristics failure); do not repeat `create` or `create-fill`.
+   If fill stops because a document on the draft has other content than the approved file (or no upload record),
+   it was not uploaded again: ask the user to remove that document from the draft in PJe, then run `fill` again.
 5. Call `pje_draft_inspect` with `stage: pending` to confirm the draft appears
    in **Não Protocolados**. Return the draft ID/URL and report which fields and
    PDFs were actually saved. Have the user review the draft in PJe before any
@@ -83,11 +90,13 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
 2. `filing_prepare` with `profile: "victor"`, a new `runId`, the ADVBOX customer ID and the reviewed facts. Facts may
    be partial: missing ones come back as review items, and `candidates` lists the claim values and CPFs the petition
    states. Document text is not sent to Jev unless `useJev` is true.
-3. Resolve every item in `review`: each file's `id` is the key for `overrides` (`{role, type}`, or `{role: "skip"}`
-   for a duplicate such as a `.docx` copy of the petition). `filing_review` shows the run again.
+3. Resolve every item in `review`: each file's `id` is the key for `overrides` (`{role, type, description}` and nothing
+   else, or `{role: "skip"}` for a duplicate such as a `.docx` copy of the petition). `filing_review` shows the run
+   again, including whether the current payload is `approved`.
 4. `filing_finalize` with `profile: "victor"` and `overrides` writes `payload.json` only when the checks pass (one main
-   petition; the claim value and CPF appear in the petition). Show its summary to the user before creating the draft.
-5. `pje_draft_write` with `create-fill` starts the fill in the background. Follow it with `pje_draft_status`, and use
+   petition; the claim value and CPF appear in the petition). Show its summary to the user. Only when they explicitly
+   approve it, call `filing_approve` with the `runId`; never on your own. A new finalize needs a new approval.
+5. `pje_draft_write` with `create-fill` (refused without that approval) starts the fill in the background. Follow it with `pje_draft_status`, and use
    `checkPje: true` to confirm the draft in PJe. `pje_draft_delete` removes a draft by number (it asks first).
 
 The filing root (`JURISYNC_FILING_DIR`) is shared by both servers, so the same `runId` works in each.

@@ -21,6 +21,7 @@ src/jurisync/connectors/pje/filing/
   fill.py             the phases below      checkpoint.py   ledger and atomic checkpoint writes
   timeline.py         per-step timing       payload.py / names.py / parsing.py   validation and helpers
   run.py              stages and the command line (client.py composes the sections into DraftClient)
+  approval.py         approval.json: the recorded approval every payload write stage requires
 ```
 
 `fill` and `create-fill` work in four phases: subjects, parties, characteristics, documents. Each phase reads the
@@ -105,13 +106,15 @@ The current working mock payload is private at
     "main": {
       "path": "/absolute/path/peticao.pdf",
       "type": "Petição inicial",
-      "description": "Petição inicial"
+      "description": "Petição inicial",
+      "sha256": "<sha256 do PDF aprovado>"
     },
     "supporting": [
       {
         "path": "/absolute/path/anexo.pdf",
         "type": "Documento Comprobatório",
-        "description": "Anexo"
+        "description": "Anexo",
+        "sha256": "<sha256 do PDF aprovado>"
       }
     ]
   }
@@ -164,6 +167,42 @@ The logged-in certificate user is not an `attorney` payload entry. The script
 explicitly associates Graziele by CPF; it does not add or verify Victor as a
 separate representative. Review the actual Partes tab before protocol.
 
+## Integridade: hash, aprovação e nomes (Fase 1)
+
+O que vai para o PJe tem de ser exatamente o que o advogado revisou. Por isso:
+
+- **Hash no payload.** Cada documento em `documents.main` e `documents.supporting[]` leva `sha256`, preenchido pelo
+  prepare/finalize a partir do `uploadSha256` do `review.json`. `validate_fill_payload` reconfere todos os arquivos
+  antes do login, e cada upload relê o arquivo, reconfere o hash e envia exatamente esses bytes. Divergência → erro
+  `Document changed since approval` (documento mudou desde a aprovação). Payloads antigos, sem `sha256`, são recusados
+  com a instrução de rodar `filing_finalize` de novo; se o run já tem rascunho (o finalize recusa runs com
+  `checkpoint.json`), é preciso um novo `runId`.
+- **Aprovação registrada.** `filing_approve(runId)` (ou `python -m jurisync.workflows.filing approve --run RUN_DIR`)
+  grava `approval.json` (0600, escrita atômica) com o horário, o sha256 do `payload.json` e o sha256 de cada documento,
+  depois de reconferir os arquivos. Todo prepare e todo finalize apagam o payload anterior e a aprovação: o prepare
+  ainda grava `payload.json` quando não há itens de revisão, mas sem aprovação. `pje_draft_write` e o CLI do conector
+  (`--stage` de qualquer etapa que escreve conteúdo do payload; `delete-draft` não usa payload) recusam antes do
+  login se não houver aprovação ou se ela não bater com o payload atual. A ferramenta só registra o "sim" do usuário;
+  a skill instrui o agente a chamá-la apenas depois de uma confirmação explícita.
+- **Upload por conteúdo, não por nome.** O PJe lista os documentos do rascunho só pelo nome do arquivo. Antes de cada
+  envio, o run grava em `checkpoint.json` → `uploads` o par `sha256 → {name, type}`. Um nome já presente no rascunho
+  só conta como "já enviado" se o registro desse nome tiver o sha256 do documento aprovado. Mesmo nome com hash
+  diferente (arquivo alterado depois do envio) ou sem registro algum → erro explícito, sem reenviar e sem pular em
+  silêncio. **Decisão: falhar, não substituir.** As capturas mostram que o navegador remove documentos do rascunho,
+  mas a requisição de remoção de um anexo já gravado não foi mapeada, e para a petição principal o PJe troca o PDF
+  ao receber outro, porém a releitura do Informativo só mostra o nome, então não há como provar que a versão nova
+  ficou. O usuário remove o documento antigo no PJe (ou começa um novo `runId`) e roda `fill` de novo.
+  `pje_draft_status` com `checkPje: true` informa em `contentNotConfirmed` os documentos cujo conteúdo no rascunho não
+  é confirmado pelo registro, e nesse caso a conclusão não é `verified`.
+- **Nomes únicos.** A limpeza do nome (sem acentos, sem o sufixo aleatório do ADVBOX) pode juntar dois arquivos
+  diferentes num só nome: `A_1111.pdf` e `Ã_2222.pdf` → `A.pdf`. O staging (`stage_uploads`) dá a cada arquivo, na
+  ordem da pasta, um nome único no run, comparando como o PJe compara (sem acento e sem diferenciar maiúsculas): o
+  primeiro mantém o nome limpo e os seguintes ganham um sufixo curto do hash (`A-1a2b3c4d.pdf`). Volumes de um PDF
+  dividido seguem o nome do arquivo (`B-vol-01.pdf`). Não acrescentamos `NN-` porque as pastas do escritório já
+  trazem a numeração (`10-PETIÇÃO INICIAL`).
+- **Overrides restritos.** Em `filing_finalize`, `overrides` só aceita `role` (`main`, `supporting`, `skip`), `type`
+  e `description`, todos texto não vazio; qualquer outra chave (como `path` ou `uploadSha256`) é erro.
+
 ## Run and review
 
 Certificate and 2FA settings come from the environment: `PJE_A1_P12`,
@@ -177,7 +216,8 @@ the JSON payload. With those values loaded:
   --checkpoint /home/gabriel/.local/share/jurisync/pje-draft-checkpoint-next.json
 ```
 
-Use a new checkpoint filename for each new draft. **Incluir** creates the
+The payload must have been approved first (`approval.json` next to it; see the integrity section above), otherwise
+every stage that writes payload content stops before logging in. Use a new checkpoint filename for each new draft. **Incluir** creates the
 draft; the script saves its ID and URL to the checkpoint immediately. A later
 failure does not erase that draft. Resume the same draft with `--stage fill`,
 the same payload, and that checkpoint. `--stage documents` only handles the
