@@ -162,3 +162,26 @@ Rode por estágios, não `create-fill` de uma vez, e confira no portal depois de
 Se houver representante legal, inclua-o à mão na aba Partes com os dados que o `pje_draft_status` lista.
 O que divergir vira ajuste no perfil `jean` ou no código. Quando tudo tiver passado, os itens podem sair da
 lista `unverified` de `trf1-1g`.
+
+## Primeiro rascunho real (18/10/2026): o modal de partes
+
+O primeiro teste acompanhado criou o rascunho e associou o assunto; o estágio `author` falhou porque, no TRF1, o modal
+"Associar parte ao processo" começa por um passo que o TRF5 não tem. Lido no próprio rascunho, só com as atualizações
+de exibição (abrir o modal e trocar os selects; nada pesquisado, confirmado, vinculado ou salvo):
+
+1. **"1 Passo → Tipo de Vinculação"**: um select "Tipo da Parte" com ids gerados (`j_id2888:j_id2892`). No polo ativo as
+   opções são ASSISTENTE, TESTEMUNHA, TERCEIRO INTERESSADO, **AUTOR**, LITISCONSORTE; no passivo, TESTEMUNHA, TERCEIRO
+   INTERESSADO, **REU** (sem acento), LITISCONSORTE.
+2. Só depois de escolher o tipo aparece o **`preCadastroPessoaFisicaForm`**, o mesmo do TRF5, já com "Jurídica" e
+   "Órgão Público = Sim" marcados por padrão.
+3. Com "Física": "Brasileiro?" (Sim marcado), CPF e **Pesquisar** (`pesquisarDocumentoPrincipal`), com os mesmos
+   sufixos de id que o código do TRF5 usa. Com "Jurídica" + órgão público: Nome e **Pesquisar**
+   (`btnPesquisarOrgaoPublico`), também iguais.
+
+O conector agora responde esse passo quando o portal tem `party_roles` (TRF1: AUTOR para o autor, REU para o INSS),
+achando o select pelas opções, e confere que o pré-cadastro abriu; no TRF5 nada muda. As respostas capturadas estão em
+`tests/connectors/pje/fixtures/trf1/party_*.html` (sem dados pessoais).
+
+**Ainda não visto:** tudo depois de Pesquisar (o nome devolvido pela Receita, Confirmar, os dados da parte, a aba
+Endereços com CEP/número/Incluir e o botão final, que o roteiro do escritório chama de "Vincular parte ao processo"; o
+código procura `btnInserirParteProcesso`, como no TRF5). Cada um desses passos falha dizendo qual campo não encontrou.
