@@ -102,19 +102,99 @@ class Trf1CapturedPagesTests(unittest.TestCase):
             client.create_draft({})
 
 
+# Labels the office's own filing guide ("[IT] Protocolo de Iniciais BPC - PJE") shows on TRF1 supporting rows; the
+# read-only capture only had the main-document list, which does not carry them.
+OFFICE_GUIDE_LABELS = {
+    "Comprovante de residência",
+    "Cadastro Nacional de Informações Sociais - CNIS",
+    "Atestado médico",
+}
+
+
 class Trf1ProfileTests(unittest.TestCase):
-    def test_victors_trf1_profile_uses_labels_the_trf1_form_offers(self):
-        profile = load_profile("victor-trf1")
+    def test_the_office_trf1_profile_uses_labels_trf1_offers(self):
+        profile = load_profile("jean")
         offered = {
             option.get_text(" ", strip=True)
             for option in BeautifulSoup(fixture("document_types.html"), "html.parser").find_all("option")
         }
         self.assertEqual(profile.portal, "trf1-1g")
-        self.assertLessEqual(set(profile.supporting_types), offered)
+        self.assertLessEqual(set(profile.supporting_types), offered | OFFICE_GUIDE_LABELS)
         self.assertIn("Petição inicial", offered)
-        self.assertEqual(profile.portal_type("Laudo Médico"), "Exame médico")
+        self.assertEqual(profile.portal_type("Laudo Médico"), "Atestado médico")
         self.assertEqual(profile.portal_type("Documento Comprobatório"), "Comprovante (Outros)")
-        self.assertEqual(profile.defaults()["classification"], {"area": "DIREITO ASSISTENCIAL"})
+        self.assertEqual(profile.defaults()["classification"]["area"], "DIREITO PREVIDENCIÁRIO")
+
+
+class Trf1CharacteristicsTests(unittest.TestCase):
+    """The TRF1 characteristics tab (captured read-only): Juízo 100% Digital and segredo are their own fields."""
+
+    def client(self, panels):
+        client = DraftClient(None, portal="trf1-1g")
+        calls = []
+        client.characteristics_panel = lambda url: panels.pop(0) if len(panels) > 1 else panels[0]
+        client.ajax = lambda url, state, fields, container, action: (
+            calls.append((fields, action)) or fixture("characteristics_tab.html")
+        )
+        return client, calls
+
+    def test_a_draft_already_matching_costs_no_writes(self):
+        client, calls = self.client([fixture("characteristics_tab.html")])
+        wanted = {
+            "claimValue": "1.000,00",
+            "legalAid": True,
+            "injunction": False,
+            "digitalCourt": True,
+            "secrecy": False,
+            "priority": ["Pessoa com Deficiência"],
+        }
+        result = client.save_characteristics("draft", wanted)
+        self.assertEqual(calls, [])
+        self.assertTrue(result["alreadySaved"])
+        self.assertEqual((result["priority"], result["priorityAdded"]), (["Pessoa com Deficiência"], []))
+        self.assertEqual(result["secrecy"], {"value": False, "changed": False})
+
+    def test_digital_court_and_injunction_are_saved_in_the_main_form_and_read_back(self):
+        before = fixture("characteristics_tab.html")
+        soup = BeautifulSoup(before, "html.parser")
+        for radio in soup.find_all("input", attrs={"type": "radio"}):
+            if "tutelaLiminar" in radio["name"]:
+                if radio["value"] == "true":
+                    radio["checked"] = "checked"
+                else:
+                    del radio["checked"]
+        after = str(soup)
+        client, calls = self.client([before, after])
+        wanted = {"claimValue": "1.000,00", "legalAid": True, "injunction": True, "digitalCourt": True, "priority": []}
+        result = client.save_characteristics("draft", wanted)
+        self.assertFalse(result["alreadySaved"])
+        saved_fields = calls[0][0]
+        digital = next(
+            name for name in saved_fields if name.endswith("solicitadoJuizo100PorCentoDigitalSelectOneRadio")
+        )
+        injunction = next(name for name in saved_fields if name.endswith("tutelaLiminarSelectOneRadio"))
+        self.assertEqual((saved_fields[digital], saved_fields[injunction]), ("true", "true"))
+        client, _ = self.client([before, before])
+        with self.assertRaisesRegex(RuntimeError, "did not retain the characteristic tutelaLiminarSelectOneRadio"):
+            client.save_characteristics("draft", wanted)
+
+    def test_a_priority_pje_does_not_offer_is_named_with_the_options(self):
+        client, _ = self.client([fixture("characteristics_tab.html")])
+        wanted = {"claimValue": "1.000,00", "legalAid": True, "injunction": False, "priority": ["Doença rara"]}
+        with self.assertRaisesRegex(RuntimeError, "no priority 'Doença rara'; options: .*Idoso\\(a\\)"):
+            client.save_characteristics("draft", wanted)
+
+    def test_digital_court_on_a_pje_without_the_field_says_to_use_the_priority(self):
+        page = fixture("characteristics_tab.html")
+        soup = BeautifulSoup(page, "html.parser")
+        for radio in soup.find_all(
+            "input", attrs={"name": lambda n: (n or "").endswith("Juizo100PorCentoDigitalSelectOneRadio")}
+        ):
+            radio.decompose()
+        client, _ = self.client([str(soup)])
+        wanted = {"claimValue": "1.000,00", "legalAid": True, "injunction": False, "digitalCourt": True}
+        with self.assertRaisesRegex(RuntimeError, "no Juízo 100% Digital field"):
+            client.save_characteristics("draft", wanted)
 
 
 if __name__ == "__main__":

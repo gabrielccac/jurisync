@@ -1,6 +1,6 @@
 {
-  "name": "victor-trf1",
-  "description": "Victor's office: TRF1 1G initial filings (SJAP). Unverified until the first supervised test draft; see docs/connectors/pje-trf1-filing-recon.md",
+  "name": "jean",
+  "description": "Office TRF1 1G initial filings (BPC), following the office's '[IT] Protocolo de Iniciais BPC - PJE'. Steps after Incluir are unverified until the first supervised draft; see docs/connectors/pje-trf1-filing-recon.md",
   "portal": "trf1-1g",
   "uncertainType": "Documentos Diversos",
   "supportingTypes": [
@@ -8,10 +8,12 @@
     "Comprovante (Outros)",
     "Processo administrativo",
     "Carta de Concessão",
-    "Exame médico",
+    "Atestado médico",
     "Procuração",
     "Apresentação de quesitos",
-    "Declaração de hipossuficiência/pobreza"
+    "Declaração de hipossuficiência/pobreza",
+    "Comprovante de residência",
+    "Cadastro Nacional de Informações Sociais - CNIS"
   ],
   "typeMap": {
     "Planilha": "Documentos Diversos",
@@ -21,12 +23,24 @@
     "Documento Comprobatório": "Comprovante (Outros)",
     "Carta de Indeferimento": "Documentos Diversos",
     "Carta de Concessão": "Carta de Concessão",
-    "Laudo Médico": "Exame médico"
+    "Laudo Médico": "Atestado médico"
   },
   "documentRules": [
     [
       "HIPOSSUFICIENCIA|DECLARACAO DE POBREZA",
       "Declaração de hipossuficiência/pobreza"
+    ],
+    [
+      "RESIDENCIA",
+      "Comprovante de residência"
+    ],
+    [
+      "CADUNICO|CAD UNICO|FOLHA RESUMO|\\bCNIS\\b",
+      "Cadastro Nacional de Informações Sociais - CNIS"
+    ],
+    [
+      "LAUDO|ATESTADO|MEDIC|RECEITUARIO|EXAME",
+      "Atestado médico"
     ],
     [
       "PETI?CAO|MANDADO DE SEGURANCA",
@@ -73,31 +87,36 @@
       "Processo Administrativo"
     ],
     [
-      "LAUDO|MEDIC|RECEITUARIO|EXAME",
-      "medical"
-    ],
-    [
       "CNIS|CTPS|RESIDENCIA|ATIVIDADE RURAL|PROVAS RURAIS|GRUPO FAMILIAR|CADUNICO|LOAS|COMPROVANTE|CERTIDAO DE OBITO|DEPENDENCIA ECONOMICA",
       "Documento Comprobatório"
     ]
   ],
   "defaults": {
     "classification": {
-      "area": "DIREITO ASSISTENCIAL"
+      "area": "DIREITO PREVIDENCIÁRIO",
+      "jurisdiction": "Seção Judiciária do Amapá",
+      "judicialClass": "PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL (436)"
     },
+    "subjects": [
+      {
+        "search": "Pessoa com Deficiência",
+        "code": "11946",
+        "name": "Pessoa com Deficiência"
+      }
+    ],
     "passive": {
-      "search": "inss",
+      "search": "INSS",
       "cnpj": "29979036000140",
       "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"
     },
     "characteristics": {
       "legalAid": true,
-      "injunction": false,
-      "priority": false
+      "injunction": true,
+      "secrecy": false,
+      "digitalCourt": true,
+      "defaultPriority": [
+        "Pessoa com deficiência"
+      ]
     }
-  },
-  "references": {
-    "subjects": "skills/victor-pje-filing/references/subjects.md",
-    "history": "README.md"
   }
 }

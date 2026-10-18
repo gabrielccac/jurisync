@@ -45,10 +45,46 @@ def _digits(value):
     return re.sub(r"\D", "", str(value or ""))
 
 
-def require_facts(facts, defaults):
+def _case_subjects(facts, defaults):
+    """The case's subjects, or the profile's default subjects when the facts name none."""
     if facts.get("subject") and facts.get("subjects"):
         raise ValueError("Use subject or subjects, not both")
-    subjects = facts.get("subjects") or ([facts["subject"]] if facts.get("subject") else [])
+    return facts.get("subjects") or ([facts["subject"]] if facts.get("subject") else defaults.get("subjects") or [])
+
+
+def _case_classification(facts, defaults):
+    """Area, jurisdiction and class: the case's values over the profile's defaults (area defaults to previdenciário)."""
+    return {
+        "area": "DIREITO PREVIDENCIÁRIO",
+        **(defaults.get("classification") or {}),
+        **(facts.get("classification") or {}),
+    }
+
+
+def _priorities(value, label):
+    """A priority setting as a list of PJe labels: one label, a list of labels, or false/absent for none."""
+    if value in (None, False, ""):
+        return []
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, list) or not all(isinstance(item, str) and item.strip() for item in values):
+        raise ValueError(f"{label} must be a PJe priority label, a list of labels, or false")
+    return [item.strip() for item in values]
+
+
+def _case_characteristics(facts, defaults):
+    """The profile's characteristics, the case's on top. Priorities: the profile's fixed `priority` always, plus the
+    case's `priority` or, when the case names none, the profile's `defaultPriority`."""
+    profile = dict(defaults.get("characteristics") or {})
+    case = dict(facts.get("characteristics") or {})
+    fixed = _priorities(profile.pop("priority", None), "profile characteristics.priority")
+    fallback = _priorities(profile.pop("defaultPriority", None), "profile characteristics.defaultPriority")
+    chosen = _priorities(case.pop("priority", None), "characteristics.priority") if "priority" in case else fallback
+    priorities = list(dict.fromkeys([*fixed, *chosen]))
+    return {**profile, **case, "priority": priorities}
+
+
+def require_facts(facts, defaults):
+    subjects = _case_subjects(facts, defaults)
     if not isinstance(subjects, list) or not subjects:
         raise ValueError("subjects must be a nonempty list")
     for index, subject in enumerate(subjects):
@@ -58,7 +94,7 @@ def require_facts(facts, defaults):
     if len({subject["code"] for subject in subjects}) != len(subjects):
         raise ValueError("subjects must have unique codes")
     author = facts.get("author") or {}
-    classification = facts.get("classification") or {}
+    classification = _case_classification(facts, defaults)
     characteristics = facts.get("characteristics") or {}
     required = {
         "authorCpf": facts.get("authorCpf"),
@@ -89,9 +125,12 @@ def require_facts(facts, defaults):
             raise ValueError("author.address.numero must be a nonempty string")
     if not re.fullmatch(r"\d+(?:\.\d{3})*,\d{2}", str(characteristics["claimValue"])):
         raise ValueError("claimValue must be Brazilian currency, e.g. 5.000,00")
-    for key in ("legalAid", "injunction"):
+    for key in ("legalAid", "injunction", "digitalCourt", "secrecy"):
         if key in characteristics and not isinstance(characteristics[key], bool):
             raise ValueError(f"characteristics.{key} must be a boolean")
+    if characteristics.get("secrecy") is True:
+        raise ValueError("characteristics.secrecy true is not supported: segredo de justiça is set by hand in PJe")
+    _case_characteristics(facts, defaults)
 
 
 def _check_cpf(value, label):
@@ -122,8 +161,19 @@ def _check_attorneys(attorneys):
 
 def _check_representative(representative):
     """The author's legal representative: who signs for a minor or a represented author."""
-    if not isinstance(representative, dict) or set(representative) != {"cpf", "name", "kind"}:
-        raise ValueError("author.representative needs exactly cpf, name and kind")
+    if not isinstance(representative, dict) or not {"cpf", "name", "kind"} <= set(representative) <= {
+        "cpf",
+        "name",
+        "kind",
+        "address",
+    }:
+        raise ValueError("author.representative needs cpf, name and kind (and optionally address)")
+    if "address" in representative:
+        address = representative["address"]
+        if not isinstance(address, dict) or not re.fullmatch(r"\d{5}-?\d{3}", str(address.get("cep") or "")):
+            raise ValueError("author.representative.address.cep must have 8 digits")
+        if not isinstance(address.get("numero"), str) or not address["numero"].strip():
+            raise ValueError("author.representative.address.numero must be a nonempty string")
     _check_cpf(representative["cpf"], "author.representative.cpf")
     if not isinstance(representative["name"], str) or not representative["name"].strip():
         raise ValueError("author.representative.name is required")
@@ -163,19 +213,11 @@ def build_payload(facts, documents, defaults):
     author = facts["author"]
     payload = {
         **defaults,
-        "classification": {
-            "area": "DIREITO PREVIDENCIÁRIO",
-            **(defaults.get("classification") or {}),
-            **facts["classification"],
-        },
-        "subjects": facts.get("subjects") or [facts["subject"]],
+        "classification": _case_classification(facts, defaults),
+        "subjects": _case_subjects(facts, defaults),
         "authorCpf": _digits(facts["authorCpf"]),
         "author": _author(author),
-        "characteristics": {
-            **defaults["characteristics"],
-            **facts["characteristics"],
-            "priority": defaults["characteristics"].get("priority", False),
-        },
+        "characteristics": _case_characteristics(facts, defaults),
         "documents": documents,
     }
     if "otherParticipants" in defaults:

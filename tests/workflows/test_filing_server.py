@@ -175,6 +175,11 @@ class FilingServerTests(unittest.TestCase):
             )
         view = ok.structured_content["payload"]
         self.assertEqual(view["author"]["cpf"], "123.***.***-09")
+        self.assertNotIn("representative", view["author"])
+        mother = {"cpf": "99988877766", "name": "M", "kind": "mae", "address": {"cep": "68900-000", "numero": "1"}}
+        shown = filing._payload_view({**payload, "author": {**payload["author"], "representative": mother}})
+        self.assertEqual(shown["author"]["representative"]["cpf"], "999.***.***-66")
+        self.assertEqual(shown["author"]["representative"]["address"], mother["address"])
         self.assertEqual(view["documents"][0]["name"], "p.pdf")
         self.assertNotIn("/secret", json.dumps(ok.structured_content))
 

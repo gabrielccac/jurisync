@@ -57,14 +57,27 @@ def validate_characteristics(characteristics):
     for key in ("legalAid", "injunction"):
         if not isinstance(characteristics.get(key), bool):
             raise ValueError(f"{key} must be a boolean")
-    priority = characteristics.get("priority")
-    if (
-        priority is not None
-        and priority is not False
-        and (not isinstance(priority, str) or not priority.strip() or re.fullmatch(r"N[ÃA]O", priority.strip(), re.I))
-    ):
-        raise ValueError("priority must be a PJe option label or false to omit it")
+    priority_labels(characteristics)
+    for key in ("digitalCourt", "secrecy"):
+        if key in characteristics and not isinstance(characteristics[key], bool):
+            raise ValueError(f"{key} must be a boolean")
+    if characteristics.get("secrecy") is True:
+        raise ValueError("secrecy true is not supported: set segredo de justiça by hand in PJe")
     return claim_value
+
+
+def priority_labels(characteristics):
+    """The priorities to have on the draft: one label, a list of labels (new form), or false/absent for none."""
+    priority = characteristics.get("priority")
+    if priority is None or priority is False:
+        return []
+    labels = [priority] if isinstance(priority, str) else priority
+    if not isinstance(labels, list) or any(
+        not isinstance(label, str) or not label.strip() or re.fullmatch(r"N[ÃA]O", label.strip(), re.I)
+        for label in labels
+    ):
+        raise ValueError("priority must be a PJe option label, a list of labels, or false to omit it")
+    return [label.strip() for label in labels]
 
 
 def validate_fill_payload(payload):
@@ -84,6 +97,8 @@ def validate_fill_payload(payload):
         if not isinstance(representative, dict) or not all(representative.get(key) for key in ("cpf", "name", "kind")):
             raise ValueError("author.representative needs cpf, name and kind")
         masked_cpf(representative["cpf"])
+        if representative.get("address") is not None:
+            address_cep(representative["address"])
     if "attorney" in payload:
         raise ValueError("Use attorneys (a list of extra attorneys), not attorney: finalize the payload again")
     attorneys = payload.get("attorneys", [])

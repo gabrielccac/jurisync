@@ -278,6 +278,39 @@ class PayloadTest(unittest.TestCase):
                 {**facts, "author": {"name": "X", "representative": {**mother, "kind": "avó"}}}, {}, PROFILE.defaults()
             )
 
+    def test_priorities_are_the_profiles_fixed_ones_plus_the_cases_or_the_default(self):
+        defaults = {
+            **PROFILE.defaults(),
+            "characteristics": {"legalAid": True, "injunction": False, "priority": "Juízo 100% Digital"},
+        }
+        self.assertEqual(build_payload(FACTS, {}, defaults)["characteristics"]["priority"], ["Juízo 100% Digital"])
+        defaults["characteristics"]["defaultPriority"] = ["Pessoa com deficiência"]
+        self.assertEqual(
+            build_payload(FACTS, {}, defaults)["characteristics"]["priority"],
+            ["Juízo 100% Digital", "Pessoa com deficiência"],
+        )
+        idoso = {**FACTS, "characteristics": {**FACTS["characteristics"], "priority": ["Idoso(a)"]}}
+        self.assertEqual(
+            build_payload(idoso, {}, defaults)["characteristics"]["priority"], ["Juízo 100% Digital", "Idoso(a)"]
+        )
+        self.assertNotIn("defaultPriority", build_payload(idoso, {}, defaults)["characteristics"])
+        for bad in ({"priority": [""]}, {"secrecy": True}, {"digitalCourt": "sim"}):
+            facts = {**FACTS, "characteristics": {**FACTS["characteristics"], **bad}}
+            with self.subTest(bad), self.assertRaises(ValueError):
+                build_payload(facts, {}, defaults)
+
+    def test_the_representative_may_carry_an_address(self):
+        mother = {"cpf": "99988877766", "name": "M", "kind": "mae", "address": {"cep": "68900-000", "numero": "12"}}
+        payload = build_payload({**FACTS, "author": {"name": "E", "representative": mother}}, {}, PROFILE.defaults())
+        self.assertEqual(payload["author"]["representative"]["address"], {"cep": "68900-000", "numero": "12"})
+        for address in ({"cep": "1"}, {"cep": "68900-000"}):
+            with self.subTest(address), self.assertRaisesRegex(ValueError, "representative.address"):
+                build_payload(
+                    {**FACTS, "author": {"name": "E", "representative": {**mother, "address": address}}},
+                    {},
+                    PROFILE.defaults(),
+                )
+
     def test_fiscal_da_lei_is_conditional_and_ceab_is_fixed(self):
         def bodies(facts):
             payload = build_payload(facts, {}, PROFILE.defaults())

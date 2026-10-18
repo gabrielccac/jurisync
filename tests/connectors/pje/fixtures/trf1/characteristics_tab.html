@@ -1,0 +1,274 @@
+<!-- TRF1 PJe 2.13.3.0 characteristics tab, captured read-only on 2026-10-17; claim value replaced, no personal data. -->
+<div><form action="/pje/Processo/update.seam" class="edit" enctype="multipart/form-data" id="formAdicionarCaracteristicasProcesso" method="post" name="formAdicionarCaracteristicasProcesso"><div class="rich-panel" id="formAdicionarCaracteristicasProcesso:j_id1466"><div class="rich-panel-body" id="formAdicionarCaracteristicasProcesso:j_id1466_body"><script type="text/javascript">//<![CDATA[
+         
+        (function($) {
+                function getDialogMessageNotEmpty() {
+                        return '*[id=dialogMessage]:has(dt span), .modal-popup:has(dt span)';
+                }
+                
+                function getAllDialogMessage() {
+                        return '*[id=dialogMessage], .modal-popup';
+                }
+                
+                function hideClosestDialogMessage(element) {
+                        hideDialog($(element).closest('*[id=dialogMessage]'));
+                }
+                
+                function showAndCloseDialogMessage() {
+                        var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');
+                        showDialogMessage(functionSetTimeout);
+                }
+                
+                function showDialogMessage(functionSetTimeout) {
+                        cancelAllHideDialogMessages();
+                        showDialog(getDialogMessageNotEmpty());
+                }
+                
+                function cancelAllHideDialogMessages() {
+                        var functionTimeout = $(window).data('timeoutDialogMessage');
+                        if (functionTimeout) {
+                                clearTimeout(functionTimeout);
+                        }
+                }
+                
+                function hideDialogMessage(element) {
+                        if (element) {
+                                //ao apertar botao de fechar
+                                cancelAllHideDialogMessages();
+                                hideClosestDialogMessage(element);
+                        } else {
+                                //ao fechar sozinho (timeout)
+                                hideDialog(getDialogMessageNotEmpty());
+                        }
+                }       
+                
+                function actionDialogMessage() {
+                        var globalMessages = 'false'; 
+                        if(globalMessages == 'true') {  
+                                if('true' == 'true') {          
+                                        if($('dt[class=error]').html() == null) {
+                                                var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');                                     
+                                                showDialogMessage(functionSetTimeout);
+                                        } else {
+                                                showDialogMessage();
+                                        }       
+                                }                       
+                        }       
+                }       
+                
+                function hideDialog(selector) {
+                        var $dialog = $(selector);
+                        if($dialog.size() == 0) {
+                                $dialog = $(getAllDialogMessage());                                                     
+                        }
+                        
+                        $dialog.css('visibility', 'hidden');
+                        $dialog.css('opacity', '0');
+                }
+                
+                function showDialog(selector) {
+                        var $dialog = $(selector);
+                        
+                        if($dialog.size() > 0) {
+                                $dialog.css('visibility', 'visible');
+                                $dialog.css('opacity', '1');
+                                if (functionSetTimeout) {
+                                        $(window).data('timeoutDialogMessage', functionSetTimeout);
+                                }
+                        }
+                }
+                
+                window.showDialogMessage = showDialogMessage;
+                window.hideDialogMessage = hideDialogMessage;
+                window.showAndCloseDialogMessage = showAndCloseDialogMessage;
+                
+                //Executar o dialog ao fazer uma requisição AJAX ou NÃO-AJAX no formulário.     
+                window.onload = function() {
+                        actionDialogMessage();  
+                }               
+                actionDialogMessage();
+        })(jQuery_21);
+        //]]>
+</script> <div class="modal-popup" id="dialogMessage"><div class="modal-header" id="title">Mensagem <span class="btn-fechar" onclick="hideDialogMessage(this);"><i class="icon-fechar"></i></span></div><div class="modal-content text-center"><dl class="rich-messages" id="formAdicionarCaracteristicasProcesso:formAdicionarCaracteristicasProcessoMessage" style="display: none;"><dt></dt></dl></div></div> <span id="formAdicionarCaracteristicasProcesso:justicaGratuita"><div class="propertyView col-sm-2"><div class="name" id="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:fieldjusticaGratuitaDiv"><label class="" for="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio">Justiça Gratuita?</label><a class="ml-5 mt-15" href="#" id="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:j_id1478" name="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:j_id1478" onclick="A4J.AJAX.Submit('formAdicionarCaracteristicasProcesso',event,{'similarityGroupingId':'formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:j_id1478','containerId':'j_id1464','parameters':{'ajaxSingle':'formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:j_id1478','formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:j_id1478':'formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:j_id1478'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar "/></a></div><div class="value col-sm-12"><table class="radio" id="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio"><tbody><tr><td><input checked="checked" id="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio:0" name="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio" onchange="" onclick="" type="radio" value="true"/> <label for="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio:0">Sim</label></td><td><input id="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio:1" name="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio" onchange="" onclick="" type="radio" value="false"/> <label for="formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuitaSelectOneRadio:1">Não</label></td></tr></tbody></table></div></div> <script type="text/javascript">//<![CDATA[
+ 
+            // utilizarValorPadrao deve ser setado como true caso, mesmo o value 
+            // tendo um valor, esse valor não esteja listado dentre os valores possíveis do radiobox
+                if ('true' == '') {
+                        if ("justicaGratuita" != "") { // Usando o wi:form
+                                obj = $('formAdicionarCaracteristicasProcesso:justicaGratuita:justicaGratuitaDecoration:justicaGratuita:1');
+                        } else { //Usando o wi:dataForm
+                                obj = $('formAdicionarCaracteristicasProcesso:justicaGratuitaDecoration:justicaGratuita:1');
+                        }       
+                        if (obj) {
+                                obj.checked = true;
+                        }
+                }
+        //]]>
+</script></span> <span id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital"><div class="propertyView col-sm-2"><div class="name" id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:fieldsolicitadoJuizo100PorCentoDigitalDiv"><label class="" for="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio">Deseja solicitar juízo 100% digital?</label><a class="ml-5 mt-15" href="#" id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1494" name="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1494" onclick="A4J.AJAX.Submit('formAdicionarCaracteristicasProcesso',event,{'similarityGroupingId':'formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1494','containerId':'j_id1464','parameters':{'ajaxSingle':'formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1494','formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1494':'formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1494'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar "/></a> <i class="fas fa-question-circle" height="12px" id="fieldsolicitadoJuizo100PorCentoDigitalEditTipImg"></i><span class="rich-tool-tip" id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1498" style="z-index:99;"><span id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1498content">Segundo a Resolução 345 do CNJ, No âmbito do Juízo 100% Digital, todos os atos processuais serão exclusivamente praticados por meio eletrônico e remoto por intermédio da rede mundial de computadores.</span><span id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1498script" style="display:none"><script id="scriptformAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1498" type="text/javascript">//<![CDATA[
+new ToolTip("formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:j_id1498","fieldsolicitadoJuizo100PorCentoDigitalEditTipImg",{'showEvent':'mouseover'} );
+//]]>
+</script></span></span></div><div class="value col-sm-12"><table class="radio" id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio"><tbody><tr><td><input checked="checked" id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio:0" name="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio" onchange="" onclick="" type="radio" value="true"/> <label for="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio:0">Sim</label></td><td><input id="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio:1" name="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio" onchange="" onclick="" type="radio" value="false"/> <label for="formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigitalSelectOneRadio:1">Não</label></td></tr></tbody></table></div></div> <script type="text/javascript">//<![CDATA[
+ 
+            // utilizarValorPadrao deve ser setado como true caso, mesmo o value 
+            // tendo um valor, esse valor não esteja listado dentre os valores possíveis do radiobox
+                if ('true' == '') {
+                        if ("solicitadoJuizo100PorCentoDigital" != "") { // Usando o wi:form
+                                obj = $('formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigital:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigital:1');
+                        } else { //Usando o wi:dataForm
+                                obj = $('formAdicionarCaracteristicasProcesso:solicitadoJuizo100PorCentoDigitalDecoration:solicitadoJuizo100PorCentoDigital:1');
+                        }       
+                        if (obj) {
+                                obj.checked = true;
+                        }
+                }
+        //]]>
+</script></span> <span id="formAdicionarCaracteristicasProcesso:tutelaLiminar"><div class="propertyView col-sm-4"><div class="name" id="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:fieldtutelaLiminarDiv"><label class="" for="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio">Pedido de liminar ou de antecipação de tutela?</label><a class="ml-5 mt-15" href="#" id="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:j_id1512" name="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:j_id1512" onclick="A4J.AJAX.Submit('formAdicionarCaracteristicasProcesso',event,{'similarityGroupingId':'formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:j_id1512','containerId':'j_id1464','parameters':{'formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:j_id1512':'formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:j_id1512','ajaxSingle':'formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:j_id1512'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar "/></a></div><div class="value col-sm-12"><table class="radio" id="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio"><tbody><tr><td><input id="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio:0" name="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio" onchange="" onclick="" type="radio" value="true"/> <label for="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio:0">Sim</label></td><td><input checked="checked" id="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio:1" name="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio" onchange="" onclick="" type="radio" value="false"/> <label for="formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminarSelectOneRadio:1">Não</label></td></tr></tbody></table></div></div> <script type="text/javascript">//<![CDATA[
+ 
+            // utilizarValorPadrao deve ser setado como true caso, mesmo o value 
+            // tendo um valor, esse valor não esteja listado dentre os valores possíveis do radiobox
+                if ('false' == '') {
+                        if ("tutelaLiminar" != "") { // Usando o wi:form
+                                obj = $('formAdicionarCaracteristicasProcesso:tutelaLiminar:tutelaLiminarDecoration:tutelaLiminar:1');
+                        } else { //Usando o wi:dataForm
+                                obj = $('formAdicionarCaracteristicasProcesso:tutelaLiminarDecoration:tutelaLiminar:1');
+                        }       
+                        if (obj) {
+                                obj.checked = true;
+                        }
+                }
+        //]]>
+</script></span> <span id="formAdicionarCaracteristicasProcesso:valorCausa"><div class="propertyView col-sm-2"><div class="name" id="formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:fieldvalorCausaDiv"><label class="" for="formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:valorCausa">Valor da causa (R$)</label><a class="ml-5 mt-15" href="#" id="formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:j_id1529" name="formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:j_id1529" onclick="A4J.AJAX.Submit('formAdicionarCaracteristicasProcesso',event,{'similarityGroupingId':'formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:j_id1529','containerId':'j_id1464','parameters':{'formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:j_id1529':'formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:j_id1529','ajaxSingle':'formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:j_id1529'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar "/></a></div><div class="value col-sm-12"><script type="text/javascript">//<![CDATA[
+  jQuery(document).ready(function() {
+        var selector = "#formAdicionarCaracteristicasProcesso\\:valorCausa\\:valorCausaDecoration\\:valorCausa";
+        try {
+                selector = eval("#formAdicionarCaracteristicasProcesso\\:valorCausa\\:valorCausaDecoration\\:valorCausa");
+        } catch (e) {}
+        jQuery(selector).maskMoney();
+ });
+//]]>
+</script><input alt="#(alt)" class="" id="formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:valorCausa" maxlength="23" name="formAdicionarCaracteristicasProcesso:valorCausa:valorCausaDecoration:valorCausa" onblur="" onchange="" onfocus="" onkeypress="" onkeyup="" size="0" tabindex="" type="text" value="1.000,00"/></div></div></span> <div class="col-sm-12 clearfix"><script id="formAdicionarCaracteristicasProcesso:j_id1540" type="text/javascript">//<![CDATA[
+                exibeConfirmacaoComplementos=function(){A4J.AJAX.Submit('formAdicionarCaracteristicasProcesso',null,{'similarityGroupingId':'formAdicionarCaracteristicasProcesso:j_id1540','containerId':'j_id1464','oncomplete':function(request,event,data){if(!alert('')){ document.getElementById('complementoClasse_shifted').click();}},'parameters':{'formAdicionarCaracteristicasProcesso:j_id1540':'formAdicionarCaracteristicasProcesso:j_id1540'} } )};
+                //]]>
+</script> <div class="actionButtons"><input class="btn btn-primary" id="formAdicionarCaracteristicasProcesso:salvaCaracteristicaProcessoButton" name="formAdicionarCaracteristicasProcesso:salvaCaracteristicaProcessoButton" onclick="A4J.AJAX.Submit('formAdicionarCaracteristicasProcesso',event,{'similarityGroupingId':'formAdicionarCaracteristicasProcesso:salvaCaracteristicaProcessoButton','containerId':'j_id1464','parameters':{'formAdicionarCaracteristicasProcesso:salvaCaracteristicaProcessoButton':'formAdicionarCaracteristicasProcesso:salvaCaracteristicaProcessoButton'} } );return false;" type="button" value="Salvar"/></div></div></div></div><input autocomplete="off" name="formAdicionarCaracteristicasProcesso" type="hidden" value="formAdicionarCaracteristicasProcesso"/><input autocomplete="off" name="autoScroll" type="hidden" value=""/><input autocomplete="off" name="formAdicionarCaracteristicasProcesso:_link_hidden_" type="hidden" value=""/><input autocomplete="off" name="formAdicionarCaracteristicasProcesso:j_idcl" type="hidden" value=""/><script type="text/javascript">//<![CDATA[
+function clear_formAdicionarCaracteristicasProcesso() {
+_clearJSFFormParameters('formAdicionarCaracteristicasProcesso','',['formAdicionarCaracteristicasProcesso:_link_hidden_','formAdicionarCaracteristicasProcesso:j_idcl']);
+}
+function clearFormHiddenParams_formAdicionarCaracteristicasProcesso(){clear_formAdicionarCaracteristicasProcesso();}
+function clearFormHiddenParams_formAdicionarCaracteristicasProcesso(){clear_formAdicionarCaracteristicasProcesso();}
+clear_formAdicionarCaracteristicasProcesso();
+//]]>
+</script><input autocomplete="off" id="javax.faces.ViewState" name="javax.faces.ViewState" type="hidden" value="j_id32"/></form><form action="/pje/Processo/update.seam" enctype="application/x-www-form-urlencoded" id="frmSegredoSig" method="post" name="frmSegredoSig"><input name="frmSegredoSig" type="hidden" value="frmSegredoSig"/> <div class="rich-panel" id="frmSegredoSig:j_id1548"><div class="rich-panel-body" id="frmSegredoSig:j_id1548_body"><div class="rich-panel" id="frmSegredoSig:j_id1549"><div class="rich-panel-header" id="frmSegredoSig:j_id1549_header">Segredo de Justiça</div><div class="rich-panel-body" id="frmSegredoSig:j_id1549_body"><div><div><table id="frmSegredoSig:selectOneRadio"><tbody><tr><td><input id="frmSegredoSig:selectOneRadio:0" name="frmSegredoSig:selectOneRadio" onclick="A4J.AJAX.Submit('frmSegredoSig',event,{'similarityGroupingId':'frmSegredoSig:j_id1553','control':this,'parameters':{'frmSegredoSig:j_id1553':'frmSegredoSig:j_id1553','ajaxSingle':'frmSegredoSig:selectOneRadio'} ,'status':'_viewRoot:status'} )" type="radio" value="true"/> <label for="frmSegredoSig:selectOneRadio:0">Sim</label></td></tr><tr><td><input checked="checked" id="frmSegredoSig:selectOneRadio:1" name="frmSegredoSig:selectOneRadio" onclick="A4J.AJAX.Submit('frmSegredoSig',event,{'similarityGroupingId':'frmSegredoSig:j_id1553','control':this,'parameters':{'frmSegredoSig:j_id1553':'frmSegredoSig:j_id1553','ajaxSingle':'frmSegredoSig:selectOneRadio'} ,'status':'_viewRoot:status'} )" type="radio" value="false"/> <label for="frmSegredoSig:selectOneRadio:1">Não</label></td></tr></tbody></table></div><div id="frmSegredoSig:observacaoSegredoDiv"></div></div></div></div><div id="frmSegredoSig:j_id1573"><input class="btn btn-primary pull-left" id="frmSegredoSig:grvSegredo" name="frmSegredoSig:grvSegredo" onclick="A4J.AJAX.Submit('frmSegredoSig',event,{'similarityGroupingId':'frmSegredoSig:grvSegredo','eventsQueue':'editQueue','parameters':{'frmSegredoSig:grvSegredo':'frmSegredoSig:grvSegredo'} ,'status':'_viewRoot:status'} );return false;" type="button" value="Gravar sigilo"/></div></div></div><input autocomplete="off" id="javax.faces.ViewState" name="javax.faces.ViewState" type="hidden" value="j_id32"/></form><form action="/pje/Processo/update.seam" class="edit" enctype="application/x-www-form-urlencoded" id="formAddPrioridadeProcesso" method="post" name="formAddPrioridadeProcesso"><div class="rich-panel" id="formAddPrioridadeProcesso:j_id1576"><div class="rich-panel-body" id="formAddPrioridadeProcesso:j_id1576_body"><script type="text/javascript">//<![CDATA[
+         
+        (function($) {
+                function getDialogMessageNotEmpty() {
+                        return '*[id=dialogMessage]:has(dt span), .modal-popup:has(dt span)';
+                }
+                
+                function getAllDialogMessage() {
+                        return '*[id=dialogMessage], .modal-popup';
+                }
+                
+                function hideClosestDialogMessage(element) {
+                        hideDialog($(element).closest('*[id=dialogMessage]'));
+                }
+                
+                function showAndCloseDialogMessage() {
+                        var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');
+                        showDialogMessage(functionSetTimeout);
+                }
+                
+                function showDialogMessage(functionSetTimeout) {
+                        cancelAllHideDialogMessages();
+                        showDialog(getDialogMessageNotEmpty());
+                }
+                
+                function cancelAllHideDialogMessages() {
+                        var functionTimeout = $(window).data('timeoutDialogMessage');
+                        if (functionTimeout) {
+                                clearTimeout(functionTimeout);
+                        }
+                }
+                
+                function hideDialogMessage(element) {
+                        if (element) {
+                                //ao apertar botao de fechar
+                                cancelAllHideDialogMessages();
+                                hideClosestDialogMessage(element);
+                        } else {
+                                //ao fechar sozinho (timeout)
+                                hideDialog(getDialogMessageNotEmpty());
+                        }
+                }       
+                
+                function actionDialogMessage() {
+                        var globalMessages = 'false'; 
+                        if(globalMessages == 'true') {  
+                                if('true' == 'true') {          
+                                        if($('dt[class=error]').html() == null) {
+                                                var functionSetTimeout = setTimeout('hideDialogMessage()', '4000');                                     
+                                                showDialogMessage(functionSetTimeout);
+                                        } else {
+                                                showDialogMessage();
+                                        }       
+                                }                       
+                        }       
+                }       
+                
+                function hideDialog(selector) {
+                        var $dialog = $(selector);
+                        if($dialog.size() == 0) {
+                                $dialog = $(getAllDialogMessage());                                                     
+                        }
+                        
+                        $dialog.css('visibility', 'hidden');
+                        $dialog.css('opacity', '0');
+                }
+                
+                function showDialog(selector) {
+                        var $dialog = $(selector);
+                        
+                        if($dialog.size() > 0) {
+                                $dialog.css('visibility', 'visible');
+                                $dialog.css('opacity', '1');
+                                if (functionSetTimeout) {
+                                        $(window).data('timeoutDialogMessage', functionSetTimeout);
+                                }
+                        }
+                }
+                
+                window.showDialogMessage = showDialogMessage;
+                window.hideDialogMessage = hideDialogMessage;
+                window.showAndCloseDialogMessage = showAndCloseDialogMessage;
+                
+                //Executar o dialog ao fazer uma requisição AJAX ou NÃO-AJAX no formulário.     
+                window.onload = function() {
+                        actionDialogMessage();  
+                }               
+                actionDialogMessage();
+        })(jQuery_21);
+        //]]>
+</script> <div class="modal-popup" id="dialogMessage"><div class="modal-header" id="title">Mensagem <span class="btn-fechar" onclick="hideDialogMessage(this);"><i class="icon-fechar"></i></span></div><div class="modal-content text-center"><dl class="rich-messages" id="formAddPrioridadeProcesso:formAddPrioridadeProcessoMessage" style="display: none;"><dt></dt></dl></div></div> <span id="formAddPrioridadeProcesso:prioridadeProcesso"><div class="propertyView col-sm-8"><div class="name" id="formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:fieldprioridadeProcessoDiv"><label class="" for="formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcesso">Prioridade de processo</label><a class="ml-5 mt-15" href="#" id="formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:j_id1588" name="formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:j_id1588" onclick="A4J.AJAX.Submit('formAddPrioridadeProcesso',event,{'similarityGroupingId':'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:j_id1588','parameters':{'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:j_id1588':'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:j_id1588','ajaxSingle':'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:j_id1588'} } );return false;" tabindex="-1"><img src="/pje/img/unlocked.gif" title="Manter valor ao cadastrar "/></a></div><div class="value col-sm-12"><select id="formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcesso" name="formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcesso" onchange="A4J.AJAX.Submit('formAddPrioridadeProcesso',event,{'similarityGroupingId':'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcessoSupport','control':this,'parameters':{'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcessoSupport':'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcessoSupport','ajaxSingle':'formAddPrioridadeProcesso:prioridadeProcesso:prioridadeProcessoDecoration:prioridadeProcesso'} } )" size="1"><option selected="selected" value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option><option value="118">Art. 1048, II, do CPC (ECA)</option><option value="119">Art. 1048, III, do CPC (Lei Maria da Penha)</option><option value="120">Art. 1048, IV, do CPC (Licitação)</option><option value="121">Art. 13 - Portaria Conjunta CNJ Nº 7 de 23/10/2023</option><option value="122">Art. 189-A, da Lei n. 11.101/2005</option><option value="123">Art. 19, da Lei n. 9.507/1997</option><option value="124">Art. 7o, parágrafo 4o, da Lei n. 12.016/2009</option><option value="125">Idoso(a)</option><option value="126">Idoso(a) maior de 80 anos</option><option value="127">Pessoa com transtorno do espectro autista</option><option value="128">Pessoa em situação de rua</option><option value="129">Portador(a) de doença grave</option><option value="130">Réu Preso</option></select></div></div></span> <div class="col-sm-12 clearfix"><div class="actionButtons" id="formAddPrioridadeProcesso:j_id1599"><input class="btn btn-primary" id="formAddPrioridadeProcesso:save" name="formAddPrioridadeProcesso:save" onclick="showLoading();;A4J.AJAX.Submit('formAddPrioridadeProcesso',event,{'similarityGroupingId':'formAddPrioridadeProcesso:save','eventsQueue':'editQueue','oncomplete':function(request,event,data){hideLoading();},'parameters':{'formAddPrioridadeProcesso:save':'formAddPrioridadeProcesso:save'} } );return false;" type="button" value="Incluir"/></div></div></div></div><input autocomplete="off" name="formAddPrioridadeProcesso" type="hidden" value="formAddPrioridadeProcesso"/><input autocomplete="off" name="autoScroll" type="hidden" value=""/><input autocomplete="off" name="formAddPrioridadeProcesso:j_idcl" type="hidden" value=""/><input autocomplete="off" name="formAddPrioridadeProcesso:_link_hidden_" type="hidden" value=""/><script type="text/javascript">//<![CDATA[
+function clear_formAddPrioridadeProcesso() {
+_clearJSFFormParameters('formAddPrioridadeProcesso','',['formAddPrioridadeProcesso:j_idcl','formAddPrioridadeProcesso:_link_hidden_']);
+}
+function clearFormHiddenParams_formAddPrioridadeProcesso(){clear_formAddPrioridadeProcesso();}
+function clearFormHiddenParams_formAddPrioridadeProcesso(){clear_formAddPrioridadeProcesso();}
+clear_formAddPrioridadeProcesso();
+//]]>
+</script><input autocomplete="off" id="javax.faces.ViewState" name="javax.faces.ViewState" type="hidden" value="j_id32"/></form><table border="0" cellpadding="0" cellspacing="0" class="rich-table" id="processoPrioridadeProcessoAbaList"><colgroup span="2"></colgroup><thead class="rich-table-thead"><tr class="rich-table-subheader"><th class="rich-table-subheadercell" id="processoPrioridadeProcessoAbaList:j_id1610header" scope="col"><div id="processoPrioridadeProcessoAbaList:j_id1610header:sortDiv"><div id="processoPrioridadeProcessoAbaList:j_id1611"></div></div></th><th class="rich-table-subheadercell" colspan="1" id="processoPrioridadeProcessoAbaList:j_id1615header" scope="col"><div id="processoPrioridadeProcessoAbaList:j_id1615header:sortDiv"><form action="/pje/Processo/update.seam" class="text-left" id="processoPrioridadeProcessoAbaList:j_id1617" method="post" name="processoPrioridadeProcessoAbaList:j_id1617"><span class="ml-5 mr-5 text-left">Prioridade do Processo</span><input autocomplete="off" name="processoPrioridadeProcessoAbaList:j_id1617" type="hidden" value="processoPrioridadeProcessoAbaList:j_id1617"/><input autocomplete="off" name="autoScroll" type="hidden" value=""/><input autocomplete="off" name="processoPrioridadeProcessoAbaList:j_id1617:_link_hidden_" type="hidden" value=""/><input autocomplete="off" name="processoPrioridadeProcessoAbaList:j_id1617:j_idcl" type="hidden" value=""/><script type="text/javascript">//<![CDATA[
+function clear_processoPrioridadeProcessoAbaList_3Aj_id1617() {
+_clearJSFFormParameters('processoPrioridadeProcessoAbaList:j_id1617','',['processoPrioridadeProcessoAbaList:j_id1617:_link_hidden_','processoPrioridadeProcessoAbaList:j_id1617:j_idcl']);
+}
+function clearFormHiddenParams_processoPrioridadeProcessoAbaList_3Aj_id1617(){clear_processoPrioridadeProcessoAbaList_3Aj_id1617();}
+function clearFormHiddenParams_processoPrioridadeProcessoAbaList_j_id1617(){clear_processoPrioridadeProcessoAbaList_3Aj_id1617();}
+clear_processoPrioridadeProcessoAbaList_3Aj_id1617();
+//]]>
+</script><input autocomplete="off" id="javax.faces.ViewState" name="javax.faces.ViewState" type="hidden" value="j_id32"/></form></div></th></tr></thead><tbody id="processoPrioridadeProcessoAbaList:tb"><tr class="rich-table-row rich-table-firstrow"><td class="rich-table-cell table-toolbar" id="processoPrioridadeProcessoAbaList:0:j_id1610" rowspan="1" width="90px;"><form action="/pje/Processo/update.seam" id="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso" method="post" name="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso"><div><a class="btn btn-default btn-sm tip" href="#" id="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:linkRemoverPrioridadeProcesso" name="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:linkRemoverPrioridadeProcesso" onclick="if(!confirm('Confirma a exclusão?')) return false;;A4J.AJAX.Submit('processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso',event,{'similarityGroupingId':'processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:linkRemoverPrioridadeProcesso','containerId':'processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:regionRemoverPrioridadeProcesso','parameters':{'processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:linkRemoverPrioridadeProcesso':'processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:linkRemoverPrioridadeProcesso'} ,'status':'_viewRoot:status'} );return false;" title="Excluir"><i class="fa fa-trash-o"></i></a></div><input autocomplete="off" name="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso" type="hidden" value="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso"/><input autocomplete="off" name="autoScroll" type="hidden" value=""/><input autocomplete="off" name="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:_link_hidden_" type="hidden" value=""/><input autocomplete="off" name="processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:j_idcl" type="hidden" value=""/><script type="text/javascript">//<![CDATA[
+function clear_processoPrioridadeProcessoAbaList_3A0_3AformRemoverPrioridadeProcesso() {
+_clearJSFFormParameters('processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso','',['processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:_link_hidden_','processoPrioridadeProcessoAbaList:0:formRemoverPrioridadeProcesso:j_idcl']);
+}
+function clearFormHiddenParams_processoPrioridadeProcessoAbaList_3A0_3AformRemoverPrioridadeProcesso(){clear_processoPrioridadeProcessoAbaList_3A0_3AformRemoverPrioridadeProcesso();}
+function clearFormHiddenParams_processoPrioridadeProcessoAbaList_0_formRemoverPrioridadeProcesso(){clear_processoPrioridadeProcessoAbaList_3A0_3AformRemoverPrioridadeProcesso();}
+clear_processoPrioridadeProcessoAbaList_3A0_3AformRemoverPrioridadeProcesso();
+//]]>
+</script><input autocomplete="off" id="javax.faces.ViewState" name="javax.faces.ViewState" type="hidden" value="j_id32"/></form></td><td class="rich-table-cell text-break text-left" colspan="1" id="processoPrioridadeProcessoAbaList:0:j_id1615" rowspan="1"><div class="col-sm-12" title=""><span class="text-left">Pessoa com deficiência</span></div></td></tr></tbody></table><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id29"/></div>

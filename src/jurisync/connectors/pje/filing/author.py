@@ -26,12 +26,14 @@ class AuthorMixin:
     def representative_manual_step(self, checkpoint, author, save=None):
         """Record, in the checkpoint, that the author's legal representative must be associated by hand in PJe."""
         representative = author["representative"]
-        digits = re.sub(r"\D", "", representative["cpf"])
+        # Everything whoever does the step by hand needs (the checkpoint is owner-only).
         step = {
             "step": "legal representative",
             "name": representative["name"],
-            "cpf": f"{digits[:3]}.***.***-{digits[-2:]}",
+            "cpf": masked_cpf(representative["cpf"]),
             "kind": representative["kind"],
+            **({"address": representative["address"]} if representative.get("address") else {}),
+            "author": author["name"],
             "reason": REPRESENTATIVE_PENDING,
         }
         steps = checkpoint.setdefault("manualSteps", [])

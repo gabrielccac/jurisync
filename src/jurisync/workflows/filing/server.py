@@ -77,6 +77,17 @@ def _mask_cpf(value):
     return f"{digits[:3]}.***.***-{digits[-2:]}" if len(digits) == 11 else None
 
 
+def _representative_view(representative):
+    """The legal representative as the user reviews it (CPF masked); PJe gets it by hand for now."""
+    return {
+        "name": representative.get("name"),
+        "cpf": _mask_cpf(representative.get("cpf")),
+        "kind": representative.get("kind"),
+        **({"address": representative["address"]} if representative.get("address") else {}),
+        "inPje": "manual step: add it to the author in PJe before protocol",
+    }
+
+
 def _payload_view(payload, manifest=None):
     documents = payload.get("documents") or {}
     items = [documents["main"], *documents.get("supporting", [])] if documents.get("main") else []
@@ -88,6 +99,11 @@ def _payload_view(payload, manifest=None):
             "name": (payload.get("author") or {}).get("name"),
             "cpf": _mask_cpf(payload.get("authorCpf")),
             "address": (payload.get("author") or {}).get("address"),
+            **(
+                {"representative": _representative_view(payload["author"]["representative"])}
+                if (payload.get("author") or {}).get("representative")
+                else {}
+            ),
         },
         "characteristics": payload.get("characteristics"),
         "documents": [

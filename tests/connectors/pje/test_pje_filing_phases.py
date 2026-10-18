@@ -113,12 +113,14 @@ class PhaseTests(unittest.TestCase):
         self.assertEqual(len(result["attorneys"]), 2)
 
     def test_a_legal_representative_becomes_a_recorded_manual_step(self):
-        mother = {"cpf": "99988877766", "name": "MARIA MAE", "kind": "mae"}
+        address = {"cep": "68900-000", "numero": "12"}
+        mother = {"cpf": "99988877766", "name": "MARIA MAE", "kind": "mae", "address": address}
         payload = {**PAYLOAD, "author": {"name": "EXAMPLE", "representative": mother}}
         point, saved = checkpoint(), []
         result = Recorder(present=False).fill_draft(point, payload, save=lambda data: saved.append(data))
         step = point["manualSteps"][0]
-        self.assertEqual((step["step"], step["cpf"], step["kind"]), ("legal representative", "999.***.***-66", "mae"))
+        self.assertEqual((step["step"], step["cpf"], step["kind"]), ("legal representative", "999.888.777-66", "mae"))
+        self.assertEqual((step["author"], step["address"]), ("EXAMPLE", {"cep": "68900-000", "numero": "12"}))
         self.assertIn("not automated yet", step["reason"])
         self.assertTrue(result["representative"]["pending"])
         Recorder(present=True).fill_draft(point, payload, verify_all=True)
