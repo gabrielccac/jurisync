@@ -1,5 +1,6 @@
 """HTTP conversation with the TRF5 PJe draft pages: requests, multipart uploads, JSF postbacks."""
 
+import os
 import uuid
 from urllib.parse import urlencode, urlsplit
 
@@ -41,7 +42,8 @@ class Transport:
             },
             impersonate="firefox147",
             allow_redirects=False,
-            timeout=30,
+            # Algumas ações do TRF1 (ex.: escolher o tipo "CNIS" de um anexo) passam de 30 s no servidor.
+            timeout=float(os.environ.get("PJE_POST_TIMEOUT", "120")),
         )
         return self._html(response)
 
