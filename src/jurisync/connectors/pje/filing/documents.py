@@ -329,6 +329,7 @@ class DocumentsMixin:
         # O TRF1 só mostra os botões da linha (atualizar tipo, gravar) na resposta do registro; as respostas
         # seguintes são parciais e não trazem a linha. Os ids são estáveis, então os buscamos aqui se faltarem depois.
         registered = soup
+        registered_html = html
         selects = [
             node
             for node in soup.find_all("select")
@@ -349,12 +350,16 @@ class DocumentsMixin:
             with timeline.step("supporting document", document=path.name):
                 prefix = select["name"].removesuffix(":tipoDoc")
                 soup = BeautifulSoup(html, "html.parser")
-                _, kind, _ = jsf.select_option(soup, select["name"], item["type"])
+                # Depois de gravar uma linha o TRF1 devolve só um trecho da página: as demais linhas (select de tipo,
+                # descrição, ordem) ficam na resposta do registro.
+                row_source = soup if soup.find("select", attrs={"name": select["name"]}) else registered
+                row_html = html if row_source is soup else registered_html
+                _, kind, _ = jsf.select_option(row_source, select["name"], item["type"])
                 fields = dict(base)
                 fields.update(
                     {
                         name: value
-                        for name, value in jsf_data(html)[1].items()
+                        for name, value in jsf_data(row_html)[1].items()
                         if re.match(r".+:\d+:(ordem|tipoDoc|descDoc|numeroDoc)$", name)
                     }
                 )
