@@ -48,6 +48,9 @@ class DocumentClassificationTest(unittest.TestCase):
             "3-PROVAS DA DEPENDENCIA ECONÔMICA_5512.pdf": "Documento Comprobatório",
             "71- DOCUMENTO DE IDENTIFICIAÇÃO DA REPRESENTANDE_6267.pdf": "Documento Comprobatório",
             "Quesitos Auxilio Doença_8587.pdf": "Outros Documentos",
+            "Inicial BPC - Francisley Damasceno.pdf": "petition",
+            "Emenda a Inicial.docx": "unknown",
+            "receitas.pdf": "medical",
         }
         for name, kind in expected.items():
             self.assertEqual(document_kind(name), kind, name)
@@ -77,6 +80,9 @@ class DocumentClassificationTest(unittest.TestCase):
         )
         self.assertEqual(
             claim_value_candidates("Valor da Causa: R$ 28.432,90\nDá-se à causa o valor de R$ 28.432,90"), ["28.432,90"]
+        )
+        self.assertEqual(
+            claim_value_candidates("Atribui-se à causa o valor de R$ 41.631 (quarenta e um mil"), ["41.631,00"]
         )
         self.assertEqual(cpf_candidates("CPF 123.456.789-09; CPF 123.456.789-09"), ["12345678909"])
 

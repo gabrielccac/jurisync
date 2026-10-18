@@ -41,7 +41,7 @@ def plain(value):
 
 
 DEFAULT_RULES = (
-    (r"PETI?CAO|MANDADO DE SEGURANCA", "petition"),
+    (r"PETI?CAO|MANDADO DE SEGURANCA|^INICIAL\b", "petition"),
     (r"^INDEFERIMENTO$", "Carta de Indeferimento"),
     (r"^CONCESSAO$", "Carta de Concessão"),
     (r"COMUNICAD[OA].*DECISAO|COMUNICACAO.*DECISAO|COMUNICAD[OA].*CESSACAO", "decision"),
@@ -51,7 +51,7 @@ DEFAULT_RULES = (
     (r"IDENTIFI.*REPRESENTAN", "Documento Comprobatório"),
     (r"DOCUMENTO DE IDENTIFICACAO|\bRG\b|\bCNH\b", "Documento de Identificação"),
     (r"^PA\b|PROCESSO ADMINISTRATIVO", "Processo Administrativo"),
-    (r"LAUDO|MEDIC|RECEITUARIO|EXAME", "medical"),
+    (r"LAUDO|MEDIC|RECEITUARIO|\bRECEITAS?\b|EXAME", "medical"),
     (
         r"CNIS|CTPS|RESIDENCIA|ATIVIDADE RURAL|PROVAS RURAIS|GRUPO FAMILIAR|CADUNICO|LOAS|COMPROVANTE"
         r"|CERTIDAO DE OBITO|DEPENDENCIA ECONOMICA",
@@ -85,11 +85,13 @@ def decision_outcome(text):
 
 
 def claim_value_candidates(text):
+    """Claim values the petition states, in Brazilian currency ("41.631" becomes "41.631,00")."""
     pattern = (
-        r"VALOR\s+DA\s+CAUSA[^\n]{0,100}?R\$\s*([\d.]+,\d{2})"
-        r"|D[AÁ]-?SE\s+[ÀA]\s+CAUSA\s+O\s+VALOR\s+DE\s+R\$\s*([\d.]+,\d{2})"
+        r"VALOR\s+DA\s+CAUSA[^\n]{0,100}?R\$\s*([\d.]+(?:,\d{2})?)"
+        r"|(?:D[AÁ]-?SE|ATRIBUI-?SE)\s+[ÀA]\s+CAUSA\s+O\s+VALOR\s+DE\s+R\$\s*([\d.]+(?:,\d{2})?)"
     )
-    return list(dict.fromkeys(match[1] or match[2] for match in re.finditer(pattern, str(text), re.I)))
+    values = (match[1] or match[2] for match in re.finditer(pattern, str(text), re.I))
+    return list(dict.fromkeys(value.rstrip(".") + ("" if "," in value else ",00") for value in values))
 
 
 def cpf_candidates(text):

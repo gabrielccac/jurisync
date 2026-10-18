@@ -21,7 +21,8 @@ SIGNALS = (
     r"\bcurador[a]?\b",
     r"\bcuratela\b",
     r"\btutor[a]?\b",
-    r"\brepresentante\s+legal\b",
+    # Not "o representante legal deste/do INSS": every BPC petition names the defendant's representative.
+    r"\brepresentante\s+legal\b(?!\s+(?:deste|desta|dele|dela|do\s+INSS|da\s+autarquia|do\s+r[ée]u))",
 )
 REPRESENTATIVE_KINDS = ("mae", "pai", "tutor", "curador", "procurador", "outro")
 

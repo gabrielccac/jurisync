@@ -63,11 +63,11 @@
       "Cadastro Nacional de Informações Sociais - CNIS"
     ],
     [
-      "LAUDO|ATESTADO|MEDIC|RECEITUARIO|EXAME",
+      "LAUDO|ATESTADO|MEDIC|RECEITUARIO|\\bRECEITAS?\\b|EXAME",
       "Atestado médico"
     ],
     [
-      "PETI?CAO|MANDADO DE SEGURANCA",
+      "PETI?CAO|MANDADO DE SEGURANCA|^INICIAL\\b",
       "petition"
     ],
     [

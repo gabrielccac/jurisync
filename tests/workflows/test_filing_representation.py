@@ -31,6 +31,8 @@ class RepresentationRuleTests(unittest.TestCase):
         text = "JOÃO, menor impúbere, neste ato representado por sua genitora MARIA, CPF 999.888.777-66"
         self.assertEqual(representation_signals(text), ["representado por", "neste ato representado", "menor impúbere"])
         self.assertEqual(representation_signals("MARIA DA SILVA, brasileira, solteira, agricultora"), [])
+        defendant = "em face do INSS, por intermédio do representante legal deste, na cidade de Itaituba-PA"
+        self.assertEqual(representation_signals(defendant), [], "the defendant's representative is not the author's")
 
     def test_a_minor_needs_a_representative_whatever_the_petition_says(self):
         problems = representation_problems(with_author(birthDate="2015-02-01"), [], [], TODAY)
