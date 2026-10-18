@@ -329,7 +329,10 @@ class DjenChecks(unittest.TestCase):
         self.assertIn(b"doc", blob)
 
     def test_fetch_attachments_guards(self):
-        stj = {"link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1", "numero_processo": "52313092320248217000"}
+        stj = {
+            "link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1",
+            "numero_processo": "52313092320248217000",
+        }
         with self.assertRaisesRegex(ValueError, "sem conector"):
             documents.fetch_attachments(stj, session=object(), document_ids=["1"])
         jfrs = {"link": "https://eproc.jfrs.jus.br/eprocV2/x", "numeroprocessocommascara": "5012366-88.2025.4.04.7104"}

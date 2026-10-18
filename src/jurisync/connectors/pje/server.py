@@ -1,4 +1,4 @@
-"""PJe MCP server: TRF1/TRF5 process context, the Expedientes panel, Push, and TRF5 drafts.
+"""PJe MCP server: TRF1/TRF5 process context, the Expedientes panel, Push, and 1st-degree initial filing drafts.
 
 Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
@@ -29,11 +29,10 @@ from jurisync.workflows.filing.server import register as register_filing_tools
 
 Portal = Literal["trf1-1g", "trf1-2g", "trf5-1g"]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
-DraftReadStage = Literal["classification", "subject-options", "pending"]
-DraftWriteStage = Literal[
-    "create",
-    "create-fill",
-    "fill",
+DraftReadStage = Literal["classification", "subject-options", "pending", "attachment-types"]
+DraftCreateStage = Literal["create", "create-fill"]
+DraftFillStage = Literal[
+    "all",
     "subject",
     "author",
     "public-bodies",
@@ -43,6 +42,8 @@ DraftWriteStage = Literal[
     "supporting-documents",
     "documents",
 ]
+# The old single write tool's stages, kept for its deprecated alias.
+DraftWriteStage = Literal["create", "create-fill", "fill", *DraftFillStage.__args__[1:]]
 # Portal code raises these for anticipated failures (bad input, portal or login errors).
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
 
@@ -227,9 +228,9 @@ def _start_fill(run_id, stage):
         filing.validate_fill_payload(resolve_documents(run.read_json(PAYLOAD), run))
         require_approval(run)
         if stage == "create-fill" and run.exists(CHECKPOINT):
-            raise ToolError("This run already has a draft; use stage fill to continue it")
+            raise ToolError("This run already has a draft; continue it with pje_draft_fill")
         if stage == "fill" and not run.exists(CHECKPOINT):
-            raise ToolError("This run has no draft yet; use stage create-fill")
+            raise ToolError("This run has no draft yet; create it with pje_draft_create")
     fill_errors.pop(run_id, None)
     job = threading.Thread(target=_fill_job, args=(run_id, stage), name=f"pje-fill-{run_id}", daemon=True)
     fill_jobs[run_id] = job
@@ -264,19 +265,36 @@ def _draft_stage(label, stage, run_id=None, **options):
         with tool_errors(label, *ERRORS):
             result = filing.run_stage(stage, **options)
     else:
-        portal = _run_portal(options.get("run"))
+        portal = options.pop("portal", None) or _run_portal(options.get("run"))
         with tool_errors(label, *ERRORS), sessions.session(portal) as session:
             result = filing.run_stage(stage, session=session, portal=portal, **options)
     return {**({"runId": run_id} if run_id is not None else {}), "success": True, "stage": stage, "result": result}
 
 
-@server.tool(
-    name="pje_draft_inspect",
-    title="Inspect TRF5 PJe draft",
-    description="Read current TRF5 1G classification choices, subject search results, or whether an existing draft appears in Não Protocolados. Uses payload.json and checkpoint.json in a named local filing run. No draft mutation.",
+DEPRECATED = "Deprecated name, kept for a while: use {} instead. "
+
+
+def _tool_with_alias(old_name, new_name, **options):
+    """Register a tool under its new name and, for a while, its old one (description says which to use)."""
+
+    def add(function):
+        server.add_tool(function, name=new_name, **options)
+        alias = {**options, "title": options["title"] + " (old name)"}
+        alias["description"] = DEPRECATED.format(new_name) + options["description"]
+        server.add_tool(function, name=old_name, **alias)
+        return function
+
+    return add
+
+
+@_tool_with_alias(
+    "pje_draft_inspect",
+    "pje_draft_options",
+    title="Read PJe draft options",
+    description="Read, for a named local filing run, what the portal offers before or while filling a draft: classification choices (classification), subject search results (subject-options, needs `search`), whether the run's draft is still in Não Protocolados (pending), or the attachment types the draft's Anexar form lists (attachment-types, needs a draft; also stored in the run so pje_filing_build checks the payload's types against it). Uses the run's payload.json and checkpoint.json. Changes nothing in PJe.",
     annotations=READ_ONLY,
 )
-def draft_inspect(
+def draft_options(
     runId: RunId,
     stage: DraftReadStage,
     search: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
@@ -287,26 +305,63 @@ def draft_inspect(
     return _draft_stage("PJe draft", stage, runId, search=search, page=page)
 
 
-@server.tool(
-    name="pje_search_pending_drafts",
-    title="Search TRF5 PJe drafts in Não Protocolados",
-    description="Search the authenticated TRF5 1G Não Protocolados list by party name, CPF, or both. Returns matching draft IDs, opening links, and summaries from the first results page. Read only; does not require a filing run.",
+@_tool_with_alias(
+    "pje_search_pending_drafts",
+    "pje_draft_search",
+    title="Search PJe drafts in Não Protocolados",
+    description="Search the authenticated portal's Não Protocolados list (TRF5 1G unless `portal` is given) by party name, CPF, or both. Returns matching draft IDs, opening links, and summaries from the first results page. Read only; does not require a filing run.",
     annotations=READ_ONLY,
 )
-def search_pending_drafts(
+def draft_search(
     name: Annotated[str | None, Field(max_length=200)] = None,
     cpf: Annotated[str | None, Field(max_length=30)] = None,
+    portal: Literal["trf1-1g", "trf5-1g"] = "trf5-1g",
 ) -> dict[str, Any]:
     name, cpf = (name or "").strip() or None, (cpf or "").strip() or None
     if not (name or cpf):
         raise ToolError("Name or CPF is required")
-    return _draft_stage("PJe pending search", "pending-search", name=name, cpf=cpf)
+    return _draft_stage("PJe pending search", "pending-search", name=name, cpf=cpf, portal=portal)
+
+
+APPROVAL_NOTE = (
+    "Refuses unless pje_filing_approve recorded the user's approval of this exact payload and every document still "
+    "has its approved sha256. Never protocols or submits the process: the draft stays in Não Protocolados. Requires "
+    "PJE_ALLOW_DRAFT_WRITES=true."
+)
+
+
+@server.tool(
+    name="pje_draft_create",
+    title="Create a PJe 1st-degree draft",
+    description="Create the draft of an initial filing on the run payload's portal (TRF5 1G or TRF1 1G) from the approved payload.json in a named local filing run, and by default fill it (create-fill: subject, parties, characteristics, documents) in the background: it returns at once, follow it with pje_draft_status. stage create only runs Incluir. A checkpoint is written right after Incluir. "
+    + APPROVAL_NOTE,
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
+)
+def draft_create(runId: RunId, stage: DraftCreateStage = "create-fill") -> dict[str, Any]:
+    if stage == "create-fill":
+        return _start_fill(runId, stage)
+    return _draft_stage("PJe draft", stage, runId)
+
+
+@server.tool(
+    name="pje_draft_fill",
+    title="Fill a PJe draft (one step or everything left)",
+    description="Continue the draft of a run that already has one: `all` (default) runs every step not yet recorded, in the background (follow it with pje_draft_status); a named stage (subject, author, public-bodies, attorney, characteristics, main-document, supporting-documents, documents) runs just that step and returns its result. Steps already done for this payload are skipped, so rerunning after a failure is safe. "
+    + APPROVAL_NOTE,
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
+)
+def draft_fill(runId: RunId, stage: DraftFillStage = "all") -> dict[str, Any]:
+    if stage == "all":
+        return _start_fill(runId, "fill")
+    return _draft_stage("PJe draft", stage, runId)
 
 
 @server.tool(
     name="pje_draft_write",
-    title="Create or fill a TRF5 or TRF1 PJe draft",
-    description="Create or fill a TRF5 1G or TRF1 1G draft (the payload's portal; TRF1 steps after Incluir are not yet verified live and are listed in unverifiedSteps) using a reviewed payload.json in a named local filing run. Refuses unless filing_approve recorded the user's approval of this exact payload and every document still has its approved sha256. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
+    title="Create or fill a PJe draft (old name)",
+    description=DEPRECATED.format("pje_draft_create (create, create-fill) or pje_draft_fill (fill and single stages)")
+    + "Create or fill a TRF5 1G or TRF1 1G draft from the approved payload of a named local filing run. "
+    + APPROVAL_NOTE,
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
@@ -317,7 +372,7 @@ def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
 
 @server.tool(
     name="pje_draft_delete",
-    title="Delete a TRF5 PJe draft",
+    title="Delete a PJe draft",
     description="Delete one draft from Não Protocolados by its draft number. The row must show the author's name, otherwise nothing is deleted. Uses the portal's own Remover action and confirms the draft is gone from a fresh search. Irreversible. Requires PJE_ALLOW_DRAFT_WRITES=true.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
@@ -330,7 +385,7 @@ def draft_delete(
 
 @server.tool(
     name="pje_draft_status",
-    title="TRF5 PJe draft run status",
+    title="PJe draft run status",
     description="Report where a filing run stands: running, interrupted, failed or complete; which phases are recorded; the current step and the latest steps with durations. checkPje=true also reads the draft in PJe and compares its documents with the payload, which is the real test that a draft is complete. Read only.",
     annotations=READ_ONLY,
 )
@@ -348,7 +403,7 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
     return response
 
 
-# The filing preparation tools (filing_prepare, filing_review, filing_finalize, filing_approve...) are offered here
+# The filing preparation tools (pje_filing_prepare, pje_filing_review, pje_filing_build, pje_filing_approve...) are offered here
 # too, so one PJe server takes a filing from the input folder to the draft. Only this server module imports the
 # workflow; the connector's own filing package never does (tests/workflows/test_filing_architecture.py).
 register_filing_tools(server)

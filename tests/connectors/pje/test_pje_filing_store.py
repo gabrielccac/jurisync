@@ -69,7 +69,7 @@ class RelativePayloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             absolute = str(Path(tmp, "run", "documents", "01-PETICAO.pdf"))
             store = self.run_store(tmp, absolute)
-            message = "absolute.*written before filing runs were self-contained.*filing_finalize again"
+            message = "absolute.*written before filing runs were self-contained.*pje_filing_build again"
             with self.assertRaisesRegex(ValueError, message):
                 approve(store)
             login = mock.patch("jurisync.connectors.pje.filing.run._login", side_effect=AssertionError)

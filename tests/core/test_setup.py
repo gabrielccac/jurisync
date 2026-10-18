@@ -116,8 +116,17 @@ class MainTest(unittest.TestCase):
                 mock.patch.object(setup, "qr_text", return_value=URI),
             ):
                 code = setup.main(
-                    ["--portals", "tjrs-1g", "--qr", "qr.png", "--env-file", str(env_file), "--no-login",
-                     "--register", "none"],
+                    [
+                        "--portals",
+                        "tjrs-1g",
+                        "--qr",
+                        "qr.png",
+                        "--env-file",
+                        str(env_file),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     ask=lambda _p: answers.pop(0),
                     ask_secret=lambda _p: secrets.pop(0),
                     say=lambda _t: None,

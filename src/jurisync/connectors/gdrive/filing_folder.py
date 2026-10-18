@@ -145,7 +145,7 @@ def export_filing_folder(
         "serviceAccount": client.account.email,
         "files": [{"name": entry["file"], "originalName": entry["originalName"]} for entry in entries],
         "skipped": skipped,
-        "next": "Call filing_prepare with this sourceFolder.",
+        "next": "Call pje_filing_prepare with this sourceFolder.",
     }
 
 

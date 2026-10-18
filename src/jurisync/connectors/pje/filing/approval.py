@@ -1,6 +1,6 @@
 """The recorded approval of a run's payload: nothing writes to PJe unless approval.json matches payload.json.
 
-`filing_approve` writes approval.json after the user has seen the finalize summary. It holds the sha256 of the payload
+`pje_filing_approve` writes approval.json after the user has seen the finalize summary. It holds the sha256 of the payload
 file and of every document, so any later change to the payload or a file voids it. Writing a new payload removes it.
 """
 
@@ -23,7 +23,7 @@ def _documents(payload):
 def approve(store):
     """Record approval of the run's current payload after checking every document still has its approved content."""
     if not store.exists(PAYLOAD):
-        raise ValueError("This run has no payload yet; call filing_finalize first")
+        raise ValueError("This run has no payload yet; call pje_filing_build first")
     content = store.read_bytes(PAYLOAD)
     payload = json.loads(content)
     validate_fill_payload(resolve_documents(payload, store))
@@ -45,13 +45,15 @@ def require_approval(store):
     """Refuse unless approval.json approves exactly the run's payload.json."""
     if not store.exists(APPROVAL):
         raise ValueError(
-            "This payload has not been approved: show the filing_finalize summary to the user and call filing_approve "
+            "This payload has not been approved: show the pje_filing_build summary to the user and call pje_filing_approve "
             "once they confirm it"
         )
     approval = store.read_json(APPROVAL)
     content = store.read_bytes(PAYLOAD)
     if approval.get("payloadSha256") != hashlib.sha256(content).hexdigest():
-        raise ValueError("The payload changed after it was approved: review it again and call filing_approve")
+        raise ValueError("The payload changed after it was approved: review it again and call pje_filing_approve")
     if approval.get("documents") != _documents(json.loads(content)):
-        raise ValueError("The approved documents differ from the payload's: review it again and call filing_approve")
+        raise ValueError(
+            "The approved documents differ from the payload's: review it again and call pje_filing_approve"
+        )
     return approval

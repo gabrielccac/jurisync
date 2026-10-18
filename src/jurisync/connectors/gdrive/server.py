@@ -26,7 +26,7 @@ server = MCPServer("gdrive", version="1.0.0")
 @server.tool(
     name="drive_export_filing_folder",
     title="Export a Google Drive folder for filing",
-    description="Download a Google Drive folder shared with the jurisync service account (read-only) into a new local folder in the filing input contract: every file straight to disk, Google Docs/Sheets/Slides exported to PDF, Drive's md5 checked, and a sources.json declaring each file's Drive origin (id, folder path, original name, modification time, link). `folder` is the folder id or its URL. Subfolders are skipped unless includeSubfolders is true; `exclude` takes name or path globs. Files over maxFileMb fail the export. Returns `sourceFolder`, the path to give filing_prepare. Writes only that local folder; never writes to Drive.",
+    description="Download a Google Drive folder shared with the jurisync service account (read-only) into a new local folder in the filing input contract: every file straight to disk, Google Docs/Sheets/Slides exported to PDF, Drive's md5 checked, and a sources.json declaring each file's Drive origin (id, folder path, original name, modification time, link). `folder` is the folder id or its URL. Subfolders are skipped unless includeSubfolders is true; `exclude` takes name or path globs. Files over maxFileMb fail the export. Returns `sourceFolder`, the path to give pje_filing_prepare. Writes only that local folder; never writes to Drive.",
     annotations=LOCAL_WRITE,
 )
 def export_filing_folder(

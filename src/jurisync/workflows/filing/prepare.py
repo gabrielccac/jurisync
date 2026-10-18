@@ -33,7 +33,7 @@ from .representation import REPRESENTATIVE_KINDS, parse_birth_date, representati
 from .split import split_pdf
 
 PJE_LIMIT = 10_000_000
-# What a reviewer may change about a file in filing_finalize. Paths and hashes come only from prepare.
+# What a reviewer may change about a file in pje_filing_build. Paths and hashes come only from prepare.
 OVERRIDE_KEYS = frozenset({"role", "type", "description"})
 
 
@@ -547,7 +547,7 @@ def prepare_inbox(store, facts, *, profile, jev=True):
     if not review:
         try:
             payload = build_payload(facts, assemble(store, rows), profile.defaults())
-            store.write_json(PAYLOAD, payload)  # written, but not approved: filing_approve decides that
+            store.write_json(PAYLOAD, payload)  # written, but not approved: pje_filing_approve decides that
         except ValueError as error:
             _void_assembly(store)
             review.append({"name": "case facts", "reason": str(error)})

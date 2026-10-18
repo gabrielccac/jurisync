@@ -7,8 +7,8 @@ source's own exporter such as the ADVBOX one. The folder is copied into the run'
 only the run. These tools wrap `prepare.py`; the only path the agent ever passes is that input folder, and it never
 writes `review.json` or `payload.json` itself. Views show each document's origin but never a local path or hash.
 
-Nothing reaches PJe on the strength of a written payload alone: `filing_approve` records the user's approval of that
-exact payload (its sha256 and every document's) in `approval.json`, and `pje_draft_write` refuses without it.
+Nothing reaches PJe on the strength of a written payload alone: `pje_filing_approve` records the user's approval of that
+exact payload (its sha256 and every document's) in `approval.json`, and `pje_draft_create`/`pje_draft_fill` refuse without it.
 """
 
 import os
@@ -37,22 +37,37 @@ RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,6
 ProfileName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,40}$")]
 
 # The tools are declared once and registered on any server: this filing server and the PJe server, which offers
-# them next to pje_draft_write so a whole filing runs through one MCP server.
+# them next to pje_draft_create so a whole filing runs through one MCP server.
 TOOLS = []
 
 
-def _tool(**options):
+def _tool(*, formerly=None, **options):
+    """Declare a tool; `formerly` is its old name, still offered for a while as a deprecated alias."""
+
     def add(function):
-        TOOLS.append((function, options))
+        TOOLS.append((function, options, formerly))
         return function
 
     return add
 
 
+def deprecated_alias(options, old_name):
+    """The options of an old tool name kept as an alias: same function and arguments, the new name in front."""
+    note = f"Deprecated name, kept for a while: use {options['name']} (same arguments). "
+    return {
+        **options,
+        "name": old_name,
+        "title": f"{options['title']} (old name)",
+        "description": note + options["description"],
+    }
+
+
 def register(target):
-    """Add every filing tool to `target` (an MCPServer)."""
-    for function, options in TOOLS:
+    """Add every filing tool, and its deprecated old name, to `target` (an MCPServer)."""
+    for function, options, formerly in TOOLS:
         target.add_tool(function, **options)
+        if formerly:
+            target.add_tool(function, **deprecated_alias(options, formerly))
 
 
 def _file_view(row):
@@ -147,8 +162,9 @@ def _require_no_draft(store):
 
 
 @_tool(
-    name="filing_prepare",
-    title="Prepare a TRF5 filing from an input folder",
+    name="pje_filing_prepare",
+    formerly="filing_prepare",
+    title="Prepare a PJe 1st-degree filing from an input folder",
     description="Copy the input folder into the run's inbox (hashing each file), convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. `sourceFolder` is an absolute local folder in the filing input contract: the documents (any subfolders, no symlinks) plus an optional sources.json declaring each file's origin. Fill it yourself from Drive, GERID or other connectors, or with a source's exporter (advbox_export_filing_folder). Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
     annotations=LOCAL_WRITE,
 )
@@ -172,21 +188,23 @@ def prepare(
 
 
 @_tool(
-    name="filing_review",
+    name="pje_filing_review",
+    formerly="filing_review",
     title="Read a prepared filing review",
     description="Return the review of a prepared run again: files with their ids, roles, PJe types and problems, the petition's candidates, and whether a payload exists. Reads local files only.",
     annotations=READ_ONLY,
 )
 def review(runId: RunId) -> dict[str, Any]:
     store = open_run(runId)
-    report = _read_json(store, REVIEW, "This run has no review yet; call filing_prepare first")
+    report = _read_json(store, REVIEW, "This run has no review yet; call pje_filing_prepare first")
     return _review_view(runId, report, store)
 
 
 @_tool(
-    name="filing_finalize",
+    name="pje_filing_build",
+    formerly="filing_finalize",
     title="Write the filing payload for a prepared run",
-    description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition. `overrides` maps a file id from the review to {role, type, description} (only those keys), or {role: 'skip'} to leave a file out. Omit `facts` to reuse the facts given to prepare. Every finalize drops any earlier approval. Returns a summary of what the draft will contain, to show the user before filing_approve.",
+    description="Apply the reviewed choices and write payload.json for pje_draft_create. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition. `overrides` maps a file id from the review to {role, type, description} (only those keys), or {role: 'skip'} to leave a file out. Omit `facts` to reuse the facts given to prepare. Every finalize drops any earlier approval. Returns a summary of what the draft will contain, to show the user before pje_filing_approve.",
     annotations=LOCAL_WRITE,
 )
 def finalize(
@@ -197,7 +215,7 @@ def finalize(
 ) -> dict[str, Any]:
     store = open_run(runId)
     _require_no_draft(store)
-    report = _read_json(store, REVIEW, "This run has no review yet; call filing_prepare first")
+    report = _read_json(store, REVIEW, "This run has no review yet; call pje_filing_prepare first")
     if facts is None:
         facts = _read_json(store, FACTS, "This run has no stored facts; pass facts")
     else:
@@ -214,20 +232,21 @@ def finalize(
         "ready": bool(result.get("ready")),
         "payload": _payload_view(payload, store.read_json(MANIFEST) if store.exists(MANIFEST) else None),
         "approved": False,
-        "next": "Show this summary to the user. Only after they explicitly approve it, call filing_approve with this runId; then call pje_draft_write with stage create-fill and follow it with pje_draft_status. If anything changes, finalize again: that needs a new approval.",
+        "next": "Show this summary to the user. Only after they explicitly approve it, call pje_filing_approve with this runId; then call pje_draft_create and follow it with pje_draft_status. If anything changes, finalize again: that needs a new approval.",
     }
 
 
 @_tool(
-    name="filing_approve",
+    name="pje_filing_approve",
+    formerly="filing_approve",
     title="Record the user's approval of a finalized filing payload",
-    description="Record that the user approved the summary filing_finalize showed: writes approval.json with the time, the payload's sha256 and each document's sha256, after checking every document still matches. pje_draft_write refuses without an approval that matches the current payload. Call it only after the user explicitly confirms that summary; never on your own.",
+    description="Record that the user approved the summary pje_filing_build showed: writes approval.json with the time, the payload's sha256 and each document's sha256, after checking every document still matches. pje_draft_create and pje_draft_fill refuse without an approval that matches the current payload. Call it only after the user explicitly confirms that summary; never on your own.",
     annotations=LOCAL_WRITE,
 )
 def approve_payload(runId: RunId) -> dict[str, Any]:
     store = open_run(runId)
     if not store.exists(PAYLOAD):
-        raise ToolError("This run has no payload yet; call filing_finalize first")
+        raise ToolError("This run has no payload yet; call pje_filing_build first")
     with tool_errors("Filing", *ERRORS):
         approval = approve(store)
     return {
@@ -235,7 +254,7 @@ def approve_payload(runId: RunId) -> dict[str, Any]:
         "approved": True,
         "approvedAt": approval["approvedAt"],
         "documents": [{"name": item["name"], "type": item["type"]} for item in approval["documents"]],
-        "next": "Call pje_draft_write with stage create-fill (or fill for an existing draft), then pje_draft_status.",
+        "next": "Call pje_draft_create (or pje_draft_fill for a run that already has a draft), then pje_draft_status.",
     }
 
 
@@ -249,7 +268,8 @@ def _subject_table(path):
 
 
 @_tool(
-    name="filing_profiles",
+    name="pje_filing_profiles",
+    formerly="filing_profiles",
     title="List the available filing profiles",
     description="List the customer filing profiles this server can use (name, portal, description). A profile holds one office's defaults and conventions; the customer's skill says which one to pass to the other filing tools.",
     annotations=READ_ONLY,
@@ -265,7 +285,8 @@ def profiles() -> dict[str, Any]:
 
 
 @_tool(
-    name="filing_subjects",
+    name="pje_filing_subjects",
+    formerly="filing_subjects",
     title="Candidate PJe subjects (assuntos) for a filing",
     description="Return the profile's reference table of benefit labels and the PJe subject codes seen for them, plus, when lawsuitRef (a lawsuit ID or CNJ number) is given, the paragraphs of the profile's history notes that record what was filed for that exact case. These are candidates for the user to confirm, never defaults.",
     annotations=READ_ONLY,

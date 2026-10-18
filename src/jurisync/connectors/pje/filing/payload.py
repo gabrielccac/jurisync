@@ -145,12 +145,12 @@ def approved_content(document):
     if not isinstance(expected, str) or not SHA256.fullmatch(expected):
         raise ValueError(
             f"Document {path.name} has no sha256 in the payload (written before integrity checks): "
-            "run filing_finalize again and approve the new payload; a run that already has a draft needs a new runId"
+            "run pje_filing_build again and approve the new payload; a run that already has a draft needs a new runId"
         )
     content = path.read_bytes()
     if hashlib.sha256(content).hexdigest() != expected:
         raise ValueError(
-            f"Document changed since approval: {path.name}. Run filing_finalize again and get a new approval"
+            f"Document changed since approval: {path.name}. Run pje_filing_build again and get a new approval"
         )
     return content
 
@@ -179,7 +179,7 @@ def resolve_documents(payload, store):
         if Path(name).is_absolute() or name.startswith("~"):
             raise ValueError(
                 f"Document path is absolute ({Path(name).name}): this payload was written before filing runs were "
-                "self-contained. Run filing_finalize again and approve the new payload; a run that already has a "
+                "self-contained. Run pje_filing_build again and approve the new payload; a run that already has a "
                 "draft needs a new runId"
             )
         if not run_name(name).startswith(DOCUMENTS + "/"):

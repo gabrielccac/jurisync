@@ -83,9 +83,7 @@ class EprocClientTests(unittest.TestCase):
                     },
                 },
             ),
-            patch.object(
-                client, "parse_event_response", return_value={"events": [], "pagination": {"complete": True}}
-            ),
+            patch.object(client, "parse_event_response", return_value={"events": [], "pagination": {"complete": True}}),
         ):
             result = client.fetch_process(NUMBER, session=session, panel_html="", panel_url=BASE, portal="jfsc")
         self.assertTrue(result["success"])

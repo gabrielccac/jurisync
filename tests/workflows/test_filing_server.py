@@ -58,25 +58,29 @@ class FilingServerTests(unittest.TestCase):
 
         return mock.patch.object(filing, "prepare_folder", prepare)
 
-    def test_tools_are_registered_and_only_prepare_and_finalize_write(self):
+    def test_tools_are_registered_and_only_prepare_build_and_approve_write(self):
         async def listing():
             async with Client(filing.server) as client:
-                return {tool.name: tool.annotations.read_only_hint for tool in (await client.list_tools()).tools}
+                return {tool.name: tool for tool in (await client.list_tools()).tools}
 
-        self.assertEqual(
-            asyncio.run(listing()),
-            {
-                "filing_prepare": False,
-                "filing_review": True,
-                "filing_finalize": False,
-                "filing_approve": False,
-                "filing_profiles": True,
-                "filing_subjects": True,
-            },
-        )
+        tools = asyncio.run(listing())
+        current = {
+            "pje_filing_prepare": False,
+            "pje_filing_review": True,
+            "pje_filing_build": False,
+            "pje_filing_approve": False,
+            "pje_filing_profiles": True,
+            "pje_filing_subjects": True,
+        }
+        old_names = {"filing_prepare", "filing_review", "filing_finalize", "filing_approve", "filing_profiles"}
+        self.assertEqual(set(tools), set(current) | old_names | {"filing_subjects"})
+        self.assertEqual({name: tools[name].annotations.read_only_hint for name in current}, current)
+        alias = tools["filing_finalize"]
+        self.assertTrue(alias.description.startswith("Deprecated name, kept for a while: use pje_filing_build"))
+        self.assertEqual(alias.input_schema, tools["pje_filing_build"].input_schema)
 
     def test_profiles_lists_what_customers_provide_without_secrets(self):
-        listed = call("filing_profiles", {}).structured_content["profiles"]
+        listed = call("pje_filing_profiles", {}).structured_content["profiles"]
         victor = next(item for item in listed if item["name"] == "victor")
         self.assertEqual(victor["portal"], "trf5-1g")
         self.assertEqual(set(victor), {"name", "portal", "description"})
@@ -85,7 +89,8 @@ class FilingServerTests(unittest.TestCase):
         calls = []
         with self.fake_prepare(calls):
             result = call(
-                "filing_prepare", {"profile": "nobody", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}}
+                "pje_filing_prepare",
+                {"profile": "nobody", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}},
             )
         self.assertTrue(result.is_error)
         self.assertIn("No filing profile named nobody", result.content[0].text)
@@ -95,7 +100,7 @@ class FilingServerTests(unittest.TestCase):
         calls = []
         with self.fake_prepare(calls):
             result = call(
-                "filing_prepare",
+                "pje_filing_prepare",
                 {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {"a": 1}},
             )
         view = result.structured_content
@@ -120,8 +125,8 @@ class FilingServerTests(unittest.TestCase):
 
         base = {"profile": "victor", "runId": "run1", "facts": {}}
         with mock.patch.object(filing, "prepare_folder", prepare_folder):
-            missing = call("filing_prepare", base)
-            view = call("filing_prepare", {**base, "sourceFolder": "/data/gathered"}).structured_content
+            missing = call("pje_filing_prepare", base)
+            view = call("pje_filing_prepare", {**base, "sourceFolder": "/data/gathered"}).structured_content
         self.assertTrue(missing.is_error)
         self.assertEqual(calls, ["/data/gathered"])
         self.assertEqual(view["files"][0]["origin"], {"kind": "declared", "source": "gerid", "file": "a.pdf"})
@@ -131,7 +136,7 @@ class FilingServerTests(unittest.TestCase):
         calls = []
         with self.fake_prepare(calls):
             call(
-                "filing_prepare",
+                "pje_filing_prepare",
                 {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}, "useJev": True},
             )
         self.assertTrue(calls[0]["jev"])
@@ -141,8 +146,11 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir.joinpath("checkpoint.json").write_text("{}")
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         for name, arguments in (
-            ("filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}}),
-            ("filing_finalize", {"profile": "victor", "runId": "run1", "facts": {}}),
+            (
+                "pje_filing_prepare",
+                {"profile": "victor", "runId": "run1", "sourceFolder": "/data/gathered", "facts": {}},
+            ),
+            ("pje_filing_build", {"profile": "victor", "runId": "run1", "facts": {}}),
         ):
             result = call(name, arguments)
             self.assertTrue(result.is_error, name)
@@ -152,7 +160,9 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir.mkdir()
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         self.run_dir.joinpath("facts.json").write_text("{}")
-        bad = call("filing_finalize", {"profile": "victor", "runId": "run1", "overrides": {"nope:9": {"role": "skip"}}})
+        bad = call(
+            "pje_filing_build", {"profile": "victor", "runId": "run1", "overrides": {"nope:9": {"role": "skip"}}}
+        )
         self.assertTrue(bad.is_error)
         self.assertIn("nope:9", bad.content[0].text)
 
@@ -170,7 +180,7 @@ class FilingServerTests(unittest.TestCase):
 
         with mock.patch.object(filing, "finalize_review", finalize):
             ok = call(
-                "filing_finalize",
+                "pje_filing_build",
                 {"profile": "victor", "runId": "run1", "overrides": {"bbb:1": {"role": "main"}}},
             )
         view = ok.structured_content["payload"]
@@ -186,7 +196,7 @@ class FilingServerTests(unittest.TestCase):
     def test_approve_records_the_payload_and_document_hashes_and_voids_on_any_change(self):
         self.run_dir.mkdir()
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
-        self.assertTrue(call("filing_approve", {"runId": "run1"}).is_error)
+        self.assertTrue(call("pje_filing_approve", {"runId": "run1"}).is_error)
         petition = self.run_dir / "documents" / "petition.pdf"
         petition.parent.mkdir()
         petition.write_bytes(b"%PDF-1 petition")
@@ -199,9 +209,9 @@ class FilingServerTests(unittest.TestCase):
         }
         payload_path = self.run_dir / "payload.json"
         payload_path.write_text(json.dumps(payload))
-        self.assertFalse(call("filing_review", {"runId": "run1"}).structured_content["approved"])
+        self.assertFalse(call("pje_filing_review", {"runId": "run1"}).structured_content["approved"])
 
-        result = call("filing_approve", {"runId": "run1"}).structured_content
+        result = call("pje_filing_approve", {"runId": "run1"}).structured_content
         self.assertTrue(result["approved"])
         self.assertEqual(result["documents"], [{"name": "petition.pdf", "type": "Petição inicial"}])
         approval_path = self.run_dir / "approval.json"
@@ -209,13 +219,13 @@ class FilingServerTests(unittest.TestCase):
         self.assertEqual(approval["payloadSha256"], hashlib.sha256(payload_path.read_bytes()).hexdigest())
         self.assertEqual(approval["documents"][0]["sha256"], sha)
         self.assertEqual(approval_path.stat().st_mode & 0o777, 0o600)
-        self.assertTrue(call("filing_review", {"runId": "run1"}).structured_content["approved"])
+        self.assertTrue(call("pje_filing_review", {"runId": "run1"}).structured_content["approved"])
 
         payload_path.write_text(json.dumps({**payload, "authorCpf": "98765432100"}))
-        self.assertFalse(call("filing_review", {"runId": "run1"}).structured_content["approved"])
+        self.assertFalse(call("pje_filing_review", {"runId": "run1"}).structured_content["approved"])
         payload_path.write_text(json.dumps(payload))
         petition.write_bytes(b"%PDF-1 edited after review")
-        refused = call("filing_approve", {"runId": "run1"})
+        refused = call("pje_filing_approve", {"runId": "run1"})
         self.assertTrue(refused.is_error)
         self.assertIn("changed since approval", refused.content[0].text)
 
@@ -230,17 +240,17 @@ class FilingServerTests(unittest.TestCase):
             return {"ready": True}
 
         with mock.patch.object(filing, "finalize_review", finalize):
-            result = call("filing_finalize", {"profile": "victor", "runId": "run1"}).structured_content
+            result = call("pje_filing_build", {"profile": "victor", "runId": "run1"}).structured_content
         self.assertFalse(result["approved"])
-        self.assertIn("filing_approve", result["next"])
+        self.assertIn("pje_filing_approve", result["next"])
         self.assertFalse(self.run_dir.joinpath("approval.json").exists())
 
     def test_subjects_come_from_the_profiles_own_reference_files(self):
-        view = call("filing_subjects", {"profile": "victor", "lawsuitRef": "17519594"}).structured_content
+        view = call("pje_filing_subjects", {"profile": "victor", "lawsuitRef": "17519594"}).structured_content
         self.assertGreaterEqual(len(view["candidates"]), 8)
         self.assertTrue(all({"benefit", "code", "name", "search"} <= set(row) for row in view["candidates"]))
         self.assertTrue(any("17519594" in paragraph for paragraph in view["history"]))
-        self.assertEqual(call("filing_subjects", {"profile": "victor"}).structured_content["history"], [])
+        self.assertEqual(call("pje_filing_subjects", {"profile": "victor"}).structured_content["history"], [])
 
 
 if __name__ == "__main__":

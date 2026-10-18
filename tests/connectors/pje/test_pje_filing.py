@@ -81,7 +81,7 @@ class DraftPayloadTests(unittest.TestCase):
                 "author": {"name": "EXAMPLE"},
                 "documents": {"main": main},
             }
-            with self.assertRaisesRegex(ValueError, "no sha256.*filing_finalize again"):
+            with self.assertRaisesRegex(ValueError, "no sha256.*pje_filing_build again"):
                 validate_fill_payload(payload)
             main["sha256"] = hashlib.sha256(b"%PDF-1 approved").hexdigest()
             validate_fill_payload(payload)

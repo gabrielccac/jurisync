@@ -13,6 +13,13 @@ from jurisync.connectors.pje import server as pje
 from jurisync.workflows.filing import server as filing
 
 FILING_TOOLS = {
+    "pje_filing_profiles",
+    "pje_filing_subjects",
+    "pje_filing_prepare",
+    "pje_filing_review",
+    "pje_filing_build",
+    "pje_filing_approve",
+    # Old names, kept for a while as deprecated aliases.
     "filing_profiles",
     "filing_subjects",
     "filing_prepare",
@@ -20,6 +27,8 @@ FILING_TOOLS = {
     "filing_finalize",
     "filing_approve",
 }
+DRAFT_TOOLS = {"pje_draft_create", "pje_draft_fill", "pje_draft_options", "pje_draft_search", "pje_draft_status"}
+OLD_DRAFT_TOOLS = {"pje_draft_write": "pje_draft_create", "pje_draft_inspect": "pje_draft_options"}
 FACTS = {
     "authorCpf": "12345678909",
     "author": {"name": "EXAMPLE"},
@@ -46,7 +55,11 @@ class PjeServerFilingToolsTests(unittest.TestCase):
         for name in FILING_TOOLS:
             self.assertEqual(on_pje[name].description, on_filing[name].description, name)
             self.assertEqual(on_pje[name].input_schema, on_filing[name].input_schema, name)
-        self.assertIn("never on your own", on_pje["filing_approve"].description)
+        self.assertIn("never on your own", on_pje["pje_filing_approve"].description)
+        self.assertEqual(DRAFT_TOOLS & set(on_pje), DRAFT_TOOLS)
+        for old, new in OLD_DRAFT_TOOLS.items():
+            self.assertIn(f"Deprecated name, kept for a while: use {new}", on_pje[old].description)
+        self.assertEqual(on_pje["pje_search_pending_drafts"].input_schema, on_pje["pje_draft_search"].input_schema)
 
     def test_prepare_then_write_needs_the_recorded_approval(self):
         started = []
@@ -61,13 +74,14 @@ class PjeServerFilingToolsTests(unittest.TestCase):
                 mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [], [])),
                 mock.patch.object(pje.filing, "run_stage", lambda stage, **options: started.append(stage)),
             ):
-                prepared, refused, approved, write = asyncio.run(
+                prepared, refused, approved, early_fill, write = asyncio.run(
                     _calls(
                         pje.server,
-                        ("filing_prepare", {"profile": "jean", **run, "facts": FACTS, "sourceFolder": str(folder)}),
-                        ("pje_draft_write", {**run, "stage": "create-fill"}),
-                        ("filing_approve", run),
-                        ("pje_draft_write", {**run, "stage": "create-fill"}),
+                        ("pje_filing_prepare", {"profile": "jean", **run, "facts": FACTS, "sourceFolder": str(folder)}),
+                        ("pje_draft_create", run),
+                        ("pje_filing_approve", run),
+                        ("pje_draft_fill", run),
+                        ("pje_draft_create", run),
                     )
                 )
                 pje.fill_jobs["case1"].join(5)
@@ -75,6 +89,7 @@ class PjeServerFilingToolsTests(unittest.TestCase):
         self.assertTrue(refused.is_error)
         self.assertIn("not been approved", refused.content[0].text)
         self.assertTrue(approved.structured_content["approved"])
+        self.assertIn("create it with pje_draft_create", early_fill.content[0].text)
         self.assertEqual(write.structured_content["state"], "started")
         self.assertEqual(started, ["create-fill"])
 

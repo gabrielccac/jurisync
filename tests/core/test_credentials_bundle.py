@@ -84,8 +84,16 @@ class ExportImportTest(unittest.TestCase):
             target = root / "home" / ".env"
             with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdin", io.StringIO(passphrase + "\n")):
                 code = setup.main(
-                    ["import", str(out), "--passphrase-stdin", "--env-file", str(target), "--no-login",
-                     "--register", "none"],
+                    [
+                        "import",
+                        str(out),
+                        "--passphrase-stdin",
+                        "--env-file",
+                        str(target),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     say=lambda _m: None,
                 )
             self.assertEqual(code, 0)
@@ -93,9 +101,21 @@ class ExportImportTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
             # a wrong passphrase fails cleanly and writes nothing new
             other = root / "other" / ".env"
-            with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdin", io.StringIO("wrong passphrase 1\n")):
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch("sys.stdin", io.StringIO("wrong passphrase 1\n")),
+            ):
                 code = setup.main(
-                    ["import", str(out), "--passphrase-stdin", "--env-file", str(other), "--no-login", "--register", "none"],
+                    [
+                        "import",
+                        str(out),
+                        "--passphrase-stdin",
+                        "--env-file",
+                        str(other),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     say=lambda _m: None,
                 )
             self.assertEqual(code, 2)
@@ -160,8 +180,16 @@ class CertificateCustomerTest(unittest.TestCase):
                 mock.patch("sys.stdin", io.StringIO(passphrase + "\n")),
             ):
                 code = setup.main(
-                    ["import", str(out), "--passphrase-stdin", "--env-file", str(target), "--no-login",
-                     "--register", "none"],
+                    [
+                        "import",
+                        str(out),
+                        "--passphrase-stdin",
+                        "--env-file",
+                        str(target),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     say=lambda _m: None,
                 )
             self.assertEqual(code, 0)
