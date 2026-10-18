@@ -112,3 +112,41 @@ def approved_content(document):
             f"Document changed since approval: {path.name}. Run filing_finalize again and get a new approval"
         )
     return content
+
+
+def payload_documents(payload):
+    documents = payload.get("documents") or {}
+    return [documents["main"], *documents.get("supporting", [])] if documents.get("main") else []
+
+
+def resolve_documents(payload, store):
+    """A copy of the payload whose document paths are local files of the run.
+
+    Payloads name documents relative to their run (`documents/01-...pdf`), so a run stays valid wherever it is kept.
+    Absolute paths come from payloads written before runs were self-contained; they are refused rather than trusted,
+    since they point outside the assembly that was approved.
+    """
+    documents = payload.get("documents")
+    if not isinstance(documents, dict):
+        return payload
+    from jurisync.connectors.pje.filing.store import DOCUMENTS, run_name
+
+    def resolve(item):
+        name = item.get("path") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not name:
+            raise ValueError("Every document needs a path")
+        if Path(name).is_absolute() or name.startswith("~"):
+            raise ValueError(
+                f"Document path is absolute ({Path(name).name}): this payload was written before filing runs were "
+                "self-contained. Run filing_finalize again and approve the new payload; a run that already has a "
+                "draft needs a new runId"
+            )
+        if not run_name(name).startswith(DOCUMENTS + "/"):
+            raise ValueError(f"Document {name} is not in the run's {DOCUMENTS}/ folder")
+        return {**item, "path": str(store.local_path(name))}
+
+    resolved = {**documents}
+    if documents.get("main") is not None:
+        resolved["main"] = resolve(documents["main"])
+    resolved["supporting"] = [resolve(item) for item in documents.get("supporting", [])]
+    return {**payload, "documents": resolved}

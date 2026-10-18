@@ -1,33 +1,31 @@
 """Per-step timing and outcome of a filing run."""
 
-import json
 import logging
-import os
-import tempfile
 import time
 import uuid
 from contextlib import contextmanager
-from pathlib import Path
 
 from jurisync.connectors.pje.filing.checkpoint import now
+from jurisync.connectors.pje.filing.store import STEPS
 
 log = logging.getLogger("jurisync.pje.filing")
 
 
 class StepTimeline:
-    """Timing and outcome of each filing step, saved next to the checkpoint after every step.
+    """Timing and outcome of each filing step, saved in the run's filing-steps.json after every step.
 
-    Entries accumulate across runs, so a re-run appends instead of replacing the history.
+    Entries accumulate across runs, so a re-run appends instead of replacing the history. Without a store (tests,
+    one-off calls) nothing is saved.
     """
 
-    def __init__(self, path, client, stage):
-        self.path = Path(path) if path else None
+    def __init__(self, store, client, stage):
+        self.store = store
         self.client = client
         self.stage = stage
         self.run = uuid.uuid4().hex[:8]
         self.steps = []
-        if self.path and self.path.exists():
-            self.steps = json.loads(self.path.read_text(encoding="utf-8")).get("steps", [])
+        if self.store is not None and self.store.exists(STEPS):
+            self.steps = self.store.read_json(STEPS).get("steps", [])
 
     @contextmanager
     def step(self, step_name, /, **details):
@@ -87,11 +85,5 @@ class StepTimeline:
         self._save()
 
     def _save(self):
-        if not self.path:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".timeline-")
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            json.dump({"steps": self.steps}, output, ensure_ascii=False, indent=2)
-        os.chmod(temp, 0o600)
-        os.replace(temp, self.path)
+        if self.store is not None:
+            self.store.write_json(STEPS, {"steps": self.steps})

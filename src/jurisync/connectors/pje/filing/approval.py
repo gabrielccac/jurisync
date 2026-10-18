@@ -8,51 +8,48 @@ import hashlib
 import json
 from pathlib import Path
 
-from jurisync.connectors.pje.filing.checkpoint import now, write_private_json
-from jurisync.connectors.pje.filing.payload import validate_fill_payload
-
-APPROVAL = "approval.json"
+from jurisync.connectors.pje.filing.checkpoint import now
+from jurisync.connectors.pje.filing.payload import payload_documents, resolve_documents, validate_fill_payload
+from jurisync.connectors.pje.filing.store import APPROVAL, PAYLOAD
 
 
 def _documents(payload):
-    documents = payload.get("documents") or {}
-    items = [documents["main"], *documents.get("supporting", [])] if documents.get("main") else []
-    return [{"name": Path(item["path"]).name, "type": item.get("type"), "sha256": item.get("sha256")} for item in items]
+    return [
+        {"name": Path(item["path"]).name, "type": item.get("type"), "sha256": item.get("sha256")}
+        for item in payload_documents(payload)
+    ]
 
 
-def approve(directory):
+def approve(store):
     """Record approval of the run's current payload after checking every document still has its approved content."""
-    payload_path = Path(directory) / "payload.json"
-    if not payload_path.exists():
+    if not store.exists(PAYLOAD):
         raise ValueError("This run has no payload yet; call filing_finalize first")
-    content = payload_path.read_bytes()
+    content = store.read_bytes(PAYLOAD)
     payload = json.loads(content)
-    validate_fill_payload(payload)
+    validate_fill_payload(resolve_documents(payload, store))
     approval = {
         "approvedAt": now(),
         "payloadSha256": hashlib.sha256(content).hexdigest(),
         "documents": _documents(payload),
     }
-    write_private_json(Path(directory) / APPROVAL, approval)
+    store.write_json(APPROVAL, approval)
     return approval
 
 
-def revoke(directory):
+def revoke(store):
     """Drop the approval; called whenever a new payload is written."""
-    (Path(directory) / APPROVAL).unlink(missing_ok=True)
+    store.delete(APPROVAL)
 
 
-def require_approval(payload_path):
-    """Refuse unless approval.json approves exactly this payload file."""
-    payload_path = Path(payload_path)
-    approval_path = payload_path.with_name(APPROVAL)
-    if not approval_path.exists():
+def require_approval(store):
+    """Refuse unless approval.json approves exactly the run's payload.json."""
+    if not store.exists(APPROVAL):
         raise ValueError(
             "This payload has not been approved: show the filing_finalize summary to the user and call filing_approve "
             "once they confirm it"
         )
-    approval = json.loads(approval_path.read_text(encoding="utf-8"))
-    content = payload_path.read_bytes()
+    approval = store.read_json(APPROVAL)
+    content = store.read_bytes(PAYLOAD)
     if approval.get("payloadSha256") != hashlib.sha256(content).hexdigest():
         raise ValueError("The payload changed after it was approved: review it again and call filing_approve")
     if approval.get("documents") != _documents(json.loads(content)):

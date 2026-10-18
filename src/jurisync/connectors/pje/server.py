@@ -4,7 +4,6 @@ Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
 """
 
-import json
 import os
 import threading
 from typing import Annotated, Any, Literal
@@ -17,7 +16,8 @@ from pydantic import Field, StringConstraints
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
 from jurisync.connectors.pje.filing.approval import require_approval
-from jurisync.connectors.pje.filing.checkpoint import run_directory
+from jurisync.connectors.pje.filing.payload import resolve_documents
+from jurisync.connectors.pje.filing.store import CHECKPOINT, PAYLOAD, open_run
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.connectors.pje.push import read_push
@@ -199,11 +199,6 @@ def watched_processes(portal: Portal) -> dict[str, Any]:
     return _notifications(portal, read_push)
 
 
-def draft_paths(run_id):
-    directory = run_directory(run_id)
-    return directory / "payload.json", directory / "checkpoint.json"
-
-
 BACKGROUND_STAGES = frozenset({"create-fill", "fill"})
 # Fills take minutes, longer than a tool call may last, so they run in a thread of this server and report through
 # pje_draft_status. A fill that fails before its checkpoint exists can only leave its error here.
@@ -212,9 +207,8 @@ fill_errors = {}
 
 
 def _fill_job(run_id, stage):
-    payload, checkpoint = draft_paths(run_id)
     try:
-        filing.run_stage(stage, payload_path=str(payload), checkpoint_path=str(checkpoint))
+        filing.run_stage(stage, run=open_run(run_id))
         fill_errors.pop(run_id, None)
     except BaseException as error:
         fill_errors[run_id] = f"{type(error).__name__}: {str(error)[:300]}"
@@ -226,13 +220,13 @@ def _start_fill(run_id, stage):
     running = fill_jobs.get(run_id)
     if running is not None and running.is_alive():
         return {"runId": run_id, "success": True, "stage": stage, "state": "already-running"}
-    payload, checkpoint = draft_paths(run_id)
+    run = open_run(run_id)
     with tool_errors("PJe draft", *ERRORS):
-        filing.validate_fill_payload(json.loads(payload.read_text(encoding="utf-8")))
-        require_approval(payload)
-        if stage == "create-fill" and checkpoint.exists():
+        filing.validate_fill_payload(resolve_documents(run.read_json(PAYLOAD), run))
+        require_approval(run)
+        if stage == "create-fill" and run.exists(CHECKPOINT):
             raise ToolError("This run already has a draft; use stage fill to continue it")
-        if stage == "fill" and not checkpoint.exists():
+        if stage == "fill" and not run.exists(CHECKPOINT):
             raise ToolError("This run has no draft yet; use stage create-fill")
     fill_errors.pop(run_id, None)
     job = threading.Thread(target=_fill_job, args=(run_id, stage), name=f"pje-fill-{run_id}", daemon=True)
@@ -251,10 +245,7 @@ def _draft_stage(label, stage, run_id=None, **options):
     if stage in filing.WRITE_STAGES and os.environ.get("PJE_ALLOW_DRAFT_WRITES") != "true":
         raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
     if run_id is not None:
-        payload, checkpoint = draft_paths(run_id)
-        options["checkpoint_path"] = str(checkpoint)
-        if stage != "subject-options":
-            options["payload_path"] = str(payload)
+        options["run"] = open_run(run_id)
     if stage == "status":  # reads local files only: no login needed
         with tool_errors(label, *ERRORS):
             result = filing.run_stage(stage, **options)
@@ -329,9 +320,8 @@ def draft_delete(
     annotations=READ_ONLY,
 )
 def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
-    _, checkpoint = draft_paths(runId)
     job = fill_jobs.get(runId)
-    if not checkpoint.exists():
+    if not open_run(runId).exists(CHECKPOINT):
         if job is not None and job.is_alive():
             return {"runId": runId, "success": True, "result": {"state": "starting", "conclusion": "not_checked"}}
         if runId in fill_errors:

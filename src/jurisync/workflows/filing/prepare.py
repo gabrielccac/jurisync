@@ -1,7 +1,7 @@
 """Prepare a TRF5 PJe draft payload from a customer's Advbox protocol folder, driven by a filing profile.
 
     python -m jurisync.workflows.filing prepare --profile NAME --customer ID --facts case-facts.json --out RUN_DIR
-    python -m jurisync.workflows.filing finalize --profile NAME --review RUN_DIR/review.json --facts case-facts.json [--overrides overrides.json]
+    python -m jurisync.workflows.filing finalize --profile NAME --run RUN_DIR --facts case-facts.json [--overrides overrides.json]
     python -m jurisync.workflows.filing approve --run RUN_DIR
 
 Downloads the folder, converts DOC/DOCX to PDF, classifies documents, splits
@@ -14,9 +14,7 @@ seen the payload) records approval.json for that exact payload.
 import argparse
 import hashlib
 import json
-import os
 import re
-import shutil
 import unicodedata
 from pathlib import Path
 
@@ -24,6 +22,8 @@ from jurisync.connectors.advbox.client import AdvboxClient
 from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.approval import revoke as revoke_approval
+from jurisync.connectors.pje.filing.checkpoint import now
+from jurisync.connectors.pje.filing.store import DOCUMENTS, MANIFEST, PAYLOAD, REVIEW, WORK, LocalRunStore
 from jurisync.core.pdf import analyze_document
 from jurisync.core.word_to_pdf import convert_word_to_pdf
 
@@ -52,12 +52,6 @@ def _sha256(content):
 
 def _digits(value):
     return re.sub(r"\D", "", str(value or ""))
-
-
-def _write_private(path, value):
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-        json.dump(value, output, ensure_ascii=False, indent=2)
 
 
 def require_facts(facts, defaults):
@@ -154,44 +148,6 @@ def apply_supporting_fallback(classification, uncertain_type="Outros Documentos"
     return result
 
 
-def supporting_documents(rows):
-    documents = []
-    for row in rows:
-        if row["role"] != "supporting":
-            continue
-        stem = row.get("description") or Path(row["name"]).stem
-        parts = row.get("parts")
-        if not parts:
-            documents.append(
-                {"path": row["path"], "type": row["type"], "description": stem, "sha256": row["uploadSha256"]}
-            )
-            continue
-        for index, part in enumerate(parts, 1):
-            documents.append(
-                {
-                    "path": part["path"],
-                    "type": row["type"],
-                    "description": f"{stem} - volume {index}/{len(parts)}",
-                    "number": f"{index}/{len(parts)}",
-                    "sha256": part["uploadSha256"],
-                }
-            )
-    return documents
-
-
-def _main_document(rows):
-    main = next(row for row in rows if row["role"] == "main")
-    return {
-        "main": {
-            "path": main["path"],
-            "type": "Petição inicial",
-            "description": main.get("description") or "Petição inicial",
-            "sha256": main["uploadSha256"],
-        },
-        "supporting": supporting_documents(rows),
-    }
-
-
 def _petition_candidates(path):
     markdown = analyze_document(Path(path).read_bytes(), Path(path).name).get("markdown") or ""
     return claim_value_candidates(markdown), cpf_candidates(markdown)
@@ -216,15 +172,6 @@ def upload_filename(name):
     return f"{re.sub(r'[ _]{2,}', ' ', folded).strip() or 'documento'}.pdf"
 
 
-def _stage_upload(path, directory, name):
-    """Copy a ready-to-upload PDF under its canonical name; the content (and hash) is unchanged."""
-    source = Path(path)
-    target = directory / "upload" / _sha256(source.read_bytes())[:12] / name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
-    return str(target)
-
-
 class CanonicalNames:
     """Unique upload names for one run.
 
@@ -244,22 +191,67 @@ class CanonicalNames:
         return candidate
 
 
-def stage_uploads(rows, directory):
-    """Copy every PDF row (and its volumes) to its upload folder under a name unique within the run, in folder order."""
-    names = CanonicalNames()
-    for row in rows:
-        if Path(row["path"]).suffix.lower() != ".pdf" or not row.get("uploadSha256"):
-            continue
-        name = names.claim(upload_filename(row["name"]), row["uploadSha256"])
-        row["path"] = _stage_upload(row["path"], directory, name)
-        for index, part in enumerate(row.get("parts") or [], 1):
-            part_name = names.claim(f"{Path(name).stem}-vol-{index:02}.pdf", part["uploadSha256"])
-            part["path"] = _stage_upload(part["path"], directory, part_name)
+def _label(name):
+    """The descriptive part of a clean upload name, without the folder's own leading number: our NN replaces it."""
+    stem = Path(upload_filename(name)).stem
+    return re.sub(r"^\d+\s*[-.]\s*", "", stem).strip() or "documento"
 
 
-def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_hashes, profile, jev_options=None):
+def assemble(store, rows):
+    """Write the run's documents/ folder from the chosen rows and return the payload's `documents`.
+
+    Filing order is explicit: the main petition is 01, then each supporting file in folder order, each volume of a
+    split PDF with its own number (`03-LAUDOS-vol-01.pdf`). Names are unique within the run (see CanonicalNames). Each
+    file is copied from the run's work area only after its content matches the reviewed `uploadSha256`. The manifest
+    records what every assembled file is and which review row it came from; the payload names the files relative to
+    the run, so the run stays valid wherever it is copied.
+    """
+    store.delete_tree(DOCUMENTS)
+    store.delete(MANIFEST)
+    main = next(row for row in rows if row["role"] == "main")
+    ordered = [main, *(row for row in rows if row["role"] == "supporting")]
+    names, entries = CanonicalNames(), []
+    for row in ordered:
+        parts = row.get("parts") or []
+        description = row.get("description") or ("Petição inicial" if row["role"] == "main" else Path(row["name"]).stem)
+        for index, item in enumerate(parts or [row], 1):
+            content = store.read_bytes(item["path"])
+            if _sha256(content) != item["uploadSha256"]:
+                raise ValueError(f"Document changed: {row['name']}")
+            label = f"{_label(row['name'])}-vol-{index:02}" if parts else _label(row["name"])
+            name = names.claim(f"{len(entries) + 1:02}-{label}.pdf", item["uploadSha256"])
+            store.write_bytes(f"{DOCUMENTS}/{name}", content)
+            entry = {
+                "path": f"{DOCUMENTS}/{name}",
+                "type": row["type"],
+                "description": f"{description} - volume {index}/{len(parts)}" if parts else description,
+                "sha256": item["uploadSha256"],
+            }
+            if parts:
+                entry["number"] = f"{index}/{len(parts)}"
+            entries.append((entry, row, len(content)))
+    store.write_json(
+        MANIFEST,
+        {
+            "version": 1,
+            "assembledAt": now(),
+            "documents": [
+                {**entry, "role": row["role"], "size": size, "reviewId": row["id"], "sourceName": row["name"]}
+                for entry, row, size in entries
+            ],
+        },
+    )
+    documents = [entry for entry, _, _ in entries]
+    return {"main": documents[0], "supporting": documents[1:]}
+
+
+def _prepare_row(entry, index, store, documents, unlabeled_petition, seen_hashes, profile, jev_options=None):
+    """Download, convert and split one file in the run's work area; the row names its files relative to the run."""
     file = documents.download_file(
-        entry.get("downloadUrl") or entry["url"], filename=entry["name"], directory=directory / "files", inspect=False
+        entry.get("downloadUrl") or entry["url"],
+        filename=entry["name"],
+        directory=store.workspace(f"{WORK}/files"),
+        inspect=False,
     )
     content = Path(file["path"]).read_bytes()
     sha256 = _sha256(content)
@@ -305,7 +297,8 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
     if path.suffix.lower() != ".pdf":
         if path.suffix.lower() in (".doc", ".docx"):
             try:
-                row["path"] = str(convert_word_to_pdf(path, directory / "converted" / sha256 / f"{path.stem}.pdf"))
+                converted = store.workspace(f"{WORK}/converted/{sha256}") / f"{path.stem}.pdf"
+                row["path"] = str(convert_word_to_pdf(path, converted))
             except Exception as error:
                 row["review"] = f"PDF conversion failed: {error}"
         else:
@@ -320,7 +313,7 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
                 row["review"] = "Main petition exceeds PJe's 10 MB limit"
             else:
                 try:
-                    row["parts"] = split_pdf(row["path"], directory / "split" / sha256)
+                    row["parts"] = split_pdf(row["path"], store.workspace(f"{WORK}/split/{sha256}"))
                     for part in row["parts"]:
                         part["uploadSha256"] = _sha256(Path(part["path"]).read_bytes())
                     row["review"] = "; ".join(
@@ -328,17 +321,27 @@ def _prepare_row(entry, index, directory, documents, unlabeled_petition, seen_ha
                     )
                 except Exception as error:
                     row["review"] = f"PDF splitting needs review: {error}"
+    row["path"] = store.name_of(row["path"])
+    for part in row.get("parts") or []:
+        part["path"] = store.name_of(part["path"])
     return row
 
 
-def prepare_customer(customer_id, facts, out_dir, *, profile, folder=None, client=None, jev=True):
-    """Download, convert, split and classify the protocol folder. `jev=False` keeps document text off the network."""
+def _void_assembly(store):
+    """Drop the payload, its approval and the assembled documents: whatever comes next must be reviewed anew."""
+    store.delete(PAYLOAD)
+    revoke_approval(store)
+    store.delete(MANIFEST)
+    store.delete_tree(DOCUMENTS)
+
+
+def prepare_customer(customer_id, facts, store, *, profile, folder=None, client=None, jev=True):
+    """Download, convert, split and classify the protocol folder into the run `store` (a RunStore).
+
+    `jev=False` keeps document text off the network.
+    """
     jev_options = None if jev else {"openrouter_key": "", "api_key": ""}
-    directory = Path(out_dir).resolve()
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # A new preparation voids any earlier payload and its approval, whatever this one concludes.
-    (directory / "payload.json").unlink(missing_ok=True)
-    revoke_approval(directory)
+    _void_assembly(store)
     documents = AdvboxDocuments(client or AdvboxClient())
     root = documents.list_customer_files(customer_id)
     selected = folder or next(
@@ -364,10 +367,9 @@ def prepare_customer(customer_id, facts, out_dir, *, profile, folder=None, clien
     )
     seen = set()
     rows = [
-        _prepare_row(entry, index, directory, documents, unlabeled, seen, profile, jev_options)
+        _prepare_row(entry, index, store, documents, unlabeled, seen, profile, jev_options)
         for index, entry in enumerate(files)
     ]
-    stage_uploads(rows, directory)
 
     mains = [row for row in rows if row["role"] == "main"]
     review = [{"id": row["id"], "name": row["name"], "reason": row["review"]} for row in rows if row.get("review")]
@@ -375,7 +377,7 @@ def prepare_customer(customer_id, facts, out_dir, *, profile, folder=None, clien
         review.append({"name": "petition", "reason": f"Expected one main petition, found {len(mains)}"})
     candidates = {"claimValues": [], "cpfs": []}
     if len(mains) == 1 and mains[0].get("uploadSha256"):
-        candidates["claimValues"], candidates["cpfs"] = _petition_candidates(mains[0]["path"])
+        candidates["claimValues"], candidates["cpfs"] = _petition_candidates(store.local_path(mains[0]["path"]))
         claim_value = (facts.get("characteristics") or {}).get("claimValue")
         if claim_value and candidates["claimValues"] and claim_value not in candidates["claimValues"]:
             review.append({"name": "claimValue", "reason": "Case fact differs from the petition's stated claim value"})
@@ -387,13 +389,12 @@ def prepare_customer(customer_id, facts, out_dir, *, profile, folder=None, clien
         require_facts(facts, profile.defaults())
     except ValueError as error:
         review.append({"name": "case facts", "reason": str(error)})
-    payload_path = None
     if not review:
         try:
-            payload = build_payload(facts, _main_document(rows), profile.defaults())
-            payload_path = directory / "payload.json"
-            _write_private(payload_path, payload)
+            payload = build_payload(facts, assemble(store, rows), profile.defaults())
+            store.write_json(PAYLOAD, payload)  # written, but not approved: filing_approve decides that
         except ValueError as error:
+            _void_assembly(store)
             review.append({"name": "case facts", "reason": str(error)})
     fallbacks = [
         {
@@ -415,19 +416,18 @@ def prepare_customer(customer_id, facts, out_dir, *, profile, folder=None, clien
         "ready": not review,
         "fallbacks": fallbacks,
     }
-    _write_private(directory / "review.json", report)
+    store.write_json(REVIEW, report)
     return {
         "ready": report["ready"],
         "review": review,
         "folder": selected,
         "fileCount": len(rows),
         "fallbackCount": len(fallbacks),
-        "reviewPath": str(directory / "review.json"),
-        "payloadPath": str(payload_path) if payload_path else None,
+        "payloadWritten": store.exists(PAYLOAD),
     }
 
 
-def _verify_row(row):
+def _verify_row(store, row):
     if row["role"] not in ("main", "supporting"):
         raise ValueError(f"Invalid role for {row['name']}")
     if row["role"] == "main" and row.get("type") != "Petição inicial":
@@ -441,13 +441,13 @@ def _verify_row(row):
         raise ValueError(f"Invalid PJe type for {row['name']}")
     if row.get("review") or not row.get("type") or not row.get("uploadSha256"):
         raise ValueError(f"Document needs review: {row['name']}")
-    content = Path(row["path"]).read_bytes()
+    content = store.read_bytes(row["path"])
     if _sha256(content) != row["uploadSha256"]:
         raise ValueError(f"Document changed: {row['name']}")
     if (not parts and len(content) > PJE_LIMIT) or not _is_pdf(content):
         raise ValueError(f"Invalid PDF: {row['name']}")
     for part in parts or []:
-        part_content = Path(part["path"]).read_bytes()
+        part_content = store.read_bytes(part["path"])
         if len(part_content) > PJE_LIMIT or not _is_pdf(part_content) or _sha256(part_content) != part["uploadSha256"]:
             raise ValueError(f"Split PDF changed or is invalid: {part['path']}")
 
@@ -470,17 +470,15 @@ def _checked_override(file_id, choice):
     return {key: value.strip() for key, value in choice.items()}
 
 
-def finalize_review(review_path, facts, overrides=None, *, profile):
-    """Apply the reviewer's explicit choices and write payload.json next to review.json (unapproved)."""
+def finalize_review(store, facts, overrides=None, *, profile):
+    """Apply the reviewer's explicit choices, assemble documents/ and write payload.json (unapproved) in the run."""
     overrides = overrides or {}
-    report = json.loads(Path(review_path).read_text(encoding="utf-8"))
+    report = store.read_json(REVIEW)
     unknown = sorted(set(overrides) - {row["id"] for row in report["files"]})
     if unknown:
         raise ValueError(f"Overrides name files that are not in the review: {', '.join(unknown)}")
     choices = {file_id: _checked_override(file_id, choice) for file_id, choice in overrides.items()}
-    directory = Path(review_path).resolve().parent
-    (directory / "payload.json").unlink(missing_ok=True)
-    revoke_approval(directory)
+    _void_assembly(store)
     rows = []
     for original in report["files"]:
         choice = choices.get(original["id"])
@@ -489,20 +487,20 @@ def finalize_review(review_path, facts, overrides=None, *, profile):
             row.pop("review", None)
         if row["role"] == "skip":
             continue
-        _verify_row(row)
+        _verify_row(store, row)
         rows.append(row)
     mains = [row for row in rows if row["role"] == "main"]
     if len(mains) != 1:
         raise ValueError(f"Expected one main petition, found {len(mains)}")
-    claim_values, cpfs = _petition_candidates(mains[0]["path"])
+    claim_values, cpfs = _petition_candidates(store.local_path(mains[0]["path"]))
     if claim_values and (facts.get("characteristics") or {}).get("claimValue") not in claim_values:
         raise ValueError("Case claimValue differs from the selected petition's stated value")
     if cpfs and _digits(facts.get("authorCpf")) not in cpfs:
         raise ValueError("Author CPF was not found among the selected petition's formatted CPFs")
-    payload = build_payload(facts, _main_document(rows), profile.defaults())
-    destination = directory / "payload.json"
-    _write_private(destination, payload)
-    return {"ready": True, "payloadPath": str(destination), "documentCount": len(rows)}
+    build_payload(facts, {}, profile.defaults())  # facts problems surface before any file is assembled
+    documents = assemble(store, rows)
+    store.write_json(PAYLOAD, build_payload(facts, documents, profile.defaults()))
+    return {"ready": True, "documentCount": 1 + len(documents["supporting"])}
 
 
 def main(argv=None):
@@ -515,7 +513,7 @@ def main(argv=None):
     prepare.add_argument("--folder")
     prepare.add_argument("--no-jev", action="store_true", help="Keep document text off the network")
     finalize = commands.add_parser("finalize")
-    finalize.add_argument("--review", required=True, type=Path)
+    finalize.add_argument("--run", required=True, type=Path, help="The run folder prepare wrote (holds review.json)")
     finalize.add_argument("--facts", required=True, type=Path)
     finalize.add_argument("--overrides", type=Path)
     for command in (prepare, finalize):
@@ -524,15 +522,20 @@ def main(argv=None):
     approval.add_argument("--run", required=True, type=Path)
     args = parser.parse_args(argv)
     if args.command == "approve":
-        print(json.dumps(approve(args.run), ensure_ascii=False, indent=2))
+        print(json.dumps(approve(LocalRunStore(args.run)), ensure_ascii=False, indent=2))
         return
     profile = load_profile(args.profile)
     facts = json.loads(args.facts.read_text(encoding="utf-8"))
     if args.command == "prepare":
         result = prepare_customer(
-            args.customer, facts, args.out, profile=profile, folder=args.folder, jev=not args.no_jev
+            args.customer,
+            facts,
+            LocalRunStore(args.out).ensure(),
+            profile=profile,
+            folder=args.folder,
+            jev=not args.no_jev,
         )
     else:
         overrides = json.loads(args.overrides.read_text(encoding="utf-8")) if args.overrides else {}
-        result = finalize_review(args.review, facts, overrides, profile=profile)
+        result = finalize_review(LocalRunStore(args.run), facts, overrides, profile=profile)
     print(json.dumps(result, ensure_ascii=False, indent=2))

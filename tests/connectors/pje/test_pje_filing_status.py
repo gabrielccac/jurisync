@@ -13,6 +13,7 @@ from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.checkpoint import phase_fingerprints
 from jurisync.connectors.pje.filing.run import _fill
 from jurisync.connectors.pje.filing.status import run_state, run_status
+from jurisync.connectors.pje.filing.store import LocalRunStore
 
 PAYLOAD = {
     "subject": {"search": "s", "code": "1", "name": "S"},
@@ -56,7 +57,7 @@ class StepStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "filing-steps.json")
             path.write_text(json.dumps({"steps": [{"step": "x", "status": "running", "error": None}]}))
-            timeline = StepTimeline(path, Stub(), "fill")
+            timeline = StepTimeline(LocalRunStore(tmp), Stub(), "fill")
             timeline.close_stale()
             saved = json.loads(path.read_text())["steps"][0]
         self.assertEqual((saved["status"], saved["error"]), ("interrupted", "run ended without finishing"))
@@ -68,7 +69,8 @@ class FillStatusTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name, "checkpoint.json")
         checkpoint = checkpoint or {"draftId": "1", "draftUrl": "u", "stage": "created"}
-        return checkpoint, path, lambda: _fill(client, checkpoint, str(path), PAYLOAD, "fill", False)
+        store = LocalRunStore(tmp.name)
+        return checkpoint, path, lambda: _fill(client, checkpoint, store, PAYLOAD, "fill", False)
 
     def test_a_finished_fill_records_complete_with_its_process_id(self):
         checkpoint, path, run = self.run_fill(Stub())
@@ -100,11 +102,10 @@ class FillStatusTests(unittest.TestCase):
 
 class RunStatusTests(unittest.TestCase):
     def write(self, tmp, checkpoint, steps=None):
-        path = Path(tmp, "checkpoint.json")
-        path.write_text(json.dumps(checkpoint))
+        Path(tmp, "checkpoint.json").write_text(json.dumps(checkpoint))
         if steps is not None:
             Path(tmp, "filing-steps.json").write_text(json.dumps({"steps": steps}))
-        return path
+        return LocalRunStore(tmp)
 
     def test_state_comes_from_the_run_record_and_process_liveness(self):
         self.assertEqual(run_state({"status": "running", "pid": os.getpid()}), "running")
@@ -173,7 +174,7 @@ class BackgroundFillTests(unittest.TestCase):
             run_dir = Path(tmp, "run1")
             run_dir.mkdir()
             run_dir.joinpath("payload.json").write_text(json.dumps(PAYLOAD))
-            approve(run_dir)
+            approve(LocalRunStore(run_dir))
             env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}
             with mock.patch.dict(os.environ, env), mock.patch.object(server.filing, "run_stage", slow_run_stage):
                 first = server._start_fill("run1", "create-fill")
@@ -202,7 +203,7 @@ class BackgroundFillTests(unittest.TestCase):
             with mock.patch.dict(os.environ, env), mock.patch.object(server.filing, "run_stage", run):
                 with self.assertRaisesRegex(ToolError, "not been approved"):
                     server.draft_write("run1", "create-fill")
-                approve(run_dir)
+                approve(LocalRunStore(run_dir))
                 payload.write_text(json.dumps({**PAYLOAD, "author": {"name": "SOMEONE ELSE"}}))
                 with self.assertRaisesRegex(ToolError, "changed after it was approved"):
                     server.draft_write("run1", "create-fill")
@@ -218,7 +219,7 @@ class BackgroundFillTests(unittest.TestCase):
             with login:
                 for stage in sorted(WRITE_STAGES - {"delete-draft"}):
                     with self.subTest(stage), self.assertRaisesRegex(ValueError, "not been approved"):
-                        run_stage(stage, payload_path=str(payload), checkpoint_path=str(Path(tmp, "cp.json")))
+                        run_stage(stage, run=LocalRunStore(tmp))
 
     def test_writes_stay_disabled_without_the_flag(self):
         from mcp.server.mcpserver.exceptions import ToolError

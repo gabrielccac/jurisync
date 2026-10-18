@@ -8,8 +8,8 @@ from jurisync.connectors.pje.filing.checkpoint import (
     UploadLedger,
     documents_fingerprint,
     fingerprint,
-    write_checkpoint,
 )
+from jurisync.connectors.pje.filing.store import LocalRunStore
 
 PAYLOAD = {
     "subject": {"search": "s", "code": "1", "name": "S"},
@@ -150,11 +150,13 @@ class PhaseTests(unittest.TestCase):
 
     def test_checkpoint_is_replaced_atomically_with_owner_only_access(self):
         with tempfile.TemporaryDirectory() as tmp:
+            store = LocalRunStore(tmp)
+            store.write_json("checkpoint.json", {"draftId": "1"})
+            store.write_json("checkpoint.json", {"draftId": "2"})
             path = Path(tmp, "checkpoint.json")
-            write_checkpoint(path, {"draftId": "1"})
-            write_checkpoint(path, {"draftId": "2"})
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(list(Path(tmp).iterdir()), [path])
+            self.assertEqual(store.read_json("checkpoint.json"), {"draftId": "2"})
 
 
 class DocumentBatchTests(unittest.TestCase):

@@ -53,9 +53,9 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir = Path(self.tmp.name, "run1")
 
     def fake_prepare(self, calls):
-        def prepare(customer_id, facts, out_dir, *, profile, folder=None, client=None, jev=True):
+        def prepare(customer_id, facts, store, *, profile, folder=None, client=None, jev=True):
             calls.append({"customer": customer_id, "folder": folder, "jev": jev, "profile": profile.name})
-            Path(out_dir, "review.json").write_text(json.dumps(REVIEW))
+            store.write_json("review.json", REVIEW)
             return {"ready": False}
 
         return mock.patch.object(filing, "prepare_customer", prepare)
@@ -143,8 +143,8 @@ class FilingServerTests(unittest.TestCase):
             "documents": {"main": {"path": "/secret/dir/p.pdf", "type": "Petição inicial", "description": "Petição"}},
         }
 
-        def finalize(review_path, facts, overrides=None, *, profile):
-            Path(review_path).with_name("payload.json").write_text(json.dumps(payload))
+        def finalize(store, facts, overrides=None, *, profile):
+            store.root.joinpath("payload.json").write_text(json.dumps(payload))
             return {"ready": True}
 
         with mock.patch.object(filing, "finalize_review", finalize):
@@ -161,14 +161,15 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir.mkdir()
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         self.assertTrue(call("filing_approve", {"runId": "run1"}).is_error)
-        petition = self.run_dir / "petition.pdf"
+        petition = self.run_dir / "documents" / "petition.pdf"
+        petition.parent.mkdir()
         petition.write_bytes(b"%PDF-1 petition")
         sha = hashlib.sha256(petition.read_bytes()).hexdigest()
         payload = {
             "subjects": [{"search": "s", "code": "1", "name": "S"}],
             "authorCpf": "12345678909",
             "author": {"name": "EXAMPLE"},
-            "documents": {"main": {"path": str(petition), "type": "Petição inicial", "sha256": sha}},
+            "documents": {"main": {"path": "documents/petition.pdf", "type": "Petição inicial", "sha256": sha}},
         }
         payload_path = self.run_dir / "payload.json"
         payload_path.write_text(json.dumps(payload))
@@ -198,8 +199,8 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir.joinpath("facts.json").write_text("{}")
         self.run_dir.joinpath("approval.json").write_text("{}")
 
-        def finalize(review_path, facts, overrides=None, *, profile):
-            Path(review_path).with_name("payload.json").write_text(json.dumps({"author": {"name": "X"}}))
+        def finalize(store, facts, overrides=None, *, profile):
+            store.root.joinpath("payload.json").write_text(json.dumps({"author": {"name": "X"}}))
             return {"ready": True}
 
         with mock.patch.object(filing, "finalize_review", finalize):

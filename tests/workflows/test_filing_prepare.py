@@ -1,11 +1,14 @@
 import hashlib
-import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from jurisync.connectors.pje.filing.approval import approve, require_approval
+from jurisync.connectors.pje.filing.payload import resolve_documents, validate_fill_payload
+from jurisync.connectors.pje.filing.store import LocalRunStore
 from jurisync.workflows.filing.classify import (
     ask_jev,
     claim_value_candidates,
@@ -16,9 +19,10 @@ from jurisync.workflows.filing.classify import (
 )
 from jurisync.workflows.filing.prepare import (
     apply_supporting_fallback,
+    assemble,
     build_payload,
     finalize_review,
-    stage_uploads,
+    prepare_customer,
     upload_filename,
 )
 from jurisync.workflows.filing.profile import load_profile
@@ -141,30 +145,69 @@ class UploadNameTest(unittest.TestCase):
         for name, clean in expected.items():
             self.assertEqual(upload_filename(name), clean, name)
 
-    def test_staged_names_are_unique_in_the_run_even_when_cleaning_collides(self):
+    def test_assembly_numbers_files_in_filing_order_with_unique_names(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            rows = []
-            for name, content in (("A_1111.pdf", b"%PDF-1"), ("Ã_2222.pdf", b"%PDF-2"), ("a_3333.pdf", b"%PDF-3")):
-                path = root / name
-                path.write_bytes(content)
-                sha = hashlib.sha256(content).hexdigest()
-                rows.append({"name": name, "path": str(path), "uploadSha256": sha})
-            big = root / "B_4444.pdf"
-            big.write_bytes(b"%PDF-big")
-            volumes = []
-            for index in (1, 2):
-                part = root / f"part{index}.pdf"
-                part.write_bytes(b"%PDF-vol" + bytes([index]))
-                volumes.append({"path": str(part), "uploadSha256": hashlib.sha256(part.read_bytes()).hexdigest()})
-            rows.append({"name": "B_4444.pdf", "path": str(big), "uploadSha256": "9" * 64, "parts": volumes})
-            stage_uploads(rows, root)
-            names = [Path(row["path"]).name for row in rows]
-            sha = [row["uploadSha256"] for row in rows]
-            # The first keeps the clean name; later ones that PJe would confuse with it get a content-hash suffix.
-            self.assertEqual(names, ["A.pdf", f"A-{sha[1][:8]}.pdf", f"a-{sha[2][:8]}.pdf", "B.pdf"])
-            self.assertEqual([Path(part["path"]).name for part in rows[3]["parts"]], ["B-vol-01.pdf", "B-vol-02.pdf"])
-            self.assertEqual(Path(rows[1]["path"]).read_bytes(), b"%PDF-2")
+            store = LocalRunStore(tmp)
+
+            def work(name, content):
+                store.write_bytes(f"work/files/{name}", content)
+                return {"path": f"work/files/{name}", "uploadSha256": hashlib.sha256(content).hexdigest()}
+
+            rows = [
+                {
+                    "id": "a",
+                    "name": "3-A_1111.pdf",
+                    "role": "supporting",
+                    "type": "Outros Documentos",
+                    **work("a", b"%PDF-1"),
+                },
+                {
+                    "id": "b",
+                    "name": "Ã_2222.pdf",
+                    "role": "supporting",
+                    "type": "Outros Documentos",
+                    **work("b", b"%PDF-2"),
+                },
+                {
+                    "id": "p",
+                    "name": "10-PETIÇÃO INICIAL_6630.pdf",
+                    "role": "main",
+                    "type": "Petição inicial",
+                    **work("p", b"%PDF-p"),
+                },
+                {
+                    "id": "c",
+                    "name": "B_4444.pdf",
+                    "role": "supporting",
+                    "type": "Laudo Médico",
+                    **work("c", b"%PDF-big"),
+                    "parts": [work("c1", b"%PDF-vol1"), work("c2", b"%PDF-vol2")],
+                },
+            ]
+            store.write_bytes("documents/99-stale.pdf", b"%PDF-old")
+            documents = assemble(store, rows)
+            items = [documents["main"], *documents["supporting"]]
+            self.assertEqual(
+                [item["path"] for item in items],
+                [
+                    "documents/01-PETICAO INICIAL.pdf",
+                    "documents/02-A.pdf",
+                    "documents/03-A.pdf",
+                    "documents/04-B-vol-01.pdf",
+                    "documents/05-B-vol-02.pdf",
+                ],
+            )
+            self.assertEqual(store.list("documents"), sorted(item["path"] for item in items))
+            self.assertEqual(store.read_bytes("documents/03-A.pdf"), b"%PDF-2")
+            self.assertEqual((items[3]["number"], items[3]["description"]), ("1/2", "B_4444 - volume 1/2"))
+            manifest = store.read_json("manifest.json")
+            self.assertEqual([entry["reviewId"] for entry in manifest["documents"]], ["p", "a", "b", "c", "c"])
+            self.assertEqual(manifest["documents"][0]["sha256"], items[0]["sha256"])
+            self.assertEqual(Path(tmp, "documents").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(Path(tmp, "documents/02-A.pdf").stat().st_mode & 0o777, 0o600)
+            store.write_bytes("work/files/b", b"%PDF-2 edited")
+            with self.assertRaisesRegex(ValueError, "Document changed: Ã_2222.pdf"):
+                assemble(store, rows)
 
 
 class PayloadTest(unittest.TestCase):
@@ -223,80 +266,150 @@ class PayloadTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fiscalDaLei"):
             build_payload(missing, {}, PROFILE.defaults())
 
-    def test_review_finalizer_requires_resolution_and_verifies_pdf_contents(self):
-        with tempfile.TemporaryDirectory() as directory:
-            directory = Path(directory)
-            petition, supporting = directory / "petition.pdf", directory / "supporting.pdf"
-            petition.write_bytes(b"%PDF-1.4\nfixture")
-            supporting.write_bytes(b"%PDF-1.4\nsupporting fixture")
-            digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
-            report = directory / "review.json"
-            report.write_text(
-                json.dumps(
+    def run_with_review(self, tmp):
+        store = LocalRunStore(Path(tmp, "run1")).ensure()
+        petition, supporting = b"%PDF-1.4\nfixture", b"%PDF-1.4\nsupporting fixture"
+        store.write_bytes("work/files/petition.pdf", petition)
+        store.write_bytes("work/files/supporting.pdf", supporting)
+        digest = lambda content: hashlib.sha256(content).hexdigest()
+        store.write_json(
+            "review.json",
+            {
+                "files": [
                     {
-                        "files": [
-                            {
-                                "id": "file:0",
-                                "name": "petition.pdf",
-                                "path": str(petition),
-                                "sha256": digest(petition),
-                                "uploadSha256": digest(petition),
-                                "role": "main",
-                                "type": "Petição inicial",
-                                "review": "Choose main",
-                            },
-                            {
-                                "id": "file:1",
-                                "name": "supporting.pdf",
-                                "path": str(supporting),
-                                "sha256": digest(supporting),
-                                "uploadSha256": digest(supporting),
-                                "role": "supporting",
-                                "type": "Outros Documentos",
-                                "fallbackReason": "No readable document text",
-                            },
-                        ]
-                    }
-                )
-            )
+                        "id": "file:0",
+                        "name": "petition.pdf",
+                        "path": "work/files/petition.pdf",
+                        "sha256": digest(petition),
+                        "uploadSha256": digest(petition),
+                        "role": "main",
+                        "type": "Petição inicial",
+                        "review": "Choose main",
+                    },
+                    {
+                        "id": "file:1",
+                        "name": "supporting.pdf",
+                        "path": "work/files/supporting.pdf",
+                        "sha256": digest(supporting),
+                        "uploadSha256": digest(supporting),
+                        "role": "supporting",
+                        "type": "Outros Documentos",
+                        "fallbackReason": "No readable document text",
+                    },
+                ]
+            },
+        )
+        return store, digest(petition), digest(supporting)
+
+    def test_review_finalizer_requires_resolution_and_verifies_pdf_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, petition_sha, supporting_sha = self.run_with_review(tmp)
             with self.assertRaisesRegex(ValueError, "needs review"):
-                finalize_review(report, FACTS, profile=PROFILE)
+                finalize_review(store, FACTS, profile=PROFILE)
             choice = {"file:0": {"role": "main", "type": "Petição inicial"}}
-            result = finalize_review(report, FACTS, choice, profile=PROFILE)
+            result = finalize_review(store, FACTS, choice, profile=PROFILE)
             self.assertTrue(result["ready"])
-            documents = json.loads(Path(result["payloadPath"]).read_text())["documents"]
-            self.assertEqual(documents["main"]["path"], str(petition))
-            self.assertEqual(documents["main"]["sha256"], digest(petition))
+            documents = store.read_json("payload.json")["documents"]
+            self.assertEqual(
+                documents["main"],
+                {
+                    "path": "documents/01-petition.pdf",
+                    "type": "Petição inicial",
+                    "description": "Petição inicial",
+                    "sha256": petition_sha,
+                },
+            )
             self.assertEqual(
                 documents["supporting"],
                 [
                     {
-                        "path": str(supporting),
+                        "path": "documents/02-supporting.pdf",
                         "type": "Outros Documentos",
                         "description": "supporting",
-                        "sha256": digest(supporting),
+                        "sha256": supporting_sha,
                     }
                 ],
             )
-            directory.joinpath("approval.json").write_text("{}")
+            store.write_json("approval.json", {})
             described = {**choice, "file:1": {"type": "Laudo Médico", "description": "Laudo do CAPS"}}
-            finalize_review(report, FACTS, described, profile=PROFILE)
-            supporting_item = json.loads(Path(result["payloadPath"]).read_text())["documents"]["supporting"][0]
+            finalize_review(store, FACTS, described, profile=PROFILE)
+            supporting_item = store.read_json("payload.json")["documents"]["supporting"][0]
             self.assertEqual(
                 (supporting_item["type"], supporting_item["description"]), ("Laudo Médico", "Laudo do CAPS")
             )
-            self.assertFalse(directory.joinpath("approval.json").exists(), "a new payload needs a new approval")
+            self.assertFalse(store.exists("approval.json"), "a new payload needs a new approval")
             for forbidden in ({"path": "/tmp/other.pdf"}, {"uploadSha256": "0" * 64}, {"role": "main", "sha256": "x"}):
                 with self.assertRaisesRegex(ValueError, "cannot be changed"):
-                    finalize_review(report, FACTS, {**choice, "file:1": forbidden}, profile=PROFILE)
+                    finalize_review(store, FACTS, {**choice, "file:1": forbidden}, profile=PROFILE)
             with self.assertRaisesRegex(ValueError, "main, supporting or skip"):
-                finalize_review(report, FACTS, {**choice, "file:1": {"role": "other"}}, profile=PROFILE)
+                finalize_review(store, FACTS, {**choice, "file:1": {"role": "other"}}, profile=PROFILE)
             with self.assertRaisesRegex(ValueError, "nope"):
-                finalize_review(report, FACTS, {"nope": {"role": "skip"}}, profile=PROFILE)
-            self.assertEqual(oct(Path(result["payloadPath"]).stat().st_mode & 0o777), "0o600")
-            petition.write_bytes(b"%PDF-1.4\nchanged")
+                finalize_review(store, FACTS, {"nope": {"role": "skip"}}, profile=PROFILE)
+            finalize_review(store, FACTS, {**choice, "file:1": {"role": "skip"}}, profile=PROFILE)
+            self.assertEqual(store.list("documents"), ["documents/01-petition.pdf"], "skipped files leave documents/")
+            self.assertEqual(Path(tmp, "run1", "payload.json").stat().st_mode & 0o777, 0o600)
+            store.write_bytes("work/files/petition.pdf", b"%PDF-1.4\nchanged")
             with self.assertRaisesRegex(ValueError, "Document changed"):
-                finalize_review(report, FACTS, choice, profile=PROFILE)
+                finalize_review(store, FACTS, choice, profile=PROFILE)
+            self.assertFalse(store.exists("payload.json"), "a failed finalize leaves no payload behind")
+
+    def test_prepare_keeps_work_files_and_documents_inside_the_run(self):
+        class Folder:
+            def list_customer_files(self, customer_id, path=None):
+                if path is None:
+                    return {"folders": [{"path": "00-PROTOCOLAR"}]}
+                return {
+                    "files": [
+                        {"name": "10-PETIÇÃO INICIAL_1111.pdf", "url": "u1"},
+                        {"name": "2-PROCURAÇÃO_2222.pdf", "url": "u2"},
+                    ]
+                }
+
+            def download_file(self, url, *, filename, directory, inspect):
+                target = Path(directory, filename)
+                target.write_bytes(b"%PDF-1 " + url.encode())
+                return {"path": str(target)}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = LocalRunStore(Path(tmp, "run1")).ensure()
+            store.write_json("approval.json", {})
+            with (
+                mock.patch("jurisync.workflows.filing.prepare.AdvboxDocuments", lambda client: Folder()),
+                mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [])),
+            ):
+                result = prepare_customer("1", FACTS, store, profile=PROFILE, client=object(), jev=False)
+            self.assertTrue(result["payloadWritten"], result["review"])
+            self.assertFalse(store.exists("approval.json"), "prepare never leaves an approval behind")
+            rows = store.read_json("review.json")["files"]
+            self.assertTrue(all(row["path"].startswith("work/files/") for row in rows))
+            documents = store.read_json("payload.json")["documents"]
+            self.assertEqual(
+                [documents["main"]["path"], *(item["path"] for item in documents["supporting"])],
+                ["documents/01-PETICAO INICIAL.pdf", "documents/02-PROCURACAO.pdf"],
+            )
+            self.assertNotIn(tmp, Path(tmp, "run1", "review.json").read_text())
+
+    def test_a_run_copied_to_another_folder_stays_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _, _ = self.run_with_review(tmp)
+            finalize_review(store, FACTS, {"file:0": {"role": "main", "type": "Petição inicial"}}, profile=PROFILE)
+            approve(store)
+            payload_text = Path(tmp, "run1", "payload.json").read_text()
+            self.assertNotIn(tmp, payload_text, "no absolute path in the payload")
+            self.assertNotIn(tmp, Path(tmp, "run1", "manifest.json").read_text())
+            shutil.copytree(Path(tmp, "run1"), Path(tmp, "elsewhere", "copied"))
+            shutil.rmtree(Path(tmp, "run1"))
+            copied = LocalRunStore(Path(tmp, "elsewhere", "copied"))
+            require_approval(copied)
+            payload = resolve_documents(copied.read_json("payload.json"), copied)
+            validate_fill_payload(payload)
+            self.assertEqual(
+                Path(payload["documents"]["main"]["path"]),
+                Path(tmp, "elsewhere", "copied").resolve() / "documents/01-petition.pdf",
+            )
+            copied.write_bytes("documents/02-supporting.pdf", b"%PDF-1.4\nswapped")
+            with self.assertRaisesRegex(ValueError, "changed since approval: 02-supporting.pdf"):
+                validate_fill_payload(resolve_documents(copied.read_json("payload.json"), copied))
 
 
 if __name__ == "__main__":

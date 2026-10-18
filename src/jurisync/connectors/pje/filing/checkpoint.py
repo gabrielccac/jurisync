@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -66,24 +65,6 @@ def pid_alive(pid):
 
 def now():
     return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def write_private_json(path, data):
-    """Replace a run file atomically (owner-only), so an interrupted write never leaves a broken file."""
-    destination = Path(path)
-    descriptor, temp = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.stem}-")
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-        json.dump(data, output, ensure_ascii=False, indent=2)
-    os.chmod(temp, 0o600)
-    os.replace(temp, destination)
-
-
-def write_checkpoint(path, data):
-    write_private_json(path, data)
-
-
-def file_sha256(path):
-    return hashlib.sha256(Path(path).expanduser().read_bytes()).hexdigest()
 
 
 class UploadLedger:

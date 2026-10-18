@@ -9,7 +9,6 @@ Nothing reaches PJe on the strength of a written payload alone: `filing_approve`
 exact payload (its sha256 and every document's) in `approval.json`, and `pje_draft_write` refuses without it.
 """
 
-import json
 import os
 import re
 from pathlib import Path
@@ -20,11 +19,11 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
-from jurisync.connectors.pje.filing.approval import APPROVAL, approve, require_approval
-from jurisync.connectors.pje.filing.checkpoint import run_directory
+from jurisync.connectors.pje.filing.approval import approve, require_approval, revoke
+from jurisync.connectors.pje.filing.store import CHECKPOINT, FACTS, PAYLOAD, REVIEW, open_run
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 from jurisync.paths import REPO_ROOT
-from jurisync.workflows.filing.prepare import _write_private, finalize_review, prepare_customer
+from jurisync.workflows.filing.prepare import finalize_review, prepare_customer
 from jurisync.workflows.filing.profile import load_profile, profile_names
 
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
@@ -47,23 +46,23 @@ def _file_view(row):
     return view
 
 
-def _approved(directory):
+def _approved(store):
     try:
-        require_approval(directory / "payload.json")
+        require_approval(store)
     except (ValueError, OSError):
         return False
     return True
 
 
-def _review_view(run_id, report, directory):
+def _review_view(run_id, report, store):
     """The review without local paths or hashes: the agent needs ids, names, types and problems."""
     return {
         "runId": run_id,
         "customerId": report.get("customerId"),
         "folder": report.get("folder"),
         "ready": bool(report.get("ready")),
-        "payloadReady": (directory / "payload.json").exists(),
-        "approved": _approved(directory),
+        "payloadReady": store.exists(PAYLOAD),
+        "approved": _approved(store),
         "files": [_file_view(row) for row in report.get("files", [])],
         "review": report.get("review", []),
         "candidates": report.get("candidates", {}),
@@ -100,14 +99,14 @@ def _payload_view(payload):
     }
 
 
-def _read_json(path, missing):
-    if not path.exists():
+def _read_json(store, name, missing):
+    if not store.exists(name):
         raise ToolError(missing)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return store.read_json(name)
 
 
-def _require_no_draft(directory):
-    if (directory / "checkpoint.json").exists():
+def _require_no_draft(store):
+    if store.exists(CHECKPOINT):
         raise ToolError("This run already has a PJe draft, so its payload can no longer change; use a new runId")
 
 
@@ -125,16 +124,16 @@ def prepare(
     folder: Annotated[str | None, Field(max_length=200)] = None,
     useJev: bool = False,
 ) -> dict[str, Any]:
-    directory = run_directory(runId)
-    _require_no_draft(directory)
+    store = open_run(runId)
+    _require_no_draft(store)
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        _write_private(directory / "facts.json", facts)
-        prepare_customer(customerId, facts, directory, profile=selected, folder=folder, jev=useJev)
+        store.ensure()
+        store.write_json(FACTS, facts)
+        prepare_customer(customerId, facts, store, profile=selected, folder=folder, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
-    report = _read_json(directory / "review.json", "Prepare did not write a review")
-    return _review_view(runId, report, directory)
+    report = _read_json(store, REVIEW, "Prepare did not write a review")
+    return _review_view(runId, report, store)
 
 
 @server.tool(
@@ -144,9 +143,9 @@ def prepare(
     annotations=READ_ONLY,
 )
 def review(runId: RunId) -> dict[str, Any]:
-    directory = run_directory(runId)
-    report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
-    return _review_view(runId, report, directory)
+    store = open_run(runId)
+    report = _read_json(store, REVIEW, "This run has no review yet; call filing_prepare first")
+    return _review_view(runId, report, store)
 
 
 @server.tool(
@@ -161,20 +160,20 @@ def finalize(
     facts: dict[str, Any] | None = None,
     overrides: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    directory = run_directory(runId)
-    _require_no_draft(directory)
-    report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
+    store = open_run(runId)
+    _require_no_draft(store)
+    report = _read_json(store, REVIEW, "This run has no review yet; call filing_prepare first")
     if facts is None:
-        facts = _read_json(directory / "facts.json", "This run has no stored facts; pass facts")
+        facts = _read_json(store, FACTS, "This run has no stored facts; pass facts")
     else:
-        _write_private(directory / "facts.json", facts)
+        store.write_json(FACTS, facts)
     unknown = sorted(set(overrides or {}) - {row["id"] for row in report.get("files", [])})
     if unknown:
         raise ToolError(f"Overrides name files that are not in the review: {', '.join(unknown)}")
-    (directory / APPROVAL).unlink(missing_ok=True)
+    revoke(store)
     with tool_errors("Filing", *ERRORS):
-        result = finalize_review(directory / "review.json", facts, overrides or {}, profile=load_profile(profile))
-    payload = _read_json(directory / "payload.json", "The payload was not written")
+        result = finalize_review(store, facts, overrides or {}, profile=load_profile(profile))
+    payload = _read_json(store, PAYLOAD, "The payload was not written")
     return {
         "runId": runId,
         "ready": bool(result.get("ready")),
@@ -191,11 +190,11 @@ def finalize(
     annotations=LOCAL_WRITE,
 )
 def approve_payload(runId: RunId) -> dict[str, Any]:
-    directory = run_directory(runId)
-    if not (directory / "payload.json").exists():
+    store = open_run(runId)
+    if not store.exists(PAYLOAD):
         raise ToolError("This run has no payload yet; call filing_finalize first")
     with tool_errors("Filing", *ERRORS):
-        approval = approve(directory)
+        approval = approve(store)
     return {
         "runId": runId,
         "approved": True,

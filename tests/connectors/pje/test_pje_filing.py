@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.filing import DraftClient, validate_fill_payload
+from jurisync.connectors.pje.filing.store import LocalRunStore
 from jurisync.connectors.pje.filing.subjects import has_subject_code, subject_rows
 
 
@@ -79,9 +80,10 @@ class StepTimelineTest(unittest.TestCase):
             requests = 0
 
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "timeline.json"
+            store = LocalRunStore(tmp)
+            path = Path(tmp) / "filing-steps.json"
             client = Client()
-            timeline = filing.StepTimeline(path, client, "fill")
+            timeline = filing.StepTimeline(store, client, "fill")
             with timeline.step("author"):
                 client.requests += 3
             with timeline.step("other participant", name="PARTY"):
@@ -89,7 +91,7 @@ class StepTimelineTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 with timeline.step("subjects"):
                     raise RuntimeError("boom")
-            again = filing.StepTimeline(path, client, "fill")
+            again = filing.StepTimeline(store, client, "fill")
             with again.step("pending"):
                 pass
             saved = json.loads(path.read_text())["steps"]

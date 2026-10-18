@@ -4,11 +4,11 @@ A run is only `complete` when its checkpoint says so. Whether the *draft* is com
 PJe can answer, so `check_pje` reads the draft's documents and compares them with the payload.
 """
 
-import json
 from pathlib import Path
 
 from jurisync.connectors.pje.filing.checkpoint import UploadLedger, phase_fingerprints, pid_alive
 from jurisync.connectors.pje.filing.documents import expected_documents
+from jurisync.connectors.pje.filing.store import CHECKPOINT, STEPS
 
 LEGACY_COMPLETE = {"documents_complete", "characteristics_complete", "parties_complete"}
 
@@ -24,16 +24,16 @@ def run_state(checkpoint):
     return "complete" if checkpoint.get("stage") in LEGACY_COMPLETE else "unknown"
 
 
-def _steps(checkpoint_path):
-    path = Path(checkpoint_path).with_name("filing-steps.json")
-    return json.loads(path.read_text(encoding="utf-8")).get("steps", []) if path.exists() else []
+def _steps(store):
+    return store.read_json(STEPS).get("steps", []) if store.exists(STEPS) else []
 
 
-def run_status(checkpoint_path, payload=None, client=None):
-    """Status of one run. Pass a payload to compare phases with the ledger, and a client to check PJe live."""
-    checkpoint = json.loads(Path(checkpoint_path).read_text(encoding="utf-8"))
+def run_status(store, payload=None, client=None):
+    """Status of one run. Pass a payload (documents resolved) to compare phases with the ledger, and a client to check
+    PJe live."""
+    checkpoint = store.read_json(CHECKPOINT)
     state = run_state(checkpoint)
-    steps = _steps(checkpoint_path)
+    steps = _steps(store)
     last_run = steps[-1]["run"] if steps else None
     current = [step for step in steps if step["run"] == last_run]
     result = {
