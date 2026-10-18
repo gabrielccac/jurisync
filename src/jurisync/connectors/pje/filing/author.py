@@ -6,7 +6,6 @@ import re
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.constants import UPDATE_URL
 from jurisync.connectors.pje.filing.parsing import has_identifier, name_matches
 from jurisync.connectors.pje.filing.payload import address_cep, masked_cpf
 from jurisync.connectors.pje.parsers import jsf_data
@@ -60,14 +59,14 @@ class AuthorMixin:
             raise RuntimeError("PJe active-party action was not rendered")
         container, action = jsf.ajax_event(add_button.find_parent(attrs={"onclick": True}))
         html = self.ajax(
-            UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, "formVincularPoloAtivo"), container, action
+            self.update_url, jsf.view_state(html), jsf.form_fields(html, "formVincularPoloAtivo"), container, action
         )
         soup = BeautifulSoup(html, "html.parser")
         person = jsf.field(soup, "tipoPessoa:0")
         fields = jsf.form_fields(html, "preCadastroPessoaFisicaForm")
         fields[person["name"]] = "F"
         container, action = jsf.ajax_event(person)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         fields = {key: value for key, value in fields.items() if "isOrgaoPublico1" not in key}
         fields.update(
@@ -79,7 +78,7 @@ class AuthorMixin:
         fields[cpf["name"]] = cpf_mask
         search = jsf.field(soup, "pesquisarDocumentoPrincipal")
         container, action = jsf.ajax_event(search)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         registry_name = jsf.field(soup, "dsNomeCivil").get("value", "")
         if not name_matches(registry_name, expected_name):
@@ -87,7 +86,7 @@ class AuthorMixin:
         fields = jsf.form_fields(html, "preCadastroPessoaFisicaForm")
         confirm = jsf.field(soup, "btnConfirmarCadastro")
         container, action = jsf.ajax_event(confirm)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         details = soup.find("form", id="formInserirParteProcesso")
         if details is None:
@@ -102,7 +101,7 @@ class AuthorMixin:
         detail_fields = jsf.form_fields(html, "formInserirParteProcesso")
         address_tab = jsf.field(soup, "enderecoUsuario_shifted", tag="table")
         container, action = jsf.ajax_event(address_tab)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), detail_fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), detail_fields, container, action)
         inline = None
         if address is not None and inline_address:
             try:
@@ -113,13 +112,17 @@ class AuthorMixin:
                 return self.add_author(draft_url, author_cpf, expected_name, address, inline_address=False)
         address_fields = inline if inline is not None else self._author_form_fields(html, detail_fields)
         container, action = jsf.ajax_event(insert)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), address_fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), address_fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         active = soup.find(id="poloAtivoDatalistDiv")
         if active is None:
             html = self.get(draft_url)
             html = self.ajax(
-                UPDATE_URL, jsf.view_state(html), {}, "_viewRoot", {"tabPartes": "tabPartes", "ajaxSingle": "tabPartes"}
+                self.update_url,
+                jsf.view_state(html),
+                {},
+                "_viewRoot",
+                {"tabPartes": "tabPartes", "ajaxSingle": "tabPartes"},
             )
             active = BeautifulSoup(html, "html.parser").find(id="poloAtivoDatalistDiv")
         if active is None or not name_matches(active.get_text(" ", strip=True), expected_name):
@@ -176,7 +179,9 @@ class AuthorMixin:
         if not selected:
             form = link.find_parent("form")
             container, action = jsf.ajax_event(link)
-            html = self.ajax(UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
+            html = self.ajax(
+                self.update_url, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action
+            )
             rows = self._address_rows(html, cep)
             if len(rows) != 1 or not rows[0][1]:
                 raise RuntimeError("PJe did not select the requested author address")
@@ -201,7 +206,7 @@ class AuthorMixin:
         link = matches[0]
         form = link.find_parent("form")
         container, action = jsf.ajax_event(link)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
         soup = BeautifulSoup(html, "html.parser")
         details = soup.find("form", id="formInserirParteProcesso")
         if details is None or not name_matches(
@@ -213,7 +218,7 @@ class AuthorMixin:
         update_action = jsf.ajax_event(update)
         tab = jsf.field(soup, "enderecoUsuario_shifted", tag="table")
         container, action = jsf.ajax_event(tab)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         address_fields = {
             key: value
             for key, value in jsf_data(html)[1].items()
@@ -280,7 +285,7 @@ class AuthorMixin:
         suggestion_id = suggestion.group(1)
         fields[cep_input["name"]] = cep
         html = self.ajax(
-            UPDATE_URL,
+            self.update_url,
             jsf.view_state(html),
             fields,
             container.group(1),
@@ -291,7 +296,7 @@ class AuthorMixin:
             raise RuntimeError(f"PJe CEP lookup returned {len(entries)} selectable addresses; manual review required")
         fields[f"{suggestion_id}_selection"] = "0"
         html = self.ajax(
-            UPDATE_URL,
+            self.update_url,
             jsf.view_state(html),
             fields,
             container.group(1),
@@ -312,7 +317,7 @@ class AuthorMixin:
             fields[jsf.field(soup, suffix)["name"]] = value
         save = jsf.field(soup, "cadastroPartePessoaEnderecobtnGravarEndereco")
         container_id, action = jsf.ajax_event(save)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container_id, action)
         rows = self._address_rows(html, cep)
         fields.update({key: value for key, value in jsf_data(html)[1].items() if key in fields})
         return html, rows
@@ -338,14 +343,16 @@ class AuthorMixin:
         if not selected:
             form = link.find_parent("form")
             container, action = jsf.ajax_event(link)
-            html = self.ajax(UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
+            html = self.ajax(
+                self.update_url, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action
+            )
             rows = self._address_rows(html, cep)
             if len(rows) != 1 or not rows[0][1]:
                 raise RuntimeError("PJe did not select the requested author address")
         if not added and selected:
             return {"cep": cep, "numero": number, "added": False, "verified": True, "changed": False}
         container, action = update_action
-        self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         saved_html, _, _ = self._author_address_editor(draft_url, author_cpf, expected_name)
         saved_rows = self._address_rows(saved_html, cep)
         if len(saved_rows) != 1 or not saved_rows[0][1]:

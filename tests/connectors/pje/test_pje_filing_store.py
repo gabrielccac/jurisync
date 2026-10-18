@@ -76,7 +76,7 @@ class RelativePayloadTests(unittest.TestCase):
             message = "absolute.*written before filing runs were self-contained.*filing_finalize again"
             with self.assertRaisesRegex(ValueError, message):
                 approve(store)
-            login = mock.patch("jurisync.connectors.pje.filing.run.trf5_cert_login", side_effect=AssertionError)
+            login = mock.patch("jurisync.connectors.pje.filing.run._login", side_effect=AssertionError)
             with login, self.assertRaisesRegex(ValueError, message):
                 run_stage("fill", run=store)
             store.write_json("checkpoint.json", {"draftId": "1", "status": "complete"})

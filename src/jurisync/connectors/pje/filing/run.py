@@ -5,10 +5,10 @@ import json
 import logging
 import os
 
-from jurisync.connectors.pje.auth.certificate import trf5_cert_login
 from jurisync.connectors.pje.filing.approval import require_approval
 from jurisync.connectors.pje.filing.checkpoint import UploadLedger, now, pid_alive
 from jurisync.connectors.pje.filing.client import DraftClient
+from jurisync.connectors.pje.filing.constants import DEFAULT_PORTAL, filing_portal, require_writes
 from jurisync.connectors.pje.filing.payload import payload_subjects, resolve_documents, validate_fill_payload
 from jurisync.connectors.pje.filing.status import run_status
 from jurisync.connectors.pje.filing.store import CHECKPOINT, PAYLOAD, LocalRunStore
@@ -18,6 +18,7 @@ from jurisync.core.mcp import load_env_file
 from jurisync.paths import REPO_ROOT
 
 STAGES = (
+    "register-options",
     "classification",
     "create",
     "create-fill",
@@ -55,6 +56,13 @@ WRITE_STAGES = frozenset(
         "delete-draft",
     }
 )
+
+
+def _login(portal):
+    """A session by the portal's own login method (TRF5: A1 certificate + TOTP; TRF1: password + TOTP)."""
+    from jurisync.connectors.pje.process import login_portal
+
+    return login_portal(portal)[0]
 
 
 def _load_payload(store):
@@ -108,8 +116,15 @@ def run_stage(
     session=None,
     verify_all=False,
     draft_id=None,
+    portal=None,
+    area=None,
+    jurisdiction=None,
 ):
-    """Run one draft stage; pass an authenticated TRF5 session to reuse it.
+    """Run one draft stage; pass an authenticated session to reuse it.
+
+    The portal is the payload's `portal` (or `portal` for stages without a payload; default trf5-1g). Only portals
+    whose filing configuration allows writes accept the writing stages. `register-options` only reads the new-process
+    form's choices (areas, then jurisdictions for `area`, then classes for `jurisdiction`) and never creates a draft.
 
     `run` is the filing run's RunStore: its payload.json, approval.json and checkpoint.json are read and written there.
 
@@ -126,7 +141,9 @@ def run_stage(
         except ValueError:  # an outdated payload still lets the run report where it stands
             payload = None
         return run_status(run, payload)
-    if stage == "subject-options":
+    if stage == "register-options":
+        payload = {}
+    elif stage == "subject-options":
         if run is None or not search or page < 1:
             raise ValueError("subject-options requires a run, search text and a positive page")
         payload = {}
@@ -142,18 +159,23 @@ def run_stage(
         payload = _load_payload(run)
         if payload is None:
             raise ValueError("A run with a payload is required for this stage")
-    if payload and payload.get("portal") != "trf5-1g":
-        raise ValueError("Only trf5-1g is supported")
+    if payload and portal and payload.get("portal") != portal:
+        raise ValueError(f"The payload is for {payload.get('portal')}, not {portal}")
+    config = filing_portal((payload or {}).get("portal") or portal or DEFAULT_PORTAL)
+    if stage in WRITE_STAGES:
+        require_writes(config)
     if stage in WRITE_STAGES and stage != "delete-draft":
         # Every stage that writes payload content needs the user's recorded approval of this exact payload.
         validate_fill_payload(payload)
         require_approval(run)
     owned = session is None
     if owned:
-        session = trf5_cert_login()
+        session = _login(config.key)
     try:
-        client = DraftClient(session)
-        if stage == "pending-search":
+        client = DraftClient(session, portal=config.key)
+        if stage == "register-options":
+            result = client.register_options(area=area, jurisdiction=jurisdiction)
+        elif stage == "pending-search":
             result = client.search_pending_drafts(name=name, cpf=cpf)
         elif stage == "delete-draft":
             result = client.delete_draft(draft_id, name)
@@ -228,6 +250,9 @@ def main():
         "--run", help="Filing run folder (payload.json, approval.json, checkpoint.json and documents/ inside it)"
     )
     parser.add_argument("--stage", choices=STAGES, default="classification")
+    parser.add_argument("--portal", help="PJe portal for stages without a payload (default trf5-1g), e.g. trf1-1g")
+    parser.add_argument("--area", help="register-options: list jurisdictions for this area label")
+    parser.add_argument("--jurisdiction", help="register-options: list classes for this jurisdiction label")
     parser.add_argument("--search", help="Assunto text for the read-only subject-options stage")
     parser.add_argument("--name", help="Parte name for the read-only pending-search stage")
     parser.add_argument("--cpf", help="Parte CPF for the read-only pending-search stage")
@@ -249,6 +274,9 @@ def main():
             cpf=args.cpf,
             verify_all=args.verify_all,
             draft_id=args.draft_id,
+            portal=args.portal,
+            area=args.area,
+            jurisdiction=args.jurisdiction,
         )
     except ValueError as error:
         if args.mcp:

@@ -9,7 +9,6 @@ from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
 from jurisync.connectors.pje.filing.checkpoint import UploadLedger
-from jurisync.connectors.pje.filing.constants import PORTAL, UPDATE_URL
 from jurisync.connectors.pje.filing.names import same_name, upload_name
 from jurisync.connectors.pje.filing.payload import approved_content
 from jurisync.connectors.pje.filing.timeline import StepTimeline
@@ -26,7 +25,11 @@ class DocumentsMixin:
     def documents_panel(self, draft_url):
         html = self.get(draft_url)
         html = self.ajax(
-            UPDATE_URL, jsf.view_state(html), {}, "_viewRoot", {"novoAnexo": "novoAnexo", "ajaxSingle": "novoAnexo"}
+            self.update_url,
+            jsf.view_state(html),
+            {},
+            "_viewRoot",
+            {"novoAnexo": "novoAnexo", "ajaxSingle": "novoAnexo"},
         )
         soup = BeautifulSoup(html, "html.parser")
         pdf = soup.find("input", attrs={"name": "raTipoDocPrincipal", "value": "PDF"})
@@ -37,7 +40,7 @@ class DocumentsMixin:
         fields = jsf.form_fields(html, "formularioUpload")
         fields["raTipoDocPrincipal"] = "PDF"
         container, action = jsf.ajax_event(pdf)
-        refreshed = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        refreshed = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         replacement = BeautifulSoup(refreshed, "html.parser").find(id="divArquivos")
         original = soup.find(id="divArquivos")
         if replacement is None or original is None:
@@ -54,7 +57,7 @@ class DocumentsMixin:
     def review_documents(self, draft_url):
         html = self.get(draft_url)
         html = self.ajax(
-            UPDATE_URL,
+            self.update_url,
             jsf.view_state(html),
             {},
             "_viewRoot",
@@ -134,7 +137,7 @@ class DocumentsMixin:
         fields[mode["name"]] = "PDF"
         fields["uploadDocumentoPrincipalDecoration:uploadDocumentoPrincipal:file"] = ""
         self.ajax(
-            UPDATE_URL,
+            self.update_url,
             jsf.view_state(html),
             fields,
             "_viewRoot",
@@ -159,9 +162,9 @@ class DocumentsMixin:
             ("ajaxSingle", upload_control),
             ("AJAX:EVENTS_COUNT", "1"),
         ]
-        self.post(UPDATE_URL, progress)
+        self.post(self.update_url, progress)
         upload_url = (
-            UPDATE_URL + f"?_richfaces_upload_uid={upload_uid}&{upload_control}={upload_control}"
+            self.update_url + f"?_richfaces_upload_uid={upload_uid}&{upload_control}={upload_control}"
             "&_richfaces_upload_file_indicator=true&AJAXREQUEST=_viewRoot"
         )
         multipart = {
@@ -174,7 +177,7 @@ class DocumentsMixin:
         content = approved_content(document)  # checked again right before the bytes leave
         ledger.record(document)
         self._html(self.multipart(upload_url, multipart, upload_control + ":file", path, content=content))
-        self.post(UPDATE_URL, progress)
+        self.post(self.update_url, progress)
         completion = re.search(
             r"onuploadcomplete':function\(event\)\{A4J\.AJAX\.Submit\('formularioUpload',event,\{"
             r"'similarityGroupingId':'(uploadDocumentoPrincipalDecoration:j_id\d+)'",
@@ -184,13 +187,13 @@ class DocumentsMixin:
         if not completion or not save:
             raise RuntimeError("PJe did not render the main-document completion actions")
         completed = self.ajax(
-            UPDATE_URL, jsf.view_state(html), fields, "_viewRoot", {completion.group(1): completion.group(1)}
+            self.update_url, jsf.view_state(html), fields, "_viewRoot", {completion.group(1): completion.group(1)}
         )
         oncomplete = BeautifulSoup(completed, "html.parser").find(id="org.ajax4jsf.oncomplete")
         if oncomplete is None or "gravarDocumentoPdf();" not in oncomplete.get_text():
             raise RuntimeError("PJe did not confirm completion of the main PDF upload")
         saved_response = self.ajax(
-            UPDATE_URL, jsf.view_state(html), fields, "_viewRoot", {save.group(1): save.group(1)}
+            self.update_url, jsf.view_state(html), fields, "_viewRoot", {save.group(1): save.group(1)}
         )
         saved = [
             item
@@ -312,7 +315,7 @@ class DocumentsMixin:
             ensure_ascii=False,
         )
         html = self.ajax(
-            UPDATE_URL,
+            self.update_url,
             jsf.view_state(html),
             base,
             container.group(1),
@@ -356,9 +359,9 @@ class DocumentsMixin:
                 fields[prefix + ":descDoc"] = item.get("description", path.stem)
                 fields[prefix + ":numeroDoc"] = item.get("number", "")
                 container_id, action = jsf.ajax_event(select)
-                html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+                html = self.ajax(self.update_url, jsf.view_state(html), fields, container_id, action)
                 fields["javax.faces.ViewState"] = jsf.view_state(html)
-                upload_url = PORTAL.base_url + "seam/resource/upload?cid=" + cid["value"]
+                upload_url = self.portal.base_url + "seam/resource/upload?cid=" + cid["value"]
                 content = approved_content(item)  # checked again right before the bytes leave
                 ledger.record(item)
                 response = self.multipart(upload_url, fields, "file[]", path, content=content, resource=True)
@@ -373,9 +376,9 @@ class DocumentsMixin:
                     raise RuntimeError(f"PJe did not render row actions for {path.name}")
                 fields.pop("javax.faces.ViewState")
                 container_id, action = jsf.ajax_event(update)
-                self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+                self.ajax(self.update_url, jsf.view_state(html), fields, container_id, action)
                 container_id, action = jsf.ajax_event(save)
-                html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+                html = self.ajax(self.update_url, jsf.view_state(html), fields, container_id, action)
 
     def add_documents(self, draft_url, documents, timeline=None, ledger=None):
         """Upload what is missing: the main petition, then every missing supporting file in one batch.

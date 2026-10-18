@@ -3,7 +3,6 @@
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.constants import UPDATE_URL
 from jurisync.connectors.pje.filing.payload import claim_amount, validate_characteristics
 
 
@@ -11,7 +10,7 @@ class CharacteristicsMixin:
     def characteristics_panel(self, draft_url):
         html = self.get(draft_url)
         return self.ajax(
-            UPDATE_URL,
+            self.update_url,
             jsf.view_state(html),
             {},
             "_viewRoot",
@@ -38,7 +37,7 @@ class CharacteristicsMixin:
         if not already_saved:
             save = jsf.field(soup, "salvaCaracteristicaProcessoButton")
             container, action = jsf.ajax_event(save)
-            self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+            self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
             html = self.characteristics_panel(draft_url)
             soup = BeautifulSoup(html, "html.parser")
         saved = jsf.form_fields(html, "formAdicionarCaracteristicasProcesso")
@@ -63,9 +62,9 @@ class CharacteristicsMixin:
                 priority_fields[selector["name"]] = value
                 save_priority = jsf.field(soup, "formAddPrioridadeProcesso:save")
                 container, action = jsf.ajax_event(selector)
-                html = self.ajax(UPDATE_URL, jsf.view_state(html), priority_fields, container, action)
+                html = self.ajax(self.update_url, jsf.view_state(html), priority_fields, container, action)
                 container, action = jsf.ajax_event(save_priority)
-                html = self.ajax(UPDATE_URL, jsf.view_state(html), priority_fields, container, action)
+                html = self.ajax(self.update_url, jsf.view_state(html), priority_fields, container, action)
                 priority_added = True
                 html = self.characteristics_panel(draft_url)
                 if priority_label not in BeautifulSoup(html, "html.parser").get_text(" ", strip=True):

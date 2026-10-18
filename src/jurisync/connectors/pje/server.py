@@ -208,7 +208,7 @@ fill_errors = {}
 
 def _fill_job(run_id, stage):
     try:
-        filing.run_stage(stage, run=open_run(run_id))
+        filing.run_stage(stage, run=open_run(run_id), portal="trf5-1g")
         fill_errors.pop(run_id, None)
     except BaseException as error:
         fill_errors[run_id] = f"{type(error).__name__}: {str(error)[:300]}"
@@ -250,8 +250,9 @@ def _draft_stage(label, stage, run_id=None, **options):
         with tool_errors(label, *ERRORS):
             result = filing.run_stage(stage, **options)
     else:
+        # These tools serve TRF5 drafts only: a run whose payload names another portal is refused, not sent here.
         with tool_errors(label, *ERRORS), sessions.session("trf5-1g") as session:
-            result = filing.run_stage(stage, session=session, **options)
+            result = filing.run_stage(stage, session=session, portal="trf5-1g", **options)
     return {**({"runId": run_id} if run_id is not None else {}), "success": True, "stage": stage, "result": result}
 
 

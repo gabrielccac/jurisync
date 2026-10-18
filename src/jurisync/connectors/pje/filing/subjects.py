@@ -5,7 +5,6 @@ import re
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.constants import UPDATE_URL
 
 
 def subject_rows(table):
@@ -36,7 +35,7 @@ class SubjectsMixin:
         fields["r_processoAssuntoListSearchForm:page"] = str(page)
         fields["r_processoAssuntoListSearchForm:searching"] = "true"
         container, action = jsf.ajax_event(jsf.field(soup, "r_processoAssuntoListSearchForm:search"))
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         table = soup.find(id="r_processoAssuntoListList")
         if table is None:
@@ -78,7 +77,7 @@ class SubjectsMixin:
         fields["r_processoAssuntoListSearchForm:searching"] = "true"
         search = jsf.field(soup, "r_processoAssuntoListSearchForm:search")
         container, action = jsf.ajax_event(search)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         table = soup.find(id="r_processoAssuntoListList")
         matches = [
@@ -93,7 +92,7 @@ class SubjectsMixin:
         if form is None:
             raise RuntimeError("PJe did not render the subject selection action")
         container, action = jsf.ajax_event(link)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
         associated = BeautifulSoup(html, "html.parser").find(id="l_processoAssuntoListList")
         if not has_subject_code(associated, subject["code"]):
             raise RuntimeError("PJe did not show the subject on the draft")

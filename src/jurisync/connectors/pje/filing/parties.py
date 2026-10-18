@@ -5,7 +5,6 @@ import re
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.constants import UPDATE_URL
 from jurisync.connectors.pje.filing.parsing import action_in_form, has_identifier, name_matches
 from jurisync.connectors.pje.filing.payload import masked_cpf
 
@@ -14,7 +13,11 @@ class PartiesMixin:
     def party_panel(self, draft_url):
         html = self.get(draft_url)
         return self.ajax(
-            UPDATE_URL, jsf.view_state(html), {}, "_viewRoot", {"tabPartes": "tabPartes", "ajaxSingle": "tabPartes"}
+            self.update_url,
+            jsf.view_state(html),
+            {},
+            "_viewRoot",
+            {"tabPartes": "tabPartes", "ajaxSingle": "tabPartes"},
         )
 
     def _public_body(self, draft_url, body, *, role=None, panel=None):
@@ -33,7 +36,7 @@ class PartiesMixin:
         toolbar_id = "formVincularPoloPassivo" if role is None else "formVincularOutrosParticipantes"
         toolbar_action = "supResetarVincPartePP" if role is None else "supResetarVincParteOP"
         container, action = jsf.ajax_event(action_in_form(html, toolbar_id, toolbar_action))
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, toolbar_id), container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), jsf.form_fields(html, toolbar_id), container, action)
         if role is not None:
             role_form = "formPasso1AssociarParticipante"
             soup = BeautifulSoup(html, "html.parser")
@@ -41,7 +44,7 @@ class PartiesMixin:
             fields = jsf.form_fields(html, role_form)
             fields[selector["name"]] = role_value
             container, action = jsf.ajax_event(selector)
-            html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+            html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         lookup_form = "preCadastroPessoaFisicaForm" if role is None else "preCadastroParticipantePessoaFisicaForm"
         soup = BeautifulSoup(html, "html.parser")
         fields = jsf.form_fields(html, lookup_form)
@@ -64,7 +67,7 @@ class PartiesMixin:
         fields[name["name"]] = body["search"]
         search = jsf.field(soup, "btnPesquisarOrgaoPublico")
         container, action = jsf.ajax_event(search)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         pages = 1
         slider = next(
@@ -93,7 +96,7 @@ class PartiesMixin:
                 break
             fields[slider_id.group(1)] = str(page + 1)
             container, action = jsf.ajax_event({"onchange": slider})
-            html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+            html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
             soup = BeautifulSoup(html, "html.parser")
         if row is None:
             raise RuntimeError("PJe public-body lookup did not return the requested CNPJ")
@@ -101,11 +104,11 @@ class PartiesMixin:
         if len(links) != 1:
             raise RuntimeError("PJe public-body result has no unique selection action")
         container, action = jsf.ajax_event(links[0])
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         insert = jsf.field(soup, "btnInserirOrgPub")
         container, action = jsf.ajax_event(insert)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         panel = BeautifulSoup(self.party_panel(draft_url), "html.parser").find(id=panel_id)
         if not present(panel):
             raise RuntimeError("PJe did not associate the public body with the draft")
@@ -141,20 +144,20 @@ class PartiesMixin:
             raise RuntimeError("Draft attorney CPF is present with a different name or OAB")
         toolbar = "formVincularPoloAtivo"
         container, action = jsf.ajax_event(action_in_form(html, toolbar, "supResetarVincRepPA"))
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), jsf.form_fields(html, toolbar), container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), jsf.form_fields(html, toolbar), container, action)
         soup = BeautifulSoup(html, "html.parser")
         role, value, _ = jsf.select_option(soup, "comboRepresentacao", "ADVOGADO")
         fields = jsf.form_fields(html, "formTipoRepresentacao")
         fields[role["name"]] = value
         container, action = jsf.ajax_event(role)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         fields = jsf.form_fields(html, "preCadastroAdvogadoForm")
         cpf = jsf.field(soup, "preCadastroAdvogado_nrCPF")
         fields[cpf["name"]] = masked_cpf(attorney["cpf"])
         search = jsf.field(soup, "btnPesquisarAdvogado")
         container, action = jsf.ajax_event(search)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         name = jsf.field(soup, "dsNomeAdvogadoCivil")
         if not name_matches(name.get("value", ""), attorney["name"]):
@@ -162,12 +165,12 @@ class PartiesMixin:
         fields[name["name"]] = name["value"]
         confirm = jsf.field(soup, "btnConfirmarCadastro")
         container, action = jsf.ajax_event(confirm)
-        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        html = self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         soup = BeautifulSoup(html, "html.parser")
         fields = jsf.form_fields(html, "formInserirRepresentanteProcesso")
         insert = jsf.field(soup, "btnInserirRepresentante")
         container, action = jsf.ajax_event(insert)
-        self.ajax(UPDATE_URL, jsf.view_state(html), fields, container, action)
+        self.ajax(self.update_url, jsf.view_state(html), fields, container, action)
         panel = BeautifulSoup(self.party_panel(draft_url), "html.parser").find(id="poloAtivoDatalistDiv")
         if not matches(panel):
             raise RuntimeError("PJe did not associate the attorney with the author")

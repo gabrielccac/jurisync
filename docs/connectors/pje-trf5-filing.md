@@ -4,6 +4,10 @@
 direct HTTP requests. It stops with the draft in **Não Protocolados**, ready for
 review and manual **Protocolar**. The request captures and implementation
 findings are in [the flow notes](pje-trf5-filing-flow.md).
+The draft code is configured per portal (`connectors/pje/filing/constants.py`): `trf5-1g` writes drafts; `trf1-1g` is
+read-only for now (see [the TRF1 survey](pje-trf1-filing-recon.md)), and every writing stage refuses it before
+logging in. Stages without a payload take `--portal`; the read-only `register-options` stage lists a portal's areas,
+jurisdictions and classes without creating anything.
 Victor's Advbox preparation, document routing, and office defaults belong in
 `customers/victor/workflows/`; this PJe adapter consumes the resulting explicit
 payload. See [Victor's workflow guide](../../customers/victor/README.md) for the

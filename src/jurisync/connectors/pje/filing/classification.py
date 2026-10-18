@@ -5,12 +5,11 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.constants import PORTAL, REGISTER_URL, UPDATE_URL
 
 
 class ClassificationMixin:
     def _classification_form(self, classification):
-        html = self.get(REGISTER_URL)
+        html = self.get(self.register_url)
         fields = jsf.form_fields(html, "processoTrfForm")
         state = jsf.view_state(html)
         soup = BeautifulSoup(html, "html.parser")
@@ -19,7 +18,7 @@ class ClassificationMixin:
         fields[area["name"]] = area_value
         container, action = jsf.ajax_event(area)
         html = self.post(
-            REGISTER_URL,
+            self.register_url,
             {**fields, "AJAXREQUEST": container, "javax.faces.ViewState": state, "AJAX:EVENTS_COUNT": "1", **action},
         )
         state = jsf.view_state(html)
@@ -30,7 +29,7 @@ class ClassificationMixin:
         fields[jurisdiction["name"]] = jurisdiction_value
         container, action = jsf.ajax_event(jurisdiction)
         html = self.post(
-            REGISTER_URL,
+            self.register_url,
             {**fields, "AJAXREQUEST": container, "javax.faces.ViewState": state, "AJAX:EVENTS_COUNT": "1", **action},
         )
         state = jsf.view_state(html)
@@ -41,7 +40,7 @@ class ClassificationMixin:
         fields[judicial_class["name"]] = class_value
         container, action = jsf.ajax_event(judicial_class)
         html = self.post(
-            REGISTER_URL,
+            self.register_url,
             {**fields, "AJAXREQUEST": container, "javax.faces.ViewState": state, "AJAX:EVENTS_COUNT": "1", **action},
         )
         jsf.view_state(html)
@@ -55,20 +54,66 @@ class ClassificationMixin:
         }
         return html, fields, include, options
 
+    @staticmethod
+    def _labels(soup, suffix):
+        selects = [select for select in soup.find_all("select") if (select.get("name") or "").endswith(suffix)]
+        if len(selects) != 1:
+            return None
+        return [
+            option.get_text(" ", strip=True)
+            for option in selects[0].find_all("option")
+            if option.get("value") not in (None, "", jsf.NO_SELECTION)
+        ]
+
+    def register_options(self, area=None, jurisdiction=None):
+        """Read the new-process form's choices without creating anything: the areas, the jurisdictions of `area`, and
+        the judicial classes of `jurisdiction`. Only the form's own Ajax refreshes are sent, never Incluir."""
+        html = self.get(self.register_url)
+        fields = jsf.form_fields(html, "processoTrfForm")
+        soup = BeautifulSoup(html, "html.parser")
+        result = {"portal": self.portal.key, "areas": self._labels(soup, "areaDireitoCombo")}
+        for label, suffix, key in (
+            (area, "areaDireitoCombo", "jurisdictions"),
+            (jurisdiction, "jurisdicaoCombo", "classes"),
+        ):
+            if not label:
+                break
+            select, value, _ = jsf.select_option(soup, suffix, label)
+            fields[select["name"]] = value
+            container, action = jsf.ajax_event(select)
+            state = jsf.view_state(html)
+            html = self.post(
+                self.register_url,
+                {
+                    **fields,
+                    "AJAXREQUEST": container,
+                    "javax.faces.ViewState": state,
+                    "AJAX:EVENTS_COUNT": "1",
+                    **action,
+                },
+            )
+            soup = BeautifulSoup(html, "html.parser")
+            result[key] = self._labels(soup, "jurisdicaoCombo" if key == "jurisdictions" else "classeJudicialCombo")
+        return result
+
     def classification_options(self, classification):
         return self._classification_form(classification)[3]
 
     def create_draft(self, classification):
         html, fields, include, options = self._classification_form(classification)
         fields[include] = include
-        html = self.ajax(REGISTER_URL, jsf.view_state(html), fields, "_viewRoot", {})
+        html = self.ajax(self.register_url, jsf.view_state(html), fields, "_viewRoot", {})
         soup = BeautifulSoup(html, "html.parser")
         redirect = soup.find("meta", attrs={"name": "Location"})
         location = redirect.get("content", "") if redirect else ""
-        draft_url = urljoin(REGISTER_URL, location)
+        draft_url = urljoin(self.register_url, location)
         parsed = urlsplit(draft_url)
         process_ids = parse_qs(parsed.query).get("idProcesso", [])
-        if parsed.hostname != PORTAL.host or parsed.path != urlsplit(UPDATE_URL).path or len(process_ids) != 1:
+        if (
+            parsed.hostname != self.portal.host
+            or parsed.path != urlsplit(self.update_url).path
+            or len(process_ids) != 1
+        ):
             raise RuntimeError("PJe did not return a new draft URL after Incluir")
         opened = self.get(draft_url)
         jsf.view_state(opened)

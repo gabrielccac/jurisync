@@ -228,7 +228,7 @@ class BackgroundFillTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             payload = Path(tmp, "payload.json")
             payload.write_text(json.dumps({**PAYLOAD, "portal": "trf5-1g"}))
-            login = mock.patch("jurisync.connectors.pje.filing.run.trf5_cert_login", side_effect=AssertionError)
+            login = mock.patch("jurisync.connectors.pje.filing.run._login", side_effect=AssertionError)
             with login:
                 for stage in sorted(WRITE_STAGES - {"delete-draft"}):
                     with self.subTest(stage), self.assertRaisesRegex(ValueError, "not been approved"):

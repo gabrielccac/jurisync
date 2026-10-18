@@ -6,7 +6,6 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.filing.constants import PENDING_URL
 from jurisync.connectors.pje.filing.parsing import name_matches
 from jurisync.connectors.pje.filing.payload import masked_cpf
 
@@ -17,7 +16,7 @@ class PendingMixin:
         name = (name or "").strip()
         if not (name or cpf):
             raise ValueError("Name or CPF is required to search Não Protocolados")
-        html = self.get(PENDING_URL)
+        html = self.get(self.pending_url)
         soup = BeautifulSoup(html, "html.parser")
         fields = jsf.form_fields(html, "consultaProcessoNaoProtocoladoForm")
         if name:
@@ -34,7 +33,7 @@ class PendingMixin:
             fields[radios[0]["name"]] = "false"
         search = jsf.field(soup, "consultaProcessoNaoProtocoladoForm:consulta")
         container, action = jsf.ajax_event(search)
-        return self.ajax(PENDING_URL, jsf.view_state(html), fields, container, action)
+        return self.ajax(self.pending_url, jsf.view_state(html), fields, container, action)
 
     def search_pending_drafts(self, *, name=None, cpf=None):
         html = self._pending_results(name, cpf)
@@ -48,7 +47,7 @@ class PendingMixin:
                 continue
             if len(links) != 1:
                 raise RuntimeError("PJe returned multiple opening links for one draft")
-            url = urljoin(PENDING_URL, links[0]["href"])
+            url = urljoin(self.pending_url, links[0]["href"])
             draft_ids = parse_qs(urlsplit(url).query).get("idProcesso", [])
             if len(draft_ids) != 1 or not draft_ids[0].isdigit():
                 raise RuntimeError("PJe returned a draft without one numeric ID")
@@ -120,7 +119,7 @@ class PendingMixin:
         # The paging values are unquoted numbers in the link, which ajax_event does not read.
         parameters = re.search(r"'parameters':\{([^}]*)\}", links[0].get("onclick", ""))
         action.update(dict(re.findall(r"'(\w+)':(\d+)", parameters.group(1) if parameters else "")))
-        self.ajax(PENDING_URL, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
+        self.ajax(self.pending_url, jsf.view_state(html), jsf.form_fields(html, form["id"]), container, action)
         if self._draft_rows(self._pending_results(name=search_term), draft_id):
             raise RuntimeError(f"PJe still lists draft {draft_id} after the delete")
         return {"draftId": draft_id, "deleted": True}

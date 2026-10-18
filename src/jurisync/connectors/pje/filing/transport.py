@@ -6,14 +6,19 @@ from urllib.parse import urlencode, urlsplit
 from bs4 import BeautifulSoup
 from curl_cffi.const import CurlHttpVersion
 
-from jurisync.connectors.pje.filing.constants import PORTAL, UPDATE_URL
+from jurisync.connectors.pje.filing.constants import DEFAULT_PORTAL, filing_portal
 from jurisync.connectors.pje.filing.names import upload_name
 from jurisync.connectors.pje.parsers import response_html
 
 
 class Transport:
-    def __init__(self, session):
+    def __init__(self, session, portal=DEFAULT_PORTAL):
         self.session = session
+        self.filing = filing_portal(portal)
+        self.portal = self.filing.portal
+        self.register_url = self.filing.register_url
+        self.update_url = self.filing.update_url
+        self.pending_url = self.filing.pending_url
         self.referer = None
         self.requests = 0
 
@@ -31,7 +36,7 @@ class Transport:
             headers={
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "Accept": "*/*",
-                "Origin": f"https://{PORTAL.host}",
+                "Origin": f"https://{self.portal.host}",
                 "Referer": self.referer or url,
             },
             impersonate="firefox147",
@@ -72,8 +77,8 @@ class Transport:
                 "Accept": "application/json"
                 if resource
                 else "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Origin": f"https://{PORTAL.host}",
-                "Referer": self.referer or UPDATE_URL,
+                "Origin": f"https://{self.portal.host}",
+                "Referer": self.referer or self.update_url,
                 "Sec-Fetch-Dest": "empty" if resource else "iframe",
                 "Sec-Fetch-Mode": "cors" if resource else "navigate",
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0",
@@ -86,7 +91,7 @@ class Transport:
             timeout=60,
             http_version=CurlHttpVersion.V1_1,
         )
-        if response.status_code != 200 or urlsplit(response.url).hostname != PORTAL.host:
+        if response.status_code != 200 or urlsplit(response.url).hostname != self.portal.host:
             raise RuntimeError(f"PJe document upload returned HTTP {response.status_code}")
         return response
 
@@ -96,9 +101,8 @@ class Transport:
             {"AJAXREQUEST": container, **fields, "javax.faces.ViewState": state, **action, "AJAX:EVENTS_COUNT": "1"},
         )
 
-    @staticmethod
-    def _html(response):
-        if response.status_code != 200 or urlsplit(response.url).hostname != PORTAL.host:
+    def _html(self, response):
+        if response.status_code != 200 or urlsplit(response.url).hostname != self.portal.host:
             raise RuntimeError(f"PJe returned HTTP {response.status_code} outside the expected draft page")
         html = response_html(response)
         redirect = BeautifulSoup(html, "html.parser").find(
