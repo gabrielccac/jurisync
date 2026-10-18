@@ -1,10 +1,8 @@
 import hashlib
-import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from jurisync.connectors.pje.filing.approval import approve, require_approval
 from jurisync.connectors.pje.filing.payload import resolve_documents, validate_fill_payload
@@ -211,11 +209,6 @@ class UploadNameTest(unittest.TestCase):
 
 
 class PayloadTest(unittest.TestCase):
-    def setUp(self):
-        patch = mock.patch.dict(os.environ, {})
-        patch.start()
-        self.addCleanup(patch.stop)
-
     def test_uncertain_supporting_files_fall_back_without_blocking(self):
         flagged = apply_supporting_fallback(
             {

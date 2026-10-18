@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,7 +76,6 @@ class AdvboxFilingFolderTests(unittest.TestCase):
         profile = load_profile("victor")
         with (
             tempfile.TemporaryDirectory() as tmp,
-            mock.patch.dict(os.environ, {}),
             mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], [], [])),
         ):
             source = export_filing_folder(Folder(), "7", Path(tmp, "input"))["sourceFolder"]

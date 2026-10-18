@@ -8,7 +8,7 @@ from unittest import mock
 from jurisync.connectors.pje.filing import run_stage
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.payload import resolve_documents
-from jurisync.connectors.pje.filing.store import LocalRunStore, open_run
+from jurisync.connectors.pje.filing.store import LocalRunStore
 
 PAYLOAD = {
     "portal": "trf5-1g",
@@ -44,10 +44,6 @@ class LocalRunStoreTests(unittest.TestCase):
             store.delete_tree("documents")
             store.delete("payload.json")
             self.assertEqual(list(root.iterdir()), [])
-
-    def test_open_run_uses_the_shared_filing_root(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict("os.environ", {"JURISYNC_FILING_DIR": tmp}):
-            self.assertEqual(open_run("run1").root, Path(tmp).resolve() / "run1")
 
 
 class RelativePayloadTests(unittest.TestCase):

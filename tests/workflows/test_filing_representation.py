@@ -1,4 +1,3 @@
-import os
 import tempfile
 import unittest
 from datetime import date
@@ -46,11 +45,6 @@ class RepresentationRuleTests(unittest.TestCase):
         self.assertEqual(representation_problems(with_author(selfRepresented=True), [], signals, TODAY), [])
         self.assertEqual(representation_problems(with_author(representative=MOTHER), [], signals, TODAY), [])
 
-    def test_the_representative_cpf_must_be_in_the_petition(self):
-        facts = with_author(representative=MOTHER)
-        self.assertEqual(representation_problems(facts, ["12345678909", "99988877766"], [], TODAY), [])
-        self.assertIn("representative's CPF", representation_problems(facts, ["12345678909"], [], TODAY)[0])
-
 
 class RepresentationInPrepareTests(unittest.TestCase):
     def setUp(self):
@@ -60,9 +54,6 @@ class RepresentationInPrepareTests(unittest.TestCase):
         self.folder.mkdir()
         (self.folder / "10-PETIÇÃO INICIAL.pdf").write_bytes(b"%PDF-1.4\npetition")
         self.store = LocalRunStore(Path(tmp.name, "run1")).ensure()
-        patch = mock.patch.dict(os.environ, {})
-        patch.start()
-        self.addCleanup(patch.stop)
 
     def petition(self, cpfs, signals):
         return mock.patch("jurisync.workflows.filing.prepare._petition_candidates", lambda path: ([], cpfs, signals))

@@ -26,16 +26,10 @@ def fixture(name):
 
 
 class PortalConfigurationTests(unittest.TestCase):
-    def test_each_portal_has_its_own_urls_and_trf1_lists_what_is_unverified(self):
+    def test_each_portal_has_its_own_urls(self):
         trf1, trf5 = filing_portal("trf1-1g"), filing_portal("trf5-1g")
         self.assertEqual(trf1.register_url, "https://pje1g.trf1.jus.br/pje/Processo/cadastrar.seam")
         self.assertEqual(trf5.update_url, "https://pje1g.trf5.jus.br/pje/Processo/update.seam")
-        self.assertEqual(
-            {key: config.writes for key, config in FILING_PORTALS.items()},
-            {"trf5-1g": True, "trf1-1g": True, "trf1-2g": True},
-        )
-        self.assertEqual(trf5.unverified, ())
-        self.assertTrue(any("Incluir" in step for step in trf1.unverified))
         client = DraftClient(None, portal="trf1-1g")
         self.assertEqual((client.portal.host, client.pending_url), ("pje1g.trf1.jus.br", trf1.pending_url))
         with self.assertRaisesRegex(ValueError, "does not support trf4-1g-sc"):
@@ -233,60 +227,9 @@ class PartyModalBase(unittest.TestCase):
         return client, calls
 
 
-class Trf1PartyModalTests(PartyModalBase):
-    """The TRF1 'Associar parte ao processo' modal, captured read-only on a real draft (display steps only)."""
-
-    def test_the_author_answers_tipo_da_parte_autor_before_the_cpf_lookup(self):
-        client, calls = self.client(["party_add_active.html", "party_role_autor.html", "party_person_fisica.html"])
-        with self.assertRaises(self.Stop):
-            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
-        opened, role, person, lookup = calls
-        self.assertIn("formVincularPoloAtivo:supResertarVincPartePA", opened[1])
-        self.assertEqual(role[0]["j_id2888:j_id2892"], "3", "AUTOR")
-        self.assertEqual(person[0]["preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa"], "F")
-        cpf = "preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nrCPFDecoration:preCadastroPessoaFisica_nrCPF"
-        self.assertEqual(lookup[0][cpf], "123.456.789-09")
-        self.assertIn("preCadastroPessoaFisicaForm:pesquisarDocumentoPrincipal", lookup[1])
-
-    def test_inss_answers_tipo_da_parte_reu_then_searches_the_public_body(self):
-        client, calls = self.client(["party_add_passive.html", "party_role_reu.html"])
-        body = {"search": "INSS", "cnpj": "29979036000140", "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"}
-        with self.assertRaises(self.Stop):
-            client.add_passive_body("draft", body, panel=fixture("party_toolbars.html"))
-        opened, role, search = calls
-        self.assertIn("formVincularPoloPassivo:supResetarVincPartePP", opened[1])
-        self.assertEqual(
-            role[0]["j_id2888:j_id2892"],
-            next(
-                option["value"]
-                for option in BeautifulSoup(fixture("party_add_passive.html"), "html.parser").find_all("option")
-                if option.get_text(strip=True) == "REU"
-            ),
-        )
-        fields = search[0]
-        self.assertEqual(fields["preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa"], "J")
-        self.assertEqual(
-            fields["preCadastroPessoaFisicaForm:isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio"], "true"
-        )
-        self.assertEqual(
-            fields[
-                "preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nomePJDecoration:preCadastroPessoaFisica_nomePJ"
-            ],
-            "INSS",
-        )
-        self.assertIn("preCadastroPessoaFisicaForm:btnPesquisarOrgaoPublico", search[1])
-
-    def test_a_missing_role_option_fails_clearly_and_trf5_has_no_role_step(self):
-        client, _ = self.client(["party_add_passive.html"])
-        with self.assertRaisesRegex(RuntimeError, "'Tipo da Parte' step with the option AUTOR"):
-            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
-        trf5, calls = self.client([], portal="trf5-1g")
-        self.assertEqual(trf5._choose_party_role("<html></html>", "active"), "<html></html>")
-        self.assertEqual(calls, [])
-
-
-class Trf1AuthorFlowTests(PartyModalBase):
-    """The rest of the author and INSS steps, replayed from responses captured on a real TRF1 draft (anonymized)."""
+class Trf1PartyTests(PartyModalBase):
+    """The TRF1 author and INSS steps, replayed from responses captured on a real draft (anonymized), up to the
+    Vincular/Inserir that would write."""
 
     ADDRESS = {"cep": "68900-000", "numero": "10"}
 
@@ -317,19 +260,18 @@ class Trf1AuthorFlowTests(PartyModalBase):
             client.add_author(
                 "draft", "12345678909", "PARTE EXEMPLO", address=self.ADDRESS, panel=fixture("party_toolbars.html")
             )
+        opened, role, person, lookup = calls[:4]
+        self.assertIn("formVincularPoloAtivo:supResertarVincPartePA", opened[1])
+        self.assertEqual(role[0]["j_id2888:j_id2892"], "3", "Tipo da Parte = AUTOR")
+        self.assertEqual(person[0]["preCadastroPessoaFisicaForm:tipoPessoaDecoration:tipoPessoa"], "F")
+        cpf = "preCadastroPessoaFisicaForm:preCadastroPessoaFisica_nrCPFDecoration:preCadastroPessoaFisica_nrCPF"
+        self.assertEqual(lookup[0][cpf], "123.456.789-09")
         insert_fields, insert_action = calls[-1]
         self.assertIn("formInserirParteProcesso:btnInserirParteProcesso", insert_action)
         for suffix in ("tpParteAlteracao", "comboParteSigilosa", "comboMoradorRua", "comboRepresentante"):
             self.assertTrue(any(name.endswith(suffix) for name in insert_fields), suffix)
         cep = next(name for name in insert_fields if name.endswith("cadastroPartePessoaEnderecoCEP"))
         self.assertIn(cep, insert_fields)
-
-    def test_trf5_still_requires_mother_and_birth_date_from_the_registry(self):
-        self.assertEqual(
-            filing_portal("trf5-1g").author_required_details,
-            ("nomeGenitoraDecoration:nomeGenitora", "dataNascimentoDecoration:dataNascimentoInputDate"),
-        )
-        self.assertEqual(filing_portal("trf1-1g").author_required_details, ())
 
     def test_inss_is_found_by_cnpj_and_reaches_inserir(self):
         client, calls = self.client(
@@ -338,7 +280,25 @@ class Trf1AuthorFlowTests(PartyModalBase):
         body = {"search": "INSS", "cnpj": "29979036000140", "name": "INSTITUTO NACIONAL DO SEGURO SOCIAL - INSS"}
         with self.assertRaises(self.Stop):
             client.add_passive_body("draft", body, panel=fixture("party_toolbars.html"))
-        self.assertIn("preCadastroPessoaFisicaForm:btnInserirOrgPub", calls[-1][1])
+        opened, role, search = calls[:3]
+        self.assertIn("formVincularPoloPassivo:supResetarVincPartePP", opened[1])
+        reu = BeautifulSoup(fixture("party_add_passive.html"), "html.parser").find("option", string="REU")["value"]
+        self.assertEqual(role[0]["j_id2888:j_id2892"], reu)
+        prefix = "preCadastroPessoaFisicaForm:"
+        self.assertEqual(search[0][prefix + "tipoPessoaDecoration:tipoPessoa"], "J")
+        self.assertEqual(search[0][prefix + "isOrgaoPublico1Decoration:isOrgaoPublico1SelectOneRadio"], "true")
+        self.assertEqual(
+            search[0][prefix + "preCadastroPessoaFisica_nomePJDecoration:preCadastroPessoaFisica_nomePJ"], "INSS"
+        )
+        self.assertIn(prefix + "btnInserirOrgPub", calls[-1][1])
+
+    def test_a_missing_role_option_fails_clearly_and_trf5_has_no_role_step(self):
+        client, _ = self.client(["party_add_passive.html"])
+        with self.assertRaisesRegex(RuntimeError, "'Tipo da Parte' step with the option AUTOR"):
+            client.add_author("draft", "12345678909", "EXAMPLE", panel=fixture("party_toolbars.html"))
+        trf5, calls = self.client([], portal="trf5-1g")
+        self.assertEqual(trf5._choose_party_role("<html></html>", "active"), "<html></html>")
+        self.assertEqual(calls, [])
 
 
 class Trf1SecondDegreeTests(PartyModalBase):

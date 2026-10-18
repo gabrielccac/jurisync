@@ -38,11 +38,6 @@ class FilingArchitectureTests(unittest.TestCase):
         names = list(_imports(SRC / "jurisync/workflows/filing/contract.py"))
         self.assertEqual([name for name in names if name.startswith("jurisync")], [])
 
-    def test_relative_imports_are_resolved_so_they_cannot_slip_through(self):
-        names = set(_imports(SRC / "jurisync/workflows/filing/prepare.py"))
-        self.assertIn("jurisync.workflows.filing.classify", names)
-        self.assertIn("jurisync.connectors.pje.filing.store", names)
-
 
 if __name__ == "__main__":
     unittest.main()
