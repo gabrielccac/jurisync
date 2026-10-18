@@ -326,6 +326,9 @@ class DocumentsMixin:
             },
         )
         soup = BeautifulSoup(html, "html.parser")
+        # O TRF1 só mostra os botões da linha (atualizar tipo, gravar) na resposta do registro; as respostas
+        # seguintes são parciais e não trazem a linha. Os ids são estáveis, então os buscamos aqui se faltarem depois.
+        registered = soup
         selects = [
             node
             for node in soup.find_all("select")
@@ -370,8 +373,10 @@ class DocumentsMixin:
                 if not confirmation.get("requisicao") or len(files) != 1 or not files[0].get("upload"):
                     raise RuntimeError(f"PJe did not accept the supporting PDF bytes: {path.name}")
                 soup = BeautifulSoup(html, "html.parser")
-                update = soup.find(id=prefix + ":commandLinkAtualizarComboTipoDocumento")
-                save = soup.find(id=prefix + ":commandLinkGravar")
+                update = soup.find(id=prefix + ":commandLinkAtualizarComboTipoDocumento") or registered.find(
+                    id=prefix + ":commandLinkAtualizarComboTipoDocumento"
+                )
+                save = soup.find(id=prefix + ":commandLinkGravar") or registered.find(id=prefix + ":commandLinkGravar")
                 if update is None or save is None:
                     raise RuntimeError(f"PJe did not render row actions for {path.name}")
                 fields.pop("javax.faces.ViewState")
