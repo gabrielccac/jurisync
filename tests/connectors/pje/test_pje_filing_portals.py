@@ -109,6 +109,14 @@ OFFICE_GUIDE_LABELS = {
     "Cadastro Nacional de Informações Sociais - CNIS",
     "Atestado médico",
 }
+# Tipos de ANEXO que o próprio TRF1 aceitou num protocolo real do escritório (comprovante de 19/06/2025); a lista
+# capturada em document_types.html é a do documento principal, que é menor que a dos anexos.
+OFFICE_FILED_ATTACHMENT_LABELS = {
+    "Carteira de identidade",
+    "Carta de indeferimento de benefício",
+    "Comprovante de situação cadastral no CPF",
+    "Certidão de nascimento",
+}
 
 
 class Trf1ProfileTests(unittest.TestCase):
@@ -119,7 +127,7 @@ class Trf1ProfileTests(unittest.TestCase):
             for option in BeautifulSoup(fixture("document_types.html"), "html.parser").find_all("option")
         }
         self.assertEqual(profile.portal, "trf1-1g")
-        self.assertLessEqual(set(profile.supporting_types), offered | OFFICE_GUIDE_LABELS)
+        self.assertLessEqual(set(profile.supporting_types), offered | OFFICE_GUIDE_LABELS | OFFICE_FILED_ATTACHMENT_LABELS)
         self.assertIn("Petição inicial", offered)
         self.assertEqual(profile.portal_type("Laudo Médico"), "Atestado médico")
         self.assertEqual(profile.portal_type("Documento Comprobatório"), "Comprovante (Outros)")
