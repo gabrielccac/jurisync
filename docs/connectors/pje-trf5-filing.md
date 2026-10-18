@@ -136,7 +136,10 @@ document field; supporting `description` defaults to the filename stem.
 Victor's split supporting PDFs set `number` to the volume fraction (for example,
 `1/2`) and repeat it in the description.
 `claimValue` uses Brazilian currency format, and `legalAid` and `injunction`
-are JSON booleans. Omit `characteristics` or `documents` only when intentionally
+are JSON booleans.
+`priority` is one PJe label or a list of labels (each added and read back, matched case-insensitively); `digitalCourt`
+sets PJe 2.13's own "juízo 100% digital" question (TRF1; on TRF5 it is the priority `Juízo 100% Digital`); `secrecy:
+false` sets and reads back segredo de justiça = Não. Omit `characteristics` or `documents` only when intentionally
 stopping before those stages.
 
 ### How selections are resolved

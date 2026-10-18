@@ -89,24 +89,42 @@ Nenhum rascunho foi criado para implementar esta etapa. O `trf1-1g` passou a esc
   aba `assunto`, cuja resposta tem a lista de assuntos associados e o formulário de busca.
 - **Incluir:** se o PJe não devolver o endereço do novo rascunho, o erro traz as mensagens do próprio PJe (campo
   obrigatório etc.) e manda conferir Não Protocolados antes de tentar de novo.
-- **Perfil `victor-trf1`** (`customers/victor/filing-profile.trf1.json`): área padrão `DIREITO ASSISTENCIAL`, INSS no
-  polo passivo, nenhum outro participante, sem prioridade e os tipos do TRF1:
+- **Perfil do escritório `jean`** (`customers/jean/filing-profile.json`), conforme o roteiro "[IT] Protocolo de
+  Iniciais BPC - PJE": matéria `DIREITO PREVIDENCIÁRIO`, jurisdição `Seção Judiciária do Amapá` (os facts trocam conforme
+  o estado do cliente), classe `PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL (436)`, assunto `11946`, INSS no polo passivo
+  (busca "INSS" + CNPJ 29.979.036/0001-40), nenhum advogado extra fixo, justiça gratuita sim, tutela sim, segredo não,
+  Juízo 100% Digital solicitado e prioridade `Pessoa com deficiência` quando o caso não indicar outra. Tipos:
 
-  | Classificação (vocabulário do TRF5) | Tipo no TRF1 |
-  | --- | --- |
-  | Laudo Médico | Exame médico |
-  | Documento Comprobatório | Comprovante (Outros) |
-  | Processo Administrativo | Processo administrativo |
-  | Carta de Concessão | Carta de Concessão |
-  | Carta de Indeferimento, Documento de Identificação, Planilha, Outros Documentos | Documentos Diversos |
-  | (pelo nome do arquivo) procuração, quesitos, declaração de hipossuficiência | Procuração, Apresentação de quesitos, Declaração de hipossuficiência/pobreza |
+  | Documento | Tipo no TRF1 | Fonte do rótulo |
+  | --- | --- | --- |
+  | Petição | Petição inicial | lista vista na Etapa A |
+  | Procuração | Procuração | lista vista na Etapa A |
+  | Comprovante de residência | Comprovante de residência | roteiro do escritório |
+  | Folha resumo do CadÚnico, CNIS | Cadastro Nacional de Informações Sociais - CNIS | roteiro do escritório |
+  | Laudos, atestados, exames, receituários | Atestado médico | roteiro do escritório |
+  | Processo administrativo | Processo administrativo | lista vista na Etapa A |
+  | Quesitos | Apresentação de quesitos | lista vista na Etapa A |
+  | Declaração de hipossuficiência | Declaração de hipossuficiência/pobreza | lista vista na Etapa A |
+  | Carta de concessão | Carta de Concessão | lista vista na Etapa A |
+  | Comprovantes em geral (classificação "Documento Comprobatório") | Comprovante (Outros) | lista vista na Etapa A |
+  | Identidade, indeferimento, planilha, outros | Documentos Diversos | lista vista na Etapa A |
 
-  Todos esses rótulos constam da lista de tipos do documento principal vista no TRF1. A lista dos **anexos** ainda não
-  foi vista: se algum rótulo faltar nela, o passo do anexo falha dizendo qual opção não existe.
+  A "lista vista na Etapa A" é a do documento principal; a dos **anexos** ainda não foi vista. Os três rótulos do
+  roteiro não estão na lista do principal (são de anexos, segundo as capturas do roteiro). Se algum faltar nos anexos,
+  o passo falha dizendo qual opção não existe.
+- **Características (aba lida só leitura num rascunho existente):** no TRF1 o **Juízo 100% Digital é um campo próprio**
+  ("Deseja solicitar juízo 100% digital?", `solicitadoJuizo100PorCentoDigital`), gravado junto com justiça gratuita,
+  tutela e valor da causa; no TRF5 ele é uma prioridade. **Segredo de justiça** tem formulário e botão próprios
+  (`frmSegredoSig`, `grvSegredo`). As prioridades vêm de uma lista separada (`formAddPrioridadeProcesso`) que esconde
+  as já associadas; a de PcD aparece como **`Pessoa com deficiência`**. No payload: `characteristics.priority` aceita
+  uma lista (um texto só continua valendo), `digitalCourt` marca o campo do TRF1 (e falha onde o PJe não o tem) e
+  `secrecy: false` marca e confere "Não" (o "Sim" fica manual). Cada valor é relido depois de gravar.
 - **O que continua igual e se confere sozinho:** cada passo relê o rascunho depois de agir (assunto associado, autor no
   polo ativo, advogado com CPF/nome/OAB, órgão público pelo CNPJ, características gravadas, documentos no
   Informativo) e falha com mensagem clara se o dado não estiver lá. Nada segue às cegas.
-- **Representante legal:** continua como passo manual registrado (igual ao TRF5).
+- **Representante legal:** continua como passo manual registrado (igual ao TRF5). O registro no checkpoint e o
+  `pje_draft_status` trazem nome, CPF, tipo e endereço (`author.representative.address {cep, numero}`) e o nome do
+  autor, para quem fizer o passo à mão.
 
 ### Verificado de verdade no TRF1 × não verificado
 
@@ -118,13 +136,15 @@ Nenhum rascunho foi criado para implementar esta etapa. O `trf1-1g` passou a esc
 | Autor por CPF (pré-cadastro, endereço) | não verificado |
 | Advogado extra (modal de representação) | não verificado |
 | INSS no polo passivo (busca "inss" + CNPJ 29.979.036/0001-40) | não verificado |
-| Características (justiça gratuita, tutela, valor da causa) | não verificado |
+| Campos e opções da aba de características (Juízo 100% Digital, segredo, prioridades) | **verificado** (leitura) |
+| Gravar características, prioridade e segredo | não verificado |
 | Petição em PDF, anexos, tipos dos anexos, limite de tamanho (mantido em 10 MB) | não verificado |
 
 ### Roteiro do primeiro teste real (acompanhado)
 
-Use um caso real com o usuário olhando o PJe ao mesmo tempo, perfil `victor-trf1`, `facts.classification` com
-`"jurisdiction": "Seção Judiciária do Amapá"` e `"judicialClass": "PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL (436)"`.
+Use um caso real com o usuário olhando o PJe ao mesmo tempo e o perfil `jean` (classificação, assunto e
+características já vêm dele; os facts trazem autor, CPF, valor da causa e, se for o caso, jurisdição de outro estado,
+prioridade diferente ou representante).
 Rode por estágios, não `create-fill` de uma vez, e confira no portal depois de cada um:
 
 1. `create`: o rascunho aparece em Não Protocolados? Se falhar, leia a mensagem do PJe (campo pedido depois da
@@ -133,11 +153,12 @@ Rode por estágios, não `create-fill` de uma vez, e confira no portal depois de
 3. `author`: autor certo no polo ativo, com o endereço esperado?
 4. `attorney` (se houver advogado extra): advogado com OAB certa?
 5. `public-bodies`: o INSS entrou? A SJAP pede órgão de cumprimento ou MPF (se sim, acrescentar ao perfil)?
-6. `characteristics`: justiça gratuita, tutela e valor da causa gravados? Existe a prioridade "Juízo 100% Digital" no
-   TRF1 (se sim, pôr no perfil)?
+6. `characteristics`: justiça gratuita sim, tutela sim, valor da causa, Juízo 100% Digital sim, segredo não e a
+   prioridade "Pessoa com deficiência" gravados?
 7. `documents`: a petição sobe em PDF? Os anexos aceitam os tipos do perfil? Qual o limite de tamanho mostrado?
 8. `pje_draft_status` com `checkPje: true`: conclusão `verified`, ou `verified_manual_steps_pending` se houver
    representante.
 
-O que divergir vira ajuste no perfil `victor-trf1` ou no código. Quando tudo tiver passado, os itens podem sair da
+Se houver representante legal, inclua-o à mão na aba Partes com os dados que o `pje_draft_status` lista.
+O que divergir vira ajuste no perfil `jean` ou no código. Quando tudo tiver passado, os itens podem sair da
 lista `unverified` de `trf1-1g`.

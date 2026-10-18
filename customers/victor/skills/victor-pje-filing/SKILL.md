@@ -120,15 +120,3 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
    `checkPje: true` to confirm the draft in PJe. `pje_draft_delete` removes a draft by number (it asks first).
 
 The filing root (`JURISYNC_FILING_DIR`) is shared by both servers, so the same `runId` works in each.
-
-## TRF1 (SJAP)
-
-For a TRF1 1st-degree case use `profile: "victor-trf1"` in every filing tool. Its facts differ from TRF5:
-`classification.jurisdiction` is the Seção Judiciária label (`"Seção Judiciária do Amapá"`), the class is
-`"PROCEDIMENTO DO JUIZADO ESPECIAL CÍVEL (436)"`, and the area defaults to `DIREITO ASSISTENCIAL` (pass
-`classification.area: "DIREITO PREVIDENCIÁRIO"` for a previdenciário case). Document types come out in TRF1's labels
-(e.g. `Exame médico`, `Comprovante (Outros)`, `Documentos Diversos`); use those in `overrides`.
-The TRF1 steps after Incluir have not run live yet: results and `pje_draft_status` list them in `unverifiedSteps`.
-Until the first supervised filing has passed, do not use `create-fill`: with the user watching PJe, run the stages one
-at a time (`create`, `subject`, `author`, `attorney`, `public-bodies`, `characteristics`, `documents`) and have the
-user confirm each in the portal, following the test plan in `docs/connectors/pje-trf1-filing-recon.md`.
