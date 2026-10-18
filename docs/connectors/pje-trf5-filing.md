@@ -292,7 +292,8 @@ Quem produz a pasta é responsabilidade de quem conhece a origem:
 
 | Responsabilidade | Onde fica |
 | --- | --- |
-| Obter documentos do Drive, GERID etc. e gravar a pasta + `sources.json` | o agente, pelos conectores dessas fontes |
+| Obter uma pasta do Google Drive e gravá-la no formato do contrato | `connectors/gdrive/` (servidor `jurisync-gdrive`, MCP `drive_export_filing_folder`; veja `docs/connectors/gdrive.md`) |
+| Obter documentos de outras fontes (GERID etc.) e gravar a pasta + `sources.json` | o agente, pelos conectores dessas fontes |
 | Obter a pasta `00 - PROTOCOLAR` do ADVBOX e gravá-la no formato do contrato | `connectors/advbox/filing_folder.py` (CLI `python -m jurisync.connectors.advbox.filing_folder --customer ID`, MCP `advbox_export_filing_folder`) |
 | Definir e validar o formato da pasta | `workflows/filing/contract.py` (`validate_folder`, `validate_sources`, `write_sources`) |
 | Copiar a pasta para o run, preparar, montar, aprovar | `workflows/filing/` (`filing_prepare` / `prepare --from`) |
@@ -312,13 +313,15 @@ do perfil e do prepare do filing; um perfil que ainda tenha `folderPatterns` é 
 - **Hash na entrada.** `inbox.json` registra, por arquivo, o SHA-256 dos bytes copiados, tamanho, horário da cópia e
   origem. O prepare lê **só** a `inbox/` e reconfere esses hashes antes de começar.
 - **Origem.** `declared` quando o `sources.json` da pasta descreve o arquivo (o filing registra o que quem produziu a
-  pasta declarou, sem poder verificar; vale também para o exportador do ADVBOX); `local` quando o arquivo não aparece
-  no `sources.json`.
-- **Esquema do `sources.json` (versão 1)**, escrito por quem produz a pasta, na raiz dela:
+  pasta declarou, sem poder verificar); `exported` quando a entrada tem `verifiedBy`, ou seja, foi escrita por um
+  exportador do jurisync que buscou o arquivo na API da origem (Drive, ADVBOX), e então o `sha256` declarado é
+  reconferido na cópia; `local` quando o arquivo não aparece no `sources.json`.
+- **Esquema do `sources.json` (versão 2; a versão 1 continua aceita, sem os dois últimos campos)**, escrito por quem
+  produz a pasta, na raiz dela:
 
   ```json
   {
-    "version": 1,
+    "version": 2,
     "files": [
       {
         "file": "laudos/laudo-caps.pdf",
@@ -327,14 +330,17 @@ do perfil e do prepare do filing; um perfil que ainda tenha `folderPatterns` é 
         "originPath": "Clientes/Maria/Laudos",
         "originalName": "Laudo CAPS.pdf",
         "modifiedAt": "2026-10-01T12:00:00Z",
-        "link": "https://drive.google.com/file/d/1AbC..."
+        "link": "https://drive.google.com/file/d/1AbC...",
+        "verifiedBy": "jurisync.gdrive",
+        "sha256": "<64 caracteres hexadecimais>"
       }
     ]
   }
   ```
 
   `file` (caminho dentro da pasta) e `origin` (texto livre: `drive`, `gerid`, `advbox`, `local`...) são obrigatórios;
-  os demais são opcionais. É recusado: versão diferente de 1, campo desconhecido, `file` absoluto ou com `..`, o mesmo
+  os demais são opcionais (`verifiedBy` e `sha256` só na versão 2, para os exportadores do jurisync). É recusado:
+  versão diferente de 1 ou 2, campo desconhecido, `sha256` que não tenha 64 caracteres hexadecimais, `file` absoluto ou com `..`, o mesmo
   arquivo descrito duas vezes, entrada para arquivo que não está na pasta, `link` que não seja http(s), JSON inválido.
   A validação acontece antes de qualquer cópia.
 - **Imagem → PDF.** JPG, JPEG e PNG viram PDF de uma página com o Pillow (já dependência): orientação EXIF corrigida,

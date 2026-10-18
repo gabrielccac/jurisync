@@ -72,7 +72,7 @@ uv tool install git+https://github.com/gabrielccac/jurisync
 ```
 
 This installs one command per server (`jurisync-pje`, `jurisync-advbox`, `jurisync-djen`, `jurisync-eproc`,
-`jurisync-juridiq`, `jurisync-inss`) and `jurisync-http`.
+`jurisync-juridiq`, `jurisync-inss`, `jurisync-gdrive`) and `jurisync-http`.
 
 **Customer credentials without editing files.** The operator exports a customer's logins into one encrypted
 bundle and the customer's machine imports it:
@@ -133,6 +133,7 @@ for an installed package and beside the code in a checkout.
 | `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`*, `filing_approve`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | none (takes a local input folder; see `advbox_export_filing_folder` for ADVBOX) | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
 | `eproc` | `eproc_list_notices`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | Browser login + TOTP, once per portal | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
+| `gdrive` | `drive_export_filing_folder`*, `drive_check_access` | Google service account (`GOOGLE_SERVICE_ACCOUNT_FILE`, read-only scope) | local filing input folder only; never writes to Drive (see `docs/connectors/gdrive.md`) |
 | `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_get_attachment`*, `inss_get_process`*, `inss_read_document` | Chrome + A3 PIN (by the user) + TOTP | local downloads only (`get` tools save the file and return its parsed text) |
 | `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
 | `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_export_filing_folder`* (a protocol folder as a filing input folder) + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |

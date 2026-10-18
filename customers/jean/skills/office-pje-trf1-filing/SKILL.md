@@ -11,8 +11,13 @@ assunto `11946` (Pessoa com Deficiência), INSS as RÉU, justiça gratuita sim, 
 Digital solicitado and priority `Pessoa com deficiência`. The attorney is the user logged in to PJe: do not add
 `attorneys` unless the user names an extra one.
 
-1. Gather the documents into one local folder (from Drive, GERID or ADVBOX) with a `sources.json` declaring each
-   file's origin (see the input contract in `docs/connectors/pje-trf5-filing.md`).
+1. Get the input folder. For the client's Google Drive folder, call `drive_export_filing_folder` with the folder's
+   URL or id (`includeSubfolders: true` when documents sit in subfolders, `exclude` for drafts or duplicates); it
+   downloads everything to disk, exports Google Docs to PDF, writes `sources.json` and returns `sourceFolder`. If it
+   says the folder is not shared, ask the user to share it as Viewer with the service-account e-mail it names
+   (`drive_check_access` shows it). Never use the Claude Drive connector for this: it cannot save files to disk.
+   For documents from other sources, save them in one local folder with a `sources.json` (input contract in
+   `docs/connectors/pje-trf5-filing.md`).
 2. Facts carry only the case: `authorCpf`, `author.name` (as in PJe), optional `author.address`, `characteristics.claimValue`.
    Override only what differs: `classification.jurisdiction` for a client in another state, `subject`/`subjects` and
    `characteristics.priority` (e.g. `["Idoso(a)"]` with subject 11947) for an elderly BPC.

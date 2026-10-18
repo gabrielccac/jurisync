@@ -7,6 +7,7 @@ extra dependency); tests pass their own.
 
 import hashlib
 import json
+import re
 import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode
@@ -68,6 +69,11 @@ class DriveClient:
 
     def _error(self, status, body, what):
         detail = body[:200].decode("utf-8", "replace") if body else ""
+        if status == 403 and re.search(r"accessNotConfigured|SERVICE_DISABLED|has not been used", detail):
+            return DriveError(
+                "The Google Drive API is not enabled in the service account's Google Cloud project: enable it under "
+                "APIs & Services → Library → Google Drive API"
+            )
         if status in (403, 404):
             return DriveError(
                 f"Google Drive answered {status} for {what}: it does not exist or is not shared with the service "

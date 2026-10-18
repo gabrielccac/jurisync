@@ -220,6 +220,9 @@ class ExportTests(unittest.TestCase):
         with self.assertRaisesRegex(DriveError, "not shared"):
             check_access(drive_client, "NOTSHARED0001")
         self.assertEqual(check_access(drive_client, ROOT)["folder"]["name"], "Maria - BPC")
+        disabled = lambda *args, **kwargs: (403, {}, b'{"error": {"reason": "accessNotConfigured"}}')
+        with self.assertRaisesRegex(DriveError, "Drive API is not enabled"):
+            DriveClient(drive_client.account, disabled).metadata(ROOT)
 
     def test_files_over_the_limit_are_refused_before_or_while_downloading(self):
         drive = FakeDrive()
