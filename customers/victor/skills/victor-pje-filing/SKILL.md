@@ -89,7 +89,13 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
 1. `filing_profiles` lists the available profiles (confirm `victor` is there). `filing_subjects` with
    `profile: "victor"` (and optionally the lawsuit ID or CNJ) returns the reference subject codes and the README record
    of what was filed for that exact case. They are candidates for the user to confirm, never defaults.
-2. `filing_prepare` with `profile: "victor"`, a new `runId`, the ADVBOX customer ID and the reviewed facts. Facts may
+2. `filing_prepare` with `profile: "victor"`, a new `runId`, the reviewed facts and either the ADVBOX `customerId` (its
+   `00-PROTOCOLAR` folder) or `sourceFolder`: an absolute local folder where you saved the documents you gathered
+   through the Drive, GERID or ADVBOX connectors. With `sourceFolder`, also write a `sources.json` at its root
+   (`{"version": 1, "files": [{"file": "<path in the folder>", "origin": "drive|gerid|advbox|...", "originId",
+   "originPath", "originalName", "modifiedAt", "link"}]}`; only `file` and `origin` are required) so every file's
+   origin is on record; files it leaves out are recorded as `local`. No symlinks. Photos (JPG, PNG) become PDFs; a HEIC
+   comes back for review (export it as JPG or PDF). Show each file's `origin` to the user in the review. Facts may
    be partial: missing ones come back as review items, and `candidates` lists the claim values and CPFs the petition
    states. Document text is not sent to Jev unless `useJev` is true.
 3. Resolve every item in `review`: each file's `id` is the key for `overrides` (`{role, type, description}` and nothing

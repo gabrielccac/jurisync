@@ -210,9 +210,10 @@ absoluto: copiada para outra pasta (ou, no futuro, para um bucket), ela continua
 
 ```text
 <runId>/
-  facts.json  review.json  payload.json  approval.json  manifest.json  checkpoint.json  filing-steps.json
+  facts.json  inbox.json  review.json  payload.json  approval.json  manifest.json  checkpoint.json  filing-steps.json
+  inbox/...                                                                        a entrada: cópia da pasta recebida
   documents/01-PETICAO INICIAL.pdf  02-PROCURACAO.pdf  03-LAUDOS-vol-01.pdf ...   a montagem final
-  work/files/  work/converted/  work/split/                                        área de trabalho do prepare
+  work/converted/  work/split/                                                     área de trabalho do prepare
 ```
 
 - **`documents/` é a montagem.** O finalize (e o prepare, quando não há pendências) copia para `documents/` só os
@@ -222,8 +223,8 @@ absoluto: copiada para outra pasta (ou, no futuro, para um bucket), ela continua
   Todo prepare e todo finalize refazem a montagem do zero (apagam `documents/`, `manifest.json`, `payload.json` e
   `approval.json`). As antigas pastas `files/`, `converted/`, `split/` e `upload/` deram lugar a `work/` + `documents/`.
 - **`manifest.json`** lista cada arquivo montado: caminho, sha256, tamanho, papel, tipo, descrição, volume e de qual
-  linha da revisão veio (`reviewId`, `sourceName`). Na Fase 3 é aqui que a origem (`advbox`, `drive`, `local`) de
-  cada arquivo vai se ligar ao `sources.json`.
+  linha da revisão veio (`reviewId`, `sourceName`), mais o hash do arquivo de entrada (`inputSha256`), como ele foi
+  derivado (`derivedBy`) e a origem (Fase 3).
 - **Caminhos relativos no payload.** Cada documento é `documents/NN-nome.pdf` + `sha256`; o conector resolve pelo
   store do run. **Decisão: payload antigo com caminho absoluto é recusado**, com a mensagem de rodar `filing_finalize`
   de novo (ou usar novo `runId`, se já há rascunho). Desde a Fase 1 todo payload real já precisava ser refeito por
@@ -239,6 +240,58 @@ absoluto: copiada para outra pasta (ou, no futuro, para um bucket), ela continua
   download, conversão, divisão) e `name_of` (caminho local → nome do run; fora do run é recusado). Os nomes são
   relativos e validados. `open_run(runId)` devolve hoje um `LocalRunStore`; uma versão em nuvem (S3/GCS) implementa
   os mesmos métodos, com `local_path`/`workspace` como cache local, sem mudar prepare, finalize ou o conector.
+
+## Entrada única: inbox/ e sources.json (Fase 3)
+
+O jurisync não busca documentos por conta própria. Quem os obtém é o agente, pelos conectores (Drive, GERID,
+ADVBOX...), numa pasta local; o jurisync recebe essa pasta e cuida de preparar e protocolar. A única busca embutida é a
+da pasta `00-PROTOCOLAR` do ADVBOX, mantida por compatibilidade, e ela agora só preenche a mesma entrada.
+
+- **Entrada.** `filing_prepare` com `sourceFolder` (caminho absoluto da pasta) ou `customerId` (ADVBOX), nunca os
+  dois; no CLI, `prepare --from PASTA` ou `prepare --customer ID`. A pasta é copiada (com subpastas) para
+  `<run>/inbox/`; arquivos ocultos (`.DS_Store`) são ignorados, links simbólicos são recusados, no máximo 200 arquivos.
+  O caminho local da pasta não é gravado em lugar nenhum, só os caminhos dentro dela.
+- **Hash na entrada.** `inbox.json` registra, por arquivo, o SHA-256 dos bytes copiados, tamanho, horário da cópia e
+  origem. O prepare lê **só** a `inbox/` e reconfere esses hashes antes de começar.
+- **Origem.** `declared` quando o `sources.json` da pasta descreve o arquivo (o jurisync registra o que o agente
+  declarou, sem poder verificar); `local` quando o arquivo não aparece no `sources.json`; `fetched` quando o próprio
+  jurisync baixou (ADVBOX: id do arquivo, pasta, nome original e data de envio).
+- **Esquema do `sources.json` (versão 1)**, escrito pelo agente na raiz da pasta:
+
+  ```json
+  {
+    "version": 1,
+    "files": [
+      {
+        "file": "laudos/laudo-caps.pdf",
+        "origin": "drive",
+        "originId": "1AbC...",
+        "originPath": "Clientes/Maria/Laudos",
+        "originalName": "Laudo CAPS.pdf",
+        "modifiedAt": "2026-10-01T12:00:00Z",
+        "link": "https://drive.google.com/file/d/1AbC..."
+      }
+    ]
+  }
+  ```
+
+  `file` (caminho dentro da pasta) e `origin` (texto livre: `drive`, `gerid`, `advbox`, `local`...) são obrigatórios;
+  os demais são opcionais. É recusado: versão diferente de 1, campo desconhecido, `file` absoluto ou com `..`, o mesmo
+  arquivo descrito duas vezes, entrada para arquivo que não está na pasta, `link` que não seja http(s), JSON inválido.
+  A validação acontece antes de qualquer cópia.
+- **Imagem → PDF.** JPG, JPEG e PNG viram PDF de uma página com o Pillow (já dependência): orientação EXIF corrigida,
+  transparência sobre fundo branco e, se passar de 10 MB, a imagem é reduzida em etapas (uma imagem é uma página, não
+  se divide). **HEIC:** o Pillow não lê HEIC sozinho; sem o pacote opcional `pillow-heif` (não adicionado, por ser
+  dependência nativa pesada) o arquivo vai para revisão pedindo que seja exportado como JPG ou PDF. Com `pillow-heif`
+  instalado, a conversão é automática. Word continua sendo convertido como antes; PDFs acima de 10 MB continuam
+  divididos em volumes.
+- **Rastreio pelo hash.** Cada linha da revisão guarda o hash de entrada (`sha256`), a origem e como foi derivada
+  (`copy`, `word-to-pdf`, `image-to-pdf`); volumes de PDF dividido guardam `inputSha256`. O `manifest.json` liga cada
+  arquivo de `documents/` (seu `sha256`, que é o do payload, da aprovação e do registro de upload no checkpoint) ao
+  `inputSha256` e à origem. A cadeia é: `inbox.json` → `review.json` → `manifest.json` → `payload.json` →
+  `approval.json` → `checkpoint.json` (`uploads`).
+- **Auditoria.** `filing_prepare`/`filing_review` mostram a origem de cada arquivo, e `filing_finalize` a de cada
+  documento do payload, sem caminho local nem hash.
 
 ## Run and review
 

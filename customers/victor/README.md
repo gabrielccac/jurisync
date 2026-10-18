@@ -95,6 +95,11 @@ to add the address. The adapter rereads the selected address after saving.
   --customer 6540591 --facts /private/case-facts.json --out /private/run
 ```
 
+Instead of `--customer`, `--from /private/gathered` prepares a local folder the agent filled (from Drive, GERID or
+ADVBOX), with an optional `sources.json` declaring where each file came from; see the inbox section of
+`docs/connectors/pje-trf5-filing.md`. Either way the files are first copied into `/private/run/inbox/` with their
+hashes, and JPG/PNG photos become PDFs.
+
 Read `/private/run/review.json`, especially `fallbacks`: these files will be
 uploaded as `Outros Documentos` unless you override their type or skip them.
 Create a private `overrides.json` keyed by the file's `id` if needed. An
