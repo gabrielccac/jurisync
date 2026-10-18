@@ -67,9 +67,14 @@ class DocumentsMixin:
         if table is None:
             raise RuntimeError("PJe did not render the draft document list")
         documents = []
+        # As colunas mudam por portal (o TRF1 tem "Id na origem" a mais): localize "Documento" e "Tipo" pelo
+        # cabeçalho; sem cabeçalho reconhecível, valem as posições do TRF5.
+        heads = [th.get_text(" ", strip=True) for th in table.find_all("th")]
+        type_index = heads.index("Tipo") if "Tipo" in heads else 7
+        description_index = heads.index("Documento") if "Documento" in heads else 6
         for row in table.find_all("tr"):
             cells = row.find_all("td", recursive=False)
-            if len(cells) < 8:
+            if len(cells) <= max(type_index, description_index):
                 continue
             file_link = row.find("a", title=re.compile(r"\.pdf\s*\(", re.I))
             if file_link is None:
@@ -78,8 +83,8 @@ class DocumentsMixin:
             documents.append(
                 {
                     "name": name,
-                    "type": cells[7].get_text(" ", strip=True),
-                    "description": cells[6].get_text(" ", strip=True),
+                    "type": cells[type_index].get_text(" ", strip=True),
+                    "description": cells[description_index].get_text(" ", strip=True),
                 }
             )
         return documents
