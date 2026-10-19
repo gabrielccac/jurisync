@@ -100,6 +100,11 @@ class UploadLedger:
         if self.save:
             self.save(self.checkpoint)
 
+    def sent(self, document):
+        """Whether this run already sent this exact content under this document's name (it may not be listed yet)."""
+        entry = self.uploads.get(document.get("sha256"))
+        return entry is not None and fold(entry["name"]) == fold(upload_name(Path(document["path"]).expanduser()))
+
     def mismatch(self, document):
         """Why the copy of this document's name on the draft may not be this content, or None when it is."""
         path = Path(document["path"]).expanduser()

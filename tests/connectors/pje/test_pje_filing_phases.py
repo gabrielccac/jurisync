@@ -217,10 +217,15 @@ class DocumentBatchTests(unittest.TestCase):
             return listings[min(len(reads), len(listings)) - 1]
 
         client.review_documents = review
+        client.sleep = lambda seconds: None
         client.add_main_document = lambda url, doc, existing=None, ledger=None: {"alreadyAdded": "main" not in uploaded}
-        client._upload_batch = lambda url, items, timeline, ledger: batches.append(
-            [Path(i["path"]).name for i in items]
-        )
+
+        def upload_batch(url, items, timeline, ledger):
+            for item in items:
+                ledger.record(item)  # as the real batch does right before each file's bytes leave
+            batches.append([Path(i["path"]).name for i in items])
+
+        client._upload_batch = upload_batch
         return client, reads, batches
 
     def test_everything_present_costs_one_read_and_no_batch(self):
@@ -245,7 +250,7 @@ class DocumentBatchTests(unittest.TestCase):
                 {"name": "2-DOC.pdf", "type": "Outros Documentos"},
             ]
             client, reads, batches = self.client([listing, complete], uploaded=())
-            client.add_documents("url", docs, ledger=self.uploaded(docs))
+            client.add_documents("url", docs, ledger=self.uploaded({"main": docs["main"], "supporting": []}))
         self.assertEqual(batches, [["1-DOC.pdf", "2-DOC.pdf"]])
         self.assertEqual(len(reads), 2)
 
