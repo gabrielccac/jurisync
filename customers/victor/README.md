@@ -28,7 +28,7 @@ judicial due date from DJEN availability before creating its ADVBOX task:
 
 The same calculator is exposed as `djen_calculate_deadline` in the DJEN MCP.
 It returns publication, first counted day, all counted business days and
-`advboxDeadline`. Its sourced JFPE calendar currently covers 25 Sep through
+the fatal date as `dueOnBr` (DD/MM/AAAA, the format ADVBOX takes). Its sourced JFPE calendar currently covers 25 Sep through
 19 Dec 2026 and rejects dates outside that window. The agent must check that
 the extracted period applies to the represented party; calendar days,
 conditional periods and missing periods require separate handling.

@@ -154,7 +154,7 @@ def get_certidao_text(
 @server.tool(
     name="djen_calculate_deadline",
     title="Calculate DJEN judicial deadline",
-    description="Count a verified number of procedural business days from DJEN availability using the sourced JFPE court calendar. Returns publication, first counted day, counted dates, and fatal date for ADVBOX. Only covers the calendar's declared period and court; does not infer a period from notice text.",
+    description="Count a verified number of procedural business days from DJEN availability using the sourced JFPE court calendar. Returns publication, first counted day, counted dates, and the fatal date (ISO and DD/MM/AAAA). Only covers the calendar's declared period and court; does not infer a period from notice text.",
     annotations=READ_ONLY,
 )
 def deadline(

@@ -26,10 +26,11 @@ resultado é o rascunho abaixo, para a Elisandra aprovar.
 
 ## Fluxo
 
-1. **DJEN**: `customers/elisandra/djen-searches.json` + janela de datas. A busca `stj-diario`
-   cobre só o STJ; a semana real vem da busca ampla (OAB 61216/RS + `nomeAdvogado`, sem
-   tribunal): TRF4 (eproc JFRS/JFSC), TJRS, TRT4, TRF3. Pagine até `count`, deduplique por
-   `id`, use `compact=true`.
+1. **DJEN**: `djen_search_communications` com a janela de datas (`inicio`/`fim`, ISO) e
+   `numeroOab: "61216"`, `ufOab: "RS"`, sem tribunal. Essa busca traz TRF4 (eproc JFRS/JFSC),
+   TJRS, TRT4, TRF3 e STJ. Se a busca por OAB falhar, use `nomeAdvogado: "ELISANDRA BECKER"`
+   (testado em 19/10/2026: mesmas comunicações). Só STJ: acrescente `tribunal: "STJ"` e
+   `meio: "D"`. Pagine até `count`, deduplique por `id`, use `compact=true`.
 2. **Portal**: pelo número CNJ (`portals.for_process`): origem 71xx = `trf4-1g-rs`,
    72xx = `trf4-1g-sc`; justiça estadual 8.21 = `tjrs-1g`. TRT4 e TRF3 não têm enriquecimento
    ligado: informe só o texto DJEN.
