@@ -48,7 +48,7 @@ class DocumentClassificationTest(unittest.TestCase):
             "3-PROVAS DA DEPENDENCIA ECONÔMICA_5512.pdf": "Documento Comprobatório",
             "71- DOCUMENTO DE IDENTIFICIAÇÃO DA REPRESENTANDE_6267.pdf": "Documento Comprobatório",
             "Quesitos Auxilio Doença_8587.pdf": "Outros Documentos",
-            "Inicial BPC - Francisley Damasceno.pdf": "petition",
+            "Inicial BPC - Exemplo da Silva.pdf": "petition",
             "Emenda a Inicial.docx": "unknown",
             "receitas.pdf": "medical",
         }
