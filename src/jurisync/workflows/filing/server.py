@@ -185,11 +185,30 @@ def _require_no_draft(store):
     annotations=LOCAL_WRITE,
 )
 def prepare(
-    profile: ProfileName,
-    runId: RunId,
-    facts: dict[str, Any],
-    sourceFolder: Annotated[str, Field(min_length=2, max_length=1000)],
-    useJev: bool = False,
+    profile: Annotated[
+        ProfileName, Field(description="Profile name from pje_filing_profiles, e.g. 'jean' or 'victor'.")
+    ],
+    runId: Annotated[
+        RunId,
+        Field(description="New run id, letters digits _ or -, up to 64 characters, e.g. 'ana-2026-10-16'."),
+    ],
+    facts: Annotated[
+        dict[str, Any],
+        Field(
+            description="Partial JSON object with what is known: authorCpf (11 digits), subject or subjects (benefit labels from pje_filing_subjects), author (object: name, optional address, optional representative), classification (object), characteristics (object, e.g. claimValue and boolean flags). Anything missing becomes a review item."
+        ),
+    ],
+    sourceFolder: Annotated[
+        str,
+        Field(
+            min_length=2,
+            max_length=1000,
+            description="The sourceFolder (or inputFolder) an exporter returned, unchanged, or an absolute local folder in the filing input contract.",
+        ),
+    ],
+    useJev: Annotated[
+        bool, Field(description="true sends document text to an outside classifier. Default false.")
+    ] = False,
 ) -> dict[str, Any]:
     store = open_run(runId)
     _require_no_draft(store)
@@ -211,7 +230,9 @@ def prepare(
     description="Return the review of a prepared run again: files with their ids, roles, PJe types and problems, the petition's candidates, and whether a payload exists. Reads local files only.",
     annotations=READ_ONLY,
 )
-def review(runId: RunId) -> dict[str, Any]:
+def review(
+    runId: Annotated[RunId, Field(description="runId of a run that already has pje_filing_prepare output.")],
+) -> dict[str, Any]:
     store = open_run(runId)
     report = _read_json(store, REVIEW, "This run has no review yet; call pje_filing_prepare first")
     return _review_view(runId, report, store)
@@ -225,10 +246,20 @@ def review(runId: RunId) -> dict[str, Any]:
     annotations=LOCAL_WRITE,
 )
 def finalize(
-    profile: ProfileName,
-    runId: RunId,
-    facts: dict[str, Any] | None = None,
-    overrides: dict[str, dict[str, str]] | None = None,
+    profile: Annotated[ProfileName, Field(description="Same profile used in pje_filing_prepare.")],
+    runId: Annotated[RunId, Field(description="runId of a prepared run.")],
+    facts: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description="Full facts object, same shape as pje_filing_prepare. Omit to reuse the facts stored at prepare time."
+        ),
+    ] = None,
+    overrides: Annotated[
+        dict[str, dict[str, str]] | None,
+        Field(
+            description='JSON object keyed by file id from pje_filing_review, e.g. {"<id>": {"role": "main", "type": "<PJe type>"}} or {"<id>": {"role": "skip"}} to leave the file out.'
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     store = open_run(runId)
     _require_no_draft(store)
@@ -260,7 +291,9 @@ def finalize(
     description="Record that the user approved the summary pje_filing_build showed: writes approval.json with the time, the payload's sha256 and each document's sha256, after checking every document still matches. pje_draft_create and pje_draft_fill refuse without an approval that matches the current payload. Call it only after the user explicitly confirms that summary; never on your own.",
     annotations=LOCAL_WRITE,
 )
-def approve_payload(runId: RunId) -> dict[str, Any]:
+def approve_payload(
+    runId: Annotated[RunId, Field(description="runId whose pje_filing_build summary the user explicitly approved.")],
+) -> dict[str, Any]:
     store = open_run(runId)
     if not store.exists(PAYLOAD):
         raise ToolError("This run has no payload yet; call pje_filing_build first")
@@ -309,7 +342,15 @@ def profiles() -> dict[str, Any]:
     annotations=READ_ONLY,
 )
 def subjects(
-    profile: ProfileName, lawsuitRef: Annotated[str | None, Field(min_length=4, max_length=40)] = None
+    profile: Annotated[ProfileName, Field(description="Profile name from pje_filing_profiles.")],
+    lawsuitRef: Annotated[
+        str | None,
+        Field(
+            min_length=4,
+            max_length=40,
+            description="Optional lawsuit id or CNJ number to look up what was filed for that case in the profile's history notes.",
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)

@@ -6,6 +6,10 @@ by state, as TRF4 does. Keys are unique within a system (``trf1-1g``,
 ``trf4-1g-sc``) and are what MCP tools, CLIs, and results use; ``Portal.id``
 prefixes the system (``pje-trf1-1g``) where systems mix. Code passes ``Portal``
 objects internally, so a missing portal fails loudly instead of defaulting.
+
+PJe deployments keep their paths under ``root``: federal courts serve ``/pje/``
+while some state courts (TJAP) serve ``/1g/``; every connector path derives from
+it instead of assuming ``/pje/``.
 """
 
 import os
@@ -23,7 +27,7 @@ LEGACY_NAMES = {"USERNAME": ("USUARIO",), "PASSWORD": ("SENHA",), "2FA_DATA": ("
 class Portal:
     key: str  # unique within its system: "trf1-1g", "trf4-1g-sc"
     system: str  # "pje" | "eproc" | "stj"
-    tribunal: str  # TRF1, TRF4, TRF5, TJRS, STJ
+    tribunal: str  # TRF1, TRF4, TRF5, TJRS, TJAP, STJ
     instance: str  # "1g" | "2g"
     host: str
     root: str  # application path: "/pje/", "/eprocV2/" ("/" when not wired)
@@ -80,6 +84,12 @@ PORTALS = {
         Portal("trf1-2g", "pje", "TRF1", "2g", "pje2g.trf1.jus.br", "/pje/", "password_totp", "PJE_2G", region="01"),
         Portal(
             "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_1G", region="05"
+        ),
+        # TJAP is a state court (CNJ J=8, TR=03) served by the PDPJ PJe under /1g/; login goes through the
+        # same Keycloak SSO as the federal courts (realm "pje", client "pje-tjap-1g").
+        Portal(
+            "tjap-1g", "pje", "TJAP", "1g", "pje.tjap.jus.br", "/1g/", "password_totp", "TJAP_1G",
+            region="03", justice="8",
         ),
         Portal(
             "trf4-1g-sc", "eproc", "TRF4", "1g", "eproc.jfsc.jus.br", "/eprocV2/", "browser_totp", "TRF4_1G_SC",

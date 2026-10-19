@@ -25,7 +25,7 @@ from jurisync.connectors.pje.expedientes import NOTICE, PRAZO
 from jurisync.connectors.pje.parsers import response_html
 from jurisync.connectors.pje.process import login_portal
 
-PANEL_PATH = "/pje/Painel/painel_usuario/advogado.seam"
+PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
 CONTAINER = "conteudoAbaExpedientes"
 BUCKET_ROW = re.compile(r"formAbaExpediente:listaAgrSitExp:(\d+):linhaN1$")
 NODE_ID = re.compile(
@@ -341,7 +341,8 @@ class Panel:
     def __init__(self, session, portal):
         self.session = session
         self.portal = portal
-        self.url = f"https://{portals.pje(portal).host}{PANEL_PATH}"
+        config = portals.pje(portal)
+        self.url = f"https://{config.host}{config.root}{PANEL_SUFFIX}"
         self.html = ""
         self.state = ""
         self.tree = {}

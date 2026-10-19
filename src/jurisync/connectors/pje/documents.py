@@ -51,7 +51,11 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     With ``save`` the original bytes are written to the shared documents folder and reported as ``savedAs``.
     """
     portal = process.get("portal")
-    if process.get("success") is not True or portal not in ("trf1-1g", "trf1-2g", "trf5-1g"):
+    try:
+        config = portals.pje(portal)
+    except ValueError:
+        raise ValueError("A successful supported PJe process result is required") from None
+    if process.get("success") is not True:
         raise ValueError("A successful supported PJe process result is required")
     number = process.get("numero_processo")
     region = None
@@ -60,8 +64,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             region = parse_process_number(number)[4]
         except (ValueError, IndexError):
             region = None
-    expected_region = {"trf1-1g": "01", "trf1-2g": "01", "trf5-1g": "05"}.get(portal)
-    if region is None or region != expected_region:
+    if region is None or region != config.region:
         raise ValueError("Process number tribunal does not match the portal")
     validate_document_ids(document_ids)
     known = {}
@@ -88,7 +91,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             known[doc_id] = merged
         else:
             known[doc_id] = document
-    host = portals.pje(portal).host
+    host = config.host
     process_id = process.get("processo_id")
     if not isinstance(process_id, str) or not re.fullmatch(r"[0-9]+", process_id):
         raise ValueError("The adapter's numeric process ID is required")
@@ -110,7 +113,8 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             or parsed.query
             or parsed.fragment
             or not re.fullmatch(
-                r"/pje/seam/resource/rest/pje-legacy/documento/download/TRF[15]/[A-Za-z0-9_-]+/"
+                re.escape(config.root)
+                + r"seam/resource/rest/pje-legacy/documento/download/[A-Za-z0-9]+/[A-Za-z0-9_-]+/"
                 + process_id
                 + "/"
                 + re.escape(doc_id),
@@ -136,7 +140,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                 document["download_url"],
                 headers={
                     "Accept": "application/pdf,text/html,*/*",
-                    "Referer": f"https://{host}/pje/Processo/ConsultaProcesso/listView.seam",
+                    "Referer": f"https://{host}{config.root}Processo/ConsultaProcesso/listView.seam",
                 },
                 impersonate="chrome",
                 allow_redirects=False,

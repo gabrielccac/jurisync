@@ -1,4 +1,4 @@
-"""PJe MCP server: TRF1/TRF5 process context, the Expedientes panel, Push, and 1st-degree initial filing drafts.
+"""PJe MCP server: TRF1/TRF5/TJAP process context, the Expedientes panel, Push, and 1st-degree initial filing drafts.
 
 Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
@@ -28,8 +28,17 @@ from jurisync.customers import ciencia_on_read
 from jurisync.workflows.filing.cleanup import cleanup_all, cleanup_run
 from jurisync.workflows.filing.server import register as register_filing_tools
 
-Portal = Literal["trf1-1g", "trf1-2g", "trf5-1g"]
-RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
+Portal = Annotated[
+    Literal["trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"],
+    Field(
+        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'tjap-1g' (TJAP 1º grau, password login)."
+    ),
+]
+RunId = Annotated[
+    str,
+    StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"),
+    Field(description="Filing run id (letters, digits, _ or -, up to 64), the same runId used in pje_filing_prepare."),
+]
 DraftReadStage = Literal["classification", "subject-options", "pending", "attachment-types"]
 DraftCreateStage = Literal["create", "create-fill"]
 DraftFillStage = Literal[
@@ -73,10 +82,23 @@ def _notifications(portal, read):
     annotations=READ_ONLY,
 )
 def get_process(
-    processNumber: Annotated[str, Field(min_length=1)],
+    processNumber: Annotated[
+        str, Field(min_length=1, description="CNJ process number with punctuation, e.g. '0005231-50.2026.4.05.8203'.")
+    ],
     portal: Portal,
-    scope: Literal["latest", "page", "all"] = "page",
-    documentIds: Annotated[list[Annotated[str, Field(min_length=1)]], Field(max_length=5)] = [],
+    scope: Annotated[
+        Literal["latest", "page", "all"],
+        Field(
+            description="'page' (default): first timeline page. 'latest': newest date only. 'all': merges bounded pages, slower."
+        ),
+    ] = "page",
+    documentIds: Annotated[
+        list[Annotated[str, Field(min_length=1)]],
+        Field(
+            max_length=5,
+            description='Optional JSON list of up to 5 document ids from documentInventory, e.g. ["195268244"]; empty means no texts.',
+        ),
+    ] = [],
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = fetch_process(processNumber, scope, portal=portal, session=session, document_ids=documentIds or None)
@@ -91,12 +113,29 @@ def get_process(
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_documents_tool(
-    processNumber: Annotated[str, Field(min_length=1)],
+    processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
     portal: Portal,
-    documentIds: Annotated[list[Annotated[str, Field(pattern=r"^[0-9]+$")]], Field(min_length=1, max_length=5)],
-    textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
-    save: bool = False,
-    acknowledgeCiencia: bool | None = None,
+    documentIds: Annotated[
+        list[Annotated[str, Field(pattern=r"^[0-9]+$")]],
+        Field(
+            min_length=1,
+            max_length=5,
+            description='JSON list of 1 to 5 numeric document ids (documentId from pje_get_process), e.g. ["195268244"].',
+        ),
+    ],
+    textLimit: Annotated[
+        int, Field(ge=200, le=100000, description="Max characters per text, 200 to 100000; default 20000.")
+    ] = 20000,
+    save: Annotated[
+        bool,
+        Field(description="true stores the original files in the shared documents folder and returns savedAs names."),
+    ] = False,
+    acknowledgeCiencia: Annotated[
+        bool | None,
+        Field(
+            description="Leave empty. true registers the party's ciência and starts the deadline; only use after the user explicitly agrees."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = read_documents(
@@ -121,11 +160,24 @@ def read_documents_tool(
     annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_expediente_ato_tool(
-    processNumber: Annotated[str, Field(min_length=1)],
+    processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
     portal: Portal,
-    expedienteId: Annotated[str, Field(pattern=r"^[0-9]+$")],
-    textLimit: Annotated[int, Field(ge=200, le=100000)] = 20000,
-    acknowledgeCiencia: bool | None = None,
+    expedienteId: Annotated[
+        str,
+        Field(
+            pattern=r"^[0-9]+$",
+            description="Numeric expediente id from pje_list_inbox or pje_get_process expedientes, e.g. '34932797'.",
+        ),
+    ],
+    textLimit: Annotated[
+        int, Field(ge=200, le=100000, description="Max characters of the act text, 200 to 100000; default 20000.")
+    ] = 20000,
+    acknowledgeCiencia: Annotated[
+        bool | None,
+        Field(
+            description="Leave empty. Pending ciência is refused without it. true registers the ciência and starts the deadline: only after the user explicitly agrees."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
         result = fetch_process(
@@ -155,7 +207,12 @@ def read_expediente_ato_tool(
     description="Read the PJe lawyer panel's Expedientes buckets (the same for every login) with their counts. With regions=true each bucket that has items also lists its regions and inboxes with counts (jurisdictions, boxes the profile has), which vary per user. Opening a bucket or expanding a region does not notify anyone; no expediente row is opened and nothing is acknowledged.",
     annotations=READ_ONLY,
 )
-def expediente_counters(portal: Portal, regions: bool = False) -> dict[str, Any]:
+def expediente_counters(
+    portal: Portal,
+    regions: Annotated[
+        bool, Field(description="true also lists regions and inboxes under each non-empty bucket.")
+    ] = False,
+) -> dict[str, Any]:
     return _notifications(portal, lambda name, session: read_counters(name, session=session, tree=regions))
 
 
@@ -167,13 +224,41 @@ def expediente_counters(portal: Portal, regions: bool = False) -> dict[str, Any]
 )
 def list_inbox(
     portal: Portal,
-    bucket: str | None = None,
-    regions: list[str] | None = None,
-    processNumber: str | None = None,
-    expedidoDe: str | None = None,
-    expedidoAte: str | None = None,
-    expedienteId: Annotated[str | None, Field(pattern=r"^[0-9]+$")] = None,
-    maxPages: Annotated[int, Field(ge=1, le=50)] = 5,
+    bucket: Annotated[
+        str | None,
+        Field(
+            description="Bucket index (e.g. '0') or part of its label, e.g. 'Pendentes de ciência'. Default: bucket 0. See pje_list_expediente_counters."
+        ),
+    ] = None,
+    regions: Annotated[
+        list[str] | None,
+        Field(
+            description='JSON list of texts; keeps inboxes whose path contains any of them, e.g. ["Serra Talhada"]. Not a plain string.'
+        ),
+    ] = None,
+    processNumber: Annotated[
+        str | None, Field(description="CNJ process number with punctuation, runs the inbox search.")
+    ] = None,
+    expedidoDe: Annotated[
+        str | None,
+        Field(
+            pattern=r"^\d{4}-\d{2}-\d{2}$",
+            description="Start of expedition date, ISO YYYY-MM-DD (e.g. '2026-10-15'). DD/MM/AAAA is refused.",
+        ),
+    ] = None,
+    expedidoAte: Annotated[
+        str | None,
+        Field(
+            pattern=r"^\d{4}-\d{2}-\d{2}$",
+            description="End of expedition date, ISO YYYY-MM-DD. Use the same day as expedidoDe for one day.",
+        ),
+    ] = None,
+    expedienteId: Annotated[
+        str | None, Field(pattern=r"^[0-9]+$", description="Numeric expediente id to find one row.")
+    ] = None,
+    maxPages: Annotated[
+        int, Field(ge=1, le=50, description="Pages of 40 rows to read per inbox, 1 to 50; default 5.")
+    ] = 5,
 ) -> dict[str, Any]:
     filters = {
         key: value
@@ -297,9 +382,19 @@ def _tool_with_alias(old_name, new_name, **options):
 )
 def draft_options(
     runId: RunId,
-    stage: DraftReadStage,
-    search: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-    page: Annotated[int, Field(ge=1, le=50)] = 1,
+    stage: Annotated[
+        DraftReadStage,
+        Field(
+            description="'classification' (choices of the register form), 'subject-options' (subject search, needs search), 'pending' (is the run's draft in Não Protocolados), 'attachment-types' (the Anexar tab's types; needs a draft)."
+        ),
+    ],
+    search: Annotated[
+        str | None,
+        Field(
+            min_length=1, max_length=200, description="Text to search subjects; required for stage 'subject-options'."
+        ),
+    ] = None,
+    page: Annotated[int, Field(ge=1, le=50, description="Page of results, 1 to 50; default 1.")] = 1,
 ) -> dict[str, Any]:
     if stage == "subject-options" and not (search or "").strip():
         raise ToolError("Subject search text is required")
@@ -314,9 +409,16 @@ def draft_options(
     annotations=READ_ONLY,
 )
 def draft_search(
-    name: Annotated[str | None, Field(max_length=200)] = None,
-    cpf: Annotated[str | None, Field(max_length=30)] = None,
-    portal: Literal["trf1-1g", "trf5-1g"] = "trf5-1g",
+    name: Annotated[
+        str | None, Field(max_length=200, description="Party name, up to 200 characters. Give name, cpf, or both.")
+    ] = None,
+    cpf: Annotated[
+        str | None, Field(max_length=30, description="Party CPF, with or without punctuation. Give name, cpf, or both.")
+    ] = None,
+    portal: Annotated[
+        Literal["trf1-1g", "trf5-1g"],
+        Field(description="Portal whose Não Protocolados list is searched; default trf5-1g."),
+    ] = "trf5-1g",
 ) -> dict[str, Any]:
     name, cpf = (name or "").strip() or None, (cpf or "").strip() or None
     if not (name or cpf):
@@ -338,7 +440,15 @@ APPROVAL_NOTE = (
     + APPROVAL_NOTE,
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
-def draft_create(runId: RunId, stage: DraftCreateStage = "create-fill") -> dict[str, Any]:
+def draft_create(
+    runId: RunId,
+    stage: Annotated[
+        DraftCreateStage,
+        Field(
+            description="'create-fill' (default: Incluir, then fill everything in the background) or 'create' (Incluir only)."
+        ),
+    ] = "create-fill",
+) -> dict[str, Any]:
     if stage == "create-fill":
         return _start_fill(runId, stage)
     return _draft_stage("PJe draft", stage, runId)
@@ -351,7 +461,13 @@ def draft_create(runId: RunId, stage: DraftCreateStage = "create-fill") -> dict[
     + APPROVAL_NOTE,
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
-def draft_fill(runId: RunId, stage: DraftFillStage = "all") -> dict[str, Any]:
+def draft_fill(
+    runId: RunId,
+    stage: Annotated[
+        DraftFillStage,
+        Field(description="'all' (default: every step not done yet, in the background) or one step to run now."),
+    ] = "all",
+) -> dict[str, Any]:
     if stage == "all":
         return _start_fill(runId, "fill")
     return _draft_stage("PJe draft", stage, runId)
@@ -365,7 +481,9 @@ def draft_fill(runId: RunId, stage: DraftFillStage = "all") -> dict[str, Any]:
     + APPROVAL_NOTE,
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
-def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
+def draft_write(
+    runId: RunId, stage: Annotated[DraftWriteStage, Field(description="Create or fill stage, as in the old tool.")]
+) -> dict[str, Any]:
     if stage in BACKGROUND_STAGES:
         return _start_fill(runId, stage)
     return _draft_stage("PJe draft", stage, runId)
@@ -378,8 +496,13 @@ def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
 def draft_delete(
-    draftId: Annotated[str, StringConstraints(pattern=r"^\d{1,12}$")],
-    authorName: Annotated[str, Field(min_length=3, max_length=200)],
+    draftId: Annotated[
+        str, StringConstraints(pattern=r"^\d{1,12}$"), Field(description="Draft number in Não Protocolados, digits.")
+    ],
+    authorName: Annotated[
+        str,
+        Field(min_length=3, max_length=200, description="Author name the draft's row must show, e.g. 'MARIA SILVA'."),
+    ],
 ) -> dict[str, Any]:
     return _draft_stage("PJe draft delete", "delete-draft", name=authorName, draft_id=draftId)
 
@@ -390,7 +513,12 @@ def draft_delete(
     description="Report where a filing run stands: running, interrupted, failed or complete; which phases are recorded; the current step and the latest steps with durations. checkPje=true also reads the draft in PJe and compares its documents with the payload, which is the real test that a draft is complete. Read only.",
     annotations=READ_ONLY,
 )
-def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
+def draft_status(
+    runId: RunId,
+    checkPje: Annotated[
+        bool, Field(description="true also reads the draft in PJe and compares its documents with the payload.")
+    ] = False,
+) -> dict[str, Any]:
     job = fill_jobs.get(runId)
     if not open_run(runId).exists(CHECKPOINT):
         if job is not None and job.is_alive():
@@ -411,9 +539,23 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True),
 )
 def filing_cleanup(
-    runId: RunId | None = None,
-    olderThanDays: Annotated[float | None, Field(ge=0, le=3650)] = None,
-    confirmPendingDraft: bool = False,
+    runId: Annotated[
+        str | None,
+        StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"),
+        Field(description="Run to remove; omit to sweep every run and unused input folder."),
+    ] = None,
+    olderThanDays: Annotated[
+        float | None,
+        Field(
+            ge=0,
+            le=3650,
+            description="Age in days after which a run without a draft goes; default 30 (JURISYNC_FILING_RETENTION_DAYS).",
+        ),
+    ] = None,
+    confirmPendingDraft: Annotated[
+        bool,
+        Field(description="true only when the user explicitly confirmed removing a run whose draft is still pending."),
+    ] = False,
 ) -> dict[str, Any]:
     running = {run_id for run_id, job in fill_jobs.items() if job.is_alive()}
 

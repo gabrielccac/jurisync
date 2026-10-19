@@ -154,7 +154,8 @@ class CertificateCustomerTest(unittest.TestCase):
             (customer / "portals.toml").write_text(
                 '[trf5-1g]\nmethod = "certificate_totp"\n'
                 'secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]\n'
-                '[env]\nsecrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD"]\noptional = ["OPENROUTER_API_KEY"]\n',
+                '[env]\nsecrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD"]\noptional = ["OPENROUTER_API_KEY"]\n'
+                'set = { ADVBOX_ALLOW_WRITES = "true" }\n',
                 encoding="utf-8",
             )
             setup.write_env(
@@ -201,8 +202,27 @@ class CertificateCustomerTest(unittest.TestCase):
             self.assertEqual(stored["PJE_TRF5_2FA_DATA"], URI)
             self.assertNotIn("PJE_TRF5_2FA_QR", stored)
             self.assertEqual(stored["ADVBOX_EMAIL"], "v@x")
+            self.assertEqual(stored["ADVBOX_ALLOW_WRITES"], "true")
             self.assertNotIn("UNRELATED", stored)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_inss_customer_bundle_registers_server_and_keeps_chrome_profile_with_config(tmp_path, monkeypatch):
+    from jurisync import credentials_bundle, setup
+
+    customers = tmp_path / "customers" / "jeanx"
+    customers.mkdir(parents=True)
+    (customers / "portals.toml").write_text('[env]\nsecrets = ["INSS_GERID_TOTP_SECRET"]\n', encoding="utf-8")
+    (customers / ".env").write_text("INSS_GERID_TOTP_SECRET=otpauth://totp/x?secret=ABC\n", encoding="utf-8")
+    monkeypatch.setenv("JURISYNC_CUSTOMERS_DIR", str(tmp_path / "customers"))
+    monkeypatch.setenv("JURISYNC_ENV_FILE", str(tmp_path / "none.env"))
+    out = tmp_path / "b.jurisync"
+    lines = []
+    setup.export_main(["--customer", "jeanx", "--out", str(out)], ask_secret=None, say=lines.append)
+    passphrase = lines[-1].rsplit(": ", 1)[1]
+    opened = credentials_bundle.unseal(out.read_text(encoding="utf-8"), passphrase)
+    assert "inss" in opened["servers"]
+    assert opened["checks"] == []

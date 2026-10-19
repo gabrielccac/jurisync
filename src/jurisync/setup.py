@@ -28,6 +28,8 @@ SERVERS = {
     "eproc": "jurisync-eproc",
     "pje": "jurisync-pje",
     "advbox": "jurisync-advbox",
+    "juridiq": "jurisync-juridiq",
+    "inss": "jurisync-inss",
     "djen": "jurisync-djen",
 }
 FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
@@ -182,8 +184,19 @@ def check_advbox():
     return True, "sessão ok"
 
 
+def check_juridiq():
+    """Log in to Juridiq with the stored e-mail and password."""
+    from jurisync.connectors.juridiq.api import JuridiqApi
+
+    try:
+        JuridiqApi().token(force_refresh=True)
+    except Exception as error:  # noqa: BLE001
+        return False, f"{type(error).__name__}: {str(error)[:140]}"
+    return True, "sessão ok"
+
+
 def run_check(check):
-    """``eproc:<portal>``, ``pje:<portal>`` or ``advbox`` → (ok, message)."""
+    """``eproc:<portal>``, ``pje:<portal>``, ``advbox`` or ``juridiq`` → (ok, message)."""
     system, _, key = check.partition(":")
     if system == "eproc":
         return check_login(key)
@@ -191,6 +204,8 @@ def run_check(check):
         return check_pje(key)
     if system == "advbox":
         return check_advbox()
+    if system == "juridiq":
+        return check_juridiq()
     return False, f"verificação desconhecida: {check}"
 
 
@@ -372,6 +387,8 @@ def export_main(argv, *, ask_secret, say):
                 selected[name] = value
                 if is_shared:
                     from_shared.append(name)
+    fixed = customers.fixed_variables(args.customer)
+    selected.update(fixed)
     if not selected:
         raise SystemExit(f"Nenhuma credencial de {args.customer} encontrada (.env do cliente ou .env da raiz)")
 
@@ -383,8 +400,14 @@ def export_main(argv, *, ask_secret, say):
             files[path.name] = path.read_bytes()
             file_vars[name] = path.name
             selected[name] = path.name
-        elif name.endswith("_2FA_QR") and path.is_file():
-            selected[name.removesuffix("_2FA_QR") + "_2FA_DATA"] = qr_text(path)
+        elif name == "INSS_GERID_QR_IMAGE":
+            if "INSS_GERID_TOTP_SECRET" not in selected and path.is_file():
+                selected["INSS_GERID_TOTP_SECRET"] = qr_text(path)
+            del selected[name]
+        elif name.endswith("_2FA_QR"):
+            data_name = name.removesuffix("_2FA_QR") + "_2FA_DATA"
+            if data_name not in selected and path.is_file():
+                selected[data_name] = qr_text(path)  # the customer's own text export wins over an image
             del selected[name]
     checks = []
     for key in setups:
@@ -393,7 +416,12 @@ def export_main(argv, *, ask_secret, say):
             checks.append(f"{system}:{key}")
     if any(name.startswith("ADVBOX_") for name in selected):
         checks.append("advbox")
-    servers = sorted({check.split(":")[0] for check in checks} | {"djen"})
+    if any(name.startswith("JURIDIQ_") for name in selected):
+        checks.append("juridiq")
+    servers = {check.split(":")[0] for check in checks} | {"djen"}
+    if any(name.startswith("INSS_") for name in selected):
+        servers.add("inss")  # no login check: the A3 certificate asks for its PIN on the first real use
+    servers = sorted(servers)
 
     if args.ask_passphrase:
         passphrase = ask_secret("Senha do pacote: ")
@@ -414,6 +442,8 @@ def export_main(argv, *, ask_secret, say):
         say(f"  arquivos: {', '.join(sorted(files))}")
     if from_shared:
         say(f"  vindas do .env da raiz (confira se são deste cliente): {', '.join(sorted(from_shared))}")
+    if fixed:
+        say(f"  valores fixos do cliente (portals.toml): {', '.join(f'{k}={v}' for k, v in sorted(fixed.items()))}")
     say(f"  verificações: {', '.join(checks) or '-'} | servidores: {', '.join(servers)}")
     if not args.ask_passphrase:
         say(f"Senha do pacote (envie por OUTRO canal, aparece só aqui): {passphrase}")
@@ -449,6 +479,10 @@ def import_main(argv, *, ask_secret, say, stdin=None):
                 output.write(raw)
         for variable, name in opened["file_vars"].items():
             values[variable] = str(directory / Path(name).name)
+    if any(name.startswith("INSS_") for name in values):
+        # The default locations sit inside the installed package; keep the Chrome profile and downloads with the config.
+        values.setdefault("INSS_BROWSER_PROFILE", str(env_file.parent / "inss-browser-profile"))
+        values.setdefault("INSS_DOWNLOAD_DIR", str(env_file.parent / "inss-downloads"))
     write_env(env_file, values)
     os.environ.update(values)
     say(f"Credenciais instaladas em {env_file} (somente o seu usuário lê esse arquivo).")

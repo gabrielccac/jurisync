@@ -17,8 +17,9 @@ __pycache__/
 *.pfx
 *.key
 *.cer
-*QR*.png
-*QR*.jpeg
+*[Qq][Rr]*.png
+*[Qq][Rr]*.jpeg
+*[Qq][Rr]*.jpg
 qr_code_*
 
 # Private runtime data: portal captures, sessions, downloads, workflow state

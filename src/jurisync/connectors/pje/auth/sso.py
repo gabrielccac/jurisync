@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared TRF1 1G/2G SSO and TOTP authentication."""
+"""Shared PJe SSO (Keycloak) and TOTP authentication."""
 
 import json
 import re
@@ -121,7 +121,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     authenticated = (
         response.status_code == 200
         and urlsplit(response.url).hostname == expected_app_host
-        and bool(soup.find("a", href=re.compile(r"/pje/logout\.seam")))
+        and bool(soup.find("a", href=re.compile(r"logout\.seam")))
         and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
         and not soup.find("form", id="kc-otp-login-form")
     )
