@@ -4,7 +4,9 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 
+from jurisync.connectors.pje.filing import attachment_types
 from jurisync.connectors.pje.filing.approval import require_approval
 from jurisync.connectors.pje.filing.checkpoint import UploadLedger, now, pid_alive
 from jurisync.connectors.pje.filing.client import DraftClient
@@ -28,6 +30,7 @@ STAGES = (
     "author",
     "pending",
     "pending-search",
+    "attachment-types",
     "public-bodies",
     "attorney",
     "characteristics",
@@ -103,6 +106,20 @@ def _fill(client, checkpoint, store, payload, stage, verify_all):
     checkpoint.update(status="complete", updatedAt=now(), error=None)
     save(checkpoint)
     return result
+
+
+def _type_problems(types, documents):
+    main = documents["main"].get("type", "Petição inicial")
+    supporting = {Path(item["path"]).name: item["type"] for item in documents.get("supporting", [])}
+    return attachment_types.unknown_types(types, main, supporting)
+
+
+def _document_stage(client, stage, draft_url, documents, ledger):
+    if stage == "main-document":
+        return client.add_main_document(draft_url, documents["main"], ledger=ledger)
+    if stage == "supporting-documents":
+        return client.add_supporting_documents(draft_url, documents.get("supporting", []), ledger=ledger)
+    return client.add_documents(draft_url, documents, ledger=ledger)
 
 
 def run_stage(
@@ -218,17 +235,15 @@ def run_stage(
                 result = [client.add_attorney(checkpoint["draftUrl"], item) for item in payload.get("attorneys", [])]
             elif stage == "characteristics":
                 result = client.save_characteristics(checkpoint["draftUrl"], payload["characteristics"])
-            elif stage == "main-document":
+            elif stage == "attachment-types":
                 draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_main_document(draft_url, payload["documents"]["main"], ledger=ledger)
-            elif stage == "supporting-documents":
+                types = attachment_types.remember(config.key, client.attachment_types(draft_url))
+                documents = (payload or {}).get("documents")
+                result = {**types, "payloadProblems": _type_problems(types, documents) if documents else []}
+            elif stage in ("main-document", "supporting-documents", "documents"):
                 draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_supporting_documents(
-                    draft_url, payload["documents"].get("supporting", []), ledger=ledger
-                )
-            elif stage == "documents":
-                draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_documents(draft_url, payload["documents"], ledger=ledger)
+                client.check_attachment_types(draft_url, payload["documents"])
+                result = _document_stage(client, stage, draft_url, payload["documents"], ledger)
             else:
                 result = client.add_author(
                     checkpoint["draftUrl"],

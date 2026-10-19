@@ -92,6 +92,10 @@ class FillMixin:
             return self.add_documents(draft_listing()["draftUrl"], payload["documents"], timeline, ledger=ledger)
 
         prints = phase_fingerprints(payload)
+        if "documents" in payload and (verify_all or completed.get("documents") != prints["documents"]):
+            # Right after the draft exists, before anything is attached: a type the portal does not offer fails here.
+            with timeline.step("attachment types"):
+                self.check_attachment_types(draft_listing()["draftUrl"], payload["documents"])
         added = phase("subjects", prints["subjects"], subjects)
         single = "subject" in payload and isinstance(added, list)
         result = {("subject" if "subject" in payload else "subjects"): added[0] if single else added}

@@ -18,6 +18,7 @@ import re
 import unicodedata
 from pathlib import Path
 
+from jurisync.connectors.pje.filing import attachment_types
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.approval import revoke as revoke_approval
 from jurisync.connectors.pje.filing.checkpoint import now
@@ -609,6 +610,22 @@ def _checked_override(file_id, choice):
     return {key: value.strip() for key, value in choice.items()}
 
 
+def _check_known_types(rows, portal):
+    """Refuse types the portal's Anexar tab does not offer, when a draft of that portal was read before."""
+    types = attachment_types.known(portal)
+    if types is None:
+        return
+    main = next(row for row in rows if row["role"] == "main")
+    supporting = {row["name"]: row["type"] for row in rows if row["role"] != "main"}
+    problems = attachment_types.unknown_types(types, main.get("type") or "Petição inicial", supporting)
+    if problems:
+        raise ValueError(
+            f"Attachment types not offered by {portal} (list read from a draft on {types['readAt'][:10]}): "
+            + "; ".join(problems)
+            + ". Override the type of those files"
+        )
+
+
 def finalize_review(store, facts, overrides=None, *, profile):
     """Apply the reviewer's explicit choices, assemble documents/ and write payload.json (unapproved) in the run."""
     overrides = overrides or {}
@@ -637,6 +654,7 @@ def finalize_review(store, facts, overrides=None, *, profile):
     mains = [row for row in rows if row["role"] == "main"]
     if len(mains) != 1:
         raise ValueError(f"Expected one main petition, found {len(mains)}")
+    _check_known_types(rows, profile.portal)
     claim_values, cpfs, signals = _petition_candidates(store.local_path(mains[0]["path"]))
     if claim_values and (facts.get("characteristics") or {}).get("claimValue") not in claim_values:
         raise ValueError("Case claimValue differs from the selected petition's stated value")

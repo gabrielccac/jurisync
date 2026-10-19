@@ -1,0 +1,27 @@
+<!-- SYNTHETIC (not captured): the shape the attachment code expects from TRF1's registration response
+     (acaoAjaxAdicionarProcessoDocumento) after two PDFs are registered. Registering rows on a real draft was out of
+     scope for a read-only capture; only this response carries each row's type select and its Atualizar/Gravar links. -->
+<html><body><input type="hidden" name="javax.faces.ViewState" value="j_id20"/>
+<div id="previews" class="dropzone-previews">
+ <div class="dz-preview" data-dz-name="09-relatorio_indeferimento.pdf">
+  <input name="formularioUpload:listaDocs:0:ordem" value="1"/>
+  <select name="formularioUpload:listaDocs:0:tipoDoc" onchange="A4J.AJAX.Submit('formularioUpload',event,{'similarityGroupingId':'formularioUpload:listaDocs:0:j_id1201','containerId':'j_id1063','parameters':{'formularioUpload:listaDocs:0:j_id1201':'formularioUpload:listaDocs:0:j_id1201'} } )">
+   <option value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option>
+   <option value="41">Carta de Indeferimento</option><option value="57">Cédula de Identidade</option>
+   <option value="88">Cadastro Nacional de Informações Sociais - CNIS</option>
+  </select>
+  <input name="formularioUpload:listaDocs:0:descDoc" value=""/><input name="formularioUpload:listaDocs:0:numeroDoc" value=""/>
+  <a id="formularioUpload:listaDocs:0:commandLinkAtualizarComboTipoDocumento" onclick="A4J.AJAX.Submit('formularioUpload',event,{'similarityGroupingId':'formularioUpload:listaDocs:0:commandLinkAtualizarComboTipoDocumento','containerId':'j_id1063'} )">atualizar</a>
+  <a id="formularioUpload:listaDocs:0:commandLinkGravar" onclick="A4J.AJAX.Submit('formularioUpload',event,{'similarityGroupingId':'formularioUpload:listaDocs:0:commandLinkGravar','containerId':'j_id1063'} )">gravar</a>
+ </div>
+ <div class="dz-preview" data-dz-name="10-rg_exemplo.pdf">
+  <input name="formularioUpload:listaDocs:1:ordem" value="2"/>
+  <select name="formularioUpload:listaDocs:1:tipoDoc" onchange="A4J.AJAX.Submit('formularioUpload',event,{'similarityGroupingId':'formularioUpload:listaDocs:1:j_id1201','containerId':'j_id1063','parameters':{'formularioUpload:listaDocs:1:j_id1201':'formularioUpload:listaDocs:1:j_id1201'} } )">
+   <option value="org.jboss.seam.ui.NoSelectionConverter.noSelectionValue">Selecione</option>
+   <option value="41">Carta de Indeferimento</option><option value="57">Cédula de Identidade</option>
+  </select>
+  <input name="formularioUpload:listaDocs:1:descDoc" value=""/><input name="formularioUpload:listaDocs:1:numeroDoc" value=""/>
+  <a id="formularioUpload:listaDocs:1:commandLinkAtualizarComboTipoDocumento" onclick="A4J.AJAX.Submit('formularioUpload',event,{'similarityGroupingId':'formularioUpload:listaDocs:1:commandLinkAtualizarComboTipoDocumento','containerId':'j_id1063'} )">atualizar</a>
+  <a id="formularioUpload:listaDocs:1:commandLinkGravar" onclick="A4J.AJAX.Submit('formularioUpload',event,{'similarityGroupingId':'formularioUpload:listaDocs:1:commandLinkGravar','containerId':'j_id1063'} )">gravar</a>
+ </div>
+</div></body></html>

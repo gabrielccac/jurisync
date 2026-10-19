@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import random
 import tempfile
 import unittest
@@ -201,6 +202,24 @@ class FolderToPayloadTests(unittest.TestCase):
             self.assertEqual([item["origin"]["source"] for item in view["documents"]], ["local", "gerid"])
             self.assertNotIn(tmp, json.dumps(view))
             self.assertNotIn("sha256", json.dumps(view))
+
+
+class KnownAttachmentTypesTests(unittest.TestCase):
+    def test_build_refuses_a_type_the_portal_listed_without_once_a_draft_was_read(self):
+        from jurisync.connectors.pje.filing import attachment_types
+        from jurisync.workflows.filing.prepare import _check_known_types
+
+        rows = [
+            {"role": "main", "name": "01-PETICAO.pdf", "type": "Petição inicial"},
+            {"role": "supporting", "name": "02-LAUDO.pdf", "type": "Laudo Médico"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"JURISYNC_FILING_DIR": tmp}):
+            _check_known_types(rows, "trf1-1g")  # nothing read yet: nothing to check against
+            attachment_types.remember("trf1-1g", {"main": ["Petição inicial"], "supporting": ["Atestado médico"]})
+            with self.assertRaisesRegex(ValueError, "not offered by trf1-1g .*02-LAUDO.pdf: 'Laudo Médico'"):
+                _check_known_types(rows, "trf1-1g")
+            rows[1]["type"] = "Atestado médico"
+            _check_known_types(rows, "trf1-1g")
 
 
 if __name__ == "__main__":
