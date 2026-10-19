@@ -24,7 +24,7 @@ from pydantic import Field, StringConstraints
 from jurisync.connectors.pje.filing.approval import approve, require_approval, revoke
 from jurisync.connectors.pje.filing.store import CHECKPOINT, FACTS, MANIFEST, PAYLOAD, REVIEW, open_run
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
-from jurisync.paths import REPO_ROOT
+from jurisync.paths import REPO_ROOT, filing_folder
 from jurisync.workflows.filing.inbox import origin_view
 from jurisync.workflows.filing.prepare import finalize_review, prepare_folder
 from jurisync.workflows.filing.profile import load_profile, profile_names
@@ -156,6 +156,18 @@ def _read_json(store, name, missing):
     return store.read_json(name)
 
 
+def _source_folder(reference):
+    """An absolute folder as given, or the name of an exporter's folder under <filing root>/inputs (`inputFolder`)."""
+    if Path(reference).expanduser().is_absolute():
+        return reference
+    if "/" in reference or reference in (".", ".."):
+        raise ValueError("sourceFolder must be an absolute path or the inputFolder name an exporter returned")
+    folder = filing_folder("inputs") / reference
+    if not folder.is_dir():
+        raise ValueError(f"No exported input folder named {reference}")
+    return str(folder)
+
+
 def _require_no_draft(store):
     if store.exists(CHECKPOINT):
         raise ToolError("This run already has a PJe draft, so its payload can no longer change; use a new runId")
@@ -165,7 +177,7 @@ def _require_no_draft(store):
     name="pje_filing_prepare",
     formerly="filing_prepare",
     title="Prepare a PJe 1st-degree filing from an input folder",
-    description="Copy the input folder into the run's inbox (hashing each file), convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. `sourceFolder` is an absolute local folder in the filing input contract: the documents (any subfolders, no symlinks) plus an optional sources.json declaring each file's origin. Fill it yourself from Drive, GERID or other connectors, or with a source's exporter (advbox_export_filing_folder). Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
+    description="Copy the input folder into the run's inbox (hashing each file), convert Word files and images (JPG, PNG; HEIC only with pillow-heif) to PDF, split PDFs over 10 MB, classify every file and write the run's review. `sourceFolder` is the folder an exporter returned (drive_export_filing_folder for Google Drive, advbox_export_filing_folder for ADVBOX: pass its sourceFolder, or its inputFolder name, unchanged), or any absolute local folder in the filing input contract: the documents (any subfolders, no symlinks) plus an optional sources.json declaring each file's origin. Each file's origin is shown in the review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
     annotations=LOCAL_WRITE,
 )
 def prepare(
@@ -179,9 +191,10 @@ def prepare(
     _require_no_draft(store)
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
+        source = _source_folder(sourceFolder)
         store.ensure()
         store.write_json(FACTS, facts)
-        prepare_folder(sourceFolder, facts, store, profile=selected, jev=useJev)
+        prepare_folder(source, facts, store, profile=selected, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(store, REVIEW, "Prepare did not write a review")
     return _review_view(runId, report, store)

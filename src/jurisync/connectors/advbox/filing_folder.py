@@ -83,6 +83,7 @@ def export_filing_folder(documents, customer_id, destination, *, folder=None):
     write_sources(destination, entries)
     return {
         "sourceFolder": str(destination),
+        "inputFolder": destination.name,
         "customerId": str(customer_id),
         "advboxFolder": selected,
         "files": [{"name": item["file"], "originalName": item["originalName"]} for item in entries],

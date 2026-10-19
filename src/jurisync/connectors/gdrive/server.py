@@ -25,22 +25,27 @@ server = MCPServer("gdrive", version="1.0.0")
 
 @server.tool(
     name="drive_export_filing_folder",
-    title="Export a Google Drive folder for filing",
-    description="Download a Google Drive folder shared with the jurisync service account (read-only) into a new local folder in the filing input contract: every file straight to disk, Google Docs/Sheets/Slides exported to PDF, Drive's md5 checked, and a sources.json declaring each file's Drive origin (id, folder path, original name, modification time, link). `folder` is the folder id or its URL. Subfolders are skipped unless includeSubfolders is true; `exclude` takes name or path globs. Files over maxFileMb fail the export. Returns `sourceFolder`, the path to give pje_filing_prepare. Writes only that local folder; never writes to Drive.",
+    title="Export Google Drive documents for a PJe filing",
+    description="Download Google Drive documents shared with the jurisync service account (read-only) into a new local input folder for pje_filing_prepare; works in Claude Chat, no terminal needed. `folder` is the link (or id) of the client's documents folder; `files` adds single file links from elsewhere, such as the petition kept in another folder. Google Docs/Sheets/Slides are exported to PDF, Drive's md5 is checked, and a sources.json records each file's Drive origin (id, folder, original name, modification time, link). Subfolders are skipped unless includeSubfolders is true; `exclude` takes name or path globs (e.g. a protocol receipt). Files over maxFileMb fail the export. Returns `sourceFolder`: pass it unchanged to pje_filing_prepare. If the account cannot see a folder or file, the error names the address to share it with (Viewer). Writes only that local folder; never writes to Drive.",
     annotations=LOCAL_WRITE,
 )
 def export_filing_folder(
-    folder: FolderRef,
+    folder: FolderRef | None = None,
+    files: Annotated[list[FolderRef], Field(max_length=50)] = [],
     includeSubfolders: bool = False,
     exclude: Annotated[list[Annotated[str, Field(min_length=1, max_length=200)]], Field(max_length=50)] = [],
     maxFileMb: Annotated[float, Field(gt=0, le=500)] = filing_folder.DEFAULT_MAX_MB,
 ) -> dict[str, Any]:
     with tool_errors("Google Drive", *ERRORS):
+        if not folder and not files:
+            raise ValueError("Give the Drive folder link, file links, or both")
+        label = filing_folder.folder_id(folder) if folder else filing_folder.drive_id(files[0], "file")
         client = filing_folder.make_client()
         return filing_folder.export_filing_folder(
             client,
             folder,
-            filing_folder.default_destination(filing_folder.folder_id(folder)),
+            filing_folder.default_destination(label),
+            files=tuple(files),
             include_subfolders=includeSubfolders,
             exclude=tuple(exclude),
             max_mb=maxFileMb,
@@ -50,7 +55,7 @@ def export_filing_folder(
 @server.tool(
     name="drive_check_access",
     title="Check the Google Drive service account",
-    description="Test the service-account key (gets a read-only token) and, when `folder` is given, that the folder is shared with the account. Returns the account's e-mail (the address to share folders with as Viewer).",
+    description="Test the service-account key (gets a read-only token) and, when `folder` is given (link or id), that the folder is shared with the account. Returns the account's e-mail: share each client folder (or the shared drive) with that address as Viewer (Leitor). Without a key, the error says where to save it.",
     annotations=READ_ONLY,
 )
 def check_access(folder: FolderRef | None = None) -> dict[str, Any]:

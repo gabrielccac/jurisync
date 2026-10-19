@@ -112,6 +112,25 @@ class FilingServerTests(unittest.TestCase):
             self.assertNotIn(hidden, text)
         self.assertEqual(json.loads(self.run_dir.joinpath("facts.json").read_text()), {"a": 1})
 
+    def test_prepare_takes_an_exporters_input_folder_name(self):
+        calls = []
+        exported = Path(self.tmp.name, "inputs", "drive-1AbC-20261019T120000")
+        exported.mkdir(parents=True)
+        with self.fake_prepare(calls):
+            ok = call(
+                "pje_filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": exported.name, "facts": {}}
+            )
+            missing = call(
+                "pje_filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "nope", "facts": {}}
+            )
+            nested = call(
+                "pje_filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "a/b", "facts": {}}
+            )
+        self.assertFalse(ok.is_error, ok.content)
+        self.assertEqual(calls[0]["source"], str(exported.resolve()))
+        self.assertIn("No exported input folder named nope", missing.content[0].text)
+        self.assertIn("absolute path or the inputFolder name", nested.content[0].text)
+
     def test_prepare_takes_only_an_input_folder_and_shows_each_files_origin(self):
         calls = []
 

@@ -29,20 +29,31 @@ DEFAULT_MAX_MB = 50
 SYNCED = re.compile(r"google ?drive|cloudstorage|dropbox|onedrive|icloud|mobile documents|box sync", re.I)
 
 
-def folder_id(reference):
-    """The folder id from an id or a Drive URL (…/folders/<id>, ?id=<id>)."""
+def drive_id(reference, what="folder"):
+    """The Drive id from an id or a link: …/folders/<id>, …/file/d/<id>, …/document/d/<id>, ?id=<id>."""
     text = str(reference or "").strip()
-    match = re.search(r"/folders/([\w-]{10,})", text) or re.search(r"[?&]id=([\w-]{10,})", text)
+    match = (
+        re.search(r"/folders/([\w-]{10,})", text)
+        or re.search(r"/d/([\w-]{10,})", text)
+        or re.search(r"[?&]id=([\w-]{10,})", text)
+    )
     if match:
         return match.group(1)
     if re.fullmatch(r"[\w-]{10,}", text):
         return text
-    raise ValueError("Give a Google Drive folder id or its URL (https://drive.google.com/drive/folders/<id>)")
+    example = (
+        "https://drive.google.com/drive/folders/<id>" if what == "folder" else "https://drive.google.com/file/d/<id>"
+    )
+    raise ValueError(f"Give a Google Drive {what} link ({example}) or its id")
 
 
-def default_destination(folder):
+def folder_id(reference):
+    return drive_id(reference, "folder")
+
+
+def default_destination(label):
     root = filing_folder("inputs")
-    return root / f"drive-{folder[:12]}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
+    return root / f"drive-{label[:12]}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
 
 
 def _check_destination(destination):
@@ -73,19 +84,47 @@ def _walk(client, folder, path, include_subfolders, out, skipped):
             out.append((path, item))
 
 
+def _single_files(client, references):
+    """Files named one by one (e.g. the petition, kept in another folder): (origin folder name, metadata) each."""
+    found = []
+    for reference in references:
+        item = client.metadata(drive_id(reference, "file"))
+        if item.get("mimeType") == FOLDER:
+            raise ValueError(f"{item['name']} is a folder: pass it as `folder`, not in `files`")
+        parent = ""
+        for parent_id in item.get("parents") or []:
+            try:
+                parent = client.metadata(parent_id).get("name", "")
+            except DriveError:
+                parent = ""  # the file is shared, its folder is not
+            break
+        found.append((parent, item))
+    return found
+
+
 def export_filing_folder(
-    client, reference, destination, *, include_subfolders=False, exclude=(), max_mb=DEFAULT_MAX_MB
+    client, reference, destination, *, files=(), include_subfolders=False, exclude=(), max_mb=DEFAULT_MAX_MB
 ):
-    """Download a shared Drive folder into `destination` (new or empty) as a filing input folder."""
+    """Download a shared Drive folder and/or single shared files into `destination` (new or empty) as a filing input
+    folder. Single files land at the top of the folder."""
     limit = int(max_mb * 1_000_000)
-    root_id = folder_id(reference)
+    if not reference and not files:
+        raise ValueError("Give a Drive folder link, file links, or both")
     destination = Path(destination).expanduser().resolve()
     _check_destination(destination)
-    root = client.metadata(root_id)
-    if root.get("mimeType") != FOLDER:
-        raise ValueError(f"{root.get('name')} is not a folder")
-    found, skipped = [], []
-    _walk(client, root_id, (), include_subfolders, found, skipped)
+    found, skipped, origin_paths = [], [], {}
+    root = None
+    if reference:
+        root_id = folder_id(reference)
+        root = client.metadata(root_id)
+        if root.get("mimeType") != FOLDER:
+            raise ValueError(f"{root.get('name')} is not a folder: pass a single file in `files`")
+        _walk(client, root_id, (), include_subfolders, found, skipped)
+    for parent, item in _single_files(client, files):
+        if any(item["id"] == known["id"] for _, known in found):
+            continue  # already in the folder
+        found.append(((), item))
+        origin_paths[item["id"]] = parent
     chosen = []
     for path, item in found:
         relative = "/".join((*path, item["name"]))
@@ -96,7 +135,7 @@ def export_filing_folder(
             raise TooLarge(f"{relative} has {int(item['size']) / 1e6:.1f} MB, more than the {max_mb} MB limit")
         chosen.append((path, item))
     if not chosen:
-        raise ValueError(f"The Drive folder {root['name']} has no files to export")
+        raise ValueError(f"The Drive folder {root['name']} has no files to export" if root else "No file to export")
     if len(chosen) > MAX_FILES:
         raise ValueError(f"The Drive folder has more than {MAX_FILES} files")
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -122,7 +161,9 @@ def export_filing_folder(
                 "file": target.relative_to(destination).as_posix(),
                 "origin": "drive",
                 "originId": item["id"],
-                "originPath": "/".join((root["name"], *path)),
+                "originPath": origin_paths[item["id"]]
+                if item["id"] in origin_paths
+                else "/".join((root["name"], *path)),
                 "originalName": item["name"],
                 "verifiedBy": EXPORTER,
                 "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
@@ -141,18 +182,24 @@ def export_filing_folder(
         raise
     return {
         "sourceFolder": str(destination),
-        "driveFolder": {"id": root_id, "name": root["name"]},
+        "inputFolder": destination.name,
+        **({"driveFolder": {"id": root["id"], "name": root["name"]}} if root else {}),
         "serviceAccount": client.account.email,
         "files": [{"name": entry["file"], "originalName": entry["originalName"]} for entry in entries],
         "skipped": skipped,
-        "next": "Call pje_filing_prepare with this sourceFolder.",
+        "next": "Call pje_filing_prepare with this sourceFolder (as is), the profile, a new runId and the case facts.",
     }
 
 
 def check_access(client, reference=None):
     """Prove the key works (a token for drive.readonly) and, given a folder, that it is shared with the account."""
     client.account.token()
-    result = {"serviceAccount": client.account.email, "scope": SCOPE, "keyFile": str(key_path())}
+    result = {
+        "serviceAccount": client.account.email,
+        "scope": SCOPE,
+        "keyFile": str(key_path()),
+        "shareWith": f"Share each client folder (or the shared drive) with {client.account.email} as Viewer (Leitor)",
+    }
     if reference:
         meta = client.metadata(folder_id(reference))
         result["folder"] = {"id": meta["id"], "name": meta["name"], "isFolder": meta.get("mimeType") == FOLDER}
@@ -171,7 +218,8 @@ def main(argv=None):
     check = commands.add_parser("check", help="Test the service-account key, and optionally access to a folder")
     check.add_argument("--folder", help="Folder id or URL to check it is shared with the service account")
     export = commands.add_parser("export", help="Export a folder as a filing input folder")
-    export.add_argument("--folder", required=True, help="Folder id or URL")
+    export.add_argument("--folder", help="Folder id or URL")
+    export.add_argument("--file", action="append", default=[], help="A single file's id or URL (repeatable)")
     export.add_argument("--subfolders", action="store_true", help="Include subfolders")
     export.add_argument("--exclude", action="append", default=[], help="Glob of names/paths to leave out (repeatable)")
     export.add_argument("--max-mb", type=float, default=DEFAULT_MAX_MB, help="Largest file accepted (MB)")
@@ -181,10 +229,12 @@ def main(argv=None):
     if args.command == "check":
         result = check_access(client, args.folder)
     else:
+        label = folder_id(args.folder) if args.folder else drive_id(args.file[0], "file") if args.file else "files"
         result = export_filing_folder(
             client,
             args.folder,
-            args.out or default_destination(folder_id(args.folder)),
+            args.out or default_destination(label),
+            files=args.file,
             include_subfolders=args.subfolders,
             exclude=args.exclude,
             max_mb=args.max_mb,

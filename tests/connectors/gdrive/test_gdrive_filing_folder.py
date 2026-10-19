@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from jurisync.connectors.gdrive.auth import SCOPE, DriveAuthError, ServiceAccount, load_key, signed_assertion
 from jurisync.connectors.gdrive.client import DriveClient, DriveError, TooLarge
-from jurisync.connectors.gdrive.filing_folder import check_access, export_filing_folder, folder_id
+from jurisync.connectors.gdrive.filing_folder import check_access, drive_id, export_filing_folder, folder_id
 from jurisync.connectors.pje.filing.store import LocalRunStore
 from jurisync.workflows.filing.contract import validate_folder
 from jurisync.workflows.filing.inbox import fill_from_folder
@@ -48,7 +48,15 @@ class FakeDrive:
                 "name": "Laudos",
                 "mimeType": "application/vnd.google-apps.folder",
             },
+            "INICIAIS00001": {
+                "id": "INICIAIS00001",
+                "name": "1. Iniciais - BPC (Controladoria)",
+                "mimeType": "application/vnd.google-apps.folder",
+            },
         }
+        self.items["PETITION0001"] = self.file(
+            "PETITION0001", "Inicial BPC - Maria.pdf", PDF + b"p", parents=["INICIAIS00001"]
+        )
         self.pages = {
             ROOT: [
                 [
@@ -68,7 +76,12 @@ class FakeDrive:
             ],
             "SUBFOLDER0001": [[self.file("FILE00000002", "Laudo CAPS.pdf", PDF + b"2")]],
         }
-        self.content = {"FILE00000001": PDF, "FILE00000002": PDF + b"2", "GDOC00000001": DOC_PDF}
+        self.content = {
+            "FILE00000001": PDF,
+            "FILE00000002": PDF + b"2",
+            "GDOC00000001": DOC_PDF,
+            "PETITION0001": PDF + b"p",
+        }
 
     @staticmethod
     def file(file_id, name, content, **extra):
@@ -155,6 +168,10 @@ class ServiceAccountTests(unittest.TestCase):
 
     def test_folder_ids_come_from_ids_or_urls(self):
         self.assertEqual(folder_id("https://drive.google.com/drive/folders/1AbCdEfGhIjK?usp=sharing"), "1AbCdEfGhIjK")
+        self.assertEqual(folder_id("https://drive.google.com/drive/u/0/folders/1AbCdEfGhIjK"), "1AbCdEfGhIjK")
+        self.assertEqual(
+            drive_id("https://drive.google.com/file/d/1XyZ0123456/view?usp=drive_link", "file"), "1XyZ0123456"
+        )
         self.assertEqual(folder_id("https://drive.google.com/open?id=1AbCdEfGhIjK"), "1AbCdEfGhIjK")
         with self.assertRaises(ValueError):
             folder_id("not a folder")
@@ -197,6 +214,24 @@ class ExportTests(unittest.TestCase):
         inbox = fill_from_folder(store, folder)
         self.assertEqual({entry["origin"]["kind"] for entry in inbox["files"]}, {"exported"})
 
+    def test_a_petition_from_another_folder_joins_the_client_folder(self):
+        drive_client, _ = client()
+        petition = "https://drive.google.com/file/d/PETITION0001/view"
+        result = export_filing_folder(drive_client, ROOT, self.tmp / "out", files=[petition], exclude=["Procura*"])
+        checked = validate_folder(Path(result["sourceFolder"]))
+        self.assertEqual(checked["files"], ["10-Petição inicial.pdf", "Inicial BPC - Maria.pdf"])
+        source = checked["sources"]["Inicial BPC - Maria.pdf"]
+        self.assertEqual(
+            (source["originPath"], source["originId"]), ("1. Iniciais - BPC (Controladoria)", "PETITION0001")
+        )
+        self.assertEqual(result["inputFolder"], "out")
+        only = export_filing_folder(drive_client, None, self.tmp / "only", files=[petition])
+        self.assertNotIn("driveFolder", only)
+        with self.assertRaisesRegex(ValueError, "is a folder: pass it as `folder`"):
+            export_filing_folder(drive_client, None, self.tmp / "x", files=[ROOT])
+        with self.assertRaisesRegex(ValueError, "folder link, file links, or both"):
+            export_filing_folder(drive_client, None, self.tmp / "y")
+
     def test_subfolders_and_excluded_names_stay_out_unless_asked(self):
         drive_client, _ = client()
         result = export_filing_folder(drive_client, ROOT, self.tmp / "out", exclude=["Procura*"])
@@ -219,7 +254,9 @@ class ExportTests(unittest.TestCase):
             export_filing_folder(drive_client, "NOTSHARED0001", self.tmp / "out")
         with self.assertRaisesRegex(DriveError, "not shared"):
             check_access(drive_client, "NOTSHARED0001")
-        self.assertEqual(check_access(drive_client, ROOT)["folder"]["name"], "Maria - BPC")
+        access = check_access(drive_client, ROOT)
+        self.assertEqual(access["folder"]["name"], "Maria - BPC")
+        self.assertIn("jurisync@office.iam.gserviceaccount.com as Viewer", access["shareWith"])
         disabled = lambda *args, **kwargs: (403, {}, b'{"error": {"reason": "accessNotConfigured"}}')
         with self.assertRaisesRegex(DriveError, "Drive API is not enabled"):
             DriveClient(drive_client.account, disabled).metadata(ROOT)
