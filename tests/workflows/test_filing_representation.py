@@ -11,7 +11,7 @@ from jurisync.workflows.filing.representation import representation_problems, re
 
 PROFILE = load_profile("victor")
 TODAY = date(2026, 10, 17)
-MOTHER = {"cpf": "99988877766", "name": "MARIA MAE", "kind": "mae"}
+MOTHER = {"cpf": "99988877714", "name": "MARIA MAE", "kind": "mae"}
 FACTS = {
     "authorCpf": "12345678909",
     "author": {"name": "EXAMPLE"},
@@ -28,7 +28,7 @@ def with_author(**author):
 
 class RepresentationRuleTests(unittest.TestCase):
     def test_petition_phrases_that_mean_representation(self):
-        text = "JOÃO, menor impúbere, neste ato representado por sua genitora MARIA, CPF 999.888.777-66"
+        text = "JOÃO, menor impúbere, neste ato representado por sua genitora MARIA, CPF 999.888.777-14"
         self.assertEqual(representation_signals(text), ["representado por", "neste ato representado", "menor impúbere"])
         self.assertEqual(representation_signals("MARIA DA SILVA, brasileira, solteira, agricultora"), [])
         defendant = "em face do INSS, por intermédio do representante legal deste, na cidade de Itaituba-PA"
@@ -62,7 +62,7 @@ class RepresentationInPrepareTests(unittest.TestCase):
 
     def test_a_minor_without_representative_is_held_for_review_and_finalize_refuses(self):
         facts = with_author(birthDate="01/02/2015")
-        with self.petition(["12345678909", "99988877766"], []):
+        with self.petition(["12345678909", "99988877714"], []):
             result = prepare_folder(self.folder, facts, self.store, profile=PROFILE, jev=False)
             self.assertFalse(result["payloadWritten"])
             self.assertEqual(
@@ -71,11 +71,11 @@ class RepresentationInPrepareTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "is a minor"):
                 finalize_review(self.store, facts, profile=PROFILE)
             finalize_review(self.store, with_author(birthDate="01/02/2015", representative=MOTHER), profile=PROFILE)
-        self.assertEqual(self.store.read_json("payload.json")["author"]["representative"]["cpf"], "99988877766")
+        self.assertEqual(self.store.read_json("payload.json")["author"]["representative"]["cpf"], "99988877714")
 
     def test_a_representative_whose_cpf_the_petition_does_not_state_is_held_for_review(self):
         facts = with_author(representative=MOTHER)
-        with self.petition(["12345678909", "11122233344"], ["representado por"]):
+        with self.petition(["12345678909", "11122233396"], ["representado por"]):
             prepare_folder(self.folder, facts, self.store, profile=PROFILE, jev=False)
             reasons = [item["reason"] for item in self.store.read_json("review.json")["review"]]
             self.assertEqual(

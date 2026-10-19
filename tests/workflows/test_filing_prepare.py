@@ -251,12 +251,12 @@ class PayloadTest(unittest.TestCase):
             build_payload({**FACTS, "characteristics": {"claimValue": "0"}}, {}, PROFILE.defaults())
 
     def test_extra_attorneys_come_from_the_case_facts(self):
-        graziele = {"cpf": "111.222.333-44", "name": "GRAZIELE ALVES DA SILVA", "oabNumber": "48647", "oabState": "PE"}
-        other = {"cpf": "55566677788", "name": "OUTRA ADVOGADA", "oabNumber": "1234", "oabState": "PB"}
+        graziele = {"cpf": "111.222.333-96", "name": "GRAZIELE ALVES DA SILVA", "oabNumber": "48647", "oabState": "PE"}
+        other = {"cpf": "55566677720", "name": "OUTRA ADVOGADA", "oabNumber": "1234", "oabState": "PB"}
         payload = build_payload({**FACTS, "attorneys": [graziele, other]}, {}, PROFILE.defaults())
-        self.assertEqual(payload["attorneys"], [{**graziele, "cpf": "11122233344"}, other])
+        self.assertEqual(payload["attorneys"], [{**graziele, "cpf": "11122233396"}, other])
         bad = {
-            "needs exactly cpf": [{"cpf": "11122233344", "name": "X"}],
+            "needs exactly cpf": [{"cpf": "11122233396", "name": "X"}],
             "11 digits": [{**graziele, "cpf": "123"}],
             "two-letter UF": [{**graziele, "oabState": "Pernambuco"}],
             "repeats": [graziele, graziele],
@@ -268,10 +268,10 @@ class PayloadTest(unittest.TestCase):
             build_payload({**FACTS, "attorney": graziele}, {}, PROFILE.defaults())
 
     def test_the_legal_representative_goes_with_the_author(self):
-        mother = {"cpf": "999.888.777-66", "name": "MARIA MAE", "kind": "mae"}
+        mother = {"cpf": "999.888.777-14", "name": "MARIA MAE", "kind": "mae"}
         facts = {**FACTS, "author": {"name": "EXAMPLE", "birthDate": "01/02/2015", "representative": mother}}
         payload = build_payload(facts, {}, PROFILE.defaults())
-        self.assertEqual(payload["author"], {"name": "EXAMPLE", "representative": {**mother, "cpf": "99988877766"}})
+        self.assertEqual(payload["author"], {"name": "EXAMPLE", "representative": {**mother, "cpf": "99988877714"}})
         with self.assertRaisesRegex(ValueError, "kind must be one of"):
             build_payload(
                 {**facts, "author": {"name": "X", "representative": {**mother, "kind": "avó"}}}, {}, PROFILE.defaults()
@@ -299,7 +299,7 @@ class PayloadTest(unittest.TestCase):
                 build_payload(facts, {}, defaults)
 
     def test_the_representative_may_carry_an_address(self):
-        mother = {"cpf": "99988877766", "name": "M", "kind": "mae", "address": {"cep": "68900-000", "numero": "12"}}
+        mother = {"cpf": "99988877714", "name": "M", "kind": "mae", "address": {"cep": "68900-000", "numero": "12"}}
         payload = build_payload({**FACTS, "author": {"name": "E", "representative": mother}}, {}, PROFILE.defaults())
         self.assertEqual(payload["author"]["representative"]["address"], {"cep": "68900-000", "numero": "12"})
         for address in ({"cep": "1"}, {"cep": "68900-000"}):

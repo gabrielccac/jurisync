@@ -25,7 +25,7 @@ NAME_PARTICLES = {"de", "da", "do", "das", "dos", "e"}
 
 
 def initials(name):
-    """'DAVI LEÃO JARDIM' -> 'DLJ' (sem acento, sem partículas como 'de', 'dos')."""
+    """'PEDRO DE SOUZA LIMA' -> 'PSL' (sem acento, sem partículas como 'de', 'dos')."""
     import unicodedata
 
     plain = "".join(c for c in unicodedata.normalize("NFD", name) if unicodedata.category(c) != "Mn")

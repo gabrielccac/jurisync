@@ -48,15 +48,15 @@ class DraftPayloadTests(unittest.TestCase):
         payload = {
             "subject": {"search": "test", "code": "1", "name": "TEST"},
             "authorCpf": "12345678909",
-            "author": {"name": "EXAMPLE", "representative": {"cpf": "99988877766", "name": "M", "kind": "mae"}},
-            "attorneys": [{"cpf": "11122233344", "name": "G", "oabNumber": "1", "oabState": "PE"}],
+            "author": {"name": "EXAMPLE", "representative": {"cpf": "99988877714", "name": "M", "kind": "mae"}},
+            "attorneys": [{"cpf": "11122233396", "name": "G", "oabNumber": "1", "oabState": "PE"}],
         }
         validate_fill_payload(payload)
         attorney = payload["attorneys"][0]
         with self.assertRaisesRegex(ValueError, "Use attorneys"):
             validate_fill_payload({**payload, "attorney": attorney})
         with self.assertRaisesRegex(ValueError, "attorneys\\[0\\] needs"):
-            validate_fill_payload({**payload, "attorneys": [{"cpf": "11122233344"}]})
+            validate_fill_payload({**payload, "attorneys": [{"cpf": "11122233396"}]})
         with self.assertRaisesRegex(ValueError, "representative needs"):
             validate_fill_payload({**payload, "author": {"name": "E", "representative": {"cpf": "1"}}})
 
@@ -137,9 +137,19 @@ def test_party_matches_minor_shown_by_initials():
     """O TRF1 lista autor menor só pelas iniciais; CPF + iniciais identificam a parte."""
     from jurisync.connectors.pje.filing.parsing import party_matches
 
-    row = "D. L. J. - CPF: 104.739.182-18 (AUTOR)"
-    assert party_matches(row, "DAVI LEÃO JARDIM", "10473918218")
-    assert not party_matches(row, "DAVI LEÃO JARDIM", "00000000000")  # CPF diferente
-    assert not party_matches(row, "MARIA LEÃO JARDIM", "10473918218")  # iniciais diferentes
+    row = "P. S. L. - CPF: 529.982.247-25 (AUTOR)"
+    assert party_matches(row, "PEDRO SOUZA LIMA", "52998224725")
+    assert not party_matches(row, "PEDRO SOUZA LIMA", "00000000000")  # CPF diferente
+    assert not party_matches(row, "MARIA SOUZA LIMA", "52998224725")  # iniciais diferentes
     assert party_matches("JOSÉ DA SILVA - CPF: 111", "José da Silva")  # nome completo continua valendo
-    assert party_matches("J. S. - CPF: 123.456.789-00", "JOSÉ DOS SANTOS", "12345678900")  # partículas ignoradas
+    assert party_matches("J. S. - CPF: 123.456.789-09", "JOSÉ DOS SANTOS", "12345678909")  # partículas ignoradas
+
+
+def test_a_cpf_with_wrong_check_digits_is_refused_before_pje_sees_it():
+    import pytest
+
+    from jurisync.connectors.pje.filing.payload import masked_cpf
+
+    assert masked_cpf("52998224725") == "529.982.247-25"
+    with pytest.raises(ValueError, match=r"529\.\*\*\*\.\*\*\*-24 has wrong check digits"):
+        masked_cpf("529.982.247-24")

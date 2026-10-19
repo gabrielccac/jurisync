@@ -22,6 +22,7 @@ from jurisync.connectors.pje.filing import attachment_types
 from jurisync.connectors.pje.filing.approval import approve
 from jurisync.connectors.pje.filing.approval import revoke as revoke_approval
 from jurisync.connectors.pje.filing.checkpoint import now
+from jurisync.connectors.pje.filing.payload import cpf_check_digits_match
 from jurisync.connectors.pje.filing.store import CHECKPOINT, DOCUMENTS, MANIFEST, PAYLOAD, REVIEW, WORK, LocalRunStore
 from jurisync.core.pdf import analyze_document
 from jurisync.core.word_to_pdf import convert_word_to_pdf
@@ -137,6 +138,8 @@ def require_facts(facts, defaults):
 def _check_cpf(value, label):
     if not isinstance(value, str) or not re.fullmatch(r"\d{11}", _digits(value)):
         raise ValueError(f"{label} must have 11 digits")
+    if not cpf_check_digits_match(_digits(value)):
+        raise ValueError(f"{label} has wrong check digits (PJe refuses it): check it against the document")
 
 
 def _check_attorneys(attorneys):

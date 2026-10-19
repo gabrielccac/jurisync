@@ -8,10 +8,25 @@ PDF_LIMIT = 10_000_000
 SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
+def cpf_check_digits_match(digits):
+    """Whether an 11-digit CPF's two check digits are right (PJe refuses it as 'formato inválido' otherwise)."""
+    if len(digits) != 11 or len(set(digits)) == 1:
+        return False
+    for size in (9, 10):
+        total = sum(int(digits[index]) * (size + 1 - index) for index in range(size))
+        if (total * 10) % 11 % 10 != int(digits[size]):
+            return False
+    return True
+
+
 def masked_cpf(value):
     digits = re.sub(r"\D", "", value)
     if len(digits) != 11:
         raise ValueError("CPF must have 11 digits")
+    if not cpf_check_digits_match(digits):
+        raise ValueError(
+            f"CPF {digits[:3]}.***.***-{digits[-2:]} has wrong check digits; check it against the document"
+        )
     return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
 
 
