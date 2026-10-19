@@ -3,6 +3,7 @@ import io
 import json
 import os
 import random
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,6 +117,15 @@ class SourceFolderTests(unittest.TestCase):
         self.sources([{**laudo, "sha256": sha(b"other bytes")}], version=2)
         with self.assertRaisesRegex(ValueError, "differs from the file its exporter wrote"):
             fill_from_folder(self.store, self.folder)
+
+    def test_an_exporters_folder_is_named_in_the_inbox_so_cleanup_can_remove_it(self):
+        inputs = Path(os.environ["JURISYNC_FILING_DIR"], "inputs")
+        exported = inputs / "drive-abc"
+        exported.mkdir(parents=True, exist_ok=True)
+        (exported / "PETICAO.pdf").write_bytes(PETITION)
+        self.addCleanup(shutil.rmtree, exported)
+        self.assertEqual(fill_from_folder(self.store, exported)["inputFolder"], "drive-abc")
+        self.assertNotIn("inputFolder", fill_from_folder(self.store, self.folder))
 
     def test_symlinks_and_relative_folders_are_refused(self):
         (self.folder / "link.pdf").symlink_to(self.folder / "10-PETIÇÃO INICIAL.pdf")

@@ -25,6 +25,7 @@ from jurisync.connectors.pje.push import read_push
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
+from jurisync.workflows.filing.cleanup import cleanup_all, cleanup_run
 from jurisync.workflows.filing.server import register as register_filing_tools
 
 Portal = Literal["trf1-1g", "trf1-2g", "trf5-1g"]
@@ -401,6 +402,36 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
     if job is not None and job.is_alive() and response["result"]["state"] == "unknown":
         response["result"]["state"] = "running"
     return response
+
+
+@server.tool(
+    name="pje_filing_cleanup",
+    title="Remove a filing run and its input documents",
+    description="Delete a local filing run (assembled documents, payload, review) and the input folder it was prepared from, to keep client documents only while needed. Removed when its draft is no longer in Não Protocolados (protocolled or deleted; checked in PJe), or, for a run without a draft, once it is older than olderThanDays (default JURISYNC_FILING_RETENTION_DAYS, 30). A run whose draft is still pending is kept unless the user explicitly confirmed removing it (confirmPendingDraft=true). Without runId it sweeps every run with the same rules (never removing a pending draft's run) and every unused input folder older than the retention. Local files only: never touches the draft in PJe.",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True),
+)
+def filing_cleanup(
+    runId: RunId | None = None,
+    olderThanDays: Annotated[float | None, Field(ge=0, le=3650)] = None,
+    confirmPendingDraft: bool = False,
+) -> dict[str, Any]:
+    running = {run_id for run_id, job in fill_jobs.items() if job.is_alive()}
+
+    def draft_pending(run_id):
+        return _draft_stage("PJe draft", "pending", run_id)["result"]["inNaoProtocolados"]
+
+    with tool_errors("Filing cleanup", *ERRORS):
+        if runId is None:
+            if confirmPendingDraft:
+                raise ToolError("confirmPendingDraft applies to one named run only")
+            return cleanup_all(draft_pending=draft_pending, older_than_days=olderThanDays, running=running)
+        return cleanup_run(
+            runId,
+            draft_pending=draft_pending,
+            older_than_days=olderThanDays,
+            confirm_pending=confirmPendingDraft,
+            running=runId in running,
+        )
 
 
 # The filing preparation tools (pje_filing_prepare, pje_filing_review, pje_filing_build, pje_filing_approve...) are offered here

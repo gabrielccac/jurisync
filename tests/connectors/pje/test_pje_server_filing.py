@@ -27,7 +27,14 @@ FILING_TOOLS = {
     "filing_finalize",
     "filing_approve",
 }
-DRAFT_TOOLS = {"pje_draft_create", "pje_draft_fill", "pje_draft_options", "pje_draft_search", "pje_draft_status"}
+DRAFT_TOOLS = {
+    "pje_draft_create",
+    "pje_draft_fill",
+    "pje_draft_options",
+    "pje_draft_search",
+    "pje_draft_status",
+    "pje_filing_cleanup",
+}
 OLD_DRAFT_TOOLS = {"pje_draft_write": "pje_draft_create", "pje_draft_inspect": "pje_draft_options"}
 FACTS = {
     "authorCpf": "12345678909",

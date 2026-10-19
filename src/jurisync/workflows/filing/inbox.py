@@ -20,6 +20,7 @@ import unicodedata
 from pathlib import Path, PurePosixPath
 
 from jurisync.connectors.pje.filing.checkpoint import now
+from jurisync.paths import filing_folder
 
 from .contract import validate_folder
 
@@ -82,7 +83,11 @@ def fill_from_folder(store, folder):
         else:
             origin = {"kind": "local", "source": "local"}
         _add(store, record, taken, PurePosixPath(name).name, content, {**origin, "file": name})
-    store.write_json(INBOX_RECORD, {"version": 1, "filledAt": now(), "files": record})
+    entry = {"version": 1, "filledAt": now(), "files": record}
+    # An exporter's folder under <filing root>/inputs is named (never its path), so cleanup can remove it with the run.
+    if folder.resolve().parent == filing_folder("inputs").resolve():
+        entry["inputFolder"] = folder.name
+    store.write_json(INBOX_RECORD, entry)
     return read_inbox(store)
 
 
