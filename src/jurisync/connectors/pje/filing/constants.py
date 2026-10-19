@@ -28,6 +28,9 @@ class FilingPortal:
         "nomeGenitoraDecoration:nomeGenitora",
         "dataNascimentoDecoration:dataNascimentoInputDate",
     )
+    # Link the author's legal representative through "Procurador | Terceiro Vinculado" (representative.py); elsewhere
+    # it stays a manual step recorded in the checkpoint.
+    links_representative: bool = False
 
     @property
     def portal(self):
@@ -56,7 +59,10 @@ FILING_PORTALS = {
         unverified=(
             "registering a new address for the author (both drafts reused an address PJe already had)",
             "extra attorney association",
+            "legal representative after Confirmar: represented party, address and Vincular (seen read-only up to the "
+            "CPF lookup)",
         ),
+        links_representative=True,
         party_roles={"active": "AUTOR", "passive": "REU"},
         author_required_details=(),
     ),

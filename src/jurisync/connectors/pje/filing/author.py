@@ -12,18 +12,32 @@ from jurisync.connectors.pje.parsers import jsf_data
 
 log = logging.getLogger("jurisync.pje.filing")
 
-# What is known of the representative flow: the browser capture of 2026-10-05 associated one REPRESENTANTE (by CPF)
-# through the same "Vincular representante" toolbar as the attorney (comboRepresentacao), but the form ids and field
-# names of the representative lookup, any "kind of representation" choice, and how PJe lists the result were not
-# recorded. Until that is captured, the fill does not guess: it records a manual step instead.
+# Portals that do not link the representative themselves (FilingPortal.links_representative) record it as a manual step.
 REPRESENTATIVE_PENDING = (
-    "Associating the author's legal representative is not automated yet (the PJe REPRESENTANTE flow has not been "
-    "captured); add it to the author in PJe by hand before protocol"
+    "Associating the author's legal representative is not automated on this portal; add it to the author in PJe by "
+    "hand before protocol"
 )
 
 
 class AuthorMixin:
-    def representative_manual_step(self, checkpoint, author, save=None):
+    def link_representative(self, draft_url, checkpoint, author, author_cpf, save=None, panel=None):
+        """Link the author's legal representative where the portal does it; otherwise, or when the attempt stops,
+        record the manual step (with why) so the rest of the draft still gets filled."""
+        if not self.filing.links_representative:
+            return self.representative_manual_step(checkpoint, author, save)
+        try:
+            result = self.add_representative(draft_url, author["representative"], author["name"], author_cpf, panel)
+        except RuntimeError as error:
+            return self.representative_manual_step(checkpoint, author, save, reason=f"Automatic link stopped: {error}")
+        steps = checkpoint.get("manualSteps") or []
+        remaining = [step for step in steps if step.get("step") != "legal representative"]
+        if remaining != steps:
+            checkpoint["manualSteps"] = remaining
+            if save:
+                save(checkpoint)
+        return result
+
+    def representative_manual_step(self, checkpoint, author, save=None, reason=REPRESENTATIVE_PENDING):
         """Record, in the checkpoint, that the author's legal representative must be associated by hand in PJe."""
         representative = author["representative"]
         # Everything whoever does the step by hand needs (the checkpoint is owner-only).
@@ -34,11 +48,11 @@ class AuthorMixin:
             "kind": representative["kind"],
             **({"address": representative["address"]} if representative.get("address") else {}),
             "author": author["name"],
-            "reason": REPRESENTATIVE_PENDING,
+            "reason": reason,
         }
-        steps = checkpoint.setdefault("manualSteps", [])
-        if step not in steps:
-            steps.append(step)
+        steps = [item for item in checkpoint.get("manualSteps", []) if item.get("step") != "legal representative"]
+        if step not in checkpoint.get("manualSteps", []):
+            checkpoint["manualSteps"] = [*steps, step]
             if save:
                 save(checkpoint)
         return {"pending": True, "manual": True, **step}

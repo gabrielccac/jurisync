@@ -70,7 +70,10 @@ class FillMixin:
                     for item in payload["attorneys"]
                 ]
             if author.get("representative"):
-                out["representative"] = self.representative_manual_step(checkpoint, author, save)
+                out["representative"] = add(
+                    "legal representative",
+                    lambda p: self.link_representative(draft_url, checkpoint, author, payload["authorCpf"], save, p),
+                )
             if "passive" in payload:
                 out["passive"] = add("passive body", lambda p: self.add_passive_body(draft_url, payload["passive"], p))
             if "otherParticipants" in payload:

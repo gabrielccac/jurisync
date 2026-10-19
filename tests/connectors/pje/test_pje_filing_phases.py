@@ -121,7 +121,7 @@ class PhaseTests(unittest.TestCase):
         step = point["manualSteps"][0]
         self.assertEqual((step["step"], step["cpf"], step["kind"]), ("legal representative", "999.888.777-14", "mae"))
         self.assertEqual((step["author"], step["address"]), ("EXAMPLE", {"cep": "68900-000", "numero": "12"}))
-        self.assertIn("not automated yet", step["reason"])
+        self.assertIn("not automated on this portal", step["reason"])
         self.assertTrue(result["representative"]["pending"])
         Recorder(present=True).fill_draft(point, payload, verify_all=True)
         self.assertEqual(len(point["manualSteps"]), 1, "a re-run does not repeat the step")

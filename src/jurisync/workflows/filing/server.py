@@ -22,6 +22,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
 from jurisync.connectors.pje.filing.approval import approve, require_approval, revoke
+from jurisync.connectors.pje.filing.constants import FILING_PORTALS
 from jurisync.connectors.pje.filing.store import CHECKPOINT, FACTS, MANIFEST, PAYLOAD, REVIEW, open_run
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 from jurisync.paths import REPO_ROOT, filing_folder
@@ -108,14 +109,17 @@ def _mask_cpf(value):
     return f"{digits[:3]}.***.***-{digits[-2:]}" if len(digits) == 11 else None
 
 
-def _representative_view(representative):
-    """The legal representative as the user reviews it (CPF masked); PJe gets it by hand for now."""
+def _representative_view(representative, portal):
+    """The legal representative as the user reviews it (CPF masked) and how it reaches PJe."""
+    automatic = portal in FILING_PORTALS and FILING_PORTALS[portal].links_representative
     return {
         "name": representative.get("name"),
         "cpf": _mask_cpf(representative.get("cpf")),
         "kind": representative.get("kind"),
         **({"address": representative["address"]} if representative.get("address") else {}),
-        "inPje": "manual step: add it to the author in PJe before protocol",
+        "inPje": "linked to the author in the author step; if that stops, it becomes a manual step with the reason"
+        if automatic
+        else "manual step: add it to the author in PJe before protocol",
     }
 
 
@@ -131,7 +135,7 @@ def _payload_view(payload, manifest=None):
             "cpf": _mask_cpf(payload.get("authorCpf")),
             "address": (payload.get("author") or {}).get("address"),
             **(
-                {"representative": _representative_view(payload["author"]["representative"])}
+                {"representative": _representative_view(payload["author"]["representative"], payload.get("portal"))}
                 if (payload.get("author") or {}).get("representative")
                 else {}
             ),
