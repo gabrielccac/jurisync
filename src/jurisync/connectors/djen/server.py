@@ -6,7 +6,7 @@ from datetime import date
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 
 from jurisync.connectors.djen.client import DjenError, fetch_certidao, search_page
 from jurisync.connectors.djen.deadlines import calculate_deadline
@@ -17,6 +17,9 @@ from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 REQUEST_ERRORS = (DjenError, ValueError, urllib.error.URLError, TimeoutError)
 
 server = MCPServer("djen", version="1.0.0")
+
+# Clients send digit-only strings such as '61216' as JSON numbers; take them back as text.
+DIGITS_AS_TEXT = BeforeValidator(lambda value: str(value) if type(value) is int else value)
 
 
 @server.tool(
@@ -37,9 +40,10 @@ def search_communications(
     ],
     numeroOab: Annotated[
         str | None,
+        DIGITS_AS_TEXT,
         Field(
             pattern=r"(?i)^\d+(?:-[ABENOS])?$",
-            description="OAB number without the UF, e.g. '14663' or '14663-PB'. Requires ufOab.",
+            description="OAB number without the UF, e.g. '14663' (supplementary registrations: '14663-A'). Requires ufOab.",
         ),
     ] = None,
     ufOab: Annotated[
@@ -62,6 +66,7 @@ def search_communications(
     ] = None,
     numeroProcesso: Annotated[
         str | None,
+        DIGITS_AS_TEXT,
         Field(
             pattern=r"^\d{7,25}$",
             description="Process number with DIGITS ONLY, no dots or dashes: '50043207620264047104' for 5004320-76.2026.4.04.7104. A formatted number is refused.",

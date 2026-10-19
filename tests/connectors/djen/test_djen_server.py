@@ -61,6 +61,23 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params["nomeAdvogado"], "ELISANDRA BECKER")
         self.assertEqual((params["siglaTribunal"], params["meio"], params["numeroOab"]), ("STJ", "D", "61216"))
 
+    async def test_numeric_oab_and_process_number_are_taken_as_text(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {
+                    "numeroOab": 61216,
+                    "ufOab": "RS",
+                    "numeroProcesso": 50052895220264047117,
+                    "inicio": "2026-10-19",
+                    "fim": "2026-10-19",
+                },
+            )
+        self.assertFalse(result.is_error)
+        params = search.call_args.args[0]
+        self.assertEqual((params["numeroOab"], params["numeroProcesso"]), ("61216", "50052895220264047117"))
+
     async def test_oab_without_uf_and_missing_keys_are_tool_errors(self):
         with mock.patch.object(
             djen_server, "search_page", side_effect=ValueError("pesquisa exige uma chave")
