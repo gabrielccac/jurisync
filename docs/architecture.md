@@ -49,7 +49,6 @@ keeps one authenticated session per portal for the life of the server:
 On top of this, PJe TRF1 persists cookies under `~/.cache/jurisync/pje/` (TRF5
 too when `PJE_TRF5_1G_SESSION_ACCOUNT` is set). Juridiq caches its bearer token
 under `~/.cache/jurisync/juridiq/` and ADVBOX caches its cookie in `data/`.
-INSS keeps its session in a dedicated Chrome profile.
 
 ## Safety boundaries
 

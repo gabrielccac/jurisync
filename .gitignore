@@ -26,7 +26,6 @@ data/*
 !data/README.md
 downloaded_files/
 conversions/
-gerid
 *-session.json
 *_session.json
 *.har

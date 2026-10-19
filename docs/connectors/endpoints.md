@@ -152,50 +152,6 @@ must add grounded act/process/deadline details. `officeId` must also be retained
 The create/update/delete wrappers live in `src/jurisync/connectors/juridiq/api.py` and
 are registered only with the connector-level `JURIDIQ_ALLOW_WRITES=true` opt-in.
 
-## INSS PAT / GERID
-
-Observed 2026-09-22 in the sanitized Chrome HAR at
-`scripts/atendimento.inss.gov.br.har`. All captured business requests returned
-HTTP 200. GERID performs authentication; these business routes are served by
-PAT APIs under `https://atendimento.inss.gov.br/apis/`.
-
-The HAR intentionally omits authorization and cookie values. Direct use of the
-notification route is separately verified with `Authorization: Bearer <ifs_auth>`;
-do not assume every other route has been independently verified outside the
-authenticated browser until each receives a direct-request check.
-
-| Method / path | Input | Observed result |
-| --- | --- | --- |
-| POST `/requerimentosPortalApi/requerimento/ec/notificacao?first=0` | `{tokenReCAPTCHA}` | Notifications; verified by the Playwright test script, not present in this HAR capture. |
-| POST `/requerimentosPortalApi/requerimento/ec/tarefa/consulta?first={offset}&pageSize={size}` | Body fields: `cpf`, `nome`, `protocolo`, `status`, `tokenReCAPTCHA`, `dataAtualizacaoInicial`, `dataAtualizacaoFinal`, `situacaoTarefa` | `{tarefas, quantidadeTotalTarefa, imagemCaptcha}`. Each task includes protocol, status, requester, service, creation/update dates and unit. |
-| GET `/requerimentosPortalApi/requerimento/ec/tarefa/{protocolo}` | Protocol returned by search | Full task detail, including internal `id`, service, interested parties, comments, attachments, representatives, additional fields, appointments and available-action flags. |
-| GET `/consolidadorECApi/pap/metadados?protocolo={protocolo}&sistema=PAT&cpf={cpf}&nome={nome}&async=false` | Protocol plus CPF/name from the active GERID JWT | JSON containing the consolidated process PDF as Base64 in `relatorio`. |
-| GET `/requerimentosPortalApi/requerimento/cadastro/servico/{servicoId}/gruposcamposadicionais` | `idServico` from task detail | Additional-field groups; empty array in this sample. |
-| GET `/arquivosPortalApi/tarefa/{protocolo}/anexo/{anexoId}` | Protocol plus `anexos[].id` or `anexosIniciais[].id` | Raw Base64 file body. The sample begins with the PDF signature `JVBER` despite an `application/json` content type; filename is supplied by `Content-Disposition`. |
-| GET `/tarefasApi/tarefas/{protocolo}/analise-documental` | Protocol | `{definicoesAnexos}`. |
-| GET `/seguradoEspecialApi/tarefa/consultar-por-protocolo/{protocolo}` | Protocol | Internal task ID used by the remaining Segurado Especial routes. |
-| GET `/seguradoEspecialApi/segurado/consultar-por-tarefa/{tarefaId}` | Internal task ID | Insured-person record and address fields. |
-| GET `/seguradoEspecialApi/segurado/consultar-dados-do-interessado/{tarefaId}` | Internal task ID | CPF, name and birth date. |
-| GET `/seguradoEspecialApi/auto-declaracao/listar/{tarefaId}` | Internal task ID | Rural-activity declaration periods. |
-| GET `/seguradoEspecialApi/tarefa/consultar-adiar-preenchimento-de-autodeclaracao/{tarefaId}` | Internal task ID | Boolean. |
-| GET `/seguradoEspecialApi/tarefa/consultar-categorias-atividade-rural/{tarefaId}` | Internal task ID | Indigenous, rural employee and rural producer flags. |
-| GET `/seguradoEspecialApi/tarefa/verificar-preenchimento-de-autodeclaracao-concluido/{tarefaId}` | Internal task ID | Boolean. |
-
-Identifier flow:
-
-1. Search returns `tarefas[].protocolo`.
-2. Task detail uses that protocol and returns the internal task `id`,
-   `idServico`, and attachment IDs.
-3. Segurado Especial routes generally use the internal task ID.
-4. File download and document analysis use the protocol.
-
-The search and notification POSTs require reCAPTCHA tokens generated for their
-respective frontend actions. No refresh-token endpoint was observed. Exact
-write routes were not captured and have not been inferred from permission names.
-PAT rejects empty strings for the two update-date fields. The MCP mirrors the
-captured UI default of today through 180 days earlier at midnight in Sao Paulo;
-explicit `YYYY-MM-DD` or ISO timestamps override that range.
-
 ## PJe TRF1: 1G and 2G
 
 Hosts: pje1g.trf1.jus.br and pje2g.trf1.jus.br.
