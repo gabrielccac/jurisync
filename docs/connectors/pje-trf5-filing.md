@@ -41,15 +41,61 @@ checkpoint: run ID, step, document or party, status, seconds, and PJe requests (
 
 ## Codex desktop chat and MCP
 
-### Todo o protocolo pelo MCP do PJe
+### Todo o protocolo pelo MCP do PJe (também no Claude Chat)
 
-O servidor do PJe (`jurisync-pje`) oferece também as ferramentas de preparo do filing (`filing_profiles`,
-`filing_subjects`, `filing_prepare`, `filing_review`, `filing_finalize`, `filing_approve`), com os mesmos nomes,
-parâmetros e textos do servidor `filing`, que continua existindo para quem quer só o preparo. O fluxo inteiro fica:
-`filing_prepare` → `filing_review` → (`filing_finalize` se algo mudar) → `filing_approve` (só com o "sim" do usuário)
-→ `pje_draft_write create-fill` → `pje_draft_status`. O código do preparo continua em `workflows/filing`: as ferramentas
-são declaradas uma vez e registradas nos dois servidores (`workflows/filing/server.py`, `register`). Só o módulo do
-servidor do PJe importa o workflow; a biblioteca `connectors/pje/filing` nunca o faz, e um teste de arquitetura garante.
+O servidor do PJe (`jurisync-pje`) leva um protocolo de 1º grau (TRF5 ou TRF1) da pasta de documentos ao rascunho, sem
+terminal, o que vale também para o Claude Chat. Com o exportador do Drive (`jurisync-gdrive`, ver `gdrive.md`):
+
+`drive_export_filing_folder` → `pje_filing_prepare` → `pje_filing_review` → `pje_filing_build` → `pje_filing_approve`
+(só com o "sim" explícito do usuário) → `pje_draft_create` → `pje_draft_status` (até `complete`, e no fim com
+`checkPje: true`).
+
+| Ferramenta | O que faz |
+|---|---|
+| `pje_filing_profiles`, `pje_filing_subjects` | perfis disponíveis; assuntos candidatos |
+| `pje_filing_prepare` | copia a pasta de entrada para o run, converte, classifica e devolve a revisão. Aceita o `sourceFolder` (ou o `inputFolder`) que o exportador devolveu, sem passo intermediário |
+| `pje_filing_review` | relê a revisão |
+| `pje_filing_build` | aplica as escolhas e grava o `payload.json` (antigo `filing_finalize`); confere os tipos de anexo com a lista lida do portal, quando já houver uma |
+| `pje_filing_approve` | registra a aprovação do usuário daquele payload exato |
+| `pje_draft_create` | cria o rascunho e, por padrão, preenche tudo em segundo plano (`stage: create` só faz o Incluir) |
+| `pje_draft_fill` | continua um rascunho: `all` (padrão, em segundo plano) ou uma etapa (`subject`, `author`, `public-bodies`, `attorney`, `characteristics`, `main-document`, `supporting-documents`, `documents`) |
+| `pje_draft_options` | leitura: classificação, assuntos, se o rascunho está em Não Protocolados, tipos de anexo do portal (`attachment-types`) |
+| `pje_draft_search`, `pje_draft_status`, `pje_draft_delete` | busca em Não Protocolados; andamento do run; remoção de rascunho |
+| `pje_filing_cleanup` | apaga o run e a pasta de entrada (ver "Limpeza") |
+
+Os nomes antigos (`filing_prepare`, `filing_review`, `filing_finalize`, `filing_approve`, `filing_profiles`,
+`filing_subjects`, `pje_draft_write`, `pje_draft_inspect`, `pje_search_pending_drafts`) continuam por um tempo como
+apelidos, com "Deprecated" na descrição. O servidor `filing` separado oferece as mesmas ferramentas de preparo. O
+protocolo é só de 1º grau: o TRF1 2º grau é apenas leitura.
+
+O código do preparo continua em `workflows/filing`: as ferramentas são declaradas uma vez e registradas nos dois
+servidores (`workflows/filing/server.py`, `register`). Só o módulo do servidor do PJe importa o workflow; a biblioteca
+`connectors/pje/filing` nunca o faz, e um teste de arquitetura garante.
+
+**Pastas.** Tudo fica em `JURISYNC_FILING_DIR` (padrão `~/.local/share/jurisync/filing`): `inputs/` recebe as pastas dos
+exportadores e `runs/<runId>` as montagens. Pastas e arquivos são do dono (0700/0600). As pastas de versões anteriores
+(`filings/`, `filing-input/`, `intake/`) são movidas para cá na primeira vez que o código novo roda; um nome já ocupado
+fica onde estava.
+
+**Anexos.** Logo depois do Incluir, antes de registrar qualquer anexo, o preenchimento lê a lista de tipos da aba Anexar
+e para com mensagem clara se algum tipo do payload não existir; a lista fica guardada por portal
+(`attachment-types/<portal>.json`) para o `pje_filing_build` conferir os próximos casos antes de criar rascunho. Quando
+um POST de anexo estoura o tempo, o TRF1 às vezes grava depois: antes de reenviar um arquivo que o run já mandou, o
+código relê o rascunho por até `PJE_UPLOAD_SETTLE_SECONDS` (padrão 90) e, se ele aparecer com o mesmo nome, tipo e
+tamanho, não reenvia. Um arquivo listado mais de uma vez para o preenchimento com o pedido de remover as cópias.
+
+**Representante legal (TRF1).** No estágio do autor, o representante (`author.representative`) é vinculado por
+"Procurador | Terceiro Vinculado": tipo (REPRESENTANTE para mãe/pai/procurador/outro, TUTOR, CURADOR), Física, CPF,
+Pesquisar (o nome do cadastro precisa bater), Confirmar, parte representada, endereço já cadastrado e Vincular; no fim
+o CPF dele precisa aparecer no polo ativo. Até Pesquisar foi visto ao vivo (só leitura); o que vem depois do Confirmar
+ainda não, e está em `unverifiedSteps`. Se parar, vira passo manual com o motivo, e o resto do rascunho segue. No TRF5
+continua passo manual. CPFs com dígito verificador errado são recusados já no preparo.
+
+**Limpeza.** `pje_filing_cleanup(runId)` apaga o run e a pasta de entrada de onde ele veio quando o rascunho saiu de
+Não Protocolados (protocolado ou removido; conferido no PJe) ou, sem rascunho, depois de `olderThanDays` (padrão
+`JURISYNC_FILING_RETENTION_DAYS`, 30). Run com rascunho ainda pendente só sai com `confirmPendingDraft: true`, dado
+pelo usuário. Sem `runId`, varre todos os runs com as mesmas regras (nunca apaga um pendente) e as pastas de entrada
+sem run mais velhas que a retenção.
 
 **Perfis no pacote instalado.** Os perfis ficam em `customers/<nome>/filing-profile*.json`, que não vão para dentro do
 pacote. A pasta de clientes é procurada nesta ordem: `JURISYNC_CUSTOMERS_DIR`; a pasta `customers/` do checkout, quando
@@ -58,16 +104,16 @@ o código roda do repositório; **a pasta de onde o pacote foi instalado**, que 
 a partir do checkout basta, sem configuração. Se o checkout mudar de lugar, reinstale a partir do novo caminho (ou
 defina `JURISYNC_CUSTOMERS_DIR`).
 
-The PJe MCP exposes `pje_draft_inspect` for current classification choices,
-subject choices, and **Não Protocolados** checks. `pje_draft_write` exposes the
-CLI's create/fill stages and requires `PJE_ALLOW_DRAFT_WRITES=true` in the MCP
-process. Neither tool exposes **Protocolar**.
-`pje_search_pending_drafts` searches the first **Não Protocolados** results
+The PJe MCP exposes `pje_draft_options` for current classification choices,
+subject choices, **Não Protocolados** checks and the attachment types. `pje_draft_create` and `pje_draft_fill` expose
+the CLI's create/fill stages and require `PJE_ALLOW_DRAFT_WRITES=true` in the MCP
+process. No tool exposes **Protocolar**.
+`pje_draft_search` searches the first **Não Protocolados** results
 page by party name, CPF, or both, without requiring a filing run.
 
 The inspection and write tools take a `runId` and open that run's store,
-`$JURISYNC_FILING_DIR/<runId>` (default:
-`~/.local/share/jurisync/filings/<runId>`; see the self-contained run section below). Prepare Victor's reviewed payload
+`$JURISYNC_FILING_DIR/runs/<runId>` (default:
+`~/.local/share/jurisync/filing/runs/<runId>`; see the self-contained run section below). Prepare Victor's reviewed payload
 with `--out` set to that same directory. Keep one unique run ID per draft;
 after **Incluir**, reuse its checkpoint and never call `create` again for that
 run. The desktop workflow is described in
@@ -176,7 +222,7 @@ now list its current choices without adding one to a draft:
 ```bash
 .venv/bin/python -m jurisync.connectors.pje.filing \
   --stage subject-options \
-  --run ~/.local/share/jurisync/filings/<runId> \
+  --run ~/.local/share/jurisync/filing/runs/<runId> \
   --search "Incapacidade Temporária" --page 1
 ```
 
@@ -197,7 +243,7 @@ separate representative. Review the actual Partes tab before protocol.
 
 - **Advogado padrão = quem está logado no PJe** (no Victor, ele mesmo); o PJe já o coloca no rascunho. O payload só
   traz advogados **extras**, em `attorneys` (lista; vazia ou ausente quando só o logado atua). Cada um precisa de
-  `cpf`, `name`, `oabNumber` e `oabState`, e vem nos `facts` do caso (`filing_prepare`/`filing_finalize`), informados
+  `cpf`, `name`, `oabNumber` e `oabState`, e vem nos `facts` do caso (`pje_filing_prepare`/`pje_filing_build`), informados
   pela skill ou pelo prompt. Nada vem de variável de ambiente, e o perfil de filing não tem mais advogado (um perfil
   com `defaults.attorney` é recusado). **Decisão: lista**, porque há casos com mais de um advogado associado e o custo
   é o mesmo; cada extra é associado e conferido (CPF, nome e OAB) no polo ativo. A chave antiga `attorney` (um só
@@ -206,7 +252,7 @@ separate representative. Review the actual Partes tab before protocol.
   `author.representative {cpf, name, kind}` nos `facts`, com `kind` entre `mae`, `pai`, `tutor`, `curador`,
   `procurador` e `outro`. Os `facts` aceitam ainda `author.birthDate` (DD/MM/AAAA ou AAAA-MM-DD) e
   `author.selfRepresented`.
-- **Conferência no preparo** (itens de revisão no `filing_prepare`; o `filing_finalize` recusa):
+- **Conferência no preparo** (itens de revisão no `pje_filing_prepare`; o `pje_filing_build` recusa):
   - autor menor de 18 anos pela `birthDate` e sem representante;
   - petição com frases de representação (`representado por`, `menor impúbere`, `curador`, `tutor`, `representante
     legal`...) e sem representante, a menos que o revisor confirme `author.selfRepresented: true` (essa confirmação
@@ -231,12 +277,12 @@ O que vai para o PJe tem de ser exatamente o que o advogado revisou. Por isso:
   prepare/finalize a partir do `uploadSha256` do `review.json`. `validate_fill_payload` reconfere todos os arquivos
   antes do login, e cada upload relê o arquivo, reconfere o hash e envia exatamente esses bytes. Divergência → erro
   `Document changed since approval` (documento mudou desde a aprovação). Payloads antigos, sem `sha256`, são recusados
-  com a instrução de rodar `filing_finalize` de novo; se o run já tem rascunho (o finalize recusa runs com
+  com a instrução de rodar `pje_filing_build` de novo; se o run já tem rascunho (o finalize recusa runs com
   `checkpoint.json`), é preciso um novo `runId`.
-- **Aprovação registrada.** `filing_approve(runId)` (ou `python -m jurisync.workflows.filing approve --run RUN_DIR`)
+- **Aprovação registrada.** `pje_filing_approve(runId)` (ou `python -m jurisync.workflows.filing approve --run RUN_DIR`)
   grava `approval.json` (0600, escrita atômica) com o horário, o sha256 do `payload.json` e o sha256 de cada documento,
   depois de reconferir os arquivos. Todo prepare e todo finalize apagam o payload anterior e a aprovação: o prepare
-  ainda grava `payload.json` quando não há itens de revisão, mas sem aprovação. `pje_draft_write` e o CLI do conector
+  ainda grava `payload.json` quando não há itens de revisão, mas sem aprovação. `pje_draft_create`/`pje_draft_fill` e o CLI do conector
   (`--stage` de qualquer etapa que escreve conteúdo do payload; `delete-draft` não usa payload) recusam antes do
   login se não houver aprovação ou se ela não bater com o payload atual. A ferramenta só registra o "sim" do usuário;
   a skill instrui o agente a chamá-la apenas depois de uma confirmação explícita.
@@ -255,7 +301,7 @@ O que vai para o PJe tem de ser exatamente o que o advogado revisou. Por isso:
   número da sua posição (`02-A.pdf`, `03-A.pdf`), o que já os separa; `CanonicalNames` continua como defesa e, se dois
   nomes ainda coincidirem (comparados como o PJe compara, sem acento e sem diferenciar maiúsculas), acrescenta um
   sufixo curto do hash.
-- **Overrides restritos.** Em `filing_finalize`, `overrides` só aceita `role` (`main`, `supporting`, `skip`), `type`
+- **Overrides restritos.** Em `pje_filing_build`, `overrides` só aceita `role` (`main`, `supporting`, `skip`), `type`
   e `description`, todos texto não vazio; qualquer outra chave (como `path` ou `uploadSha256`) é erro.
 
 ## Montagem autocontida e RunStore (Fase 2)
@@ -281,13 +327,13 @@ absoluto: copiada para outra pasta (ou, no futuro, para um bucket), ela continua
   linha da revisão veio (`reviewId`, `sourceName`), mais o hash do arquivo de entrada (`inputSha256`), como ele foi
   derivado (`derivedBy`) e a origem (Fase 3).
 - **Caminhos relativos no payload.** Cada documento é `documents/NN-nome.pdf` + `sha256`; o conector resolve pelo
-  store do run. **Decisão: payload antigo com caminho absoluto é recusado**, com a mensagem de rodar `filing_finalize`
+  store do run. **Decisão: payload antigo com caminho absoluto é recusado**, com a mensagem de rodar `pje_filing_build`
   de novo (ou usar novo `runId`, se já há rascunho). Desde a Fase 1 todo payload real já precisava ser refeito por
   causa do `sha256`, e um caminho absoluto aponta para fora da montagem aprovada. O `status` continua lendo esses
   runs (sem comparar fases). Caminhos fora de `documents/` ou com `..` também são recusados.
 - **Run com rascunho.** Depois do `checkpoint.json`, o prepare recusa e o finalize do CLI só aceita mudar fatos do
   caso: se a montagem resultante for diferente da que já está no payload, ele recusa sem tocar em `documents/`
-  (o `filing_finalize` do MCP continua recusando qualquer mudança). A aprovação é sempre exigida de novo.
+  (o `pje_filing_build` do MCP continua recusando qualquer mudança). A aprovação é sempre exigida de novo.
 - **RunStore** (`connectors/pje/filing/store.py`) é a única porta de leitura e escrita do run, para prepare,
   finalize, approve, o conector, o status e a linha do tempo: `exists`, `read_bytes`, `read_json`, `write_bytes`,
   `write_json` (atômicos, 0600, pastas 0700), `delete`, `delete_tree`, `list`, mais `local_path` (um arquivo local com
@@ -313,17 +359,17 @@ Quem produz a pasta é responsabilidade de quem conhece a origem:
 | Obter documentos de outras fontes (GERID etc.) e gravar a pasta + `sources.json` | o agente, pelos conectores dessas fontes |
 | Obter a pasta `00 - PROTOCOLAR` do ADVBOX e gravá-la no formato do contrato | `connectors/advbox/filing_folder.py` (CLI `python -m jurisync.connectors.advbox.filing_folder --customer ID`, MCP `advbox_export_filing_folder`) |
 | Definir e validar o formato da pasta | `workflows/filing/contract.py` (`validate_folder`, `validate_sources`, `write_sources`) |
-| Copiar a pasta para o run, preparar, montar, aprovar | `workflows/filing/` (`filing_prepare` / `prepare --from`) |
+| Copiar a pasta para o run, preparar, montar, aprovar | `workflows/filing/` (`pje_filing_prepare` / `prepare --from`) |
 | Escrever no PJe | `connectors/pje/filing/` |
 
 O exportador do ADVBOX escolhe a pasta do cliente pela convenção do escritório (`00 - PROTOCOLAR`, ou
 `00 - PROTOCOLAR JUD`; outra pasta com `folder`), baixa os arquivos tirando o sufixo numérico aleatório que o ADVBOX
 acrescenta (`LAUDO_1524.pdf` → `LAUDO.pdf`) e grava o `sources.json` com `origin: "advbox"`, id do arquivo, pasta, nome
-original e data de envio, validando pelo contrato. Ele grava em `JURISYNC_FILING_INPUT_DIR` (padrão
-`<estado>/filing-input/advbox-<cliente>-<data>`) e devolve `sourceFolder`. Essas regras (padrões de pasta, sufixo) saíram
+original e data de envio, validando pelo contrato. Ele grava em `<JURISYNC_FILING_DIR>/inputs/advbox-<cliente>-<data>` e devolve `sourceFolder` e
+`inputFolder`. Essas regras (padrões de pasta, sufixo) saíram
 do perfil e do prepare do filing; um perfil que ainda tenha `folderPatterns` é recusado com essa explicação.
 
-- **Entrada.** `filing_prepare` recebe `sourceFolder` (caminho absoluto da pasta); no CLI, `prepare --from PASTA`.
+- **Entrada.** `pje_filing_prepare` recebe `sourceFolder` (caminho absoluto da pasta); no CLI, `prepare --from PASTA`.
   Não há mais `customerId`/`--customer` no filing. A pasta é copiada (com subpastas) para
   `<run>/inbox/`; arquivos ocultos (`.DS_Store`) são ignorados, links simbólicos são recusados, no máximo 200 arquivos.
   O caminho local da pasta não é gravado em lugar nenhum, só os caminhos dentro dela.
@@ -371,7 +417,7 @@ do perfil e do prepare do filing; um perfil que ainda tenha `folderPatterns` é 
   arquivo de `documents/` (seu `sha256`, que é o do payload, da aprovação e do registro de upload no checkpoint) ao
   `inputSha256` e à origem. A cadeia é: `inbox.json` → `review.json` → `manifest.json` → `payload.json` →
   `approval.json` → `checkpoint.json` (`uploads`).
-- **Auditoria.** `filing_prepare`/`filing_review` mostram a origem de cada arquivo, e `filing_finalize` a de cada
+- **Auditoria.** `pje_filing_prepare`/`pje_filing_review` mostram a origem de cada arquivo, e `pje_filing_build` a de cada
   documento do payload, sem caminho local nem hash.
 
 ## Run and review
@@ -383,7 +429,7 @@ the JSON payload. With those values loaded:
 ```bash
 .venv/bin/python -m jurisync.connectors.pje.filing \
   --stage create-fill \
-  --run ~/.local/share/jurisync/filings/<runId>
+  --run ~/.local/share/jurisync/filing/runs/<runId>
 ```
 
 `--run` is the run folder: its `payload.json`, `approval.json`, `checkpoint.json` and `documents/` are used from there

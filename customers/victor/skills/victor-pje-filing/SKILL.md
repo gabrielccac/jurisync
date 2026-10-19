@@ -43,9 +43,9 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    user review. A missing address does not block a draft while PJe accepts it
    as optional.
 2. Choose a new alphanumeric `runId` and a private run directory under the
-   PJe MCP's configured `JURISYNC_FILING_DIR`. Use a root writable in the
-   current ChatGPT workspace; the agent and MCP must use the same root. Do not
-   assume the fallback `~/.local/share/jurisync/filings` is writable.
+   PJe MCP's configured `JURISYNC_FILING_DIR` (runs live in its `runs/`, default
+   `~/.local/share/jurisync/filing/runs`). Use a root writable in the current
+   workspace; the agent and MCP must use the same root.
    Write reviewed facts to a private JSON file, then, from the repo root, export the ADVBOX folder and prepare it
    (two separate steps: the filing never talks to ADVBOX):
    `.venv/bin/python -m jurisync.connectors.advbox.filing_folder --customer <id> --out <input-folder>` and
@@ -63,15 +63,14 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    A `payload.json` is never approved by itself, even when prepare wrote it with no review items.
 3. Show the user the reviewed facts, selected subjects, address status,
    document list and classifications, and unresolved limitations. Use
-   `pje_draft_inspect` with `stage: classification` and the run ID to check
+   `pje_draft_options` with `stage: classification` and the run ID to check
    current PJe choices. Search
-   **Não Protocolados** with `pje_search_pending_drafts` using the author's CPF
+   **Não Protocolados** with `pje_draft_search` using the author's CPF
    before creating a new draft; show possible existing drafts for review.
    Only after the user explicitly approves that summary, record it with
-   `.venv/bin/python -m jurisync.workflows.filing approve --run <run-directory>` (or `filing_approve`).
+   `.venv/bin/python -m jurisync.workflows.filing approve --run <run-directory>` (or `pje_filing_approve`).
    Never approve on your own. Any later prepare or finalize drops the approval; show the new summary and ask again.
-4. When the user has asked to create the draft, call `pje_draft_write` with
-   `stage: create-fill` and the same run ID. Draft writes require
+4. When the user has asked to create the draft, call `pje_draft_create` and the same run ID. Draft writes require
    `PJE_ALLOW_DRAFT_WRITES=true` in the PJe MCP process and refuses without an approval that matches the current
    payload and files ("Document changed since approval" means a file changed: finalize and ask again). The adapter writes
    `checkpoint.json` immediately after **Incluir**. If filling later fails,
@@ -79,11 +78,11 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    regenerate `payload.json` with `finalize --run <run-directory>
    --facts <facts.json>` rather than editing it by hand, then show it and get a new approval. With a draft in place
    only case facts may change; a different document selection needs a new `runId`. Resume with the
-   targeted `pje_draft_write` stage (`characteristics`, then `documents`, for
+   targeted `pje_draft_fill` stage (`characteristics`, then `documents`, for
    a characteristics failure); do not repeat `create` or `create-fill`.
    If fill stops because a document on the draft has other content than the approved file (or no upload record),
    it was not uploaded again: ask the user to remove that document from the draft in PJe, then run `fill` again.
-5. Call `pje_draft_inspect` with `stage: pending` to confirm the draft appears
+5. Call `pje_draft_options` with `stage: pending` to confirm the draft appears
    in **Não Protocolados**. Return the draft ID/URL and report which fields and
    PDFs were actually saved. Have the user review the draft in PJe before any
    final filing. There is no Protocolar tool in this workflow.
@@ -96,10 +95,10 @@ A chat session that only has MCP tools cannot run the `prepare` command in a ter
 work and never takes file paths. It is not Victor-specific: every filing tool takes a `profile` name, and **this skill
 always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; replace step 2 with:
 
-1. `filing_profiles` lists the available profiles (confirm `victor` is there). `filing_subjects` with
+1. `pje_filing_profiles` lists the available profiles (confirm `victor` is there). `pje_filing_subjects` with
    `profile: "victor"` (and optionally the lawsuit ID or CNJ) returns the reference subject codes and the README record
    of what was filed for that exact case. They are candidates for the user to confirm, never defaults.
-2. Get the input folder, then call `filing_prepare` with `profile: "victor"`, a new `runId`, the reviewed facts and
+2. Get the input folder, then call `pje_filing_prepare` with `profile: "victor"`, a new `runId`, the reviewed facts and
    `sourceFolder` (the folder's absolute path). For Victor's usual case, `advbox_export_filing_folder` with the ADVBOX
    `customerId` downloads the `00 - PROTOCOLAR` folder and returns `sourceFolder` (its `sources.json` is already
    written). For documents you gather yourself through the Drive, GERID or other connectors, save them in one local
@@ -111,12 +110,16 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
    be partial: missing ones come back as review items, and `candidates` lists the claim values and CPFs the petition
    states. Document text is not sent to Jev unless `useJev` is true.
 3. Resolve every item in `review`: each file's `id` is the key for `overrides` (`{role, type, description}` and nothing
-   else, or `{role: "skip"}` for a duplicate such as a `.docx` copy of the petition). `filing_review` shows the run
+   else, or `{role: "skip"}` for a duplicate such as a `.docx` copy of the petition). `pje_filing_review` shows the run
    again, including whether the current payload is `approved`.
-4. `filing_finalize` with `profile: "victor"` and `overrides` writes `payload.json` only when the checks pass (one main
+4. `pje_filing_build` with `profile: "victor"` and `overrides` writes `payload.json` only when the checks pass (one main
    petition; the claim value and CPF appear in the petition). Show its summary to the user. Only when they explicitly
-   approve it, call `filing_approve` with the `runId`; never on your own. A new finalize needs a new approval.
-5. `pje_draft_write` with `create-fill` (refused without that approval) starts the fill in the background. Follow it with `pje_draft_status`, and use
-   `checkPje: true` to confirm the draft in PJe. `pje_draft_delete` removes a draft by number (it asks first).
+   approve it, call `pje_filing_approve` with the `runId`; never on your own. A new build needs a new approval.
+5. `pje_draft_create` (refused without that approval) starts the fill in the background. Follow it with `pje_draft_status`, and use
+   `checkPje: true` to confirm the draft in PJe; `pje_draft_fill` continues a draft that stopped (it skips what is
+   done). `pje_draft_delete` removes a draft by number (it asks first).
+6. After the user protocols (or drops) the draft, `pje_filing_cleanup` with the `runId` removes the run and its input
+   folder. A run whose draft is still in Não Protocolados is kept unless the user explicitly confirms.
 
-The filing root (`JURISYNC_FILING_DIR`) is shared by both servers, so the same `runId` works in each.
+The filing root (`JURISYNC_FILING_DIR`) is shared by both servers, so the same `runId` works in each. Old tool names
+(`filing_prepare`, `filing_finalize`, `pje_draft_write`...) still work for a while; use the new ones.

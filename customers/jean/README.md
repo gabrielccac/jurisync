@@ -18,6 +18,6 @@ and `route` (plus `enrich`/`provisional_route` when used); see
 ## Protocolo de iniciais BPC no PJe TRF1
 
 Perfil de filing `jean` (`filing-profile.json`) e skill `skills/office-pje-trf1-filing`. Os documentos vêm da pasta do
-cliente no Google Drive pelo exportador `jurisync-gdrive` (`drive_export_filing_folder` → `filing_prepare`); a
+cliente no Google Drive pelo exportador `jurisync-gdrive` (`drive_export_filing_folder` → `pje_filing_prepare` → ... → `pje_draft_create`, tudo por MCP, também no Claude Chat); a
 configuração da conta de serviço (variável `GOOGLE_SERVICE_ACCOUNT_FILE`, padrão
 `~/.config/jurisync/google-service-account.json`) está em `docs/connectors/gdrive.md`.

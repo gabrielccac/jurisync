@@ -1,11 +1,13 @@
 # Google Drive → pasta de entrada do filing
 
-`jurisync.connectors.gdrive` baixa uma pasta do Google Drive direto para o disco, no formato do contrato de entrada do
-filing (`docs/connectors/pje-trf5-filing.md`, seção do contrato), para depois rodar `filing_prepare`. É uma peça
+`jurisync.connectors.gdrive` baixa uma pasta do Google Drive (e, se preciso, arquivos soltos de outras pastas) direto
+para o disco, no formato do contrato de entrada do
+filing (`docs/connectors/pje-trf5-filing.md`, seção do contrato), para depois rodar `pje_filing_prepare`. É uma peça
 separada do filing, como o exportador do ADVBOX: só depende do contrato; o filing não conhece o Drive.
 
-Por que não o conector do Drive do Claude: ele devolve os arquivos dentro da conversa e só grava no disco os maiores
-que ~75 KB, o que não serve para um fluxo automático. Este exportador fala direto com a API do Drive.
+Por que não o conector do Drive do Claude: ele devolve os arquivos dentro da conversa (em base64) e só funciona para o
+filing numa sessão com terminal que os decodifique. No Claude Chat, sem terminal, o caminho é este exportador, que fala
+direto com a API do Drive.
 
 ## Como funciona
 
@@ -27,7 +29,8 @@ que ~75 KB, o que não serve para um fluxo automático. Este exportador fala dir
   formulários e outros tipos do Google que não exportam para PDF ficam de fora e aparecem em `skipped`. A pasta de
   destino nunca fica dentro de pasta sincronizada (Google Drive para desktop, Dropbox, OneDrive, iCloud) e, se a
   exportação falhar no meio, nada fica para trás.
-- **Destino:** `JURISYNC_FILING_INPUT_DIR` (padrão `<estado>/filing-input`), em `drive-<pasta>-<data>`.
+- **Destino:** `<JURISYNC_FILING_DIR>/inputs/drive-<id>-<data>` (padrão `~/.local/share/jurisync/filing/inputs`).
+  A pasta sai junto com o run em `pje_filing_cleanup`.
 
 ## Configuração (uma vez)
 
@@ -61,33 +64,47 @@ que ~75 KB, o que não serve para um fluxo automático. Este exportador fala dir
 ## Habilitar no Claude
 
 É um servidor MCP próprio, **`jurisync-gdrive`** (instalado junto com os outros comandos do jurisync), também
-disponível em `jurisync-http gdrive`. No Claude Code deste repositório ele já está no `.mcp.json` como `gdrive`. No
-Claude Desktop, acrescente ao `claude_desktop_config.json`, ao lado dos outros servidores do jurisync:
+disponível em `jurisync-http gdrive`. No Claude Code deste repositório ele já está no `.mcp.json` como `gdrive`.
+
+No **Claude Desktop (Chat e Code)**, acrescente dentro de `"mcpServers"` do
+`~/Library/Application Support/Claude/claude_desktop_config.json`, ao lado de `"pje"`:
 
 ```json
-"gdrive": {"command": "/Users/<você>/.local/bin/jurisync-gdrive"}
+"gdrive": {
+  "command": "/Users/jeanferreira/.local/bin/jurisync-gdrive",
+  "args": [],
+  "env": {}
+}
 ```
 
-ou, no Claude Code fora do repositório:
+Não precisa de `env`: a chave é lida de `~/.config/jurisync/google-service-account.json`. Só para guardá-la em outro
+lugar acrescente `"env": {"GOOGLE_SERVICE_ACCOUNT_FILE": "/caminho/da/chave.json"}`. Depois, reinicie o Claude.
+
+Fora do repositório, no Claude Code:
 
 ```bash
 claude mcp add gdrive -- jurisync-gdrive
 ```
 
-## Uso: Drive → filing
+## Uso: Drive → filing (Claude Chat, sem terminal)
 
-1. `drive_export_filing_folder` com `folder` (id ou URL da pasta do cliente), `includeSubfolders` se os documentos
-   estiverem em subpastas, e `exclude` para deixar algo de fora. Ela devolve `sourceFolder` e a lista do que ficou de
-   fora (`skipped`).
-2. `filing_prepare` com `profile`, `runId`, os `facts` e esse `sourceFolder`. A revisão mostra a origem de cada
-   documento (Drive, com link e caminho de pastas).
-3. Segue o fluxo normal: `filing_review`, `filing_finalize`, aprovação do usuário com `filing_approve`, e
-   `pje_draft_write`.
+1. `drive_export_filing_folder` com `folder` (link da pasta do cliente, ex.: a pasta dele em "Documentos Clientes
+   BPC") e, em `files`, links de arquivos que estão em outra pasta (ex.: a petição em "1. Iniciais - BPC
+   (Controladoria)"). `includeSubfolders` se os documentos estiverem em subpastas; `exclude` para deixar algo de fora
+   (ex.: `["*protocolo*"]`). Ela devolve `sourceFolder`, `inputFolder` e o que ficou de fora (`skipped`).
+2. `pje_filing_prepare` com `profile`, um `runId` novo, os `facts` e esse `sourceFolder` (ou `inputFolder`) sem mudar
+   nada. A revisão mostra a origem de cada documento (Drive, com link e pasta).
+3. `pje_filing_review` → `pje_filing_build` → resumo ao usuário → `pje_filing_approve` só com o "sim" dele →
+   `pje_draft_create` → `pje_draft_status` (no fim, `checkPje: true`).
+4. Depois do protocolo (pelo usuário), `pje_filing_cleanup` com o `runId` apaga o run e a pasta exportada.
+
+Se a conta não enxergar a pasta ou o arquivo, o erro diz o e-mail com que compartilhar (Leitor); sem chave, diz onde
+salvá-la.
 
 Pelo terminal:
 
 ```bash
-.venv/bin/python -m jurisync.connectors.gdrive export --folder "<id ou URL>" --subfolders
+.venv/bin/python -m jurisync.connectors.gdrive export --folder "<id ou URL>" --file "<URL da petição>" --subfolders
 ```
 
 ## Erros comuns

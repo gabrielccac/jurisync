@@ -131,7 +131,7 @@ until the user approves that payload: after showing it, record the approval with
 .venv/bin/python -m jurisync.workflows.filing approve --run /private/run
 ```
 
-(or `filing_approve` in the MCP). Any new prepare or finalize drops the approval.
+(or `pje_filing_approve` in the MCP). Any new prepare or finalize drops the approval.
 Word conversion is available as an importable function and a command:
 
 ```bash

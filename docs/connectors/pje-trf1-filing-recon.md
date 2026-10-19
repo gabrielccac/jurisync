@@ -236,3 +236,17 @@ Protocolados do 2º grau estava vazia):
 **Decisão (18/10/2026):** o escritório não protocola no 2º grau, só no 1º. A escrita de rascunho no `trf1-2g`, o perfil
 `jean-trf1-2g`, o `referenceProcess` e o `partyRoles` foram retirados; o 2º grau continua só para leitura (processos,
 expedientes, documentos). O reconhecimento acima fica como registro, caso isso mude.
+
+## Leituras de 19/10/2026 (só leitura, rascunhos 15508678 e 15508705)
+
+- **Anexos.** A tabela `processoDocumentoGridList` da aba "Protocolar Inicial" tem a coluna "Id na origem" e mostra o
+  tamanho ao lado do nome (`09-relatorio_indeferimento.pdf (6.642,34 Kb)`, em KiB); a aba Anexar, em modo PDF, lista
+  130 tipos para os anexos (`tipoDocLoteSuperior`) e 82 para a petição (`cbTD`). Fixtures anonimizadas em
+  `tests/connectors/pje/fixtures/trf1/documents_*.html`; a resposta de registro das linhas e a da escolha de tipo são
+  sintéticas (capturá-las exigiria registrar linhas num rascunho real).
+- **Representante.** No polo ativo, "Procurador | Terceiro Vinculado" (`formVincularPoloAtivo:supResetarVincRepPA`) abre
+  `mpAssociarRepresentanteProcesso` com "Tipo de representação" (ADVOGADO, ADVOGADO DATIVO, CURADOR, HERDEIRO,
+  INVENTARIANTE, REPRESENTANTE, TUTOR). REPRESENTANTE mostra `preCadastroPessoaFisicaRepresentanteForm` (Física por
+  padrão, CPF, Pesquisar); Pesquisar preenche `dsNomeCivil` e oferece Confirmar. Um CPF com dígito verificador errado
+  volta "Documento em formato inválido". Nada foi confirmado nem vinculado; o que vem depois do Confirmar segue não
+  verificado.
