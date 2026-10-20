@@ -5,6 +5,7 @@ check the logins, and register the servers with Claude.
     jurisync-setup --customer elisandra          # portals taken from customers/elisandra/portals.toml
     jurisync-setup export --customer elisandra --out elisandra.jurisync   # operator: encrypted bundle
     jurisync-setup import elisandra.jurisync                              # customer machine: passphrase on a local page
+    jurisync-setup skills --customer elisandra                            # install/update the customer's skills from GitHub
 
 Secrets go to one file (``~/.config/jurisync/.env`` unless ``--env-file``), created with owner-only permissions,
 and are never printed. Servers read that file at startup, so Claude Desktop and Claude Code share the same login.
@@ -383,7 +384,9 @@ def export_main(argv, *, ask_secret, say):
         for name, value in source.items():
             if not value or name in selected:
                 continue
-            if name in wanted or name.startswith(tuple(prefixes)):
+            # The shared .env serves several customers (it holds Jean's TRF1 password login under PJE_1G_*):
+            # only names the customer declares come from it; a portal prefix sweeps the customer's own .env alone.
+            if name in wanted or (not is_shared and name.startswith(tuple(prefixes))):
                 selected[name] = value
                 if is_shared:
                     from_shared.append(name)
@@ -497,6 +500,10 @@ def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
             return export_main(argv[1:], ask_secret=ask_secret, say=say)
         if argv[:1] == ["import"]:
             return import_main(argv[1:], ask_secret=ask_secret, say=say)
+        if argv[:1] == ["skills"]:
+            from jurisync.skills_sync import skills_main
+
+            return skills_main(argv[1:], say=say)
         return setup_main(argv, ask=ask, ask_secret=ask_secret, say=say)
     except (ValueError, TimeoutError, OSError) as error:
         say(f"Erro: {error}")

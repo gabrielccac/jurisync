@@ -58,7 +58,9 @@ dados do cliente estão em `tarefas.md` e `fora-do-mapa.md`.
    **escalar**,
    **monitorar**, **ruído**, **duplicada** (`fora-do-mapa.md` §1).
 5. **Tarefa** → `references/tarefas.md`: átomo e cadeia (§3), cabeçalho e campos por tipo
-   (§4), início e final (§1), anexo (§5), invariantes de criação (§7).
+   (§4), início e final (§1), anexo (§5), invariantes de criação (§7). Em
+   `CUMPRIR ATO ORDINATÓRIO`, o responsável é quem fez a `PETIÇÃO INICIAL` do processo no
+   ADVBOX (`tarefas.md` §3, §1), não quem protocolou.
 6. **Prévia ou criação** com verificação: depois de criar, releia o histórico do processo
    e confirme a tarefa.
 

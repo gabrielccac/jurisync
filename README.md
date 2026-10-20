@@ -74,6 +74,12 @@ uv tool install git+https://github.com/gabrielccac/jurisync
 This installs one command per server (`jurisync-pje`, `jurisync-advbox`, `jurisync-djen`, `jurisync-eproc`,
 `jurisync-juridiq`, `jurisync-inss`) and `jurisync-http`.
 
+**Customer skills from GitHub, without the plugin.** `jurisync-setup skills --customer <name>` clones the
+repository into `~/jurisync-src` (or fast-forwards it) on the branch the package was installed from, links each
+`customers/<name>/skills/<skill>` into `~/.claude/skills` for Claude Code, and writes `<skill>.zip` to Downloads
+for upload in Cowork, only when the skill changed. Running it again is the update; it stops instead of overwriting
+when the clone has local edits or commits.
+
 **Customer credentials without editing files.** The operator exports a customer's logins into one encrypted
 bundle and the customer's machine imports it:
 

@@ -24,9 +24,9 @@ Maria Daniela `33264` · João Matheus `259464` · Maria Fernanda `179652` ·
 Emilly `49187` · Brenda `72411` · Arthur `280388` · Sâmara `108476` · Fabiana `51137` ·
 Roberta `206548` · Williadja `72707` · CONTROLADORIA `216759`.
 
-Os responsáveis abaixo são o padrão do POP; o ADVBOX mostra que a equipe às vezes
-distribui diferente (ex.: `CUMPRIR ATO ORDINATÓRIO` atribuído a outra pessoa que não
-"quem protocolou").
+Os responsáveis abaixo são o padrão do POP. Exceção definida pelo escritório: em
+`CUMPRIR ATO ORDINATÓRIO` o responsável é quem fez a petição inicial do processo, lido
+no histórico do ADVBOX (§3, §1), não quem protocolou.
 
 ## 3. Átomos e cadeias
 
@@ -34,9 +34,20 @@ distribui diferente (ex.: `CUMPRIR ATO ORDINATÓRIO` atribuído a outra pessoa q
 - `ABRIR INTIMAÇÃO` `572240` (Kaíky `132063`), mesmo dia. Checklist depois.
 
 ### §1 Ato ordinatório / prazo inicial / emenda / pedido de endereço
-- `CUMPRIR ATO ORDINATÓRIO` `265427` — responsável: quem protocolou o caso (Sâmara
-  `108476` …); se ninguém protocolou, alternar Fabiana `51137` / Sâmara. Prazo conforme
-  a certidão.
+- `CUMPRIR ATO ORDINATÓRIO` `265427` — prazo conforme a certidão. Responsável: **quem fez
+  a petição inicial do processo**, porque o ato ordinatório normalmente chega depois do
+  peticionamento e quem peticionou conhece o caso. Para achar:
+  1. `advbox_lawsuit_report` do processo com `taskSearch="PETIÇÃO INICIAL"` (inclui as
+     concluídas): o responsável da tarefa `PETIÇÃO INICIAL …` (ex.: `PETIÇÃO INICIAL - PREV
+     SM-URBANO`) é o responsável do ato ordinatório. Converta o nome no ID pela lista do §2
+     (ou `advbox_list_members`).
+  2. Não confunda com `PROTOCOLAR PREV - JUD` / `PROCESSO PROTOCOLADO-JUD`: quem protocola
+     nem sempre é quem escreveu a petição.
+  3. Mais de uma `PETIÇÃO INICIAL` com responsáveis diferentes, ou tarefa com mais de um
+     responsável: mostre os nomes na prévia e pergunte. Nenhuma `PETIÇÃO INICIAL` no
+     histórico: alternar Fabiana `51137` / Sâmara `108476` e registrar na prévia que o
+     responsável não foi achado no histórico.
+  Na prévia e no comentário, cite de onde veio o responsável (tarefa, data e nome).
 
 ### §2 Laudos (anexar o laudo na tarefa)
 - Social → `ANALISAR LAUDO SOCIAL JUDICIAL` `5427574` (Emilly `49187`)

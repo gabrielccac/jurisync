@@ -177,6 +177,35 @@ class CertificateCustomerTest(unittest.TestCase):
             self.assertEqual(stored["ADVBOX_ALLOW_WRITES"], "true")
             self.assertNotIn("UNRELATED", stored)
 
+    def test_shared_env_never_leaks_another_customers_portal_variables(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            customer = root / "customers" / "vic"
+            customer.mkdir(parents=True)
+            (root / "a1.p12").write_bytes(b"CERTIFICATE-BYTES")
+            (customer / "portals.toml").write_text(
+                '[trf1-1g]\nmethod = "certificate_totp"\n'
+                'secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA"]\n'
+                '[env]\nset = { PJE_1G_CERT = "true" }\n',
+                encoding="utf-8",
+            )
+            setup.write_env(
+                customer / ".env",
+                {"PJE_A1_P12": str(root / "a1.p12"), "PJE_A1_PIN": "pin-1", "PJE_TRF5_2FA_DATA": URI},
+            )
+            shared = root / "shared.env"
+            setup.write_env(
+                shared, {"PJE_1G_USERNAME": "jean-cpf", "PJE_1G_PASSWORD": "jean-pw", "PJE_1G_2FA_DATA": "jean-totp"}
+            )
+            out, messages = root / "vic.jurisync", []
+            env = {"JURISYNC_CUSTOMERS_DIR": str(root / "customers"), "JURISYNC_ENV_FILE": str(shared)}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(setup.main(["export", "--customer", "vic", "--out", str(out)], say=messages.append), 0)
+            joined = "\n".join(messages)
+            self.assertNotIn("PJE_1G_USERNAME", joined)
+            self.assertNotIn("PJE_1G_PASSWORD", joined)
+            self.assertIn("PJE_1G_CERT=true", joined)
+
 
 if __name__ == "__main__":
     unittest.main()

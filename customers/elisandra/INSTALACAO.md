@@ -100,16 +100,13 @@ PASSOS
    (com aspas, porque o caminho tem espaços) sem ler nem exibir o restante do arquivo (só acrescente
    a linha). No Linux não é necessário.
 
-9. Skill de intimações: clone o repositório e ligue a skill ao Claude (link, para que as minhas
-   mudanças fiquem versionadas no clone):
-   git clone --branch feat/tjrs-eproc-setup https://github.com/gabrielccac/jurisync ~/jurisync-src
-   macOS/Linux:
-     mkdir -p ~/.claude/skills
-     ln -s ~/jurisync-src/customers/elisandra/skills/elisandra-sop-intimacoes ~/.claude/skills/elisandra-sop-intimacoes
-   Windows (PowerShell, junção não precisa de administrador):
-     New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
-     cmd /c mklink /J "%USERPROFILE%\.claude\skills\elisandra-sop-intimacoes" "%USERPROFILE%\jurisync-src\customers\elisandra\skills\elisandra-sop-intimacoes"
-   Confirme que ~/.claude/skills/elisandra-sop-intimacoes/SKILL.md existe.
+9. Skill de intimações: rode
+   jurisync-setup skills --customer elisandra
+   Ele baixa o repositório em ~/jurisync-src, liga a skill em ~/.claude/skills (Claude Code) e
+   gera Downloads/elisandra-sop-intimacoes.zip para o Cowork. Se ele parar por mudanças locais,
+   mostre a mensagem e PARE. Depois me explique como enviar o zip no app do Claude
+   (Configurações → Capacidades → Skills → Enviar skill); se os nomes do menu forem diferentes,
+   me ajude a achar a opção de enviar skill.
 
 10. Mostre apenas as linhas de resultado: "pronto" ou "FALHOU" de cada login e as de registro.
     Rode claude mcp list e mostre se eproc e djen aparecem. Se algum falhar, mostre a mensagem
@@ -130,8 +127,9 @@ Depois que uma correção for enviada (push) para `feat/tjrs-eproc-setup`, ela c
 ```text
 Atualize o Jurisync da minha máquina. Pare no primeiro erro e me mostre a mensagem completa.
 1. Rode: uv tool install --force "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
-2. Rode: git -C ~/jurisync-src pull --ff-only
-   Se recusar porque mudei a skill localmente, me mostre os arquivos alterados e PARE.
+2. Rode: jurisync-setup skills --customer elisandra
+   Se ele parar porque mudei a skill localmente, me mostre a mensagem e PARE.
+   Se ele disser "Reenvie no Cowork", me lembre de enviar o zip de Downloads no app do Claude.
 3. Não rode jurisync-setup import de novo: as credenciais já estão instaladas.
 4. Me diga para FECHAR COMPLETAMENTE e reabrir o Claude, para os servidores carregarem a versão nova.
 ```
