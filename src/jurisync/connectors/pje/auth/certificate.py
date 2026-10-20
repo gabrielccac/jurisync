@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TRF5 certificate + TOTP login with a native A1 signer."""
+"""PJe certificate + TOTP login with a native A1 signer (any PJe portal)."""
 
 import os
 import re
@@ -17,13 +17,11 @@ from jurisync.core.http import log, log_request
 from jurisync.core.redaction import url_shape
 from jurisync.core.totp import accounts_from_image, parse_accounts, select_account, totp
 
-PORTAL_KEY = "trf5-1g"
-
 
 def _require_available(page):
     """A 5xx login page means the portal is down, not that the login flow changed."""
     if page.status_code >= 500:
-        raise RuntimeError(f"TRF5 PJe is unavailable (HTTP {page.status_code}); try again later")
+        raise RuntimeError(f"PJe is unavailable (HTTP {page.status_code}); try again later")
 
 
 def _challenge(html):
@@ -66,22 +64,27 @@ def _authenticated(response, host):
     return (
         response.status_code == 200
         and urllib.parse.urlsplit(response.url).hostname == host
-        and bool(soup.find("a", href=re.compile(r"/pje/logout\.seam")))
+        and bool(soup.find("a", href=re.compile(r"/logout\.seam")))
         and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
     )
 
 
-def trf5_cert_login(twofa_data=None, session=None, *, pin=None, p12_path=None):
-    """Return an authenticated TRF5 1G session via certificate + TOTP."""
-    config = portals.pje(PORTAL_KEY)
-    twofa_data = twofa_data or os.environ.get("PJE_TRF5_2FA_DATA", "")
-    qr_path = os.environ.get("PJE_TRF5_2FA_QR")
-    if twofa_data:
-        account = select_account(parse_accounts(twofa_data), label="PJE_TRF5_2FA_DATA")
-    elif qr_path:
-        account = select_account(accounts_from_image(Path(qr_path)), label="PJE_TRF5_2FA_QR")
-    else:
-        raise RuntimeError("Set PJE_TRF5_2FA_DATA or PJE_TRF5_2FA_QR")
+def _twofa(portal, twofa_data=None):
+    """The TOTP account this portal's SSO asks for after the certificate, when it does."""
+    config = portals.pje(portal)
+    data = twofa_data or config.env("2FA_DATA")
+    qr_path = config.env("2FA_QR")
+    if data:
+        return select_account(parse_accounts(data), label=f"{config.env_prefix}_2FA_DATA")
+    if qr_path:
+        return select_account(accounts_from_image(Path(qr_path)), label=f"{config.env_prefix}_2FA_QR")
+    return None
+
+
+def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None):
+    """Return an authenticated PJe session via A1 certificate (+ TOTP when the SSO asks)."""
+    config = portals.pje(portal)
+    account = _twofa(portal, twofa_data)
     pin = pin or os.environ.get("PJE_A1_PIN")
     if not pin:
         raise RuntimeError("Set PJE_A1_PIN to the A1 certificate password")
@@ -112,9 +115,14 @@ def _login(session, config, account, key, cert, chain):
     require_allowed_url(action)
 
     response = _follow(session, _submit_code(session, action, token))
+    if _authenticated(response, config.host):
+        log.info("%s certificate login complete -> %s", config.key, url_shape(response.url))
+        return session
     candidate = BeautifulSoup(response.text, "html.parser").find("form", id="kc-otp-login-form")
     if not candidate or not candidate.get("action"):
-        raise RuntimeError("SSO did not advance to OTP after the certificate callback")
+        raise RuntimeError("SSO did not advance after the certificate callback")
+    if account is None:
+        raise RuntimeError(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
     otp_action = urllib.parse.urljoin(response.url, candidate["action"])
     require_allowed_url(otp_action)
 
@@ -129,6 +137,6 @@ def _login(session, config, account, key, cert, chain):
     log_request("POST", otp_action, response.status_code)
     final = _follow(session, response)
     if not _authenticated(final, config.host):
-        raise RuntimeError("TRF5 login did not reach an authenticated PJe page")
-    log.info("TRF5 certificate login complete -> %s", url_shape(final.url))
+        raise RuntimeError(f"{config.key} login did not reach an authenticated PJe page")
+    log.info("%s certificate login complete -> %s", config.key, url_shape(final.url))
     return session

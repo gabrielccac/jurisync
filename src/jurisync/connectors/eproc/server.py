@@ -41,7 +41,12 @@ sessions = SessionPool(login=authenticate, refresh=refresh_panel, close=lambda v
 def configured_portals():
     """Eproc portals whose credentials are set; all wired portals when none are."""
     keys = portals.keys("eproc")
-    ready = tuple(key for key in keys if portals.eproc(key).env("USERNAME") and portals.eproc(key).env("2FA_DATA"))
+    ready = tuple(
+        key
+        for key in keys
+        if (portals.eproc(key).env("2FA_DATA") or portals.eproc(key).env("2FA_QR"))
+        and (portals.eproc(key).env("USERNAME") or portals.eproc(key).uses_certificate())
+    )
     return ready or keys
 
 

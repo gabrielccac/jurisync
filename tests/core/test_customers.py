@@ -63,7 +63,7 @@ def test_customer_name_cannot_escape_directory(root):
 def test_victor_setup_is_valid():
     monkeypatch_dir = os.environ.pop("JURISYNC_CUSTOMERS_DIR", None)
     try:
-        assert set(customers.load_setup("victor")) == {"trf5-1g"}
+        assert set(customers.load_setup("victor")) == {"trf5-1g", "trf5-2g", "trf1-1g", "trf1-2g"}
     finally:
         if monkeypatch_dir:
             os.environ["JURISYNC_CUSTOMERS_DIR"] = monkeypatch_dir

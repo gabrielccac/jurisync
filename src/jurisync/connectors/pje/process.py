@@ -47,9 +47,9 @@ def login_portal(portal):
     if cached is not None:
         return cached, None
     if auth_method(portal) == "certificate_totp":
-        from jurisync.connectors.pje.auth.certificate import trf5_cert_login
+        from jurisync.connectors.pje.auth.certificate import cert_login
 
-        session, response = trf5_cert_login(), None
+        session, response = cert_login(portal), None
     else:
         session, response = login_session(*credentials(portal), config.login_url, config.host)
     try:
@@ -328,7 +328,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Read PJe process movements (TRF1/TJAP password login, TRF5 certificate login)"
     )
-    parser.add_argument("--portal", choices=("trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"), required=True)
+    parser.add_argument(
+        "--portal", choices=("trf1-1g", "trf1-2g", "trf3-1g", "trf5-1g", "trf5-2g", "tjap-1g"), required=True
+    )
     parser.add_argument("--process-number", required=True)
     parser.add_argument("--scope", choices=("latest", "page", "all"), default="page")
     parser.add_argument("--save-detail-html", help="Save the authenticated 1G detail response locally")

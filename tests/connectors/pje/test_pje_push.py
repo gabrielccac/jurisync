@@ -21,6 +21,17 @@ class PjeNotificationChecks(unittest.TestCase):
             [item["process_number"] for item in push.parse_push_items(html)], ["1016572-38.2026.4.01.0000"]
         )
 
+    def test_trf1_push_grid_has_only_the_process_column_and_keeps_repeated_registrations(self):
+        html = """<table id='x'><tr><th></th><th>Processo</th></tr>
+        <tr><td><a onclick="construirLogicaAcesso(426331);">go</a></td><td>1003236-66.2019.4.01.3312</td></tr>
+        <tr><td></td><td>1005375-88.2019.4.01.3312</td></tr>
+        <tr><td></td><td>1005375-88.2019.4.01.3312</td></tr></table>
+        <p>3 resultados encontrados</p>"""
+        items = push.parse_push_items(html)
+        self.assertEqual([item["process_number"] for item in items][-2:], ["1005375-88.2019.4.01.3312"] * 2)
+        self.assertEqual((items[0]["process_id"], items[0]["registered_at"]), (426331, ""))
+        self.assertTrue(push.parse_push_page(html, len(items))["complete"])
+
     def test_push_reader_reuses_supplied_session_without_closing_it(self):
         push_url = "https://pje1g.trf1.jus.br/pje/Push/listView.seam?iframe=true"
         session = Mock()

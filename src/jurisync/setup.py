@@ -273,7 +273,7 @@ def check_secret(check):
         if system == "eproc":
             return portals.eproc(key).env("2FA_DATA")
         if system == "pje":
-            return portals.pje(key).env("2FA_DATA") or os.environ.get("PJE_TRF5_2FA_DATA", "")
+            return portals.pje(key).env("2FA_DATA")
     except ValueError:
         return ""
     return ""

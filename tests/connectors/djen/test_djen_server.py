@@ -113,6 +113,20 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["numero_processo"], "08001234520264058300")
         self.assertEqual(item["texto_limpo"], "Intime-se a parte")
         self.assertEqual(item["advogados"][0]["numero_digits"], "14663")
+        self.assertEqual(item["portal"]["portal"], "trf5-1g/trf5-2g")  # no link: the number fits both instances
+
+    async def test_each_item_names_the_pje_that_issued_it(self):
+        turma = dict(RAW_ITEM, id=2, link="https://pje2g.trf5.jus.br/pje/Processo/ConsultaDocumento/listView.seam?x=1")
+        vara = dict(RAW_ITEM, id=3, link="https://pje1g.trf5.jus.br/pje/Processo/ConsultaDocumento/listView.seam?x=2")
+        page = {"status": "success", "count": 2, "items": [turma, vara]}
+        with mock.patch.object(djen_server, "search_page", return_value=page):
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-10-19", "fim": "2026-10-19", "compact": True},
+            )
+        self.assertEqual(
+            [item["portal"]["portal"] for item in result.structured_content["items"]], ["trf5-2g", "trf5-1g"]
+        )
 
     async def test_compact_search_keeps_one_text_and_trims_lawyers(self):
         raw = dict(RAW_ITEM)

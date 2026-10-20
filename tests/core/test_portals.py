@@ -25,8 +25,11 @@ class PortalRegistryTest(unittest.TestCase):
         ):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "portal must be one of"):
                 portals.get(key, system)
-        self.assertEqual(portals.keys("pje"), ("trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"))
-        self.assertEqual(portals.keys("eproc"), ("trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "tjrs-1g"))
+        self.assertEqual(portals.keys("pje"), ("trf1-1g", "trf1-2g", "trf5-1g", "trf5-2g", "trf3-1g", "tjap-1g"))
+        self.assertEqual(
+            portals.keys("eproc"),
+            ("trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "trf4-1g-pr", "trf4-2g", "tjrs-1g"),
+        )
 
     def test_old_names_are_aliases_and_ids_carry_the_system(self):
         self.assertIs(portals.eproc("jfsc"), portals.eproc("trf4-1g-sc"))
@@ -58,7 +61,9 @@ class PortalRegistryTest(unittest.TestCase):
         self.assertEqual([p.key for p in portals.for_process("5012366-88.2025.4.04.7104")], ["trf4-1g-rs"])
         self.assertEqual([p.key for p in portals.for_process("5012366-88.2025.4.04.7204")], ["trf4-1g-sc"])
         self.assertEqual([p.key for p in portals.for_process("5012366-88.2025.4.04.0000")], ["trf4-2g"])
-        self.assertEqual([p.key for p in portals.for_process("0001271-74.2026.4.05.8304")], ["trf5-1g"])
+        self.assertEqual([p.key for p in portals.for_process("0001271-74.2026.4.05.8304")], ["trf5-1g", "trf5-2g"])
+        self.assertEqual(portals.for_host("pje2g.trf5.jus.br").key, "trf5-2g")
+        self.assertEqual([p.key for p in portals.for_process("5001234-56.2026.4.03.6100")], ["trf3-1g"])
         self.assertEqual([p.key for p in portals.for_process("1024853-70.2023.4.01.3400")], ["trf1-1g", "trf1-2g"])
         self.assertEqual([p.key for p in portals.for_process("0001234-56.2026.8.03.0001")], ["tjap-1g"])
         self.assertEqual(portals.for_process("0001271-74.2026.8.17.0001"), [])

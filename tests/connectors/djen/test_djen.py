@@ -288,7 +288,7 @@ class DjenChecks(unittest.TestCase):
 
     def test_resolve_portal_cnj_fallback(self):
         trf5 = documents.resolve_portal({"link": "", "numero_processo": "00035279020264058303"})
-        self.assertEqual((trf5["system"], trf5["portal"], trf5["wired"]), ("pje", "trf5-1g", True))
+        self.assertEqual((trf5["system"], trf5["portal"], trf5["wired"]), ("pje", "trf5-1g/trf5-2g", True))
         jfrs = documents.resolve_portal({"link": None, "numeroprocessocommascara": "5012366-88.2025.4.04.7104"})
         self.assertEqual(jfrs["portal"], "trf4-1g-rs")
         unknown = documents.resolve_portal({"link": "", "numero_processo": "curto"})
@@ -329,7 +329,10 @@ class DjenChecks(unittest.TestCase):
         self.assertIn(b"doc", blob)
 
     def test_fetch_attachments_guards(self):
-        stj = {"link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1", "numero_processo": "52313092320248217000"}
+        stj = {
+            "link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1",
+            "numero_processo": "52313092320248217000",
+        }
         with self.assertRaisesRegex(ValueError, "sem conector"):
             documents.fetch_attachments(stj, session=object(), document_ids=["1"])
         jfrs = {"link": "https://eproc.jfrs.jus.br/eprocV2/x", "numeroprocessocommascara": "5012366-88.2025.4.04.7104"}

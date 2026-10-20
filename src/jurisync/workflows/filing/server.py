@@ -7,7 +7,6 @@ MCP access. They wrap `prepare.py`, so the agent never passes file paths and nev
 """
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Annotated, Any
@@ -252,7 +251,9 @@ def subjects(
 
 
 def main():
-    load_env_file(os.environ.get("JURISYNC_ENV_FILE") or REPO_ROOT / ".env")
+    # A checkout keeps credentials in its own .env; an installed package uses ~/.config/jurisync/.env.
+    checkout_env = REPO_ROOT / ".env"
+    load_env_file(checkout_env if (REPO_ROOT / "pyproject.toml").exists() and checkout_env.exists() else None)
     run_stdio(server)
 
 

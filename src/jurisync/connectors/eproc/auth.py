@@ -2,13 +2,14 @@
 
 import time
 from http.cookiejar import Cookie
+from pathlib import Path
 
 from curl_cffi import requests
 from selenium.common.exceptions import StaleElementReferenceException, UnexpectedAlertPresentException
 from seleniumbase import Driver
 
 from jurisync import portals
-from jurisync.core.totp import next_code, parse_accounts, parse_index, select_account, totp
+from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, parse_index, select_account, totp
 
 PANEL_MARKER = "acao=painel_adv_listar"
 PANEL_READY = 'a[aria-describedby="processoscomprazoemaberto"]'
@@ -24,11 +25,11 @@ LOGIN_FIELDS = {
 def portal_totp_account(portal):
     """Select this portal's TOTP account from its own authenticator export."""
     portal = portals.eproc(portal)
-    data = portal.env("2FA_DATA")
-    if not data:
-        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} in .env")
+    data, qr_path = portal.env("2FA_DATA"), portal.env("2FA_QR")
+    if not data and not qr_path:
+        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')} in .env")
     return select_account(
-        parse_accounts(data),
+        parse_accounts(data) if data else accounts_from_image(Path(qr_path)),
         match=portal.env("OTP_PROFILE_MATCH"),
         index=parse_index(portal.env("OTP_PROFILE_INDEX"), portal.env_name("OTP_PROFILE_INDEX")),
         label=portal.env_prefix,

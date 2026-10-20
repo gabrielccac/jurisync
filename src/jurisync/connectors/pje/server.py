@@ -25,9 +25,9 @@ from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
 
 Portal = Annotated[
-    Literal["trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"],
+    Literal["trf1-1g", "trf1-2g", "trf3-1g", "trf5-1g", "trf5-2g", "tjap-1g"],
     Field(
-        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'tjap-1g' (TJAP 1º grau, password login)."
+        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf3-1g' (TRF3 1º grau), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'trf5-2g' (TRF5 2º grau, certificate login), 'tjap-1g' (TJAP 1º grau, password login). Any portal can also log in with the A1 certificate (PJE_A1_P12/PJE_A1_PIN) when it opts in with <PREFIX>_CERT=true."
     ),
 ]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
@@ -100,7 +100,7 @@ def get_process(
 @server.tool(
     name="pje_read_documents",
     title="Read PJe documents",
-    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except the act of a communication whose ciência is not registered yet: reading it may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. When such a read happens the result has ciencia.pendenteAoLer and an aviso: tell the user and note it in the task. If the Expedientes tab cannot be read the check is skipped and the result says cienciaChecked=false.",
+    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except the act of a communication whose ciência is not registered yet: reading it may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. When such a read happens the result has ciencia.pendenteAoLer and an aviso: tell the user and note it in the task. If the Expedientes tab cannot be read the check is skipped and the result says cienciaChecked=false.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_documents_tool(

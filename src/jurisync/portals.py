@@ -73,6 +73,10 @@ class Portal:
                     return value
         return default
 
+    def uses_certificate(self):
+        """Whether this customer logs in here with the A1 certificate: PJE_A1_P12 is set and <PREFIX>_CERT is on."""
+        return bool(os.environ.get("PJE_A1_P12")) and self.env("CERT").lower() in {"1", "true", "yes", "on"}
+
     def env_name(self, name):
         return f"{self.env_prefix}_{name}"
 
@@ -83,8 +87,18 @@ PORTALS = {
         Portal("trf1-1g", "pje", "TRF1", "1g", "pje1g.trf1.jus.br", "/pje/", "password_totp", "PJE_1G", region="01"),
         Portal("trf1-2g", "pje", "TRF1", "2g", "pje2g.trf1.jus.br", "/pje/", "password_totp", "PJE_2G", region="01"),
         Portal(
-            "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_1G", region="05"
+            "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_1G",
+            legacy_env_prefixes=("PJE_TRF5",), region="05",
         ),
+        # Same Keycloak SSO (client "pje-trf5-2g") and the same A1 certificate + authenticator as the 1G. It also
+        # serves the Turmas Recursais, whose appeals keep the 1G number, so a number alone cannot tell the two
+        # apart (as in TRF1): DJEN's link host can.
+        Portal(
+            "trf5-2g", "pje", "TRF5", "2g", "pje2g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_2G",
+            legacy_env_prefixes=("PJE_TRF5",), region="05",
+        ),
+        # TRF3 (SP/MS) serves the same PJe under /pje/; the password flow is the default, the A1 certificate opts in.
+        Portal("trf3-1g", "pje", "TRF3", "1g", "pje1g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_1G", region="03"),
         # TJAP is a state court (CNJ J=8, TR=03) served by the PDPJ PJe under /1g/; login goes through the
         # same Keycloak SSO as the federal courts (realm "pje", client "pje-tjap-1g").
         Portal(
@@ -103,10 +117,11 @@ PORTALS = {
         # so the prefix stays shared (intentional exception to prefix == key).
         Portal("trf6-1g", "eproc", "TRF6", "1g", "eproc1g.trf6.jus.br", "/eproc/", "browser_totp", "TRF6", region="06"),
         Portal("trf6-2g", "eproc", "TRF6", "2g", "eproc2g.trf6.jus.br", "/eproc/", "browser_totp", "TRF6", region="06"),
-        Portal("trf4-1g-pr", "eproc", "TRF4", "1g", "eproc.jfpr.jus.br", "/", "browser_totp", "TRF4_1G_PR",
-               legacy_env_prefixes=("JFPR",), region="04", origins=("70",), wired=False),
-        Portal("trf4-2g", "eproc", "TRF4", "2g", "eproc.trf4.jus.br", "/", "browser_totp", "TRF4_2G",
-               region="04", wired=False),
+        Portal("trf4-1g-pr", "eproc", "TRF4", "1g", "eproc.jfpr.jus.br", "/eprocV2/", "browser_totp", "TRF4_1G_PR",
+               legacy_env_prefixes=("JFPR",), region="04", origins=("70",)),
+        # TRF4 itself (2G) serves its Eproc under /eproc2trf4/; its SSO also accepts the A1 certificate over mutual TLS.
+        Portal("trf4-2g", "eproc", "TRF4", "2g", "eproc.trf4.jus.br", "/eproc2trf4/", "browser_totp", "TRF4_2G",
+               region="04"),
         # TJRS serves its Eproc under /eproc/ (public document links use it); state justice is CNJ J=8, TR=21.
         Portal("tjrs-1g", "eproc", "TJRS", "1g", "eproc1g.tjrs.jus.br", "/eproc/", "browser_totp", "TJRS_1G",
                legacy_env_prefixes=("TJRS",), region="21", justice="8", wired=True),

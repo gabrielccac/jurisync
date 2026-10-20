@@ -17,6 +17,7 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import login, portal_totp_account
+from jurisync.connectors.eproc.certificate import cert_login
 from jurisync.connectors.eproc.documents import read_selected_documents
 from jurisync.connectors.eproc.parsers import (
     parse_event_response,
@@ -152,6 +153,8 @@ def _credentials(portal):
 
 
 def authenticate(portal):
+    if portals.eproc(portal).uses_certificate():
+        return cert_login(portal)
     username, password = _credentials(portal)
     return login(username, password, portal_totp_account(portal), portal=portal)
 

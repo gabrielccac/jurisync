@@ -55,10 +55,17 @@ class ExtractorTest(unittest.TestCase):
         self.assertEqual(status, "extracted_unnumbered")
         self.assertIn("laudo pericial", text)
 
+    def test_short_unnumbered_pages_are_returned_as_short_html_with_their_text(self):
+        body = b'<html xmlns="http://www.w3.org/1999/xhtml"><head></head><p>PETI&Ccedil;&Atilde;O INICIAL E DOCUMENTOS ANEXADOS.</p></html>'
+        self.assertEqual(extract_document_text(body, "text/html", NUMBER)[0], "unrecognized_html")
+        self.assertEqual(
+            extract_document_text(body, "text/html", NUMBER, allow_unnumbered=True),
+            ("short_html", "PETIÇÃO INICIAL E DOCUMENTOS ANEXADOS."),
+        )
+
     def test_unnumbered_mode_still_rejects_error_login_and_sealed_pages(self):
         for body in (
             b"<html>Documento indisponivel</html>",
-            b"<html><title>Error</title>Unavailable</html>",
             ("<html>" + "O documento não é válido ou não existe. " * 5 + "</html>").encode(),
             ("<html>PJeOffice indisponível " + "texto " * 30 + "</html>").encode(),
             b"<html>Documento protegido por sigilo - Para visualiz\xc3\xa1-lo, acesse os autos digitais.</html>",

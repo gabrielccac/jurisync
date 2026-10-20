@@ -18,11 +18,17 @@ def auth_method(portal):
 
     A portal registered with a certificate (TRF5) also accepts its own username, password and TOTP: the
     password flow is used only when no A1 certificate is configured (``PJE_A1_P12``) and all three are set.
+
+    Any other PJe portal uses the certificate when one is configured (``PJE_A1_P12``) and the portal
+    opts in with ``<PREFIX>_CERT=true``; the certificate flow asks for TOTP only if the SSO does.
     """
     config = portals.pje(portal)
+    certificate = bool(os.environ.get("PJE_A1_P12"))
     password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD", "2FA_DATA"))
-    if config.auth == "certificate_totp" and password_ready and not os.environ.get("PJE_A1_P12"):
-        return "password_totp"
+    if config.auth == "certificate_totp":
+        return "password_totp" if password_ready and not certificate else "certificate_totp"
+    if config.uses_certificate():
+        return "certificate_totp"
     return config.auth
 
 

@@ -84,8 +84,16 @@ class ExportImportTest(unittest.TestCase):
             target = root / "home" / ".env"
             with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdin", io.StringIO(passphrase + "\n")):
                 code = setup.main(
-                    ["import", str(out), "--passphrase-stdin", "--env-file", str(target), "--no-login",
-                     "--register", "none"],
+                    [
+                        "import",
+                        str(out),
+                        "--passphrase-stdin",
+                        "--env-file",
+                        str(target),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     say=lambda _m: None,
                 )
             self.assertEqual(code, 0)
@@ -93,9 +101,21 @@ class ExportImportTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
             # a wrong passphrase fails cleanly and writes nothing new
             other = root / "other" / ".env"
-            with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdin", io.StringIO("wrong passphrase 1\n")):
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch("sys.stdin", io.StringIO("wrong passphrase 1\n")),
+            ):
                 code = setup.main(
-                    ["import", str(out), "--passphrase-stdin", "--env-file", str(other), "--no-login", "--register", "none"],
+                    [
+                        "import",
+                        str(out),
+                        "--passphrase-stdin",
+                        "--env-file",
+                        str(other),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     say=lambda _m: None,
                 )
             self.assertEqual(code, 2)
@@ -161,8 +181,16 @@ class CertificateCustomerTest(unittest.TestCase):
                 mock.patch("sys.stdin", io.StringIO(passphrase + "\n")),
             ):
                 code = setup.main(
-                    ["import", str(out), "--passphrase-stdin", "--env-file", str(target), "--no-login",
-                     "--register", "none"],
+                    [
+                        "import",
+                        str(out),
+                        "--passphrase-stdin",
+                        "--env-file",
+                        str(target),
+                        "--no-login",
+                        "--register",
+                        "none",
+                    ],
                     say=lambda _m: None,
                 )
             self.assertEqual(code, 0)
@@ -216,9 +244,7 @@ def test_inss_customer_bundle_registers_server_and_keeps_chrome_profile_with_con
 
     customers = tmp_path / "customers" / "jeanx"
     customers.mkdir(parents=True)
-    (customers / "portals.toml").write_text(
-        '[env]\nsecrets = ["INSS_GERID_TOTP_SECRET"]\n', encoding="utf-8"
-    )
+    (customers / "portals.toml").write_text('[env]\nsecrets = ["INSS_GERID_TOTP_SECRET"]\n', encoding="utf-8")
     (customers / ".env").write_text("INSS_GERID_TOTP_SECRET=otpauth://totp/x?secret=ABC\n", encoding="utf-8")
     monkeypatch.setenv("JURISYNC_CUSTOMERS_DIR", str(tmp_path / "customers"))
     monkeypatch.setenv("JURISYNC_ENV_FILE", str(tmp_path / "none.env"))

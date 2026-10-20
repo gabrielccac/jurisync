@@ -1,4 +1,4 @@
-"""Offline checks for the TRF5 certificate login boundary."""
+"""Offline checks for the PJe certificate login boundary."""
 
 import unittest
 from types import SimpleNamespace
@@ -15,7 +15,8 @@ class CertificateLoginChecks(unittest.TestCase):
             patch.object(cert_login, "_login", return_value=session) as login,
         ):
             self.assertIs(
-                cert_login.trf5_cert_login("JBSWY3DPEHPK3PXP", session, pin="test-pin", p12_path="a1.p12"), session
+                cert_login.cert_login("trf5-1g", "JBSWY3DPEHPK3PXP", session, pin="test-pin", p12_path="a1.p12"),
+                session,
             )
         load.assert_called_once_with("a1.p12", "test-pin")
         self.assertEqual(login.call_args.args[3:], ("key", "cert", []))

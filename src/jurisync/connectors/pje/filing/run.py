@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from jurisync.connectors.pje.auth.certificate import trf5_cert_login
+from jurisync.connectors.pje.auth.certificate import cert_login
 from jurisync.connectors.pje.filing.checkpoint import now, pid_alive, write_checkpoint
 from jurisync.connectors.pje.filing.client import DraftClient
 from jurisync.connectors.pje.filing.payload import payload_subjects, validate_fill_payload
@@ -147,7 +147,7 @@ def run_stage(
         validate_fill_payload(payload)
     owned = session is None
     if owned:
-        session = trf5_cert_login()
+        session = cert_login("trf5-1g")
     try:
         client = DraftClient(session)
         if stage == "pending-search":

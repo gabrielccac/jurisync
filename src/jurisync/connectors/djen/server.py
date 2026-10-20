@@ -10,6 +10,7 @@ from pydantic import BeforeValidator, Field
 
 from jurisync.connectors.djen.client import DjenError, fetch_certidao, search_page
 from jurisync.connectors.djen.deadlines import calculate_deadline
+from jurisync.connectors.djen.documents import resolve_portal
 from jurisync.connectors.djen.normalize import compact_item, normalize_item
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
@@ -25,7 +26,7 @@ DIGITS_AS_TEXT = BeforeValidator(lambda value: str(value) if type(value) is int 
 @server.tool(
     name="djen_search_communications",
     title="Search DJEN communications",
-    description="Read one page of public DJEN communications for a date window and at least one search key: OAB + UF, advogado name (nomeAdvogado), party name, free text (texto) or process number, with optional tribunal and meio (D = Diário, E = eletrônico). Returns normalized text and metadata; routing decisions belong to the skill. A full 50-item page can exceed tool output limits: compact=true keeps one copy of the text plus the fields routing needs, and textLimit cuts each text (texto_chars keeps the original length; the full text stays available through djen_get_certidao_text). No authentication or poll-state mutation.",
+    description="Read one page of public DJEN communications for a date window and at least one search key: OAB + UF, advogado name (nomeAdvogado), party name, free text (texto) or process number, with optional tribunal and meio (D = Diário, E = eletrônico). Returns normalized text and metadata; routing decisions belong to the skill. Each item has portal: the court system that issued it (portal key such as 'trf5-1g' or 'trf5-2g', read from the communication link host; from the CNJ number when there is no link, which can list several keys like 'trf5-1g/trf5-2g'). A full 50-item page can exceed tool output limits: compact=true keeps one copy of the text plus the fields routing needs, and textLimit cuts each text (texto_chars keeps the original length; the full text stays available through djen_get_certidao_text). No authentication or poll-state mutation.",
     annotations=READ_ONLY,
 )
 def search_communications(
@@ -117,6 +118,8 @@ def search_communications(
             raise ValueError("numeroOab requires ufOab")
         result = search_page(params, pagina, itens)
     items = [normalize_item(item) for item in result["items"]]
+    for item in items:
+        item["portal"] = resolve_portal(item)
     result["items"] = [compact_item(item, textLimit) for item in items] if compact else items
     return result
 
