@@ -1,0 +1,50 @@
+{
+  "name": "victor",
+  "version": "0.1.2",
+  "description": "Skills do escritório do Victor com os MCPs do Jurisync",
+  "author": {
+    "name": "Gabriel Cavalcanti"
+  },
+  "skills": [
+    "./skills/victor-sop-intimacoes",
+    "./skills/victor-pje-filing"
+  ],
+  "mcpServers": {
+    "djen": {
+      "command": "jurisync-djen",
+      "env": {
+        "JURISYNC_CUSTOMER": "victor",
+        "JURISYNC_CUSTOMERS_DIR": "${CLAUDE_PLUGIN_ROOT}/customers"
+      }
+    },
+    "pje": {
+      "command": "jurisync-pje",
+      "env": {
+        "JURISYNC_CUSTOMER": "victor",
+        "JURISYNC_CUSTOMERS_DIR": "${CLAUDE_PLUGIN_ROOT}/customers"
+      }
+    },
+    "advbox": {
+      "command": "jurisync-advbox",
+      "env": {
+        "JURISYNC_CUSTOMER": "victor",
+        "JURISYNC_CUSTOMERS_DIR": "${CLAUDE_PLUGIN_ROOT}/customers"
+      }
+    },
+    "eproc": {
+      "command": "jurisync-eproc",
+      "env": {
+        "JURISYNC_CUSTOMER": "victor",
+        "JURISYNC_CUSTOMERS_DIR": "${CLAUDE_PLUGIN_ROOT}/customers"
+      }
+    },
+    "filing": {
+      "command": "jurisync-filing",
+      "env": {
+        "JURISYNC_CUSTOMER": "victor",
+        "JURISYNC_CUSTOMERS_DIR": "${CLAUDE_PLUGIN_ROOT}/customers",
+        "JURISYNC_PROFILES_DIR": "${CLAUDE_PLUGIN_ROOT}/customers"
+      }
+    }
+  }
+}

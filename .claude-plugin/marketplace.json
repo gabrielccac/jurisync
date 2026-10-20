@@ -1,0 +1,17 @@
+{
+  "name": "jurisync",
+  "owner": {
+    "name": "Gabriel Cavalcanti"
+  },
+  "plugins": [
+    {
+      "name": "victor",
+      "source": "./plugins/victor",
+      "description": "Skills do escritório do Victor (SOP de intimações DJEN→ADVBOX e protocolo TRF5) com os MCPs do Jurisync",
+      "version": "0.1.2"
+    }
+  ],
+  "metadata": {
+    "description": "Plugins do Jurisync: skills por cliente com os MCPs dos tribunais e do ADVBOX"
+  }
+}
