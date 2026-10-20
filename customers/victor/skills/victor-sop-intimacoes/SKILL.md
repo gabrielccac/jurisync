@@ -6,9 +6,11 @@ description: SOP de intimações do escritório do Victor. Lê comunicações DJ
 # SOP de intimações: DJEN → PJe → tarefas ADVBOX (Victor)
 
 Transforma comunicações DJEN em tarefas ADVBOX conforme o SOP (POP) de Movimentação de
-Intimações Judiciais. O texto DJEN vem primeiro; o PJe `trf5-1g` (`pje1g.trf5.jus.br`)
-entra só para o que o texto não traz. O credenciamento do cliente (certificado A1 +
-TOTP) vale **somente** para `trf5-1g`: nunca use os portais TRF1 nesta skill.
+Intimações Judiciais. O texto DJEN vem primeiro; o PJe do TRF5 entra só para o que o texto
+não traz, no portal que emitiu a comunicação (`enriquecimento-pje.md` §0): `trf5-1g`
+(`pje1g.trf5.jus.br`, varas e JEFs) ou `trf5-2g` (`pje2g.trf5.jus.br`, Turmas Recursais de
+PE e PB e o Tribunal). O credenciamento do cliente (certificado A1 + TOTP) vale para esses
+dois: nunca use os portais TRF1 nesta skill.
 
 Esta skill é **por cliente**: os padrões, átomos, responsáveis e registros fora do mapa
 são do escritório do Victor. Os arquivos de procedimento (`classificacao.md`,
@@ -37,7 +39,8 @@ dados do cliente estão em `tarefas.md` e `fora-do-mapa.md`.
 4. **Data de perícia ou audiência é evento**, não prazo. Sem data nos documentos,
    escreva "não designada" e a fonte.
 5. **Um ato, uma cadeia.** IDs DJEN com o mesmo texto geram uma tarefa; liste todos os
-   IDs. Antes de criar, procure o ID DJEN no histórico do ADVBOX (`tarefas.md` §6).
+   IDs. Antes de criar, **liste as tarefas do processo** (pendentes e concluídas) e
+   compare por ato, não só pelo ID DJEN: a equipe também cria tarefas à mão (`tarefas.md` §6).
 6. **Fora do mapa → escalar.** Nunca aplique um padrão por analogia: registre em
    `references/fora-do-mapa.md` com a evidência e pare.
 7. **Anexo** só quando o tipo de tarefa pede (`tarefas.md` §5).
@@ -57,42 +60,40 @@ dados do cliente estão em `tarefas.md` e `fora-do-mapa.md`.
 4. **Resultado** → um de: **criar**, **check**, **incremento** (`advbox_update_task`),
    **escalar**,
    **monitorar**, **ruído**, **duplicada** (`fora-do-mapa.md` §1).
-5. **Tarefa** → `references/tarefas.md`: átomo e cadeia (§3), cabeçalho e campos por tipo
+5. **Dedupe antes de criar** → `tarefas.md` §6: liste as tarefas do processo e compare
+   com a tarefa proposta; se o ato já está coberto, o resultado é **check** ou
+   **incremento**, não criar.
+6. **Tarefa** → `references/tarefas.md`: átomo e cadeia (§3), cabeçalho e campos por tipo
    (§4), início e final (§1), anexo (§5), invariantes de criação (§7). Em
    `CUMPRIR ATO ORDINATÓRIO`, o responsável é quem fez a `PETIÇÃO INICIAL` do processo no
    ADVBOX (`tarefas.md` §3, §1), não quem protocolou.
-6. **Prévia ou criação** com verificação: depois de criar, releia o histórico do processo
+7. **Prévia ou criação** com verificação: depois de criar, releia o histórico do processo
    e confirme a tarefa.
 
 ## Ferramentas
 
+Os parâmetros de cada ferramenta estão na descrição do próprio MCP; aqui ficam só o papel
+de cada uma e as armadilhas que mudam a decisão.
+
 - **DJEN** (primário, leitura): `djen_search_communications` (use `compact=true` e
-  `textLimit`: uma página de 50 itens completa passa de 270 mil caracteres),
-  `djen_get_certidao_text` (teor completo; `extractionStatus=ocr_needed` → peça OCR),
-  `djen_calculate_deadline` (JFPE, calendário publicado pela ferramenta; a data do
+  `textLimit`: uma página completa passa de 270 mil caracteres), `djen_get_certidao_text`
+  (`extractionStatus=ocr_needed` → peça OCR), `djen_calculate_deadline` (a data do
   documento nos autos não substitui `data_disponibilizacao`).
-- **PJe** (secundário, leitura): `pje_get_process` (portal `trf5-1g`: linha do tempo,
-  inventário e `expedientes`, a aba Expedientes com o prazo `limite` de cada comunicação),
-  `pje_read_expediente_ato` (o ato de um expediente e seus anexos; recusa os com ciência
-  pendente) e `pje_read_documents` (só documentos, até 5 por chamada, sem linha do
-  tempo). HTML sem o número CNJ volta como `extracted_unnumbered`; a certidão de
-  intimação volta com `expedientes` (prazo por destinatário); `save=true` grava o original
-  na pasta compartilhada (`savedAs`) para anexar. Áudios: extra `transcription`.
+- **PJe** (secundário, leitura, portal `trf5-1g` ou `trf5-2g` conforme o `portal` da
+  comunicação, `enriquecimento-pje.md` §0): `pje_get_process` (linha do tempo,
+  inventário e `expedientes`, com o prazo `limite` de cada comunicação),
+  `pje_read_expediente_ato` (recusa expedientes com ciência pendente) e
+  `pje_read_documents`. A certidão de intimação volta com `expedientes` (prazo por
+  destinatário); `save=true` grava o original na pasta compartilhada para anexar.
 - **ADVBOX** (leitura): `advbox_list_lawsuits` (busca por CNJ); `advbox_lawsuit_report`
-  com `taskSearch` (acha o ID DJEN no histórico, concluídas incluídas) e `maxTasks`,
-  `maxNotices`, `maxTextChars` (relatórios chegam a 70 mil caracteres);
-  `advbox_find_tasks` (tarefas **pendentes**, com `postId`); `advbox_list_activities`
-  (inclui `deadline`; o filtro pendentes/concluídas não tem efeito hoje);
-  `advbox_list_publications` (intimações que o ADVBOX recebeu: `period` today/3d/7d/30d ou
-  `dateFrom`+`dateTo`, `tribunal` por sigla, `processNumber` CNJ, `responsible`; até 200 por
-  página, `hasMore` indica a próxima; `status` pendente/concluida mostra se já foi tratada;
-  o texto de uma intimação vem de `advbox_activity_details` com o `postId`);
-  `advbox_list_members`, `advbox_list_workflows`, `advbox_workflow_tasks`.
-- **ADVBOX** (escrita, gate `ADVBOX_ALLOW_WRITES=true`): `advbox_create_task` (anexos por
-  `attachmentFiles`; `dryRun=true` valida corpo, workflow e arquivos sem enviar nada),
-  `advbox_update_task` (edita uma tarefa **pendente**: comentário, data, prazo,
-  responsáveis, anexos; o ADVBOX **substitui** a tarefa e o resultado tem um `postId`
-  NOVO), `advbox_complete_task`, `advbox_delete_task` (pede confirmação).
+  com `taskSearch` acha o ID DJEN no histórico, concluídas incluídas (limite os
+  relatórios com `maxTasks`, `maxNotices`, `maxTextChars`); `advbox_find_tasks` vê só
+  tarefas **pendentes**; `advbox_list_publications` mostra as intimações que o ADVBOX
+  recebeu e se já foram tratadas (o texto vem de `advbox_activity_details`).
+- **ADVBOX** (escrita, gate `ADVBOX_ALLOW_WRITES=true`): `advbox_create_task` (rode antes
+  com `dryRun=true`), `advbox_update_task` (só tarefa **pendente**; o ADVBOX **substitui**
+  a tarefa e devolve um `postId` NOVO), `advbox_complete_task`, `advbox_delete_task`
+  (pede confirmação).
 
 ## Referências (leia nesta ordem)
 

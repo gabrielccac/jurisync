@@ -3,6 +3,18 @@
 This directory holds Victor-specific workflows and policy in the Jurisync
 repository. The shared ADVBOX and PJe connectors live under `src/jurisync/connectors/`.
 
+## Installing the skills
+
+On a machine with `uv tool install git+https://github.com/gabrielccac/jurisync` done, run in Claude Code
+`/plugin install victor --marketplace gabrielccac/jurisync`, then
+`jurisync-setup import victor.jurisync --register none`. The plugin lives in `plugins/victor/`
+(its `skills/` and `customers/victor` are symlinks into this folder; Claude Code copies them as real files on
+install). It installs `victor-sop-intimacoes` and `victor-pje-filing` plus the `djen`, `pje`, `advbox`, `eproc`
+and `filing` servers. Keep the plugin in its own folder: at the repo root it would also pick up the development
+`.mcp.json` and register servers that fail on other machines. Bump `version` in
+`plugins/victor/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` when a skill changes; users
+then run `/plugin update victor`. Inside this checkout the skills load through `.claude/skills/` symlinks.
+
 ## DJEN to ADVBOX tasks
 
 The customer POP rules live in
@@ -35,9 +47,8 @@ conditional periods and missing periods require separate handling.
 
 ## PJe filing preparation
 
-For local Codex desktop use, `skills/victor-pje-filing/SKILL.md` guides the
-preparation and PJe MCP stages. The skill is installed through a symlink in
-`~/.agents/skills`; it does not submit **Protocolar**.
+`skills/victor-pje-filing/SKILL.md` guides the preparation and PJe MCP stages for
+Claude. It does not submit **Protocolar**. See "Installing the skills" below.
 
 The existing TRF1 spreadsheet watcher runs from the repository root with
 `python -m customers.victor.workflows.pje1g_watch --help`.

@@ -16,9 +16,11 @@ deduplicar por `id`; páginas grandes: use `itens` pequeno ou grave em arquivo):
 3. **Nível de PJe** (`enriquecimento-pje.md` §3). Registre `PJe: não — DJEN suficiente`
    ou `PJe: sim` com os IDs lidos. Falha do conector ou documento ilegível =
    `PJe: pendente`, nunca "sem informação".
-4. **Duplicata e estado atual** (`tarefas.md` §6): procure o ID DJEN no histórico do
-   processo no ADVBOX (`advbox_lawsuit_report`). Para perícia social, veja se já há
-   instrução/responsável (§8 do POP).
+4. **Duplicata e estado atual** (`tarefas.md` §6): **liste as tarefas do processo**
+   (`advbox_lawsuit_report` + `advbox_find_tasks`), busque o ID DJEN e compare por ato
+   mesmo sem o ID. Na coluna "duplicata / estado" informe as tarefas conferidas e, se
+   houver cobertura, qual (`postId`, data, responsável). "Não conferido" nunca vale como
+   "sem duplicata". Para perícia social, veja se já há instrução/responsável (§8 do POP).
 5. **Prazo** (`enriquecimento-pje.md` §5): termo da certidão, publicação, início,
    vencimento e calendário usado. Divergência ou prazo não suportado → revisão.
 6. **Tarefa(s)** (`tarefas.md` §3–§5): átomo, responsável, início, final, descrição pelo

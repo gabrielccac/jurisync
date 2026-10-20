@@ -1,13 +1,33 @@
 # Victor's portal access. Method and secret names only; the values go in the
 # gitignored customers/victor/.env (see .env.example in this directory).
 # "A|B" means either variable is enough.
+#
+# One A1 certificate serves every PJe below; [env].set switches the TRF1 portals to the certificate login.
+# The authenticator is declared per portal prefix (same export, as in customers/wesley): TRF5 keeps its earlier
+# PJE_TRF5_* names and each TRF1 instance reads PJE_1G_/PJE_2G_2FA_DATA (the SSO asks Victor's account for the
+# code after the certificate on both; Wesley's account is not asked on TRF1 1G).
 
 [trf5-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]
 
+# TRF5 2nd instance: Turmas Recursais (PE, PB) and the Tribunal.
+[trf5-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]
+
+# TRF1 1st and 2nd instance, validated on 2026-10-20 with the same A1 certificate and authenticator.
+[trf1-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+
+[trf1-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_2G_2FA_DATA|PJE_2G_2FA_QR"]
+
 # Variables that belong to no portal. ADVBOX_DEVICE_ID is what lets the same login work on any machine.
 [env]
 secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]
-# Pinned values: Victor's ADVBOX server may create and edit tasks (writes are off by default elsewhere).
-set = { ADVBOX_ALLOW_WRITES = "true" }
+# Pinned values: Victor's ADVBOX server may create and edit tasks (writes are off by default elsewhere), and his
+# TRF1 portals log in with the A1 certificate instead of a password.
+set = { ADVBOX_ALLOW_WRITES = "true", PJE_1G_CERT = "true", PJE_2G_CERT = "true" }

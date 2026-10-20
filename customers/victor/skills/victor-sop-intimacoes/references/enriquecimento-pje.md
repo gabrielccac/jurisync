@@ -4,7 +4,29 @@ Princípio: o texto DJEN primeiro; o PJe só para o que falta (comando, prazo, a
 referência). Registre sempre o que foi lido (IDs de movimento e documento) e o que
 **não** foi encontrado e onde se procurou.
 
-Ferramentas: `pje_get_process` (portal `trf5-1g`, `scope: page` ou `all`: linha do tempo,
+## 0. Qual PJe ler (escolha adaptativa)
+
+O mesmo processo pode estar em dois PJe do TRF5, com o **mesmo número**: o recurso
+inominado sobe para a Turma Recursal sem mudar o CNJ. Por isso o número sozinho não decide.
+
+1. **`portal` da comunicação DJEN** (vem em cada item de `djen_search_communications`,
+   lido do host do link): `trf5-1g` → `pje1g.trf5.jus.br`; `trf5-2g` → `pje2g.trf5.jus.br`
+   (Turmas Recursais de PE e PB, relatorias, e o Tribunal). Use esse portal.
+2. **Sem link** (`portal` = `trf5-1g/trf5-2g`), decida pelo órgão: "Turma Recursal",
+   "Relatoria", "TR/PE", "TR/PB", "Turma Regional" ou classe `RECURSO INOMINADO` → `trf5-2g`;
+   vara federal ou JEF → `trf5-1g`.
+3. **Processo não encontrado** no portal escolhido: tente o outro uma vez e registre na
+   prévia em qual achou. Não alterne mais que isso.
+4. **Partindo do PJe** (sem DJEN): `pje_list_inbox` e `pje_list_expediente_counters` de cada
+   portal mostram de onde vem o expediente; os do `trf5-2g` são das Turmas Recursais.
+5. O mesmo certificado e autenticador valem para os dois. Uma sessão de cada vez por portal.
+
+Verificado em 20/10/2026: painel do `trf5-2g` com as caixas "Turma Recursal de Pernambuco" e
+"Turma Recursal da Paraíba"; `pje_get_process`, `pje_read_documents`,
+`pje_read_expediente_ato`, `pje_list_inbox` e Push funcionaram. O rascunho de protocolo
+(`pje_draft_*`) existe só no `trf5-1g`.
+
+Ferramentas: `pje_get_process` (portal do §0, `scope: page` ou `all`: linha do tempo,
 inventário e a aba **Expedientes**), `pje_read_expediente_ato` (o ato de uma comunicação
 da aba, com seus anexos) e `pje_read_documents` (só os documentos pedidos, até 5 por chamada, ids do
 inventário; devolve texto, estado de extração e, nas certidões, os `expedientes`). Verificado em 08/10/2026: `scope: all`
@@ -86,7 +108,7 @@ Suba de nível só quando o anterior deixar um campo obrigatório de `tarefas.md
 | P9 / P10 Sentença | N1 | Dispositivo (DJEN basta), certidão | Resultado, obrigações (quem cumpre, em quantos dias) | Certidão (recurso) |
 | P11 Homologação | N1 | Sentença, intimação de obrigação de fazer, certidão de trânsito | Obrigação do INSS, prazo, trânsito | Autora: nenhum. INSS: texto |
 | P12 Cálculo | N2 | Intimação, certidão, **sentença** | Parâmetros (DIB, retroativos, índices) | Certidão |
-| P13 Turma Recursal | N0 | Texto DJEN integral | Resultado; monocrático ou colegiado | Legal: revisar |
+| P13 Turma Recursal | N0 (N1 no `trf5-2g` se o texto não basta) | Texto DJEN integral; no `trf5-2g`, o acórdão ou a decisão ligada à intimação | Resultado; monocrático ou colegiado | Legal: revisar |
 | P15 Pedido de endereço | N1 | Despacho, certidão, **petição de cumprimento** (se já houver) | Prazo; se já foi cumprido | Certidão |
 | P16 Cumprimento | N1 | Despacho, certidão | Obrigação do INSS e "prazo fatal" dele | Texto / certidão |
 | P18 Sigilo | N2 | Autos pelo PJe autenticado | Identificar o ato e segui-lo | Do padrão resultante |
@@ -98,8 +120,10 @@ Suba de nível só quando o anterior deixar um campo obrigatório de `tarefas.md
   texto). O laudo é o PDF "Laudo Pericial (NOME)". Áudios (MP3) acompanham.
 - **HTML do PJe sem o número CNJ** (intimações de laudo, notificações curtas) volta como
   `extracted_unnumbered`: o documento foi buscado por ID do processo, então é aceito se
-  tiver conteúdo suficiente e nenhuma marca de erro, login ou sigilo. Páginas curtas ou
-  de erro continuam `unrecognized_html`.
+  tiver conteúdo suficiente e nenhuma marca de erro, login ou sigilo. Página curta sem marca
+  de erro (capa como "PETIÇÃO INICIAL E DOCUMENTOS ANEXADOS.") volta como `short_html`, com o
+  texto: leia-o e use os demais documentos do movimento; não é prova do ato. Páginas de erro,
+  login ou sigilo continuam `unrecognized_html`.
 - **Áudio:** com o extra `transcription` (faster-whisper) o leitor transcreve em
   português. A transcrição é aproximada; use só para confirmar fatos que também
   estejam no PDF. Leva minutos por gravação.

@@ -13,9 +13,9 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
 1. Resolve the intended Advbox customer and lawsuit. Gather the author's CPF
    and PJe registry name, jurisdiction, judicial class, and claim value from
    the lawsuit and petition. For Assuntos, read
-   [references/subjects.md](references/subjects.md) and check the repository's
-   `/home/gabriel/orca/jurisync/customers/victor/README.md` for this exact lawsuit ID or CNJ number before
-   choosing the ordered `subjects` list. The Advbox `Ação` and codes filed in
+   [references/subjects.md](references/subjects.md) and call `filing_subjects` with
+   `profile: "victor"` and this exact lawsuit ID or CNJ number (it returns what was filed for
+   that case) before choosing the ordered `subjects` list. The Advbox `Ação` and codes filed in
    other lawsuits are candidates, not defaults. PJe's `subject-options` lookup
    requires an existing draft; use it after `stage: create` if an advance
    check is needed. The `create-fill` path itself matches each code and name
@@ -33,14 +33,14 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    the selected CEP after saving the party. Surface conflicting addresses for
    user review. A missing address does not block a draft while PJe accepts it
    as optional.
-2. Choose a new alphanumeric `runId` and a private run directory under the
-   PJe MCP's configured `JURISYNC_FILING_DIR`. Use a root writable in the
-   current ChatGPT workspace; the agent and MCP must use the same root. Do not
-   assume the fallback `~/.local/share/jurisync/filings` is writable.
-   Write reviewed facts to a private JSON file, then run
-   `.venv/bin/python -m jurisync.workflows.filing prepare --profile victor
-   --customer <id> --facts <facts.json> --out <run-directory>` from the repo root
-   (it loads the repo `.env` itself).
+2. Choose a new alphanumeric `runId`. With a shell, use a private run directory under the
+   PJe MCP's configured `JURISYNC_FILING_DIR` (the agent and MCP must use the same root;
+   do not assume the fallback `~/.local/share/jurisync/filings` is writable). Write
+   reviewed facts to a private JSON file, then run
+   `python -m jurisync.workflows.filing prepare --profile victor
+   --customer <id> --facts <facts.json> --out <run-directory>`
+   (it loads the credentials file itself). Without a shell, use the `filing` tools in the
+   next section instead.
    Do not create a separate `documents.json`; this script downloads and
    classifies the files, then writes `review.json` and, when ready, `payload.json`.
    Treat both files as script outputs; do not write or replace them manually.
