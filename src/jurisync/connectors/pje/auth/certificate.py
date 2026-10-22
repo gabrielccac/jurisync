@@ -3,6 +3,7 @@
 
 import os
 import re
+import time
 import urllib.parse
 import uuid
 from pathlib import Path
@@ -81,15 +82,35 @@ def _twofa(portal, twofa_data=None):
     return None
 
 
-def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None):
-    """Return an authenticated PJe session via A1 certificate (+ TOTP when the SSO asks)."""
+# A login that stops short of the authenticated page is often a TOTP code the SSO already took or one that expired
+# mid-flight. The same code is not valid twice, so the retry waits for the next 30-second window.
+RETRYABLE_LOGIN = ("did not reach an authenticated PJe page", "SSO did not advance")
+TOTP_WINDOW = 30
+
+
+def _seconds_to_next_window(now):
+    return TOTP_WINDOW - (now % TOTP_WINDOW) + 1
+
+
+def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None, sleep=time.sleep, clock=time.time):
+    """Return an authenticated PJe session via A1 certificate (+ TOTP when the SSO asks).
+
+    One failed attempt is repeated once, on a new session, after the TOTP window changes.
+    """
     config = portals.pje(portal)
     account = _twofa(portal, twofa_data)
     pin = pin or os.environ.get("PJE_A1_PIN")
     if not pin:
         raise RuntimeError("Set PJE_A1_PIN to the A1 certificate password")
     key, cert, chain = native_signer.load_a1(p12_path or native_signer.a1_path(), pin)
-    return _login(session or requests.Session(), config, account, key, cert, chain)
+    try:
+        return _login(session or requests.Session(), config, account, key, cert, chain)
+    except RuntimeError as error:
+        if account is None or not any(marker in str(error) for marker in RETRYABLE_LOGIN):
+            raise
+        log.info("%s login stopped short (%s); retrying in the next TOTP window", config.key, error)
+        sleep(_seconds_to_next_window(clock()))
+        return _login(requests.Session(), config, account, key, cert, chain)
 
 
 def _login(session, config, account, key, cert, chain):

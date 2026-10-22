@@ -18,6 +18,7 @@ from jurisync.connectors.eproc.client import (
     authenticate,
     fetch_process,
     list_notices,
+    list_processes,
     request,
 )
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
@@ -86,6 +87,24 @@ def create_server(keys=None):
         ],
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_notices(queue, **context))
+
+    @server.tool(
+        name="eproc_list_processes",
+        title="List Eproc lawyer processes",
+        description=(
+            "Read the first page of Relação de Processos for the authenticated lawyer, using the portal's "
+            "default filters (TRF6 excludes baixados by default). No CNJ required. Returns case numbers, "
+            "parties, class, subject, last event, dates and claim value. Check filters and pagination.complete; "
+            "this is not an unrestricted court-wide search and does not fetch subsequent pages. "
+            "Use eproc_get_process for details/documents. Requires the report link in the authenticated panel. "
+            f"Portals: {describe(keys)}. Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_processes(
+        portal: Annotated[Portal, Field(description="Portal key from the list above, e.g. 'trf6-1g'.")],
+    ) -> dict[str, Any]:
+        return call(portal, list_processes)
 
     @server.tool(
         name="eproc_get_process",

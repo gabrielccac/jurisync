@@ -163,7 +163,11 @@ class BackgroundFillTests(unittest.TestCase):
             run_dir.mkdir()
             run_dir.joinpath("payload.json").write_text(json.dumps(PAYLOAD))
             env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}
-            with mock.patch.dict(os.environ, env), mock.patch.object(server.filing, "run_stage", slow_run_stage):
+            with (
+                mock.patch.dict(os.environ, env),
+                mock.patch.object(server.filing, "run_stage", slow_run_stage),
+                mock.patch.object(server, "sessions", mock.MagicMock()),  # the job borrows a pooled session
+            ):
                 first = server._start_fill("run1", "create-fill")
                 started.wait(5)
                 again = server._start_fill("run1", "create-fill")

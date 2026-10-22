@@ -71,29 +71,34 @@ def parse_panel(html, base_url):
 
 def _process_row(row, base_url):
     cells = row.find_all("td", recursive=False)
-    if len(cells) < 8:
+    headers = row.find_parent("table").find_all("th")
+    expired = len(cells) == 7 and bool(headers) and "conferido" in text(headers[-1]).casefold()
+    if len(cells) < 8 and not expired:
         return None
-    link = cells[1].select_one('a[href*="acao=processo_selecionar"]')
+    # Expired-deadline rows omit the checkbox and deadline-start columns.
+    offset = 0 if expired else 1
+    process_cell = cells[offset]
+    link = process_cell.select_one('a[href*="acao=processo_selecionar"]')
     if not link:
         return None
     parties = []
-    for part in cells[1].select("[data-parte]"):
+    for part in process_cell.select("[data-parte]"):
         name = text(part)
         if name and name not in {p["name"] for p in parties}:
             parties.append({"role": part.get("data-parte", "").strip(), "name": name})
-    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(cells[1]), re.I)
+    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
     return {
         "id": (row.select_one("input.infraCheckbox[value]") or {}).get("value"),
         "number": text(link),
         "url": _href(link.get("href"), base_url),
         "court": court.group(1) if court else "",
         "parties": parties,
-        "caseClass": text(cells[2]),
-        "subject": text(cells[3]),
-        "deadlineEvent": text(cells[4]),
-        "requestedAt": text(cells[5]),
-        "deadlineStart": text(cells[6]),
-        "deadlineEnd": text(cells[7]),
+        "caseClass": text(cells[offset + 1]),
+        "subject": text(cells[offset + 2]),
+        "deadlineEvent": text(cells[offset + 3]),
+        "requestedAt": text(cells[offset + 4]),
+        "deadlineStart": "" if expired else text(cells[6]),
+        "deadlineEnd": text(cells[5] if expired else cells[7]),
         "caseClassCode": row.get("data-classe"),
         "competence": row.get("data-competencia"),
     }
@@ -114,22 +119,84 @@ def parse_process_list_page(html, base_url):
     """Return list items with pagination evidence from the returned form."""
     items = parse_process_list(html, base_url)
     soup = BeautifulSoup(html, "html.parser")
+    return {"items": items, "pagination": _list_pagination(soup, items), "diagnostics": []}
+
+
+def _list_pagination(soup, items):
     values = {node.get("name"): node.get("value", "") for node in soup.select("input[name]")}
     try:
         total_items = int(values["hdnInfraNroItens"])
     except (KeyError, TypeError, ValueError):
+        total_items = None
+    # Some queues leave the selection counter at zero but show the actual total in the caption.
+    count = re.search(r"\((\d+)\s+registros?\)", text(soup.select_one("table.infraTable caption")), re.I)
+    if count:
+        total_items = int(count[1])
+    if total_items is not None and total_items < len(items):
         total_items = None
     try:
         page = int(values.get("hdnInfraPaginaAtual", "0"))
     except (TypeError, ValueError):
         page = None
     return {
+        "page": page,
+        "totalItems": total_items,
+        "itemCount": len(items),
+        "complete": total_items is not None and len(items) >= total_items,
+    }
+
+
+def parse_lawyer_process_report(html, base_url):
+    """Parse Relação de Processos, whose columns differ from the notice queues."""
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.select_one("table.infraTable")
+    headers = [text(node) for node in table.select("th")] if table else []
+    expected = [
+        "Número Processo",
+        "Classe",
+        "Autores Principais",
+        "Réu(s)",
+        "Localidade Judicial",
+        "Assunto",
+        "Último Evento",
+        "Data/Hora Ult. Evento",
+        "Data/Hora Autuação",
+        "Valor da Causa",
+    ]
+    if headers != ["", *expected]:
+        return {"items": [], "pagination": {}, "diagnostics": ["unsupported_process_report_layout"]}
+    items = []
+    for row in table.select("tr.infraTrClara, tr.infraTrEscura"):
+        cells = row.find_all("td", recursive=False)
+        link = cells[1].select_one('a[href*="acao=processo_selecionar"]') if len(cells) == 11 else None
+        if not link or not _PROCESS_NUMBER.fullmatch(text(link)):
+            return {"items": [], "pagination": {}, "diagnostics": ["invalid_process_report_row"]}
+        items.append(
+            {
+                "number": text(link),
+                "url": _href(link.get("href"), base_url),
+                "court": text(cells[1]).removeprefix(text(link)).strip(),
+                "caseClass": text(cells[2]),
+                "parties": [
+                    {"role": role, "name": name}
+                    for index, role in ((3, "AUTOR"), (4, "REU"))
+                    for name in cells[index].stripped_strings
+                ],
+                "location": text(cells[5]),
+                "subject": text(cells[6]),
+                "lastEvent": text(cells[7]),
+                "lastEventAt": text(cells[8]),
+                "filedAt": text(cells[9]),
+                "claimValue": text(cells[10]),
+            }
+        )
+    closed = soup.select_one('input[name="chkMostrarBaixados"]')
+    return {
         "items": items,
-        "pagination": {
-            "page": page,
-            "totalItems": total_items,
-            "itemCount": len(items),
-            "complete": total_items is not None and len(items) >= total_items,
+        "pagination": _list_pagination(soup, items),
+        "filters": {
+            "includeClosed": closed.has_attr("checked") if closed else None,
+            "status": text(soup.select_one('select[name="selStatusProcesso"] option[selected]')) or None,
         },
         "diagnostics": [],
     }

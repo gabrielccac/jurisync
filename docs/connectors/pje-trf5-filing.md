@@ -197,6 +197,33 @@ draft `4167920`, including the documents. A full `create-fill` run from an
 empty new draft through documents has not yet been exercised in one invocation.
 The final protocol request and its signing or result flow have not been mapped.
 
+## When PJe is slow or a run stops halfway
+
+PJe times out, answers a postback with a partial page, or drops the login. The draft client is built so a stopped run
+can be continued from PJe's own state instead of started over.
+
+- **Reads are retried.** A GET, and the postback that reads the document list, are repeated after 2 s and 5 s when they
+  time out, the connection drops or PJe answers 5xx or an error page (`filing/retry.py`). A write postback is never
+  repeated blindly.
+- **Documents are reconciled in rounds** (`add_supporting_documents`). Each round compares the draft's list with the
+  payload (`documents_diff`), uploads what is missing in one batch, and reads the list again, up to 3 rounds. A row that
+  fails costs only that row: the next round sends it again. The type select and its options are read from the
+  registration answer, which holds every row; the answers to the row actions are partial pages and are used only for
+  the ViewState and the row's own links. A document on the draft with another type, or twice, is not something a rerun
+  can fix: the run stops with `DocumentsNeedReview`, naming each one and what PJe has.
+- **Each document has a state** in the checkpoint (`documentStates`: `verified`, `missing`, `wrongType`, `duplicate`,
+  with the attempts made and the last row error).
+- **`pje_draft_status` with `checkPje=true` shows the draft, not just a verdict**: `onDraft` (name and type as PJe lists
+  them), `ok`, `missing`, `wrongType` (expected and found), `duplicates` and `unexpected`. `verified` needs `missing`,
+  `wrongType` and `duplicates` to be empty (`unexpected` is only reported). `next` says what to do: `resume`, `needsHuman: ...` or nothing.
+- **Continue with `resume`**, not `create-fill` (which would create a second draft). It runs `fill` in the background on
+  the same draft: finished phases are skipped by their fingerprint, and the documents phase uploads only what PJe's list
+  still lacks. The single-stage calls (`documents`, `characteristics`, ...) run inside the tool call, which can expire
+  while the portal is slow.
+- **Background fills borrow the server's pooled login** instead of logging in again, and a certificate login that stops
+  short is repeated once after the TOTP window changes. A start that failed before it reached the checkpoint appears in
+  the status as `lastStartError`.
+
 ## Historical document types in Minhas petições
 
 The authenticated **Painel do Advogado** is

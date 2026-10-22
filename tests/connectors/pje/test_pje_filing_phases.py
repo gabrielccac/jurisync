@@ -46,7 +46,7 @@ class Recorder(DraftClient):
     def save_characteristics(self, draft_url, characteristics):
         return self._answer("characteristics")
 
-    def add_documents(self, draft_url, documents, timeline=None):
+    def add_documents(self, draft_url, documents, timeline=None, progress=None):
         return self._answer("documents")
 
     def _pending_row(self, draft_id, author_name):
@@ -174,7 +174,7 @@ class DocumentBatchTests(unittest.TestCase):
 
         client.review_documents = review
         client.add_main_document = lambda url, doc, existing=None: {"alreadyAdded": "main" not in uploaded}
-        client._upload_batch = lambda url, items, timeline: batches.append([Path(i["path"]).name for i in items])
+        client._upload_batch = lambda url, items, timeline: batches.append([Path(i["path"]).name for i in items]) or []
         return client, reads, batches
 
     def test_everything_present_costs_one_read_and_no_batch(self):
@@ -235,7 +235,7 @@ class DocumentBatchTests(unittest.TestCase):
             self.assertTrue(result["alreadyAdded"])
             self.assertEqual((batches, len(reads)), ([], 1))
             wrong = {**item, "type": "Laudo Médico"}
-            with self.assertRaisesRegex(RuntimeError, "different document type"):
+            with self.assertRaisesRegex(RuntimeError, "need review in PJe"):
                 client.add_supporting_document("url", wrong)
 
     def test_row_name_pairs_each_type_select_with_its_file(self):

@@ -63,7 +63,12 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    regenerate `payload.json` with `finalize --review <run-directory>/review.json
    --facts <facts.json>` rather than editing it by hand. Resume with the
    targeted `pje_draft_write` stage (`characteristics`, then `documents`, for
-   a characteristics failure); do not repeat `create` or `create-fill`.
+   a characteristics failure); do not repeat `create` or `create-fill`. After a
+   failed or interrupted run call `pje_draft_write` with `stage: resume`: it
+   continues the same draft in the background and uploads only the documents
+   PJe's list still lacks. Read `pje_draft_status` with `checkPje: true`: its
+   `onDraft`, `missing` and `wrongType` lists show what is really in the draft
+   and `next` says whether to resume or fix by hand.
 5. Call `pje_draft_inspect` with `stage: pending` to confirm the draft appears
    in **Não Protocolados**. Return the draft ID/URL and report which fields and
    PDFs were actually saved. Have the user review the draft in PJe before any

@@ -65,11 +65,12 @@ def resolve_portal(item):
     """Which portal owns this case: link host first, CNJ segments fallback."""
     link = item.get("link") or ""
     try:
-        host = urllib.parse.urlsplit(link).hostname or ""
+        parts = urllib.parse.urlsplit(link)
+        host, path = parts.hostname or "", parts.path
     except ValueError:
-        host = ""
+        host, path = "", ""
     if host:
-        portal = portals.for_host(host)
+        portal = portals.for_host(host, path)
         if portal:
             return _resolved(portal, f"link host {host}", host)
         if host.endswith(".jus.br"):

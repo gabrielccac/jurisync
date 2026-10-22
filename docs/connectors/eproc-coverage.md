@@ -6,20 +6,39 @@ connector `src/jurisync/connectors/eproc/` (read-only).
 
 ## Cobertura atual
 
-- Tools: `eproc_list_notices` (filas: `open_deadlines`, `pending`) e
+- Tools: `eproc_list_notices` (filas listadas em `QUEUE_KINDS`),
+  `eproc_list_processes` (Relação de Processos do advogado) e
   `eproc_get_process` (eventos + documentos, até 5 docs, `save` opcional).
 - Ações no allowlist (`READ_ACTIONS`/`AJAX_ACTIONS`): as 2 filas + `painel_adv_listar`,
   `processo_pesquisa_rapida`, `processo_selecionar`, `processo_consulta_listar`,
+  `relatorio_processo_procurador_listar`,
   `acessar_documento(_implementacao)`; ajax: `montar_tabela_eventos_filtrados`,
   `retornar_citacao_intimacao_estado`.
 - Login: SSO Keycloak via browser headless (SeleniumBase) + TOTP.
 
-## O gap (causa raiz)
+## Relação de Processos (implementado em 2026-10-21)
 
-`parse_panel()` (parsers.py) só extrai **2 links de fila** + pesquisa rápida + endpoint de
-estado. Todo o resto que o painel anuncia (~65 ações) é descartado, e `require_route` é
-allowlist rígida (qualquer outra `acao` → erro). É recorte deliberado — ampliar exige
-descobrir as ações + parsers + allowlist.
+Chamada MCP: `eproc_list_processes({"portal": "trf6-1g"})`.
+CLI: `python -m jurisync.connectors.eproc.client processes --portal trf6-1g`.
+
+Usa a sessão existente e o link assinado anunciado pelo painel, com um GET ao relatório.
+Retorna número CNJ, juízo, classe, partes, localidade, assunto, último evento e sua data,
+autuação e valor da causa. Os números podem ser usados em `eproc_get_process` para
+buscar movimentos e textos dos documentos.
+
+O escopo é o relatório do advogado autenticado, com os filtros padrão do portal,
+não uma busca irrestrita de todos os processos do tribunal. No TRF6 observado:
+situação Todos e baixados excluídos. `filters` informa esses valores quando disponíveis.
+Lê somente a página retornada; consultar `pagination.complete` e `totalItems` antes de
+considerar a lista completa. Não percorre páginas nem altera filtros automaticamente.
+
+O parser dedicado foi conferido com a captura de sete processos do TRF6 1G; outros
+portais dependem do mesmo layout e do link no painel. Ausência do link, layout
+desconhecido, sessão expirada e acesso negado são erros, não listas vazias confirmadas.
+Hashes e links assinados não são expostos no resultado. A suíte Eproc contém 45 testes.
+
+`parse_panel()` descobre as ações anunciadas; `require_route` permite somente as rotas
+mapeadas. Novas telas continuam exigindo parser e inclusão explícita no allowlist.
 
 ## Features planejadas
 
@@ -50,7 +69,7 @@ descobrir as ações + parsers + allowlist.
 
 ### F. Relatórios / busca de processos
 - `relatorio_processo_procurador_listar` — "Relação de Processos" (Número, Classe, Autores,
-  Réus, Localidade, Assunto, Último Evento, Datas, Valor da Causa)
+  Réus, Localidade, Assunto, Último Evento, Datas, Valor da Causa): implementado acima.
 - `processo_consultar` — "Consulta Processual" (filtros: `numNrProcesso`, `strNomeParte`,
   datas, apenso, mostrar baixados) + export Excel (`hdnExcel`)
 

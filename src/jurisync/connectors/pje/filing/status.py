@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from jurisync.connectors.pje.filing.checkpoint import phase_fingerprints, pid_alive
+from jurisync.connectors.pje.filing.documents import documents_diff
 
 LEGACY_COMPLETE = {"documents_complete", "characteristics_complete", "parties_complete"}
 
@@ -43,6 +44,7 @@ def run_status(checkpoint_path, payload=None, client=None):
         "updatedAt": checkpoint.get("updatedAt"),
         "error": checkpoint.get("error"),
         "pid": checkpoint.get("pid"),
+        **({"documentStates": checkpoint["documentStates"]} if checkpoint.get("documentStates") else {}),
         "recentSteps": [
             {key: step.get(key) for key in ("step", "document", "status", "seconds", "requests", "startedAt")}
             for step in current[-4:]
@@ -65,7 +67,22 @@ def run_status(checkpoint_path, payload=None, client=None):
             result["conclusion"] = "incomplete"
     else:
         result["conclusion"] = "not_checked"
+    result["next"] = next_step(state, result)
     return result
+
+
+def next_step(state, result):
+    """What to do next, from the run state and the PJe check: resume, review by hand, or nothing."""
+    problems = (result.get("pje") or {}).get("documents", {})
+    if problems.get("wrongType") or problems.get("duplicates"):
+        return "needsHuman: fix the listed documents in PJe, or delete the draft and prepare a new run"
+    if result.get("conclusion") == "verified":
+        return None
+    if state == "running":
+        return "wait: the fill is still running"
+    if state in ("failed", "interrupted", "unknown") or result.get("conclusion") == "incomplete":
+        return "resume: call pje_draft_write with stage resume"
+    return None
 
 
 def _check_pje(client, checkpoint, payload):
@@ -81,7 +98,16 @@ def _check_pje(client, checkpoint, payload):
         check["verified"] = False
         return check
     listed = client.review_documents(row["draftUrl"]) if expected else []
-    missing = client._missing_documents(listed, expected) if expected else []
-    check["documents"] = {"expected": len(expected), "listed": len(listed), "missing": missing}
-    check["verified"] = not missing
+    diff = documents_diff(listed, expected)
+    check["documents"] = {
+        "expected": len(expected),
+        "listed": len(listed),
+        "missing": diff["missing"],
+        "wrongType": diff["wrongType"],
+        "duplicates": diff["duplicates"],
+        "unexpected": diff["unexpected"],
+        "ok": diff["ok"],
+        "onDraft": [{"name": item["name"], "type": item["type"]} for item in listed],
+    }
+    check["verified"] = diff["verified"]
     return check

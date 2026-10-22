@@ -41,6 +41,38 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         search.assert_not_called()
 
+    async def test_accepts_optional_fields_sent_as_null(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        nulls = dict.fromkeys(
+            ["numeroOab", "ufOab", "nomeAdvogado", "nomeParte", "texto", "numeroProcesso", "meio", "tribunal"]
+        )
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {**nulls, "nomeAdvogado": "ELISANDRA BECKER", "inicio": "2026-10-20", "fim": "2026-10-20"},
+            )
+        self.assertFalse(result.is_error)
+        self.assertEqual(search.call_args.args[0]["nomeAdvogado"], "ELISANDRA BECKER")
+
+    async def test_oab_number_sent_as_json_number_is_taken_as_text(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroOab": 61216, "ufOab": "RS", "tribunal": None, "inicio": "2026-10-20", "fim": "2026-10-20"},
+            )
+        self.assertFalse(result.is_error)
+        self.assertEqual(search.call_args.args[0]["numeroOab"], "61216")
+
+    async def test_formatted_process_number_is_still_refused(self):
+        with mock.patch.object(djen_server, "search_page") as search:
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroProcesso": "5004320-76.2026.4.04.7104", "inicio": "2026-10-20", "fim": "2026-10-20"},
+            )
+        self.assertTrue(result.is_error)
+        search.assert_not_called()
+
     async def test_search_by_advogado_name_passes_the_payload(self):
         payload = {"status": "success", "count": 0, "items": []}
         with mock.patch.object(djen_server, "search_page", return_value=payload) as search:

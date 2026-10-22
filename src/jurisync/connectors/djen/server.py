@@ -20,6 +20,7 @@ REQUEST_ERRORS = (DjenError, ValueError, urllib.error.URLError, TimeoutError)
 server = MCPServer("djen", version="1.0.0")
 
 # Clients send digit-only strings such as '61216' as JSON numbers; take them back as text.
+# The `pattern` rules sit on the inner `str` so pydantic >= 2.14 never applies them to None.
 DIGITS_AS_TEXT = BeforeValidator(lambda value: str(value) if type(value) is int else value)
 
 
@@ -40,15 +41,14 @@ def search_communications(
         date, Field(description="End of the window, ISO YYYY-MM-DD, inclusive. Same day as inicio for one day.")
     ],
     numeroOab: Annotated[
-        str | None,
-        DIGITS_AS_TEXT,
+        Annotated[str, DIGITS_AS_TEXT, Field(pattern=r"(?i)^\d+(?:-[ABENOS])?$")] | None,
         Field(
-            pattern=r"(?i)^\d+(?:-[ABENOS])?$",
             description="OAB number without the UF, e.g. '14663' (supplementary registrations: '14663-A'). Requires ufOab.",
         ),
     ] = None,
     ufOab: Annotated[
-        str | None, Field(pattern=r"(?i)^[A-Z]{2}$", description="Two-letter UF of the OAB, e.g. 'PB'.")
+        Annotated[str, Field(pattern=r"(?i)^[A-Z]{2}$")] | None,
+        Field(description="Two-letter UF of the OAB, e.g. 'PB'."),
     ] = None,
     nomeAdvogado: Annotated[
         str | None,
@@ -66,10 +66,8 @@ def search_communications(
         Field(min_length=3, max_length=200, description="Free text found in the publication, 3 to 200 characters."),
     ] = None,
     numeroProcesso: Annotated[
-        str | None,
-        DIGITS_AS_TEXT,
+        Annotated[str, DIGITS_AS_TEXT, Field(pattern=r"^\d{7,25}$")] | None,
         Field(
-            pattern=r"^\d{7,25}$",
             description="Process number with DIGITS ONLY, no dots or dashes: '50043207620264047104' for 5004320-76.2026.4.04.7104. A formatted number is refused.",
         ),
     ] = None,
@@ -78,9 +76,8 @@ def search_communications(
         Field(description="Medium: 'D' = Diário (Diário de Justiça), 'E' = eletrônico. Other values are refused."),
     ] = None,
     tribunal: Annotated[
-        str | None,
+        Annotated[str, Field(pattern=r"(?i)^[A-Z0-9]+$")] | None,
         Field(
-            pattern=r"(?i)^[A-Z0-9]+$",
             description="Court acronym, letters and digits, e.g. 'TRF5', 'TJSP'. Leave empty for all courts.",
         ),
     ] = None,

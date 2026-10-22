@@ -13,6 +13,7 @@ dependencies = [
   "curl_cffi==0.16.2",
   "mcp==2.3.0",
   "pdf-inspector==1.25.2",
+  "pydantic>=2.13.5,<2.14",
   "Pillow==12.3.0",
   "playwright==1.63.0",
   "pyotp==2.10.0",

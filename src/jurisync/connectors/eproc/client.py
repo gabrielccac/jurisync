@@ -21,6 +21,7 @@ from jurisync.connectors.eproc.certificate import cert_login
 from jurisync.connectors.eproc.documents import read_selected_documents
 from jurisync.connectors.eproc.parsers import (
     parse_event_response,
+    parse_lawyer_process_report,
     parse_panel,
     parse_process_detail,
     parse_process_list_page,
@@ -44,7 +45,9 @@ QUEUE_KINDS = {
     "hearing_notice": "intimacao_de_pauta_listar",
 }
 QUEUE_ACTIONS = set(QUEUE_KINDS.values())
+PROCESS_REPORT_ACTION = "relatorio_processo_procurador_listar"
 READ_ACTIONS = QUEUE_ACTIONS | {
+    PROCESS_REPORT_ACTION,
     "painel_adv_listar",
     "processo_pesquisa_rapida",
     "processo_selecionar",
@@ -101,6 +104,10 @@ def classify_body(body):
         )
     ):
         return "session_expired"
+    # Subject options can contain "não autorizado" without indicating an access failure.
+    for node in soup.select("script, style, option"):
+        node.decompose()
+    lowered = soup.get_text(" ", strip=True).casefold()
     if any(
         token in lowered
         for token in (
@@ -258,6 +265,41 @@ def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal
             "pagination": _redact(parsed.get("pagination", {})),
             "diagnostics": [],
         }
+    finally:
+        if owned:
+            session.close()
+
+
+def list_processes(*, session=None, panel_html=None, panel_url=None, portal):
+    """Read the first lawyer-report page with the portal's default filters."""
+    portal = portals.eproc(portal).key
+    owned = session is None
+    if owned:
+        session, panel_html, panel_url = authenticate(portal)
+    try:
+        base_url = portals.eproc(portal).base_url
+        panel = parse_panel(panel_html, base_url)
+        endpoint = panel["actions"].get(PROCESS_REPORT_ACTION)
+        if not endpoint:
+            raise RuntimeError("Authenticated panel did not expose Relação de Processos")
+        endpoint = urljoin(panel_url or base_url, endpoint)
+        require_route(endpoint, {PROCESS_REPORT_ACTION}, portal=portal)
+        response, body = request(session, "GET", endpoint, portal=portal)
+        error = _response_error(response, body)
+        parsed = (
+            {"items": [], "pagination": {}, "diagnostics": [error]}
+            if error
+            else parse_lawyer_process_report(body, base_url)
+        )
+        return _redact(
+            {
+                "success": not parsed["diagnostics"],
+                "source": "eproc",
+                "portal": portal,
+                "scope": "lawyer_processes",
+                **parsed,
+            }
+        )
     finally:
         if owned:
             session.close()
@@ -471,6 +513,8 @@ def main():
     queue = subparsers.add_parser("queue")
     queue.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     queue.add_argument("--queue", choices=("open_deadlines", "pending"), required=True)
+    processes = subparsers.add_parser("processes", help="List the first Relação de Processos page with default filters")
+    processes.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     process = subparsers.add_parser("process")
     process.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     process.add_argument("--process-number", required=True)
@@ -480,11 +524,12 @@ def main():
     enable_request_logging()
     load_env_file(".env")
     with redirect_stdout(sys.stderr):
-        result = (
-            list_notices(args.queue, portal=args.portal)
-            if args.command == "queue"
-            else fetch_process(args.process_number, args.scope, args.document_id, portal=args.portal)
-        )
+        if args.command == "queue":
+            result = list_notices(args.queue, portal=args.portal)
+        elif args.command == "processes":
+            result = list_processes(portal=args.portal)
+        else:
+            result = fetch_process(args.process_number, args.scope, args.document_id, portal=args.portal)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result.get("success"):
         raise SystemExit(1)

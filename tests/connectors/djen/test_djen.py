@@ -286,6 +286,17 @@ class DjenChecks(unittest.TestCase):
         )
         self.assertEqual((stj["portal"], stj["wired"]), ("stj", False))
 
+    def test_resolve_portal_tells_the_two_tjpe_instances_apart_by_the_link_path(self):
+        base = "https://pje.cloud.tjpe.jus.br"
+        for path, expected in (
+            ("/1g/Processo/ConsultaDocumento/listView.seam?x=1", "tjpe-1g"),
+            ("/2g/Processo/x.seam", "tjpe-2g"),
+        ):
+            resolved = documents.resolve_portal({"link": base + path, "numero_processo": "00012717420268170001"})
+            self.assertEqual((resolved["system"], resolved["portal"], resolved["wired"]), ("pje", expected, True))
+        no_link = documents.resolve_portal({"link": "", "numero_processo": "00012717420268170001"})
+        self.assertEqual(no_link["portal"], "tjpe-1g/tjpe-2g")
+
     def test_resolve_portal_cnj_fallback(self):
         trf5 = documents.resolve_portal({"link": "", "numero_processo": "00035279020264058303"})
         self.assertEqual((trf5["system"], trf5["portal"], trf5["wired"]), ("pje", "trf5-1g/trf5-2g", True))

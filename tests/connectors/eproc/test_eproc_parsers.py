@@ -80,6 +80,32 @@ class EprocParserTests(unittest.TestCase):
         self.assertEqual(parsed["pagination"]["totalPages"], 3)
         self.assertFalse(parsed["pagination"]["complete"])
 
+    def test_expired_queue_uses_seven_columns_and_caption_total(self):
+        caption = "<caption>Lista de Citações e Intimações com Decurso de Prazo (1 registro):</caption>"
+        html = f"""<input name="hdnInfraNroItens" value="0"><table class="infraTable">{caption}
+          <tr><th>Processo</th><th>Classe</th><th>Assunto</th><th>Evento e Prazo</th>
+          <th>Data envio requisição</th><th>Final Prazo</th><th>Conferido ?</th></tr>
+          <tr class="infraTrClara"><td><a href="controlador.php?acao=processo_selecionar">0000001-23.2026.4.06.3800</a>
+          Juízo: MGBHZCIV21T<span data-parte="AUTOR">Parte de teste</span></td><td>Classe</td><td>Assunto</td>
+          <td>Intimação — 10 dias</td><td>21/09/2026 17:09:03</td><td>07/10/2026 23:59:59</td>
+          <td><img alt="Conferir"></td></tr></table>"""
+        result = parse_process_list_page(html, "https://eproc1g.trf6.jus.br/eproc/")
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual(
+            (item["caseClass"], item["subject"], item["deadlineEvent"]), ("Classe", "Assunto", "Intimação — 10 dias")
+        )
+        self.assertEqual(
+            (item["requestedAt"], item["deadlineStart"], item["deadlineEnd"]),
+            ("21/09/2026 17:09:03", "", "07/10/2026 23:59:59"),
+        )
+        self.assertEqual(item["parties"], [{"role": "AUTOR", "name": "Parte de teste"}])
+        self.assertEqual(result["pagination"]["totalItems"], 1)
+        self.assertTrue(result["pagination"]["complete"])
+        unknown = parse_process_list_page(html.replace(caption, ""), BASE)
+        self.assertIsNone(unknown["pagination"]["totalItems"])
+        self.assertFalse(unknown["pagination"]["complete"])
+
 
 if __name__ == "__main__":
     unittest.main()
