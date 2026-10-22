@@ -25,9 +25,32 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_2G_2FA_DATA|PJE_2G_2FA_QR"]
 
+# TRF5's Turma Regional de Uniformização (pjett.trf5.jus.br): same SSO, certificate and authenticator as the TRF5 above.
+[trf5-tru]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2FA_DATA|PJE_TRF5_2FA_QR"]
+
+# TRF3 1st and 2nd instance (2nd = Turmas Recursais de SP), validated on 2026-10-22 with the same A1 certificate.
+[trf3-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF3_1G_2FA_DATA|PJE_TRF3_1G_2FA_QR"]
+
+[trf3-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF3_2G_2FA_DATA|PJE_TRF3_2G_2FA_QR"]
+
+# TJPE (state court) PJe, 1st and 2nd instance on pje.cloud.tjpe.jus.br: the same SSO, certificate and authenticator.
+[tjpe-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPE_1G_2FA_DATA|TJPE_1G_2FA_QR"]
+
+[tjpe-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPE_2G_2FA_DATA|TJPE_2G_2FA_QR"]
+
 # Variables that belong to no portal. ADVBOX_DEVICE_ID is what lets the same login work on any machine.
 [env]
 secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]
 # Pinned values: Victor's ADVBOX server may create and edit tasks (writes are off by default elsewhere), and his
-# TRF1 portals log in with the A1 certificate instead of a password.
-set = { ADVBOX_ALLOW_WRITES = "true", PJE_1G_CERT = "true", PJE_2G_CERT = "true" }
+# TRF1, TRF3 and TJPE portals log in with the A1 certificate instead of a password.
+set = { ADVBOX_ALLOW_WRITES = "true", PJE_1G_CERT = "true", PJE_2G_CERT = "true", TJPE_1G_CERT = "true", TJPE_2G_CERT = "true", PJE_TRF3_1G_CERT = "true", PJE_TRF3_2G_CERT = "true" }

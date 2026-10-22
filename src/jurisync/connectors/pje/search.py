@@ -4,7 +4,9 @@ The flow is the same for 1st and 2nd instance (and for TRF1, TRF5 and TJAP): ope
 consulta page, submit the CNJ number, select the matching row, open the detail
 page with the returned CA token, then read bounded timeline pages. Live pages
 on trf1-1g, trf1-2g, trf5-1g and tjap-1g expose the same controls; the only
-per-instance difference is the detail URL suffix below.
+per-instance difference is the detail URL suffix below. TJPE (tjpe-1g/2g) differs in one control: its
+Pesquisar button only calls the JS function submeterPesquisa(), so the action to post is the one that function
+declares (parsers.submit_function_search_action).
 """
 
 import re
@@ -28,6 +30,7 @@ from jurisync.connectors.pje.parsers import (
     parse_timeline,
     recaptcha_search_action,
     response_html,
+    submit_function_search_action,
 )
 
 MAX_TIMELINE_PAGES = 5
@@ -61,6 +64,8 @@ def discover_controls(html):
     search = [item for item in controls if "pesquisar" in item["label"]]
     if any("executarReCaptcha()" in item["element"].get("onclick", "") for item in search):
         search_ids = {recaptcha_search_action(html)}
+    elif any(item["element"].get("onclick", "").lstrip().startswith("return pesquisar()") for item in search):
+        search_ids = {submit_function_search_action(html)}  # TJPE: the button calls submeterPesquisa()
     else:
         search_refs = {ref for item in search for ref in item["ajax_ids"]}
         search_ids = search_refs or {item["id"] for item in search if item["id"]}

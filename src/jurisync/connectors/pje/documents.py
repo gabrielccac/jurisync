@@ -149,7 +149,10 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             )
             item.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
             if response.status_code != 200:
-                item["extractionStatus"] = "http_error"
+                # The first-instance copy of a second-instance document is not served here: read the visible one.
+                item["extractionStatus"] = (
+                    "first_instance_copy" if document.get("first_instance_copy") else "http_error"
+                )
             else:
                 content = bytearray()
                 for chunk in response.iter_content():

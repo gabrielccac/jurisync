@@ -296,3 +296,30 @@ uv run python -m jurisync.customers victor
 
 A new customer is a new directory with its own `portals.toml` and `.env`; a new portal
 is one row in `src/jurisync/portals.py` plus one section per customer that uses it.
+
+### PJe portals on the A1 certificate (validated 2026-10-20 and 2026-10-22)
+
+| Portal | Key | Login | Read |
+| --- | --- | --- | --- |
+| TRF5 1º grau/JEF | `trf5-1g` | A1 + authenticator | counters, inbox, Push, process, documents, expediente act |
+| TRF5 2º grau / Turmas Recursais | `trf5-2g` | A1 + authenticator | same as `trf5-1g` |
+| TRF5 Turma Regional de Uniformização | `trf5-tru` | A1 + authenticator (`PJE_TRF5_2FA_DATA`) | counters, inbox, process, documents |
+| TRF1 1º and 2º grau | `trf1-1g`, `trf1-2g` | A1 + authenticator (`PJE_1G_CERT`, `PJE_2G_CERT` pinned) | counters, inbox, process, documents |
+| TRF3 1º and 2º grau (Turmas Recursais de SP) | `trf3-1g`, `trf3-2g` | A1 + authenticator (`PJE_TRF3_1G_CERT`, `PJE_TRF3_2G_CERT` pinned) | counters, inbox, process, documents |
+| TJPE 1º and 2º grau | `tjpe-1g`, `tjpe-2g` | A1 + authenticator (`TJPE_1G_CERT`, `TJPE_2G_CERT` pinned) | counters, inbox, Push, process, documents, expediente act |
+
+The authenticator export is the same for every portal but each portal reads it from its own prefix
+(`PJE_TRF5_2FA_DATA`, `PJE_1G_2FA_DATA`, `PJE_2G_2FA_DATA`, `PJE_TRF3_1G_2FA_DATA`, `PJE_TRF3_2G_2FA_DATA`,
+`TJPE_1G_2FA_DATA`, `TJPE_2G_2FA_DATA`). The TRU reads the TRF5 one.
+
+On a 2nd-instance process the inventory also lists the first instance's documents (`ID de origem`,
+`visible_in_timeline: false`, `first_instance_copy: true`); they do not open there and come back as
+`extractionStatus: first_instance_copy`. Read the visible ones.
+
+TJPE serves both instances on `pje.cloud.tjpe.jus.br`, told apart by the path (`/1g/`, `/2g/`; DJEN's link and
+`portals.for_host(host, path)` use it). Its consulta page differs in one control: the **Pesquisar** button only
+calls the JS function `submeterPesquisa()`, so the search action to post is the one that function declares
+(`fPP:j_id479` today), not the button's id. `search.discover_controls` reads it from the page; with the button's
+id the search returns no rows. If the page ever marks reCAPTCHA as active (`captchaAtivo = true`) the search stops
+with an error and the process has to be opened in the browser. Most documents are scanned PDFs
+(`extractionStatus=ocr_needed`), as on the other portals.

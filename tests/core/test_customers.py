@@ -46,6 +46,33 @@ def test_customer_env_loads_before_shared_and_env_wins(root, monkeypatch, tmp_pa
         monkeypatch.delenv(name)
 
 
+def test_pinned_values_beat_the_shared_file_but_not_the_environment(root, monkeypatch, tmp_path):
+    (root / "acme" / "portals.toml").write_text(
+        '[trf1-1g]\nmethod = "certificate_totp"\nsecrets = ["ACME_USER"]\n'
+        '[env]\nset = { ACME_CERT = "true", ACME_KEEP = "pinned" }\n'
+    )
+    shared = tmp_path / "shared.env"
+    shared.write_text("ACME_CERT=false\nACME_KEEP=shared\n")
+    monkeypatch.setenv("ACME_KEEP", "from-process")
+    monkeypatch.delenv("ACME_CERT", raising=False)
+    load_env_file(shared)
+    assert os.environ["ACME_CERT"] == "true"
+    assert os.environ["ACME_KEEP"] == "from-process"
+    monkeypatch.delenv("ACME_CERT")
+
+
+def test_shared_file_can_name_the_customer(root, monkeypatch, tmp_path):
+    (root / "acme" / ".env").write_text("ACME_USER=from-customer\n")
+    shared = tmp_path / "shared.env"
+    shared.write_text("JURISYNC_CUSTOMER=acme\nACME_USER=from-shared\n")
+    monkeypatch.delenv("JURISYNC_CUSTOMER")
+    load_env_file(shared)
+    assert os.environ["JURISYNC_CUSTOMER"] == "acme"
+    assert os.environ["ACME_USER"] == "from-customer"
+    monkeypatch.delenv("ACME_USER")
+    monkeypatch.delenv("JURISYNC_CUSTOMER")
+
+
 def test_invalid_setup_fails_loudly(root):
     (root / "acme" / "portals.toml").write_text('[trf9-1g]\nmethod = "password_totp"\n')
     with pytest.raises(ValueError, match="portal must be one of"):
@@ -63,7 +90,17 @@ def test_customer_name_cannot_escape_directory(root):
 def test_victor_setup_is_valid():
     monkeypatch_dir = os.environ.pop("JURISYNC_CUSTOMERS_DIR", None)
     try:
-        assert set(customers.load_setup("victor")) == {"trf5-1g", "trf5-2g", "trf1-1g", "trf1-2g"}
+        assert set(customers.load_setup("victor")) == {
+            "trf5-1g",
+            "trf5-2g",
+            "trf5-tru",
+            "trf1-1g",
+            "trf1-2g",
+            "trf3-1g",
+            "trf3-2g",
+            "tjpe-1g",
+            "tjpe-2g",
+        }
     finally:
         if monkeypatch_dir:
             os.environ["JURISYNC_CUSTOMERS_DIR"] = monkeypatch_dir

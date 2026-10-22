@@ -14,6 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
+from jurisync import portals
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
 from jurisync.connectors.pje.filing.checkpoint import run_directory
@@ -25,9 +26,9 @@ from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
 
 Portal = Annotated[
-    Literal["trf1-1g", "trf1-2g", "trf3-1g", "trf5-1g", "trf5-2g", "tjap-1g"],
+    Literal[portals.keys("pje")],
     Field(
-        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf3-1g' (TRF3 1º grau), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'trf5-2g' (TRF5 2º grau, certificate login), 'tjap-1g' (TJAP 1º grau, password login). Any portal can also log in with the A1 certificate (PJE_A1_P12/PJE_A1_PIN) when it opts in with <PREFIX>_CERT=true."
+        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf3-1g' (TRF3 1º grau), 'trf3-2g' (TRF3 2º grau, Turmas Recursais de SP), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'trf5-2g' (TRF5 2º grau, certificate login), 'trf5-tru' (TRF5 Turma Regional de Uniformização, certificate login), 'tjap-1g' (TJAP 1º grau, password login), 'tjpe-1g' and 'tjpe-2g' (TJPE 1º and 2º grau, password login). Any portal can also log in with the A1 certificate (PJE_A1_P12/PJE_A1_PIN) when it opts in with <PREFIX>_CERT=true."
     ),
 ]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
@@ -36,6 +37,7 @@ DraftWriteStage = Literal[
     "create",
     "create-fill",
     "fill",
+    "resume",
     "subject",
     "author",
     "public-bodies",
@@ -231,21 +233,19 @@ def list_inbox(
         str | None, Field(description="CNJ process number with punctuation, runs the inbox search.")
     ] = None,
     expedidoDe: Annotated[
-        str | None,
+        Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
         Field(
-            pattern=r"^\d{4}-\d{2}-\d{2}$",
             description="Start of expedition date, ISO YYYY-MM-DD (e.g. '2026-10-15'). DD/MM/AAAA is refused.",
         ),
     ] = None,
     expedidoAte: Annotated[
-        str | None,
+        Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
         Field(
-            pattern=r"^\d{4}-\d{2}-\d{2}$",
             description="End of expedition date, ISO YYYY-MM-DD. Use the same day as expedidoDe for one day.",
         ),
     ] = None,
     expedienteId: Annotated[
-        str | None, Field(pattern=r"^[0-9]+$", description="Numeric expediente id to find one row.")
+        Annotated[str, Field(pattern=r"^[0-9]+$")] | None, Field(description="Numeric expediente id to find one row.")
     ] = None,
     maxPages: Annotated[
         int, Field(ge=1, le=50, description="Pages of 40 rows to read per inbox, 1 to 50; default 5.")
@@ -284,7 +284,7 @@ def draft_paths(run_id):
     return directory / "payload.json", directory / "checkpoint.json"
 
 
-BACKGROUND_STAGES = frozenset({"create-fill", "fill"})
+BACKGROUND_STAGES = frozenset({"create-fill", "fill", "resume"})
 # Fills take minutes, longer than a tool call may last, so they run in a thread of this server and report through
 # pje_draft_status. A fill that fails before its checkpoint exists can only leave its error here.
 fill_jobs = {}
@@ -294,18 +294,23 @@ fill_errors = {}
 def _fill_job(run_id, stage):
     payload, checkpoint = draft_paths(run_id)
     try:
-        filing.run_stage(stage, payload_path=str(payload), checkpoint_path=str(checkpoint))
+        # The pooled session is reused and refreshed, so a fill and its retries do not log in again each time.
+        with sessions.session("trf5-1g") as session:
+            filing.run_stage(stage, payload_path=str(payload), checkpoint_path=str(checkpoint), session=session)
         fill_errors.pop(run_id, None)
     except BaseException as error:
         fill_errors[run_id] = f"{type(error).__name__}: {str(error)[:300]}"
 
 
-def _start_fill(run_id, stage):
+def _start_fill(run_id, requested):
+    # `resume` is `fill` under the name an agent reaches for after a failure: it continues the run's own draft,
+    # skipping the phases already recorded and sending only the documents PJe's list still lacks.
+    stage = "fill" if requested == "resume" else requested
     if os.environ.get("PJE_ALLOW_DRAFT_WRITES") != "true":
         raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
     running = fill_jobs.get(run_id)
     if running is not None and running.is_alive():
-        return {"runId": run_id, "success": True, "stage": stage, "state": "already-running"}
+        return {"runId": run_id, "success": True, "stage": requested, "state": "already-running"}
     payload, checkpoint = draft_paths(run_id)
     with tool_errors("PJe draft", *ERRORS):
         filing.validate_fill_payload(json.loads(payload.read_text(encoding="utf-8")))
@@ -320,7 +325,7 @@ def _start_fill(run_id, stage):
     return {
         "runId": run_id,
         "success": True,
-        "stage": stage,
+        "stage": requested,
         "state": "started",
         "next": "Call pje_draft_status with this runId to follow progress; it finishes on its own.",
     }
@@ -388,7 +393,7 @@ def search_pending_drafts(
 @server.tool(
     name="pje_draft_write",
     title="Create or fill TRF5 PJe draft",
-    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill and fill run in the background and return at once: follow them with pje_draft_status. Individual stages support recovery and review.",
+    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill, fill and resume run in the background and return at once: follow them with pje_draft_status. After a failed or interrupted run call resume: it continues the same draft from where it stopped and uploads only the documents PJe's list still lacks (never create-fill again). The single-stage calls (documents, characteristics, ...) run inside the tool call, which can expire on a slow portal, so prefer resume. Individual stages support recovery and review.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
@@ -428,6 +433,10 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
     response = _draft_stage("PJe draft status", "status-check" if checkPje else "status", runId)
     if job is not None and job.is_alive() and response["result"]["state"] == "unknown":
         response["result"]["state"] = "running"
+    if runId in fill_errors and not (job is not None and job.is_alive()):
+        # A start that failed before it touched the checkpoint (a login that did not go through) is not in the
+        # checkpoint; without this line the run would still look as if nothing had been tried.
+        response["result"]["lastStartError"] = fill_errors[runId]
     return response
 
 

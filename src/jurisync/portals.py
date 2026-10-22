@@ -38,6 +38,7 @@ class Portal:
     justice: str = "4"  # CNJ "J" segment: "4" federal (default), "8" state courts
     origins: tuple[str, ...] = field(default=())  # CNJ "OOOO" prefixes served by this portal
     wired: bool = True  # False: recognized, but no connector yet
+    guess_by_number: bool = True  # False: never suggested from a process number alone (only a link host picks it)
 
     @property
     def id(self):
@@ -99,11 +100,28 @@ PORTALS = {
         ),
         # TRF3 (SP/MS) serves the same PJe under /pje/; the password flow is the default, the A1 certificate opts in.
         Portal("trf3-1g", "pje", "TRF3", "1g", "pje1g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_1G", region="03"),
+        Portal("trf3-2g", "pje", "TRF3", "2g", "pje2g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_2G", region="03"),
+        # Turma Regional de Uniformização da 5ª Região: its own PJe host, same SSO and A1 certificate. Its cases keep
+        # the JEF number, so only the link host (DJEN) or the panel it appears in points here.
+        Portal(
+            "trf5-tru", "pje", "TRF5", "2g", "pjett.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_TRU",
+            legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False,
+        ),
         # TJAP is a state court (CNJ J=8, TR=03) served by the PDPJ PJe under /1g/; login goes through the
         # same Keycloak SSO as the federal courts (realm "pje", client "pje-tjap-1g").
         Portal(
             "tjap-1g", "pje", "TJAP", "1g", "pje.tjap.jus.br", "/1g/", "password_totp", "TJAP_1G",
             region="03", justice="8",
+        ),
+        # TJPE (CNJ J=8, TR=17) serves both instances on one cloud host, told apart by the path (/1g/, /2g/), with
+        # the same Keycloak SSO (clients "pje-tjpe-1g-cloud" and "pje-tjpe-2g-cloud"). An appeal keeps its number.
+        Portal(
+            "tjpe-1g", "pje", "TJPE", "1g", "pje.cloud.tjpe.jus.br", "/1g/", "password_totp", "TJPE_1G",
+            region="17", justice="8",
+        ),
+        Portal(
+            "tjpe-2g", "pje", "TJPE", "2g", "pje.cloud.tjpe.jus.br", "/2g/", "password_totp", "TJPE_2G",
+            region="17", justice="8",
         ),
         Portal(
             "trf4-1g-sc", "eproc", "TRF4", "1g", "eproc.jfsc.jus.br", "/eprocV2/", "browser_totp", "TRF4_1G_SC",
@@ -158,12 +176,18 @@ def hosts(system):
     return {PORTALS[key].host for key in keys(system)}
 
 
-def for_host(host):
-    """The portal serving this host (or a subdomain of it), if any."""
-    for portal in PORTALS.values():
-        if host == portal.host or host.endswith("." + portal.host):
-            return portal
-    return None
+def for_host(host, path=""):
+    """The portal serving this host (or a subdomain of it), if any.
+
+    Portals that share a host (TJPE's 1G and 2G) are told apart by the application path of the link.
+    """
+    matches = [portal for portal in PORTALS.values() if host == portal.host or host.endswith("." + portal.host)]
+    if len(matches) > 1:
+        path = path or ""
+        for portal in matches:
+            if portal.root != "/" and path.startswith(portal.root):
+                return portal
+    return matches[0] if matches else None
 
 
 def for_process(number):
@@ -172,7 +196,11 @@ def for_process(number):
     if not match:
         return []
     justice, region, origin = match.groups()
-    candidates = [portal for portal in PORTALS.values() if portal.justice == justice and portal.region == region]
+    candidates = [
+        portal
+        for portal in PORTALS.values()
+        if portal.guess_by_number and portal.justice == justice and portal.region == region
+    ]
     by_origin = [portal for portal in candidates if any(origin.startswith(prefix) for prefix in portal.origins)]
     if by_origin:
         return by_origin

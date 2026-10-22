@@ -231,6 +231,24 @@ def recaptcha_search_action(html):
     return actions.pop()
 
 
+def submit_function_search_action(html):
+    """The A4J action behind TJPE's Pesquisar button, which only calls the JS function ``submeterPesquisa``.
+
+    The button's own AJAX call is never reached (its onclick returns first), so the id to post is the one the
+    function declares. A page that already marks reCAPTCHA as active (``captchaAtivo = true``) is refused: the
+    search then waits for a token from the user's browser.
+    """
+    if re.search(r"captchaAtivo\s*=\s*true", html):
+        raise RuntimeError("This PJe asks for reCAPTCHA before searching; open the process in the browser")
+    script = re.search(r"submeterPesquisa\s*=\s*function\s*\([^)]*\)\s*\{(.*?)\};", html, re.S)
+    actions = (
+        set(re.findall(r"similarityGroupingId['\"]\s*:\s*['\"](fPP:[^'\"]+)", script.group(1))) if script else set()
+    )
+    if len(actions) != 1:
+        raise RuntimeError("Could not uniquely discover the PJe submeterPesquisa search action")
+    return actions.pop()
+
+
 def extract_documents(block_html, download_pattern, base_url):
     documents = []
     seen = set()
@@ -298,6 +316,13 @@ def parse_document_inventory(html, timeline, download_pattern, base_url):
         for movement in day.get("movements", [])
         for document in movement.get("documents", [])
     }
+    # A second-instance document titled "... - ID de origem N" points to a copy of document N in the first
+    # instance, which that instance's portal serves but this one does not.
+    origin_ids = {
+        found
+        for document in visible.values()
+        for found in re.findall(r"ID de origem (\d+)", document.get("title") or "")
+    }
     match = re.search(r"var\s+listaIdsDocumentos\s*=\s*\[([^\]]*)\]", html)
     ids = (re.findall(r"\d+", match.group(1)) if match else []) + list(visible)
     result = []
@@ -306,6 +331,8 @@ def parse_document_inventory(html, timeline, download_pattern, base_url):
         if download_pattern:
             item["download_url"] = urljoin(base_url, f"{download_pattern}{doc_id}")
         item["visible_in_timeline"] = doc_id in visible
+        if doc_id in origin_ids:
+            item["first_instance_copy"] = True
         result.append(item)
     return result
 

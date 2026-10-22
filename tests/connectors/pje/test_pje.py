@@ -210,6 +210,16 @@ class PjeChecks(unittest.TestCase):
         html = """<form id="fPP"><script id="fPP:j_id77">executarPesquisaReCaptcha=function(){A4J.AJAX.Submit('fPP',null,{'similarityGroupingId':'fPP:j_id77','parameters':{'fPP:j_id77':'fPP:j_id77'}})};</script><input id="fPP:searchProcessos" value="Pesquisar" onclick="return executarReCaptcha();"></form>"""
         self.assertEqual(search.discover_controls(html)["search"], "fPP:j_id77")
 
+    def test_tjpe_search_action_is_the_submeter_pesquisa_function_not_the_button(self):
+        html = """<form id="fPP"><script>var captchaAtivo = false; function pesquisar(){ submeterPesquisa(); }</script>
+        <input id="fPP:searchProcessos" value="Pesquisar" onclick="return pesquisar();;A4J.AJAX.Submit('fPP',event,{'similarityGroupingId':'fPP:searchProcessos'});return false;">
+        <script id="fPP:j_id479">submeterPesquisa=function(){A4J.AJAX.Submit('fPP',null,{'similarityGroupingId':'fPP:j_id479','parameters':{'fPP:j_id479':'fPP:j_id479'} } )};</script>
+        <script id="fPP:j_id480">refreshCaptchaAtivo=function(){A4J.AJAX.Submit('fPP',null,{'similarityGroupingId':'fPP:j_id480'})};</script></form>"""
+        self.assertEqual(search.discover_controls(html), {"init": None, "search": "fPP:j_id479"})
+        active = html.replace("captchaAtivo = false", "captchaAtivo = true")
+        with self.assertRaisesRegex(RuntimeError, "reCAPTCHA"):
+            search.discover_controls(active)
+
     def test_timeline_class_order_and_distinct_documents(self):
         html = """<div class="data media"><div class="media-body"><span class="data-interna text-muted">07 set. 2026</span></div><div class="tipo-M interno media"><span class="texto-movimento text-upper">Juntada</span><a><span>1 - A</span></a><div class="col-sm-12"><small>17:05</small></div></div><div class="tipo-M interno media"><span class="texto-movimento text-upper">Juntada</span><a><span>2 - B</span></a><div class="col-sm-12"><small>17:05</small></div></div></div>"""
         timeline = parsers.parse_timeline(html, "/documents/", "https://pje1g.trf1.jus.br")
@@ -231,6 +241,21 @@ class PjeChecks(unittest.TestCase):
         self.assertEqual([item["id"] for item in inventory], ["123", "456"])
         self.assertTrue(inventory[0]["visible_in_timeline"] is False)
         self.assertEqual(parsers.parse_pagination(html, timeline)["mode"], "infinite_scroll")
+
+    def test_inventory_flags_the_first_instance_copy_named_in_a_title(self):
+        timeline = [
+            {
+                "date": "07 set. 2026",
+                "movements": [
+                    {"documents": [{"id": "10", "title": "Petição Inicial - ID de origem 99", "download_url": "u"}]}
+                ],
+            }
+        ]
+        html = "<script>var listaIdsDocumentos = [10, 99, 55];</script>"
+        inventory = {i["id"]: i for i in parsers.parse_document_inventory(html, timeline, "/documents/", "https://x")}
+        self.assertTrue(inventory["99"]["first_instance_copy"])
+        self.assertNotIn("first_instance_copy", inventory["10"])
+        self.assertNotIn("first_instance_copy", inventory["55"])  # older page, still readable
 
     def test_1g_controls_are_discovered_from_current_ajax_metadata(self):
         html = """

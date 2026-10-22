@@ -329,7 +329,9 @@ def main():
         description="Read PJe process movements (TRF1/TJAP password login, TRF5 certificate login)"
     )
     parser.add_argument(
-        "--portal", choices=("trf1-1g", "trf1-2g", "trf3-1g", "trf5-1g", "trf5-2g", "tjap-1g"), required=True
+        "--portal",
+        choices=("trf1-1g", "trf1-2g", "trf3-1g", "trf5-1g", "trf5-2g", "tjap-1g", "tjpe-1g", "tjpe-2g"),
+        required=True,
     )
     parser.add_argument("--process-number", required=True)
     parser.add_argument("--scope", choices=("latest", "page", "all"), default="page")

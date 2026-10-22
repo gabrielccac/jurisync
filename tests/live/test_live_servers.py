@@ -121,6 +121,49 @@ def test_pje_trf5_certificate_login():
     assert ok(process)["documentInventory"]
 
 
+VICTOR_PORTALS = (
+    "trf5-1g", "trf5-2g", "trf5-tru", "trf1-1g", "trf1-2g", "trf3-1g", "trf3-2g", "tjpe-1g", "tjpe-2g",
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("portal", VICTOR_PORTALS)
+def test_victor_pje_portal_reads(portal):
+    """Counters, first inbox process, process page and one visible document, on Victor's A1 certificate.
+
+    Run with JURISYNC_CUSTOMER=victor. Wait ~30 s between portals: the SSO rejects a reused TOTP code.
+    """
+    require("PJE_A1_P12", "PJE_A1_PIN")
+    env = {"JURISYNC_CUSTOMER": "victor"}
+    (_, counters), (_, inbox) = call_all(
+        "jurisync.connectors.pje.server",
+        [
+            ("pje_list_expediente_counters", {"portal": portal}),
+            ("pje_list_inbox", {"portal": portal, "maxPages": 1}),
+        ],
+        **env,
+    )
+    assert ok(counters)["buckets"]
+    numbers = [
+        row["processNumber"] for box in ok(inbox)["inboxes"] for row in box.get("rows", []) if row.get("processNumber")
+    ]
+    if not numbers:
+        pytest.skip(f"{portal}: empty inbox, nothing to open")
+    ((_, process),) = call_all(
+        "jurisync.connectors.pje.server",
+        [("pje_get_process", {"portal": portal, "processNumber": numbers[0], "scope": "page"})],
+        **env,
+    )
+    inventory = ok(process)["documentInventory"]
+    readable = [d["id"] for d in inventory if d.get("visible_in_timeline") and not d.get("first_instance_copy")]
+    if readable:
+        ((_, read),) = call_all(
+            "jurisync.connectors.pje.server",
+            [("pje_read_documents", {"portal": portal, "processNumber": numbers[0], "documentIds": readable[:1]})],
+            **env,
+        )
+        assert ok(read)["documents"]
+
+
 @pytest.mark.parametrize("portal, prefix", [("trf4-1g-sc", "JFSC"), ("trf4-1g-rs", "JFRS")])
 def test_eproc_logs_in_once_then_reuses(portal, prefix):
     require(f"{prefix}_USUARIO", f"{prefix}_EXPORT_DATA")

@@ -11,9 +11,13 @@ inominado sobe para a Turma Recursal sem mudar o CNJ. Por isso o número sozinho
 
 1. **`portal` da comunicação DJEN** (vem em cada item de `djen_search_communications`,
    lido do host do link): `trf5-1g` → `pje1g.trf5.jus.br`; `trf5-2g` → `pje2g.trf5.jus.br`
-   (Turmas Recursais de PE e PB, relatorias, e o Tribunal). Use esse portal.
+   (Turmas Recursais de PE e PB, relatorias, e o Tribunal); `trf5-tru` → `pjett.trf5.jus.br`
+   (Turma Regional de Uniformização). Use esse portal. Outros portais do Victor pelo host do link:
+   `trf3-1g` → `pje1g.trf3.jus.br`; `trf3-2g` → `pje2g.trf3.jus.br` (Turmas Recursais de SP);
+   `tjpe-1g`/`tjpe-2g` → `pje.cloud.tjpe.jus.br/1g` ou `/2g`.
 2. **Sem link** (`portal` = `trf5-1g/trf5-2g`), decida pelo órgão: "Turma Recursal",
-   "Relatoria", "TR/PE", "TR/PB", "Turma Regional" ou classe `RECURSO INOMINADO` → `trf5-2g`;
+   "Relatoria", "TR/PE", "TR/PB" ou classe `RECURSO INOMINADO` → `trf5-2g`; "Turma Regional" /
+   "Uniformização" → `trf5-tru` (o número sozinho nunca indica a TRU);
    vara federal ou JEF → `trf5-1g`.
 3. **Processo não encontrado** no portal escolhido: tente o outro uma vez e registre na
    prévia em qual achou. Não alterne mais que isso.

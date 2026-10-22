@@ -3,14 +3,14 @@
 Antes de enviar:
 
 - Gere o pacote: `uv run jurisync-setup export --customer victor --out ~/victor.jurisync` e anote a senha
-  que aparece (só aparece nessa hora). Os servidores do pacote são `pje`, `advbox` e `djen`; as verificações são PJe TRF5 1g/2g, PJe TRF1 1g/2g e ADVBOX.
+  que aparece (só aparece nessa hora). Os servidores do pacote são `pje`, `advbox` e `djen`; as verificações são PJe TRF5 1g/2g, TRF1 1g/2g, TJPE 1g/2g e ADVBOX.
 - Dê à conta GitHub dele acesso de leitura ao repositório `gabrielccac/jurisync` (privado).
 - Envie `victor.jurisync` e `victor-sop-intimacoes.zip` (para Downloads) e a senha do pacote por outro canal.
 - `victor-pje-filing` fica fora por enquanto: o servidor `filing` ainda não está no GitHub.
 
 ```text
 Preciso instalar o Jurisync, que acessa o PJe do TRF5 (1º grau/JEF e 2º grau/Turmas Recursais) e do
-TRF1 (1º e 2º grau), todos com o meu certificado A1, o ADVBOX do escritório e o DJEN, e a minha skill
+TRF1 e TJPE (1º e 2º grau), todos com o meu certificado A1, o ADVBOX do escritório e o DJEN, e a minha skill
 de intimações. Você é responsável por toda a
 instalação, incluindo os programas que faltarem, seguindo as regras abaixo.
 
@@ -73,7 +73,7 @@ PASSOS
      e aguarde a conclusão. Se o navegador não abrir, mostre o endereço que ele imprimir (começa
      com http://127.0.0.1) para eu abrir.
    - Em seguida ele instala as credenciais e o certificado A1 em ~/.config/jurisync, testa o login
-     do PJe TRF5 (1º e 2º grau), do PJe TRF1 (1º e 2º grau) e do ADVBOX e registra os servidores no Claude Code e no Claude Desktop. Pode levar
+     do PJe TRF5, TRF1 e TJPE (1º e 2º grau cada) e do ADVBOX e registra os servidores no Claude Code e no Claude Desktop. Pode levar
      alguns minutos.
 
 7. Skill de intimações a partir do zip:
