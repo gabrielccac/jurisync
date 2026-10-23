@@ -194,8 +194,3 @@ def test_juridiq_reads():
     require("JURIDIQ_EMAIL", "JURIDIQ_PASSWORD")
     ((_, tags),) = call_all("jurisync.connectors.juridiq.server", [("juridiq_list_tags", {"limit": 5})])
     assert "result" in ok(tags)
-
-
-def test_inss_server_starts():
-    # A real call may open Chrome for the A3 PIN; starting the server is the automated part.
-    assert call_all("jurisync.connectors.inss.server", []) == []

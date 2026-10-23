@@ -15,7 +15,6 @@ dependencies = [
   "pdf-inspector==1.25.2",
   "pydantic>=2.13.5,<2.14",
   "Pillow==12.3.0",
-  "playwright==1.63.0",
   "pyotp==2.10.0",
   "pypdf==6.0.0",
   "seleniumbase==4.54.1",
@@ -29,7 +28,6 @@ jurisync-advbox = "jurisync.connectors.advbox.server:main"
 jurisync-djen = "jurisync.connectors.djen.server:main"
 jurisync-eproc = "jurisync.connectors.eproc.server:main"
 jurisync-juridiq = "jurisync.connectors.juridiq.server:main"
-jurisync-inss = "jurisync.connectors.inss.server:main"
 jurisync-filing = "jurisync.workflows.filing.server:main"
 jurisync-http = "jurisync.serve:main"
 jurisync-setup = "jurisync.setup:main"

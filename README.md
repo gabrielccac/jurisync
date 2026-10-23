@@ -1,7 +1,7 @@
 # Jurisync
 
 MCP connectors that let LLM agents read Brazilian court portals (PJe, Eproc,
-DJEN, INSS) and work with legal management tools (Juridiq, ADVBOX), plus the
+DJEN) and work with legal management tools (Juridiq, ADVBOX), plus the
 customer workflows and agent skills built on them. Everything is Python.
 
 Connectors supply evidence and mechanics; legal judgment stays with the calling
@@ -28,7 +28,6 @@ src/jurisync/
                         (auth/ holds SSO, A1 certificate, session cache)
     eproc/              TRF4 (1G SC/RS/PR, 2G), TRF6 and TJRS: notice queues, process, documents (A1 certificate or Selenium login)
     djen/               Public DJEN/Comunica search, certidão text, JFPE deadline calendar
-    inss/               GERID/PAT through Chrome with the A3 certificate
     juridiq/            Juridiq REST API
     advbox/             ADVBOX web session: customers, lawsuits, activities, files, tasks
   workflows/
@@ -40,7 +39,7 @@ customers/
   elisandra/            DJEN → eproc intimações skill (TRF4 SC/RS, TJRS), task drafts for approval
   wesley/               PJe (TRF1, TRF3, TRF5) and Eproc (TRF4) access on the A1 certificate
 plugins/                Claude Code plugins per customer (skills + server registrations), with .claude-plugin/ marketplace
-cli/                    Diagnostics: juridiq_read, inss_probe, eproc_portal_smoke
+cli/                    Diagnostics: juridiq_read, eproc_portal_smoke
 tests/                  Offline tests mirroring src/ and customers/
 docs/                   Architecture, publication workflow, connector references
 .claude/skills/         Links to each customer's skills for Claude Code
@@ -59,8 +58,6 @@ cp .env.example .env
 ```
 
 Fill in only the connectors you use; `.env.example` documents every variable.
-INSS also needs Google Chrome and the A3 certificate middleware; see
-[the INSS guide](docs/connectors/inss-instalacao.md).
 
 Claude Code picks up `.mcp.json` from the project root. Each server runs as
 `.venv/bin/python -m jurisync.connectors.<name>.server` and loads `.env` on
@@ -75,7 +72,7 @@ uv tool install git+https://github.com/gabrielccac/jurisync
 ```
 
 This installs one command per server (`jurisync-pje`, `jurisync-advbox`, `jurisync-djen`, `jurisync-eproc`,
-`jurisync-juridiq`, `jurisync-inss`, `jurisync-filing`), `jurisync-http` and `jurisync-setup`.
+`jurisync-juridiq`, `jurisync-filing`), `jurisync-http` and `jurisync-setup`.
 
 **Skill + MCPs as a Claude Code plugin.** After the `uv tool install` above, one command installs the customer's
 skills and registers its MCP servers, and `/plugin update` brings every later change:
@@ -152,7 +149,6 @@ for an installed package and beside the code in a checkout.
 | `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | ADVBOX session | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
 | `eproc` | `eproc_list_notices`, `eproc_list_processes`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `trf4-1g-pr`, `trf4-2g`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | Browser login + TOTP, or the A1 certificate over mutual TLS with `<PREFIX>_CERT=true` (TRF4); once per portal | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
-| `inss-gerid` | `inss_gerid_ensure_session`, `inss_list_notifications`, `inss_search_tasks`, `inss_get_task`, `inss_get_attachment`*, `inss_get_process`*, `inss_read_document` | Chrome + A3 PIN (by the user) + TOTP | local downloads only (`get` tools save the file and return its parsed text) |
 | `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
 | `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
 
@@ -192,10 +188,6 @@ Add a customer by creating `customers/<name>/` with a README, its skills under
 .venv/bin/python cli/juridiq_read.py --path /user/me
 ```
 
-```bash
-.venv/bin/python cli/inss_probe.py login
-```
-
 ## Development
 
 ```bash
@@ -213,5 +205,5 @@ manual and read-only.
 
 - [Architecture](docs/architecture.md) — boundaries, sessions, safety rules
 - [Publication workflow](docs/publication-workflow.md) — the agent contract for Juridiq triage
-- [Connector references](docs/connectors/) — endpoints, TRF5 filing, Eproc captures, INSS setup, Tramitação
+- [Connector references](docs/connectors/) — endpoints, TRF5 filing, Eproc captures, Tramitação
 - [Backlog](docs/backlog.md)

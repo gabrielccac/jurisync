@@ -19,8 +19,6 @@ secrets = ["TJAP_1G_USERNAME", "TJAP_1G_PASSWORD", "TJAP_1G_2FA_DATA"]
 method = "browser_totp"
 secrets = ["TJRS_1G_USERNAME", "TJRS_1G_PASSWORD", "TJRS_1G_2FA_DATA"]
 
-# Juridiq and INSS-GERID belong to no portal. GERID signs in with an A3 certificate (PIN typed on the
-# machine) plus this authenticator secret, so it is registered but not login-tested during import.
+# Juridiq belongs to no portal.
 [env]
-secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD", "INSS_GERID_TOTP_SECRET|INSS_GERID_QR_IMAGE"]
-optional = ["INSS_GERID_TOTP_ACCOUNT"]
+secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]

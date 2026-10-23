@@ -48,18 +48,6 @@
         "JURISYNC_CUSTOMER": "victor"
       }
     },
-    "inss-gerid": {
-      "type": "stdio",
-      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
-      "args": [
-        "-m",
-        "jurisync.connectors.inss.server"
-      ],
-      "env": {
-        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
-        "JURISYNC_CUSTOMER": "victor"
-      }
-    },
     "advbox": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
