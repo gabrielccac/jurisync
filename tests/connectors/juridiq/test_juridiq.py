@@ -165,6 +165,62 @@ class ClientTest(JuridiqTestCase):
             ],
         )
 
+    def test_tag_and_task_template_mutations_use_captured_routes(self):
+        fake = FakeJuridiq(routes={})
+        api = JuridiqApi(send=fake)
+        with mock.patch.dict(os.environ, {"JURIDIQ_ALLOW_WRITES": "true"}):
+            api.create_tag({"name": "Urgente", "color": "#f10707", "modules": ["tarefas"]})
+            api.update_tag("tag-1", {"name": "Urgente 2"})
+            api.delete_tag("tag-1")
+            api.create_task_template({"title": "Modelo", "subtasks": [{"title": "Passo 1"}]})
+            api.update_task_template("tpl-1", {"title": "Modelo 2"})
+            api.delete_task_template("tpl-1")
+        self.assertEqual(
+            [(r["path"], r["method"], r["body"]) for r in fake.requests],
+            [
+                ("/tag", "POST", {"name": "Urgente", "color": "#f10707", "modules": ["tarefas"]}),
+                ("/tag/tag-1", "PATCH", {"name": "Urgente 2"}),
+                ("/tag", "DELETE", {"id": ["tag-1"]}),
+                (
+                    "/task/task-templates",
+                    "POST",
+                    {
+                        "title": "Modelo",
+                        "points": 0,
+                        "priority": "Baixa",
+                        "daysForDue": 1,
+                        "daysForStart": 0,
+                        "isBusinessDay": False,
+                        "createSheet": False,
+                        "estimatedTimeMinutes": 0,
+                        "subtasks": [
+                            {
+                                "title": "Passo 1",
+                                "description": "",
+                                "status": "Pendente",
+                                "priority": "Baixa",
+                                "isBusinessDay": False,
+                                "daysForDue": 1,
+                                "daysForStart": 0,
+                                "points": 0,
+                                "tags": [],
+                                "responsiblesId": [],
+                            }
+                        ],
+                    },
+                ),
+                ("/task/task-templates/tpl-1", "PATCH", {"title": "Modelo 2"}),
+                ("/task/task-templates/tpl-1", "DELETE", None),
+            ],
+        )
+
+    def test_tag_defaults_are_filled_before_sending(self):
+        fake = FakeJuridiq(routes={})
+        api = JuridiqApi(send=fake)
+        with mock.patch.dict(os.environ, {"JURIDIQ_ALLOW_WRITES": "true"}):
+            api.create_tag({"name": "Sem cor"})
+        self.assertEqual(fake.requests[0]["body"], {"name": "Sem cor", "color": "#0296F9", "modules": ["tarefas"]})
+
     def test_api_errors_preserve_response_details(self):
         fake = FakeJuridiq(
             routes={
@@ -252,9 +308,12 @@ class ServerTest(JuridiqTestCase):
         readonly, writable = self.tools(False), self.tools(True)
         self.assertIn("juridiq_list_publications", readonly)
         self.assertNotIn("juridiq_create_task", readonly)
+        self.assertNotIn("juridiq_create_task_template", readonly)
         self.assertIn("juridiq_create_task", writable)
+        self.assertIn("juridiq_create_tag", writable)
+        self.assertIn("juridiq_create_task_template", writable)
         self.assertEqual(len(readonly), 18)
-        self.assertEqual(len(writable), 26)
+        self.assertEqual(len(writable), 32)
 
     def test_create_task_sends_only_supplied_fields_and_rejects_unknown(self):
         fake = FakeJuridiq(routes={"/task/": {"id": "task-1"}})

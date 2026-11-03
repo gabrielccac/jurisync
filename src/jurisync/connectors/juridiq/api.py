@@ -109,6 +109,48 @@ def payload_data(payload):
     return []
 
 
+TASK_PRIORITIES = ("Baixa", "Média", "Alta")
+TASK_STATUSES = ("Pendente", "Em progresso", "Concluída")
+
+TEMPLATE_DEFAULTS = {
+    "points": 0,
+    "priority": "Baixa",
+    "daysForDue": 1,
+    "daysForStart": 0,
+    "isBusinessDay": False,
+    "createSheet": False,
+    "estimatedTimeMinutes": 0,
+}
+
+SUBTASK_DEFAULTS = {
+    "description": "",
+    "status": "Pendente",
+    "priority": "Baixa",
+    "isBusinessDay": False,
+    "daysForDue": 1,
+    "daysForStart": 0,
+    "points": 0,
+}
+
+
+def _subtask_body(subtask):
+    body = dict(_object(subtask, "subtask"))
+    for name, value in SUBTASK_DEFAULTS.items():
+        body.setdefault(name, value)
+    body.setdefault("tags", [])
+    body.setdefault("responsiblesId", [])
+    return body
+
+
+def _template_body(payload):
+    """Fill the fields the dashboard always sends, so a minimal payload is accepted."""
+    body = dict(_object(payload, "task template payload"))
+    for name, value in TEMPLATE_DEFAULTS.items():
+        body.setdefault(name, value)
+    body["subtasks"] = [_subtask_body(item) for item in (body.get("subtasks") or [])]
+    return body
+
+
 def _send(method, url, headers, body):
     with requests.Session() as session:
         return session.request(method, url, headers=headers, data=body, allow_redirects=False, timeout=60)
@@ -364,6 +406,35 @@ class JuridiqApi:
             if isinstance(columns, dict):
                 return list(columns.values())
         return []
+
+    # -- tag and task template writes ---------------------------------------
+
+    def create_tag(self, payload):
+        body = dict(_object(payload, "tag payload"))
+        body.setdefault("modules", ["tarefas"])
+        body.setdefault("color", "#0296F9")
+        return self.json("/tag", "POST", body)
+
+    def update_tag(self, tag_id, patch):
+        return self.json(f"/tag/{_segment(tag_id, 'tagId')}", "PATCH", _object(patch, "tag patch"))
+
+    def delete_tag(self, tag_id):
+        _segment(tag_id, "tagId")
+        # The API takes the ids in a DELETE body; an empty body answers 400.
+        return self.json("/tag", "DELETE", {"id": [tag_id]})
+
+    def create_task_template(self, payload):
+        return self.json("/task/task-templates", "POST", _template_body(payload))
+
+    def update_task_template(self, template_id, patch):
+        body = dict(_object(patch, "task template patch"))
+        if "subtasks" in body:
+            body["subtasks"] = [_subtask_body(item) for item in (body.get("subtasks") or [])]
+        return self.json(f"/task/task-templates/{_segment(template_id, 'templateId')}", "PATCH", body)
+
+    def delete_task_template(self, template_id):
+        _segment(template_id, "templateId")
+        return self.json(f"/task/task-templates/{template_id}", "DELETE")
 
     # -- tasks and events ----------------------------------------------------
 
