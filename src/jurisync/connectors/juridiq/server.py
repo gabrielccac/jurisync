@@ -1,5 +1,6 @@
 """Juridiq MCP server. Write tools are registered only when JURIDIQ_ALLOW_WRITES=true."""
 
+import inspect
 import os
 from datetime import date
 from typing import Annotated, Any, Literal
@@ -274,6 +275,14 @@ class EventCreate(Strict):
     description: str | None = None
 
 
+def _arguments():
+    """The calling tool's own parameters. locals() would also return the closure's api and call, which the task
+    filters reject."""
+    frame = inspect.currentframe().f_back
+    code = frame.f_code
+    return {name: frame.f_locals[name] for name in code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]}
+
+
 def _payload(model):
     """Send only the fields the caller supplied, as the Node connector did."""
     return model.model_dump(mode="json", exclude_unset=True)
@@ -509,7 +518,7 @@ def create_server(allow_writes=None, api=None):
         taskKanbanColumnIds: OneOrMany | None = None,
         status: OneOrMany | None = None,
     ) -> dict[str, Any]:
-        options = {key: value for key, value in locals().items()}
+        options = _arguments()
         return call(lambda: api.tasks(**options))
 
     @read(
@@ -543,7 +552,7 @@ def create_server(allow_writes=None, api=None):
         taskKanbanColumnIds: OneOrMany | None = None,
         status: OneOrMany | None = None,
     ) -> dict[str, Any]:
-        options = {key: value for key, value in locals().items()}
+        options = _arguments()
         return call(lambda: api.kanban_tasks(**options))
 
     @read("juridiq_get_task", "Get Juridiq task", "Retrieve a task by ID. Read-only.")
