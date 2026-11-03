@@ -198,6 +198,69 @@ class TaskUpdate(Strict):
     customFields: CustomFields | None = None
 
 
+TagModule = Literal["processos", "tarefas", "andamentos", "pessoas", "atendimentos", "automacoes"]
+TaskPriority = Literal["Baixa", "Média", "Alta"]
+TaskStatus = Literal["Pendente", "Em progresso", "Concluída"]
+HexColor = Annotated[str, Field(pattern=r"^#[0-9A-Fa-f]{6}$")]
+
+
+class TagCreate(Strict):
+    name: Text
+    color: HexColor = "#0296F9"
+    modules: Annotated[list[TagModule], Field(min_length=1)] = ["tarefas"]
+
+
+class TagUpdate(Strict):
+    name: Text | None = None
+    color: HexColor | None = None
+    modules: Annotated[list[TagModule], Field(min_length=1)] | None = None
+
+
+class TaskSubtask(Strict):
+    title: Text
+    description: str | None = None
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
+    isBusinessDay: bool | None = None
+    daysForDue: Annotated[int, Field(ge=0)] | None = None
+    daysForStart: Annotated[int, Field(ge=0)] | None = None
+    points: int | float | None = None
+    tags: list[UUID] | None = None
+    responsiblesId: list[UUID] | None = None
+
+
+class TaskTemplateCreate(Strict):
+    title: Text
+    description: str | None = None
+    points: int | float | None = None
+    columnId: UUID | None = None
+    priority: TaskPriority | None = None
+    daysForDue: Annotated[int, Field(ge=0)] | None = None
+    daysForStart: Annotated[int, Field(ge=0)] | None = None
+    isBusinessDay: bool | None = None
+    createSheet: bool | None = None
+    estimatedTimeMinutes: Annotated[int, Field(ge=0)] | None = None
+    tags: list[UUID] | None = None
+    responsiblesId: list[UUID] | None = None
+    subtasks: list[TaskSubtask] | None = None
+
+
+class TaskTemplateUpdate(Strict):
+    title: Text | None = None
+    description: str | None = None
+    points: int | float | None = None
+    columnId: UUID | None = None
+    priority: TaskPriority | None = None
+    daysForDue: Annotated[int, Field(ge=0)] | None = None
+    daysForStart: Annotated[int, Field(ge=0)] | None = None
+    isBusinessDay: bool | None = None
+    createSheet: bool | None = None
+    estimatedTimeMinutes: Annotated[int, Field(ge=0)] | None = None
+    tags: list[UUID] | None = None
+    responsiblesId: list[UUID] | None = None
+    subtasks: list[TaskSubtask] | None = None
+
+
 class EventCreate(Strict):
     title: Text
     date: date
@@ -527,6 +590,60 @@ def create_server(allow_writes=None, api=None):
     )
     def delete_task(taskId: Id) -> dict[str, Any]:
         return call(lambda: api.delete_task(str(taskId)))
+
+    @write(
+        "juridiq_create_tag",
+        "Create Juridiq tag",
+        "Create a tag (etiqueta) in the configured Juridiq account. modules chooses where it shows up: processos, tarefas, andamentos, pessoas, atendimentos, automacoes; defaults to tarefas. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        ADDITIVE,
+    )
+    def create_tag(payload: TagCreate) -> dict[str, Any]:
+        return call(lambda: api.create_tag(_payload(payload)))
+
+    @write(
+        "juridiq_update_tag",
+        "Update Juridiq tag",
+        "Rename, recolor or change the modules of an existing tag. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        ADDITIVE,
+    )
+    def update_tag(tagId: Id, patch: TagUpdate) -> dict[str, Any]:
+        return call(lambda: api.update_tag(str(tagId), _payload(patch)))
+
+    @write(
+        "juridiq_delete_tag",
+        "Delete Juridiq tag",
+        "Delete only the explicitly supplied tag. The API takes the id in a DELETE body, not in the path. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        DESTRUCTIVE,
+    )
+    def delete_tag(tagId: Id) -> dict[str, Any]:
+        return call(lambda: api.delete_tag(str(tagId)))
+
+    @write(
+        "juridiq_create_task_template",
+        "Create Juridiq task template",
+        "Create a task template (modelo de tarefa). title is required. priority is Baixa, Média or Alta; status of a subtask is Pendente, Em progresso or Concluída. tags take tag UUIDs (juridiq_list_tags), responsiblesId take user UUIDs (juridiq_list_users) and columnId takes a column UUID (juridiq_list_task_columns). Omitted fields get the same defaults the dashboard sends (points 0, priority Baixa, daysForDue 1, daysForStart 0). Available only when JURIDIQ_ALLOW_WRITES=true.",
+        ADDITIVE,
+    )
+    def create_task_template(payload: TaskTemplateCreate) -> dict[str, Any]:
+        return call(lambda: api.create_task_template(_payload(payload)))
+
+    @write(
+        "juridiq_update_task_template",
+        "Update Juridiq task template",
+        "Update a task template; send only the fields that change. Sending subtasks replaces the whole list. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        DESTRUCTIVE,
+    )
+    def update_task_template(templateId: Id, patch: TaskTemplateUpdate) -> dict[str, Any]:
+        return call(lambda: api.update_task_template(str(templateId), _payload(patch)))
+
+    @write(
+        "juridiq_delete_task_template",
+        "Delete Juridiq task template",
+        "Delete only the explicitly supplied task template (no body is sent). Available only when JURIDIQ_ALLOW_WRITES=true.",
+        DESTRUCTIVE,
+    )
+    def delete_task_template(templateId: Id) -> dict[str, Any]:
+        return call(lambda: api.delete_task_template(str(templateId)))
 
     @write(
         "juridiq_create_event",
