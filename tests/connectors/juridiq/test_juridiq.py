@@ -380,6 +380,22 @@ class ServerTest(JuridiqTestCase):
             api.delete_task_template("a/../b")
         self.assertEqual(fake.requests[0]["path"], "/task/task-templates/a%2F..%2Fb")
 
+    def test_list_tasks_tools_send_only_their_filters(self):
+        fake = FakeJuridiq(routes={"/task/": {"data": [{"id": "task-1"}]}, "/task/kanban": {"columns": []}})
+
+        async def run(name):
+            async with Client(create_server(allow_writes=False, api=JuridiqApi(send=fake))) as client:
+                return await client.call_tool(name, {"lawSuitId": "law-1", "limit": 5})
+
+        listed = asyncio.run(run("juridiq_list_tasks"))
+        kanban = asyncio.run(run("juridiq_list_tasks_kanban"))
+        self.assertFalse(listed.is_error)
+        self.assertFalse(kanban.is_error)
+        self.assertEqual([r["path"] for r in fake.requests], ["/task/", "/task/kanban"])
+        for request in fake.requests:
+            self.assertIn("lawSuit=law-1", request["query"])
+            self.assertIn("limit=5", request["query"])
+
     def test_list_results_are_wrapped_like_the_node_server(self):
         fake = FakeJuridiq(routes={"/lawSuit": {"data": [{"id": "law-1", "processNumber": "1"}]}})
 
