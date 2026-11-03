@@ -146,9 +146,13 @@ class LawSuitUpdate(Strict):
     customFields: CustomFields | None = None
 
 
+TaskPriority = Literal["Baixa", "Média", "Alta"]
+TaskStatus = Literal["Pendente", "Em progresso", "Concluída"]
+
+
 class TaskCreate(Strict):
     title: Text
-    priority: Text
+    priority: TaskPriority
     columnId: UUID
     initialDate: str
     description: Any = None
@@ -173,7 +177,7 @@ class TaskCreate(Strict):
 
 class TaskUpdate(Strict):
     title: Text | None = None
-    priority: Text | None = None
+    priority: TaskPriority | None = None
     status: Text | None = None
     initialDate: str | None = None
     lawSuitId: UUID | None = None
@@ -199,8 +203,6 @@ class TaskUpdate(Strict):
 
 
 TagModule = Literal["processos", "tarefas", "andamentos", "pessoas", "atendimentos", "automacoes"]
-TaskPriority = Literal["Baixa", "Média", "Alta"]
-TaskStatus = Literal["Pendente", "Em progresso", "Concluída"]
 HexColor = Annotated[str, Field(pattern=r"^#[0-9A-Fa-f]{6}$")]
 
 
@@ -567,7 +569,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_task",
         "Create Juridiq task",
-        "Create a task in the configured Juridiq account. Required payload fields are title, priority, columnId (a Kanban column UUID from juridiq_list_task_columns), and initialDate. Use responsiblesId, not responsibleIds. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a task in the configured Juridiq account. Required payload fields are title, priority (Baixa, Média or Alta), columnId (a Kanban column UUID from juridiq_list_task_columns), and initialDate. Use responsiblesId, not responsibleIds. lawSuitId is optional but recommended: pass it (find it with juridiq_find_lawsuit) so the task shows up in the process it belongs to; without it the task is created standalone. Available only when JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_task(payload: TaskCreate) -> dict[str, Any]:
@@ -604,7 +606,7 @@ def create_server(allow_writes=None, api=None):
         "juridiq_update_tag",
         "Update Juridiq tag",
         "Rename, recolor or change the modules of an existing tag. Available only when JURIDIQ_ALLOW_WRITES=true.",
-        ADDITIVE,
+        DESTRUCTIVE,
     )
     def update_tag(tagId: Id, patch: TagUpdate) -> dict[str, Any]:
         return call(lambda: api.update_tag(str(tagId), _payload(patch)))

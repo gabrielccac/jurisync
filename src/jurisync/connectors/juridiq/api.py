@@ -109,9 +109,6 @@ def payload_data(payload):
     return []
 
 
-TASK_PRIORITIES = ("Baixa", "Média", "Alta")
-TASK_STATUSES = ("Pendente", "Em progresso", "Concluída")
-
 TEMPLATE_DEFAULTS = {
     "points": 0,
     "priority": "Baixa",
@@ -433,8 +430,7 @@ class JuridiqApi:
         return self.json(f"/task/task-templates/{_segment(template_id, 'templateId')}", "PATCH", body)
 
     def delete_task_template(self, template_id):
-        _segment(template_id, "templateId")
-        return self.json(f"/task/task-templates/{template_id}", "DELETE")
+        return self.json(f"/task/task-templates/{_segment(template_id, 'templateId')}", "DELETE")
 
     # -- tasks and events ----------------------------------------------------
 
