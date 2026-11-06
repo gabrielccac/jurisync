@@ -36,7 +36,11 @@ from jurisync.connectors.pje.parsers import (
 MAX_TIMELINE_PAGES = 5
 DETAIL_PATH = "Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam"
 DETAIL_SUFFIX = {"1g": "&aba=", "2g": ""}
-DOWNLOAD_PATTERN = re.compile(r"window\.open\('([^']*/documento/download/[A-Za-z0-9]+/[^']*/\d+/)'")
+DOWNLOAD_PATTERN = re.compile(
+    r"window\.open\('([^']*/documento/download/[A-Za-z0-9]+/[^']*/\d+/)'"
+    r"|var url\s*=\s*'([^']*/seam/resource/rest/pje-legacy/documento/download/[^']*/)'\s*\+\s*idDocumento"
+    r"|<(?:iframe|embed)[^>]*\ssrc=\"([^\"]*/seam/resource/rest/pje-legacy/documento/download/)\d+\""
+)
 
 
 def _control_id(element):
@@ -220,7 +224,7 @@ def search_process(
         capture_path.chmod(0o600)
         capture_path.write_bytes(response.content)
     pattern_match = DOWNLOAD_PATTERN.search(detail_html)
-    download_pattern = pattern_match.group(1) if pattern_match else None
+    download_pattern = next((g for g in pattern_match.groups() if g), None) if pattern_match else None
     first_timeline = parse_timeline(detail_html, download_pattern, search_url)
     timeline, pagination = fetch_timeline_pages(session, detail_html, detail_url, download_pattern, search_url)
     documents = [doc for day in timeline for movement in day["movements"] for doc in movement["documents"]]

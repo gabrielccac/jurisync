@@ -187,6 +187,40 @@ class BackgroundFillTests(unittest.TestCase):
             with self.assertRaises(ToolError):
                 server._start_fill("run1", "create-fill")
 
+    def test_a_hosted_office_does_not_inherit_the_server_flag(self):
+        from jurisync.connectors.pje import server
+        from jurisync.core import credentials
+
+        with mock.patch.dict(os.environ, {"PJE_ALLOW_DRAFT_WRITES": "true"}):
+            self.assertTrue(server.draft_writes_enabled())
+            with credentials.scope("office-a", {}):
+                self.assertFalse(server.draft_writes_enabled())
+            with credentials.scope("office-b", {"PJE_ALLOW_DRAFT_WRITES": "true"}):
+                self.assertTrue(server.draft_writes_enabled())
+
+    def test_the_background_fill_keeps_the_callers_credential_scope(self):
+        from jurisync.connectors.pje import server
+        from jurisync.core import credentials
+
+        seen = {}
+
+        def job(run_id, stage):
+            seen["tenant"] = credentials.tenant()
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"JURISYNC_FILING_DIR": tmp}):
+            with (
+                credentials.scope("office-a", {"PJE_ALLOW_DRAFT_WRITES": "true"}),
+                mock.patch.object(server, "_fill_job", job),
+                mock.patch.object(server, "draft_paths") as paths,
+                mock.patch.object(server.filing, "validate_fill_payload"),
+            ):
+                payload = Path(tmp) / "payload.json"
+                payload.write_text("{}")
+                paths.return_value = (payload, Path(tmp) / "checkpoint.json")
+                server._start_fill("run-ctx", "create-fill")
+                server.fill_jobs["run-ctx"].join(5)
+        self.assertEqual(seen["tenant"], "office-a")
+
 
 if __name__ == "__main__":
     unittest.main()

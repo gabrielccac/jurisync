@@ -5,12 +5,9 @@ The Keycloak login page offers a certificate button that moves to a sibling SSO 
 answers with a "Continue" form, then the SSO asks the authenticator code like the password flow.
 """
 
-import os
 import re
-import tempfile
 import time
 import urllib.parse
-from pathlib import Path
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
@@ -18,34 +15,29 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER, portal_totp_account
 from jurisync.connectors.pje.auth import signer as native_signer
-from jurisync.core.http import IMPERSONATE, require_url
+from jurisync.core import credentials
+from jurisync.core.certificate import client_certificate
+from jurisync.core.http import IMPERSONATE, TIMEOUT, follow_redirects, require_url
 from jurisync.core.totp import next_code, totp
 
-TIMEOUT = 30
-REDIRECTS = {301, 302, 303, 307, 308}
 CERT_HOST = re.compile(r"document\.location\.host\s*=\s*['\"]([a-z0-9.-]+)['\"]", re.I)
 BROKER_HOST = "sso.cloud.pje.jus.br"
 
 
 def require_login_url(config, value):
-    """A login redirect must stay on the portal, a court ``eproc-sso*`` host or the national broker."""
+    """A login redirect must stay on the portal, a court ``*sso*`` host or the national broker."""
     hosts = {config.host, BROKER_HOST}
     host = (urllib.parse.urlsplit(value or "").hostname or "").lower()
     # The TRF4 sections (jfsc, jfrs, jfpr) share one SSO under trf4.jus.br, so the domain is not the portal's.
-    if host.startswith("eproc-sso") and host.endswith(".jus.br"):
+    # State courts name theirs differently (cert-sso.tjsc, certificado-sso.tjsp, keycloak-eks.tjrs);
+    # any SSO/Keycloak host under .jus.br (a restricted judiciary TLD) is accepted.
+    if host.endswith(".jus.br") and ("sso" in host or "keycloak" in host):
         hosts.add(host)
     return require_url(value, hosts=hosts, label="eproc login redirect")
 
 
 def _follow(session, config, response, *, cert=None, hops=14):
-    for _ in range(hops):
-        location = response.headers.get("Location")
-        if response.status_code not in REDIRECTS or not location:
-            break
-        url = urllib.parse.urljoin(response.url, location)
-        require_login_url(config, url)
-        response = session.get(url, impersonate=IMPERSONATE, cert=cert, allow_redirects=False, timeout=TIMEOUT)
-    return response
+    return follow_redirects(session, response, check=lambda url: require_login_url(config, url), cert=cert, hops=hops)
 
 
 def _form(html, page_url, config, form_id):
@@ -80,16 +72,6 @@ def _login_page(session, config):
     return page
 
 
-def _write_pem(directory, key, cert, chain):
-    from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
-
-    cert_path, key_path = Path(directory) / "cert.pem", Path(directory) / "key.pem"
-    cert_path.write_bytes(b"".join(item.public_bytes(Encoding.PEM) for item in (cert, *chain)))
-    key_path.write_bytes(key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
-    key_path.chmod(0o600)
-    return str(cert_path), str(key_path)
-
-
 def _otp_step(session, config, response, account):
     action, _ = _form(response.text, response.url, config, "kc-otp-login-form")
     if action is None:
@@ -114,15 +96,13 @@ def _otp_step(session, config, response, account):
 def cert_login(portal, *, pin=None, p12_path=None, session=None):
     """Return ``(session, panel_html, panel_url)`` like the browser login, using the A1 certificate."""
     config = portals.eproc(portal)
-    pin = pin or os.environ.get("PJE_A1_PIN")
+    pin = pin or credentials.env("PJE_A1_PIN")
     if not pin:
         raise RuntimeError("Set PJE_A1_PIN to the A1 certificate password")
     account = portal_totp_account(config)
-    key, cert, chain = native_signer.load_a1(p12_path or native_signer.a1_path(), pin)
+    key, cert, chain = native_signer.load_a1(p12_path, pin)
     session = session or requests.Session()
-    with tempfile.TemporaryDirectory() as directory:
-        os.chmod(directory, 0o700)
-        pem = _write_pem(directory, key, cert, chain)
+    with client_certificate(key, cert, chain) as pem:
         page = _login_page(session, config)
         response = _follow(
             session,

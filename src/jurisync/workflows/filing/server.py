@@ -16,17 +16,17 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
-from jurisync.connectors.pje.filing.checkpoint import run_directory
+from jurisync.core.documents_dir import resolve_saved_folder
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
+from jurisync.core.runs import run_directory
 from jurisync.paths import REPO_ROOT
-from jurisync.workflows.filing.prepare import _write_private, finalize_review, prepare_customer
+from jurisync.workflows.filing.prepare import _write_private, finalize_review, prepare_folder
 from jurisync.workflows.filing.profile import load_profile, profile_names
 
-ERRORS = (ValueError, RuntimeError, OSError, KeyError)
+ERRORS = (ValueError, RuntimeError, OSError, KeyError)  # OSError covers FileNotFoundError for a missing folder
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
-Digits = Annotated[str, StringConstraints(pattern=r"^\d{1,12}$")]
 
 ProfileName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,40}$")]
 
@@ -46,8 +46,7 @@ def _review_view(run_id, report, payload_ready):
     """The review without local paths or hashes: the agent needs ids, names, types and problems."""
     return {
         "runId": run_id,
-        "customerId": report.get("customerId"),
-        "folder": report.get("folder"),
+        "source": report.get("source"),
         "ready": bool(report.get("ready")),
         "payloadReady": payload_ready,
         "files": [_file_view(row) for row in report.get("files", [])],
@@ -99,8 +98,8 @@ def _require_no_draft(directory):
 
 @server.tool(
     name="filing_prepare",
-    title="Prepare a TRF5 filing from the ADVBOX protocol folder",
-    description="Download the customer's 00-PROTOCOLAR folder from ADVBOX, convert Word files to PDF, split PDFs over 10 MB, classify every file and write the run's review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
+    title="Prepare a filing from a folder of documents",
+    description="Prepare the documents of a filing that were already pulled into a subfolder of the shared documents folder (sourceFolder). Pull them first with the office's own system tools, as its skill says (ADVBOX: advbox_save_folder). Converts Word files to PDF, split PDFs over 10 MB, classify every file and write the run's review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
     annotations=LOCAL_WRITE,
 )
 def prepare(
@@ -109,8 +108,12 @@ def prepare(
         RunId,
         Field(description="New run id, letters digits _ or -, up to 64 characters, e.g. 'ana-2026-10-16'."),
     ],
-    customerId: Annotated[
-        Digits, Field(description="ADVBOX customer id (digits) whose 00-PROTOCOLAR folder is read, e.g. '10473994'.")
+    sourceFolder: Annotated[
+        str,
+        Field(
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            description="Subfolder of the shared documents folder holding the documents to file, e.g. the one advbox_save_folder saved into.",
+        ),
     ],
     facts: Annotated[
         dict[str, Any],
@@ -118,13 +121,6 @@ def prepare(
             description="Partial JSON object with what is known: authorCpf (11 digits), subject or subjects (benefit labels from filing_subjects), author (object), classification (object), characteristics (object, e.g. claimValue and boolean flags). Anything missing becomes a review item."
         ),
     ],
-    folder: Annotated[
-        str | None,
-        Field(
-            max_length=200,
-            description="Optional ADVBOX folder path inside the customer, as listed by advbox_list_files.",
-        ),
-    ] = None,
     useJev: Annotated[
         bool, Field(description="true sends document text to an outside classifier. Default false.")
     ] = False,
@@ -135,7 +131,8 @@ def prepare(
         selected = load_profile(profile)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         _write_private(directory / "facts.json", facts)
-        prepare_customer(customerId, facts, directory, profile=selected, folder=folder, jev=useJev)
+        _, files = resolve_saved_folder(sourceFolder)
+        prepare_folder(files, facts, directory, profile=selected, source=sourceFolder, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(directory / "review.json", "Prepare did not write a review")
     return _review_view(runId, report, (directory / "payload.json").exists())

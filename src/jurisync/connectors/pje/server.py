@@ -4,8 +4,8 @@ Authenticated sessions stay in memory per portal for the life of the server,
 so consecutive calls skip the password/certificate + TOTP login.
 """
 
+import contextvars
 import json
-import os
 import threading
 from typing import Annotated, Any, Literal
 
@@ -17,20 +17,27 @@ from pydantic import Field, StringConstraints
 from jurisync import portals
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import is_authenticated
-from jurisync.connectors.pje.filing.checkpoint import run_directory
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.connectors.pje.push import read_push
+from jurisync.core import credentials
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
+from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
 
-Portal = Annotated[
-    Literal[portals.keys("pje")],
-    Field(
-        description="PJe portal: 'trf1-1g' (TRF1 1º grau), 'trf1-2g' (TRF1 2º grau), 'trf3-1g' (TRF3 1º grau), 'trf3-2g' (TRF3 2º grau, Turmas Recursais de SP), 'trf5-1g' (TRF5 1º grau, JEF by certificate login), 'trf5-2g' (TRF5 2º grau, certificate login), 'trf5-tru' (TRF5 Turma Regional de Uniformização, certificate login), 'tjap-1g' (TJAP 1º grau, password login), 'tjpe-1g' and 'tjpe-2g' (TJPE 1º and 2º grau, password login). Any portal can also log in with the A1 certificate (PJE_A1_P12/PJE_A1_PIN) when it opts in with <PREFIX>_CERT=true."
-    ),
-]
+
+def _portal_description():
+    names = ", ".join(
+        f"'{key}' ({portals.pje(key).tribunal} {portals.pje(key).instance})" for key in portals.keys("pje")
+    )
+    return (
+        f"PJe portal key: {names}. TRF5 and the portals registered with a certificate log in with the A1 certificate "
+        "(PJE_A1_P12/PJE_A1_PIN); any other portal can opt in with <PREFIX>_CERT=true and otherwise uses password + TOTP."
+    )
+
+
+Portal = Annotated[Literal[portals.keys("pje")], Field(description=_portal_description())]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
 DraftReadStage = Literal["classification", "subject-options", "pending"]
 DraftWriteStage = Literal[
@@ -56,6 +63,11 @@ sessions = SessionPool(
     close=lambda session: session.close(),
 )
 server = MCPServer("pje", version="1.0.0")
+
+
+def draft_writes_enabled():
+    """Draft writes are opt-in per account: hosted, the office's own setting; locally, the environment."""
+    return credentials.env("PJE_ALLOW_DRAFT_WRITES") == "true"
 
 
 def _allow_ciencia(requested):
@@ -306,7 +318,7 @@ def _start_fill(run_id, requested):
     # `resume` is `fill` under the name an agent reaches for after a failure: it continues the run's own draft,
     # skipping the phases already recorded and sending only the documents PJe's list still lacks.
     stage = "fill" if requested == "resume" else requested
-    if os.environ.get("PJE_ALLOW_DRAFT_WRITES") != "true":
+    if not draft_writes_enabled():
         raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
     running = fill_jobs.get(run_id)
     if running is not None and running.is_alive():
@@ -319,7 +331,9 @@ def _start_fill(run_id, requested):
         if stage == "fill" and not checkpoint.exists():
             raise ToolError("This run has no draft yet; use stage create-fill")
     fill_errors.pop(run_id, None)
-    job = threading.Thread(target=_fill_job, args=(run_id, stage), name=f"pje-fill-{run_id}", daemon=True)
+    # A new thread starts with an empty context: carry the caller's credential scope (the office, when hosted).
+    context = contextvars.copy_context()
+    job = threading.Thread(target=context.run, args=(_fill_job, run_id, stage), name=f"pje-fill-{run_id}", daemon=True)
     fill_jobs[run_id] = job
     job.start()
     return {
@@ -332,7 +346,7 @@ def _start_fill(run_id, requested):
 
 
 def _draft_stage(label, stage, run_id=None, **options):
-    if stage in filing.WRITE_STAGES and os.environ.get("PJE_ALLOW_DRAFT_WRITES") != "true":
+    if stage in filing.WRITE_STAGES and not draft_writes_enabled():
         raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
     if run_id is not None:
         payload, checkpoint = draft_paths(run_id)

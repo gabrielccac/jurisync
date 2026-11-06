@@ -11,6 +11,9 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from jurisync import portals
+from jurisync.core import credentials
+from jurisync.core.http import IMPERSONATE
+from jurisync.paths import user_cache
 
 
 def auth_method(portal):
@@ -23,7 +26,7 @@ def auth_method(portal):
     opts in with ``<PREFIX>_CERT=true``; the certificate flow asks for TOTP only if the SSO does.
     """
     config = portals.pje(portal)
-    certificate = bool(os.environ.get("PJE_A1_P12"))
+    certificate = credentials.has("PJE_A1_P12")
     password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD", "2FA_DATA"))
     if config.auth == "certificate_totp":
         return "password_totp" if password_ready and not certificate else "certificate_totp"
@@ -40,7 +43,7 @@ def cache_identity(portal):
         # The certificate is not part of the identity. Reuse is safe only
         # when the caller identifies that account; fresh login still works.
         return None
-    identity = json.dumps([str(Path.cwd().resolve()), config.host, username, account])
+    identity = json.dumps([str(Path.cwd().resolve()), credentials.tenant(), config.host, username, account])
     return hashlib.sha256(identity.encode()).hexdigest()
 
 
@@ -48,8 +51,7 @@ def cache_path(portal):
     identity = cache_identity(portal)
     if identity is None:
         return None
-    default = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "jurisync" / "pje"
-    root = Path(os.environ.get("PJE_SESSION_DIR") or default)
+    root = user_cache("pje", "PJE_SESSION_DIR")
     return root / f"{portal}-{identity}.json"
 
 
@@ -57,7 +59,7 @@ def is_authenticated(session, portal):
     """Return whether the session still opens the authenticated process search."""
     config = portals.pje(portal)
     try:
-        response = session.get(config.search_url, impersonate="chrome", allow_redirects=False, timeout=20)
+        response = session.get(config.search_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=20)
     except requests.exceptions.RequestException:
         return False
     soup = BeautifulSoup(response.text, "html.parser")

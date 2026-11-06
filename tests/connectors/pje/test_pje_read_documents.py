@@ -142,7 +142,7 @@ class SavedDocumentsTest(unittest.TestCase):
             with self.subTest(extension=extension):
                 session = Mock()
                 session.get.return_value = response(body, kind)
-                with patch.object(documents, "_extract_document_text", return_value=("extracted", "x")):
+                with patch.object(documents, "extract_document_text", return_value=("extracted", "x")):
                     item = documents.read_selected_documents(process(), ["456"], session=session, save=True)[0]
                 self.assertTrue(item["savedAs"].endswith("." + extension))
 

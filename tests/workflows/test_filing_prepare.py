@@ -19,6 +19,7 @@ from jurisync.workflows.filing.prepare import (
     apply_supporting_fallback,
     build_payload,
     finalize_review,
+    prepare_folder,
     upload_filename,
 )
 from jurisync.workflows.filing.profile import load_profile
@@ -260,6 +261,45 @@ class PayloadTest(unittest.TestCase):
             petition.write_bytes(b"%PDF-1.4\nchanged")
             with self.assertRaisesRegex(ValueError, "Document changed"):
                 finalize_review(report, FACTS, choice, profile=PROFILE)
+
+
+class PrepareFolderTest(unittest.TestCase):
+    """The preparation works on any folder of pulled documents, whatever system they came from."""
+
+    def setUp(self):
+        patch = mock.patch.dict(os.environ, {"VICTOR_PJE_ATTORNEY_CPF": "12345678909"})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def folder(self, files):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        for name, content in files.items():
+            Path(directory.name, name).write_bytes(content)
+        return directory.name
+
+    def test_a_pulled_folder_becomes_a_review_and_a_payload_without_touching_the_source(self):
+        source = self.folder({"PETIÇÃO INICIAL.pdf": b"%PDF-1.4\npetition", "0-PA.pdf": b"%PDF-1.4\nadministrative"})
+        files = sorted(Path(source).iterdir())
+        with tempfile.TemporaryDirectory() as out:
+            result = prepare_folder(files, FACTS, out, profile=PROFILE, source="docs", jev=False)
+            self.assertEqual((result["fileCount"], result["source"]), (2, "docs"))
+            report = json.loads(Path(result["reviewPath"]).read_text())
+            self.assertEqual(report["source"], "docs")
+            self.assertEqual(sorted(row["role"] for row in report["files"]), ["main", "supporting"])
+            for row in report["files"]:
+                self.assertTrue(Path(row["path"]).is_relative_to(Path(out).resolve()))
+        self.assertEqual(sorted(p.name for p in Path(source).iterdir()), ["0-PA.pdf", "PETIÇÃO INICIAL.pdf"])
+        self.assertEqual(Path(source, "0-PA.pdf").read_bytes(), b"%PDF-1.4\nadministrative")
+
+    def test_an_empty_folder_and_a_non_pdf_file_are_reported(self):
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaisesRegex(ValueError, "has no files"):
+                prepare_folder([], FACTS, out, profile=PROFILE, source="empty", jev=False)
+            source = self.folder({"PETIÇÃO INICIAL.pdf": b"%PDF-1.4\np", "nota.txt": b"hello"})
+            result = prepare_folder(sorted(Path(source).iterdir()), FACTS, out, profile=PROFILE, jev=False)
+        self.assertFalse(result["ready"])
+        self.assertTrue(any("not a PDF" in item["reason"] for item in result["review"]))
 
 
 if __name__ == "__main__":

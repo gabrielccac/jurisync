@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from jurisync import setup
+from jurisync.install import setup
 
 URI = "otpauth://totp/Eproc:user?secret=JBSWY3DPEHPK3PXP&issuer=Eproc"
 

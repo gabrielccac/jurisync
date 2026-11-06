@@ -10,8 +10,8 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from jurisync import credentials_bundle as bundle
-from jurisync import setup
+from jurisync.install import credentials_bundle as bundle
+from jurisync.install import setup
 
 ENV = {"TJRS_1G_USERNAME": "user-123", "TJRS_1G_PASSWORD": "s3cret-value", "TJRS_1G_2FA_DATA": "otpauth://x"}
 PASSPHRASE = "correct horse battery"

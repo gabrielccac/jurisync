@@ -9,7 +9,8 @@ run inside a time-limited tool should expect long calls.
 
 import io
 import os
-from pathlib import Path
+
+from jurisync.paths import user_cache
 
 DEFAULT_MODEL = "small"
 DEFAULT_LANGUAGE = "pt"
@@ -18,8 +19,7 @@ _model_name = None
 
 
 def _model_dir():
-    configured = os.environ.get("JURISYNC_WHISPER_DIR")
-    return Path(configured).expanduser() if configured else Path.home() / ".cache" / "jurisync" / "whisper"
+    return user_cache("whisper", "JURISYNC_WHISPER_DIR")
 
 
 def _load_model():

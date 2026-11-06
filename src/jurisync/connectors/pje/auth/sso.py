@@ -92,7 +92,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
         login_url,
         data={"username": username, "password": password, "pjeoffice-code": "", "phrase": ""},
         allow_redirects=False,
-        impersonate="chrome",
+        impersonate=IMPERSONATE,
     )
     log_request("POST", login_url, response.status_code)
     try:
@@ -105,7 +105,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
         otp_url,
         data={"otp": otp, "login": "Validar"},
         allow_redirects=False,
-        impersonate="chrome",
+        impersonate=IMPERSONATE,
     )
     log_request("POST", otp_url, response.status_code)
     if response.status_code not in {301, 302, 303, 307, 308}:

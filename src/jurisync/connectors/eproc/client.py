@@ -26,12 +26,10 @@ from jurisync.connectors.eproc.parsers import (
     parse_process_detail,
     parse_process_list_page,
 )
-from jurisync.core.http import IMPERSONATE, enable_request_logging, require_url
+from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, require_url
 from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
 
-TIMEOUT = 30
-REDIRECTS = {301, 302, 303, 307, 308}
 # Read-only citation/intimation queues, keyed by the tool's `queue` argument.
 # The panel advertises which of these a deployment exposes; the extra kinds are
 # the same "process list" layout as pending/open_deadlines.
@@ -57,7 +55,6 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "processo_selecionar_pagina",  # TJRS pages the event table through the process page instead of ajax
 }
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
-CNJ = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
 MAX_EVENT_PAGES = 5
 
 
@@ -403,7 +400,7 @@ def fetch_process(
     save=False,
 ):
     portal = portals.eproc(portal).key  # aliases in, current key out
-    if not isinstance(process_number, str) or not CNJ.fullmatch(process_number):
+    if not isinstance(process_number, str) or not portals.CNJ.fullmatch(process_number):
         raise ValueError("process_number must be a formatted CNJ number")
     if scope not in ("latest", "page"):
         raise ValueError("scope must be latest or page")

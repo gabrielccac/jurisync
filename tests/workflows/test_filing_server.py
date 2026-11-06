@@ -8,11 +8,11 @@ from unittest import mock
 
 from mcp.client.client import Client
 
+from jurisync.core.documents_dir import save_folder_file
 from jurisync.workflows.filing import server as filing
 
 REVIEW = {
-    "customerId": "1",
-    "folder": "00-PROTOCOLAR",
+    "source": "docs1",
     "ready": False,
     "files": [
         {
@@ -50,14 +50,23 @@ class FilingServerTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.run_dir = Path(self.tmp.name, "run1")
+        documents = tempfile.TemporaryDirectory()
+        self.addCleanup(documents.cleanup)
+        documents_env = mock.patch.dict(os.environ, {"JURISYNC_DOCUMENTS_DIR": documents.name})
+        documents_env.start()
+        self.addCleanup(documents_env.stop)
+        for name in ("a.docx", "b.pdf"):
+            save_folder_file("docs1", name, b"x")
 
     def fake_prepare(self, calls):
-        def prepare(customer_id, facts, out_dir, *, profile, folder=None, client=None, jev=True):
-            calls.append({"customer": customer_id, "folder": folder, "jev": jev, "profile": profile.name})
+        def prepare(files, facts, out_dir, *, profile, source="", jev=True):
+            calls.append(
+                {"files": sorted(Path(f).name for f in files), "source": source, "jev": jev, "profile": profile.name}
+            )
             Path(out_dir, "review.json").write_text(json.dumps(REVIEW))
             return {"ready": False}
 
-        return mock.patch.object(filing, "prepare_customer", prepare)
+        return mock.patch.object(filing, "prepare_folder", prepare)
 
     def test_tools_are_registered_and_only_prepare_and_finalize_write(self):
         async def listing():
@@ -84,7 +93,9 @@ class FilingServerTests(unittest.TestCase):
     def test_an_unknown_profile_is_rejected_before_any_work(self):
         calls = []
         with self.fake_prepare(calls):
-            result = call("filing_prepare", {"profile": "nobody", "runId": "run1", "customerId": "1", "facts": {}})
+            result = call(
+                "filing_prepare", {"profile": "nobody", "runId": "run1", "sourceFolder": "docs1", "facts": {}}
+            )
         self.assertTrue(result.is_error)
         self.assertIn("No filing profile named nobody", result.content[0].text)
         self.assertEqual(calls, [])
@@ -93,10 +104,10 @@ class FilingServerTests(unittest.TestCase):
         calls = []
         with self.fake_prepare(calls):
             result = call(
-                "filing_prepare", {"profile": "victor", "runId": "run1", "customerId": "1", "facts": {"a": 1}}
+                "filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "docs1", "facts": {"a": 1}}
             )
         view = result.structured_content
-        self.assertEqual(calls, [{"customer": "1", "folder": None, "jev": False, "profile": "victor"}])
+        self.assertEqual(calls, [{"files": ["a.docx", "b.pdf"], "source": "docs1", "jev": False, "profile": "victor"}])
         self.assertEqual([file["id"] for file in view["files"]], ["aaa:0", "bbb:1"])
         self.assertEqual(view["candidates"]["cpfs"], ["12345678909"])
         text = json.dumps(view)
@@ -104,12 +115,19 @@ class FilingServerTests(unittest.TestCase):
             self.assertNotIn(hidden, text)
         self.assertEqual(json.loads(self.run_dir.joinpath("facts.json").read_text()), {"a": 1})
 
+    def test_a_source_folder_that_was_not_pulled_is_a_clear_error(self):
+        calls = []
+        with self.fake_prepare(calls):
+            result = call("filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "nope", "facts": {}})
+        self.assertTrue(result.is_error)
+        self.assertEqual(calls, [])
+
     def test_jev_is_only_used_when_asked(self):
         calls = []
         with self.fake_prepare(calls):
             call(
                 "filing_prepare",
-                {"profile": "victor", "runId": "run1", "customerId": "1", "facts": {}, "useJev": True},
+                {"profile": "victor", "runId": "run1", "sourceFolder": "docs1", "facts": {}, "useJev": True},
             )
         self.assertTrue(calls[0]["jev"])
 
@@ -118,7 +136,7 @@ class FilingServerTests(unittest.TestCase):
         self.run_dir.joinpath("checkpoint.json").write_text("{}")
         self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
         for name, arguments in (
-            ("filing_prepare", {"profile": "victor", "runId": "run1", "customerId": "1", "facts": {}}),
+            ("filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "docs1", "facts": {}}),
             ("filing_finalize", {"profile": "victor", "runId": "run1", "facts": {}}),
         ):
             result = call(name, arguments)

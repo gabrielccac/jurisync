@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from jurisync import setup, skills_sync
+from jurisync.install import setup, skills_sync
 
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "Test",

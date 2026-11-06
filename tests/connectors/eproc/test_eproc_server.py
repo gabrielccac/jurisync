@@ -23,7 +23,9 @@ class EprocServerTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(
                 server.configured_portals(),
-                ("trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "trf4-1g-pr", "trf4-2g", "tjrs-1g"),
+                ("tjmg-1g", "tjrj-eproc-1g", "tjpr-1g", "trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "trf4-1g-pr", "trf4-2g", "trf2-1g-rj",
+                 "trf2-1g-es", "trf2-2g", "tjrs-1g",
+                 "tjsc-1g", "tjsc-2g", "tjto-1g", "tjto-2g", "tjsp-1g", "tjsp-2g", "tnu"),
             )
         shared = {"TRF6_USUARIO": "u", "TRF6_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
         with mock.patch.dict(os.environ, shared, clear=True):

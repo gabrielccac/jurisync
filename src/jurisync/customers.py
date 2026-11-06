@@ -20,9 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jurisync import portals
+from jurisync.core import credentials
 
 # Methods a customer may declare. Connectors decide how each one logs in.
-METHODS = ("password_totp", "certificate_totp", "browser_totp")
+METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate_challenge", "browser_totp")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,7 +46,7 @@ def customers_dir():
 
 
 def customer_name():
-    return os.environ.get("JURISYNC_CUSTOMER", "").strip()
+    return credentials.env("JURISYNC_CUSTOMER").strip()
 
 
 def customer_dir(name):

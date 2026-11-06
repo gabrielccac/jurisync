@@ -15,6 +15,9 @@ from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from curl_cffi import requests
 
+from jurisync.core import credentials
+from jurisync.paths import user_cache
+
 MAX_PAGINATION_PAGES = 10_000
 
 
@@ -28,18 +31,24 @@ def _cache_dir():
     """Private token cache outside the repository (LocalAppData on Windows)."""
     if os.environ.get("LOCALAPPDATA"):
         return Path(os.environ["LOCALAPPDATA"]) / "Juridiq"
-    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "jurisync" / "juridiq"
+    return user_cache("juridiq")
 
 
 def config():
-    email = (os.environ.get("JURIDIQ_EMAIL") or "").strip().lower()
+    email = (credentials.env("JURIDIQ_EMAIL") or "").strip().lower()
     name = f"bearer-{hashlib.sha256(email.encode()).hexdigest()[:16]}.json" if email else "bearer-session.json"
+    tenant = credentials.tenant()
+    session_file = (
+        _cache_dir() / "tenants" / tenant / name
+        if tenant
+        else Path(os.environ.get("JURIDIQ_SESSION_FILE") or _cache_dir() / name)
+    )
     return {
         "apiBaseUrl": os.environ.get("JURIDIQ_API_BASE_URL") or "https://api.juridiq.com.br",
         "loginUrl": os.environ.get("JURIDIQ_LOGIN_URL") or "https://www.api.juridiq.com.br/auth/login",
         "email": email,
-        "password": os.environ.get("JURIDIQ_PASSWORD"),
-        "sessionFile": Path(os.environ.get("JURIDIQ_SESSION_FILE") or _cache_dir() / name),
+        "password": credentials.env("JURIDIQ_PASSWORD"),
+        "sessionFile": session_file,
     }
 
 
@@ -178,7 +187,7 @@ class JuridiqApi:
             raise JuridiqError("Juridiq requests must use the configured API origin.")
         method = method.upper()
         read_query = method == "POST" and parts.path == "/generic-tables"
-        if method not in ("GET", "HEAD") and not read_query and os.environ.get("JURIDIQ_ALLOW_WRITES") != "true":
+        if method not in ("GET", "HEAD") and not read_query and credentials.env("JURIDIQ_ALLOW_WRITES") != "true":
             raise PermissionError(
                 "Juridiq writes are disabled. Set JURIDIQ_ALLOW_WRITES=true after confirming the operation."
             )

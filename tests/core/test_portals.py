@@ -35,14 +35,34 @@ class PortalRegistryTest(unittest.TestCase):
                 "trf3-1g",
                 "trf3-2g",
                 "trf5-tru",
-                "tjap-1g",
-                "tjpe-1g",
-                "tjpe-2g",
+                 "tjap-1g",
+                 "tjpe-1g",
+                 "tjpe-2g",
+                 "tjce-1g",
+                 "tjce-2g",
+                 "trt7-1g",
+                 "trt7-2g",
+                 "trt18-1g",
+                 "trt18-2g",
+                 "tst",
+                 "tjrj-1g",
+                 "tjrj-2g",
+                 "tjmt-1g",
+                 "tjdft-1g",
+                 "tjpa-1g",
+                 "tjma-1g",
+                 "tjes-1g",
+                 "tjba-1g",
+                 "tjpb-1g",
+                 "tjpi-1g",
+                 "tjpi-2g",
             ),
         )
         self.assertEqual(
             portals.keys("eproc"),
-            ("trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "trf4-1g-pr", "trf4-2g", "tjrs-1g"),
+            ("tjmg-1g", "tjrj-eproc-1g", "tjpr-1g", "trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "trf4-1g-pr", "trf4-2g", "trf2-1g-rj",
+             "trf2-1g-es", "trf2-2g", "tjrs-1g",
+             "tjsc-1g", "tjsc-2g", "tjto-1g", "tjto-2g", "tjsp-1g", "tjsp-2g", "tnu"),
         )
 
     def test_old_names_are_aliases_and_ids_carry_the_system(self):
@@ -75,6 +95,10 @@ class PortalRegistryTest(unittest.TestCase):
         self.assertEqual([p.key for p in portals.for_process("5012366-88.2025.4.04.7104")], ["trf4-1g-rs"])
         self.assertEqual([p.key for p in portals.for_process("5012366-88.2025.4.04.7204")], ["trf4-1g-sc"])
         self.assertEqual([p.key for p in portals.for_process("5012366-88.2025.4.04.0000")], ["trf4-2g"])
+        self.assertEqual(portals.for_host("eproc.trf2.jus.br").key, "trf2-2g")
+        self.assertEqual(portals.for_host("eproc.jfrj.jus.br").key, "trf2-1g-rj")
+        self.assertEqual(portals.for_host("eproc.jfes.jus.br").key, "trf2-1g-es")
+        self.assertEqual([p.key for p in portals.for_process("5001234-56.2026.4.02.5101")], ["trf2-1g-rj", "trf2-1g-es", "trf2-2g"])
         self.assertEqual([p.key for p in portals.for_process("0001271-74.2026.4.05.8304")], ["trf5-1g", "trf5-2g"])
         self.assertEqual(portals.for_host("pje2g.trf5.jus.br").key, "trf5-2g")
         # TJPE serves both instances on one host: the application path tells them apart.
@@ -88,7 +112,9 @@ class PortalRegistryTest(unittest.TestCase):
         self.assertEqual([p.key for p in portals.for_process("1024853-70.2023.4.01.3400")], ["trf1-1g", "trf1-2g"])
         self.assertEqual([p.key for p in portals.for_process("0001234-56.2026.8.03.0001")], ["tjap-1g"])
         self.assertEqual([p.key for p in portals.for_process("0001271-74.2026.8.17.0001")], ["tjpe-1g", "tjpe-2g"])
-        self.assertEqual(portals.for_process("0001271-74.2026.8.06.0001"), [])  # no TJCE connector
+        self.assertEqual([p.key for p in portals.for_process("0001271-74.2026.8.06.0001")], ["tjce-1g", "tjce-2g"])
+        self.assertEqual(portals.for_host("pje.tjce.jus.br", "/pje2grau/x.seam").key, "tjce-2g")
+        self.assertEqual(portals.for_host("pje.tjce.jus.br", "/pje1grau/x.seam").key, "tjce-1g")
 
 
 if __name__ == "__main__":

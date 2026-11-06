@@ -36,9 +36,32 @@ def portal_totp_account(portal):
     )
 
 
+def dismiss_alert(driver):
+    """Accept a blocking JS alert and return its text (some portals confirm new devices this way)."""
+    try:
+        alert = driver.switch_to.alert
+    except Exception:
+        return ""
+    try:
+        text = alert.text
+    except Exception:
+        text = ""
+    try:
+        alert.accept()
+    except Exception:
+        pass
+    return text
+
+
 def has(driver, selector, timeout=0.5):
     try:
         return driver.wait_for_element(selector, timeout=timeout) is not None
+    except UnexpectedAlertPresentException:
+        dismiss_alert(driver)
+        try:
+            return driver.wait_for_element(selector, timeout=timeout) is not None
+        except Exception:
+            return False
     except Exception:
         return False
 
@@ -59,7 +82,16 @@ def page_hint(driver, limit=160):
 def wait_for_step(driver, timeout=25):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        url = driver.get_current_url() or ""
+        try:
+            url = driver.get_current_url() or ""
+        except UnexpectedAlertPresentException:
+            text = dismiss_alert(driver)
+            if "confirma" in text.lower():
+                raise RuntimeError(
+                    "eproc asks for a confirmation code (new device/email check); "
+                    "fetch the code and continue the login with it"
+                ) from None
+            continue
         if any(has(driver, selector) for selector in LOGIN_FIELDS["otp"]):
             return "otp"
         if has(driver, "button:contains('Enviar')"):
@@ -128,9 +160,12 @@ def session_from_cookies(cookies):
 
 
 def _first_element(driver, selectors, timeout=10):
-    for selector in selectors:
-        if has(driver, selector, timeout=timeout):
-            return driver.wait_for_element(selector, timeout=timeout)
+    # Poll alternatives together instead of spending the full timeout on absent SSO fields.
+    deadline = time.monotonic() + timeout
+    while selectors and time.monotonic() < deadline:
+        for selector in selectors:
+            if has(driver, selector, timeout=0.1):
+                return driver.wait_for_element(selector, timeout=timeout)
     return None
 
 

@@ -505,7 +505,8 @@ class ServerResumeTests(unittest.TestCase):
         ):
             answer = self.server._start_fill("run1", "resume")
         self.assertEqual((answer["state"], answer["stage"]), ("started", "resume"))
-        self.assertEqual(threads, [(self.server._fill_job, ("run1", "fill"))])
+        # The job runs inside a copy of the caller's context: the thread target is Context.run(job, *args).
+        self.assertEqual([args for _, args in threads], [(self.server._fill_job, "run1", "fill")])
 
     def test_resume_without_a_draft_is_refused(self):
         Path(self.tmp.name, "run1", "checkpoint.json").unlink()

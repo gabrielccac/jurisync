@@ -18,6 +18,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 from curl_cffi import CurlMime, requests
 
 from jurisync.connectors.advbox.parsers import BASE_URL, parse_csrf_token, parse_hidden_inputs
+from jurisync.core import credentials
 from jurisync.paths import STATE_DIR
 
 
@@ -30,14 +31,14 @@ class CsrfStaleError(RuntimeError):
 
 
 def require_writes():
-    if os.environ.get("ADVBOX_ALLOW_WRITES") != "true":
+    if credentials.env("ADVBOX_ALLOW_WRITES") != "true":
         raise PermissionError(
             "ADVBOX writes are disabled. Set ADVBOX_ALLOW_WRITES=true after confirming the operation."
         )
 
 
 def _required(name):
-    value = (os.environ.get(name) or "").strip()
+    value = (credentials.env(name) or "").strip()
     if not value:
         raise RuntimeError(f"Set {name} in .env")
     return value
@@ -85,8 +86,12 @@ def is_expired_session(cache, now_ms=None):
 
 
 def session_file():
-    account = (os.environ.get("ADVBOX_EMAIL") or "").strip().lower()
+    account = (credentials.env("ADVBOX_EMAIL") or "").strip().lower()
     name = f"advbox-{hashlib.sha256(account.encode()).hexdigest()[:16]}.json" if account else "advbox-session.json"
+    tenant = credentials.tenant()
+    if tenant:
+        # Hosted: each office's cookie lives in its own folder; the server-wide override does not apply.
+        return STATE_DIR / "data" / "tenants" / tenant / name
     return Path(os.environ.get("ADVBOX_SESSION_FILE") or STATE_DIR / "data" / name)
 
 

@@ -21,11 +21,13 @@ import sys
 import time
 from pathlib import Path
 
-from jurisync import credentials_bundle, customers, portals
+from jurisync import customers, portals
 from jurisync.core.totp import parse_accounts, select_account
+from jurisync.install import credentials_bundle
 from jurisync.paths import USER_ENV_FILE
 
 SERVERS = {
+    "esaj": "jurisync-esaj",
     "eproc": "jurisync-eproc",
     "pje": "jurisync-pje",
     "advbox": "jurisync-advbox",
@@ -490,7 +492,7 @@ def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
         if argv[:1] == ["import"]:
             return import_main(argv[1:], ask_secret=ask_secret, say=say)
         if argv[:1] == ["skills"]:
-            from jurisync.skills_sync import skills_main
+            from jurisync.install.skills_sync import skills_main
 
             return skills_main(argv[1:], say=say)
         return setup_main(argv, ask=ask, ask_secret=ask_secret, say=say)

@@ -101,6 +101,43 @@ class EprocAuthTests(unittest.TestCase):
 
 
 class FillFieldTests(unittest.TestCase):
+    def test_legacy_field_does_not_wait_for_absent_sso_field(self):
+        from jurisync.connectors.eproc import auth
+
+        for kind, timeout in (("username", 20), ("password", 20), ("otp", 10)):
+            with self.subTest(kind=kind):
+                selectors = auth.LOGIN_FIELDS[kind]
+                driver = Mock()
+                with patch.object(auth, "has", side_effect=[False, True]) as has:
+                    field = auth._first_element(driver, selectors, timeout=timeout)
+                self.assertIs(field, driver.wait_for_element.return_value)
+                self.assertTrue(all(call.kwargs["timeout"] < 1 for call in has.call_args_list))
+                driver.wait_for_element.assert_called_once_with(selectors[1], timeout=timeout)
+
+    def test_delayed_field_is_checked_again_within_shared_timeout(self):
+        from jurisync.connectors.eproc import auth
+
+        driver = Mock()
+        with (
+            patch.object(auth.time, "monotonic", side_effect=[0, 0, 1]),
+            patch.object(auth, "has", side_effect=[False, False, True]),
+        ):
+            field = auth._first_element(driver, ("#username", "#txtUsuario"), timeout=20)
+        self.assertIs(field, driver.wait_for_element.return_value)
+        driver.wait_for_element.assert_called_once_with("#username", timeout=20)
+
+    def test_missing_fields_share_one_timeout(self):
+        from jurisync.connectors.eproc import auth
+
+        driver = Mock()
+        with (
+            patch.object(auth.time, "monotonic", side_effect=[0, 0, 20]),
+            patch.object(auth, "has", return_value=False) as has,
+        ):
+            self.assertIsNone(auth._first_element(driver, ("#username", "#txtUsuario"), timeout=20))
+        self.assertEqual(has.call_count, 2)
+        driver.wait_for_element.assert_not_called()
+
     def test_field_is_found_again_when_the_page_re_renders(self):
         from selenium.common.exceptions import StaleElementReferenceException
 
@@ -119,11 +156,12 @@ class FillFieldTests(unittest.TestCase):
 
         fields = [Field(True), Field(False)]
         driver = Mock()
-        driver.wait_for_element.side_effect = lambda *_a, **_k: fields[min(driver.wait_for_element.call_count - 1, 1)]
-        with patch.object(auth.time, "sleep"):
+        driver.wait_for_element.side_effect = [fields[0], fields[0], fields[1], fields[1]]
+        with patch.object(auth.time, "sleep") as sleep:
             field = auth._fill_field(driver, ("#otp",), "123456")
         self.assertIs(field, fields[1])
         self.assertEqual(fields[1].typed, ["123456"])
+        sleep.assert_called_once_with(0.5)
 
 
 if __name__ == "__main__":

@@ -96,6 +96,12 @@ class PjeChecks(unittest.TestCase):
     def test_detail_url_differs_only_by_instance_suffix(self):
         self.assertEqual(search.DETAIL_SUFFIX, {"1g": "&aba=", "2g": ""})
         self.assertTrue(search.DOWNLOAD_PATTERN.search("window.open('/pje/documento/download/TRF5/x/1/'"))
+        legacy = "var url = '/1g/seam/resource/rest/pje-legacy/documento/download/-1/1g/7878703/' + idDocumento"
+        match = search.DOWNLOAD_PATTERN.search(legacy)
+        self.assertEqual(
+            next(g for g in match.groups() if g),
+            "/1g/seam/resource/rest/pje-legacy/documento/download/-1/1g/7878703/",
+        )
 
     def test_cross_tribunal_number_fails_before_login(self):
         with patch.object(client, "login_portal") as login, self.assertRaisesRegex(ValueError, "TRF5"):

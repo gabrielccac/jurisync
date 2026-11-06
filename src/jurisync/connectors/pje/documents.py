@@ -12,31 +12,10 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.connectors.pje.parsers import parse_process_number
-from jurisync.core.document_text import extract_document_text as _extract_document_text
+from jurisync.core.document_text import extract_document_text
+from jurisync.core.documents import MAX_DOCUMENT_BYTES, validate_document_ids
 from jurisync.core.documents_dir import save_document
-
-MAX_DOCUMENTS = 5
-MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
-
-
-def validate_document_ids(document_ids):
-    if (
-        not isinstance(document_ids, list)
-        or not 1 <= len(document_ids) <= MAX_DOCUMENTS
-        or any(not isinstance(doc_id, str) or not re.fullmatch(r"[0-9]+", doc_id) for doc_id in document_ids)
-        or len(set(document_ids)) != len(document_ids)
-    ):
-        raise ValueError("Select 1-5 unique numeric document ID strings")
-
-
-def extract_document_text(content, content_type, process_number="", *, allow_unnumbered=False):
-    """Legacy helper name; selected reads use the shared status unchanged."""
-    status, text = _extract_document_text(content, content_type, process_number, allow_unnumbered=allow_unnumbered)
-    if status == "session_expired":
-        return "unrecognized_html", ""
-    if status == "pdf_parse_error":
-        return "pdf_extractor_unavailable", ""
-    return status, text
+from jurisync.core.http import IMPERSONATE
 
 
 def read_selected_documents(process, document_ids, *, session, save=False):
@@ -114,9 +93,9 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             or parsed.fragment
             or not re.fullmatch(
                 re.escape(config.root)
-                + r"seam/resource/rest/pje-legacy/documento/download/[A-Za-z0-9]+/[A-Za-z0-9_-]+/"
+                + r"seam/resource/rest/pje-legacy/documento/download/(?:[A-Za-z0-9-]+/[A-Za-z0-9_-]+/"
                 + process_id
-                + "/"
+                + r"/)?"
                 + re.escape(doc_id),
                 parsed.path,
             )
@@ -142,7 +121,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                     "Accept": "application/pdf,text/html,*/*",
                     "Referer": f"https://{host}{config.root}Processo/ConsultaProcesso/listView.seam",
                 },
-                impersonate="chrome",
+                impersonate=IMPERSONATE,
                 allow_redirects=False,
                 timeout=30,
                 stream=True,
@@ -163,7 +142,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                     content.extend(chunk)
                 else:
                     item["sha256"] = hashlib.sha256(content).hexdigest()
-                    item["extractionStatus"], item["text"] = _extract_document_text(
+                    item["extractionStatus"], item["text"] = extract_document_text(
                         bytes(content), item["content_type"], number, allow_unnumbered=True
                     )
                     if save:

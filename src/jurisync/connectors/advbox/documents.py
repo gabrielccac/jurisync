@@ -8,6 +8,8 @@ from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit
 from jurisync.connectors.advbox.client import positive_integer
 from jurisync.connectors.advbox.parsers import BASE_URL, parse_file_tree
 from jurisync.connectors.advbox.session import SessionExpiredError
+from jurisync.core import credentials
+from jurisync.core.documents_dir import save_folder_file
 from jurisync.core.pdf import analyze_document, available_path
 from jurisync.paths import STATE_DIR
 
@@ -117,7 +119,9 @@ class AdvboxDocuments:
                 raise RuntimeError("ADVBOX download response was empty")
             fallback = unquote(urlsplit(url).path.split("/")[-1]) or "advbox-download"
             output_name = download_filename("", filename or fallback)
-            folder = Path(directory or STATE_DIR / "downloaded_files" / "advbox")
+            tenant = credentials.tenant()
+            default = STATE_DIR / "downloaded_files" / "advbox"
+            folder = Path(directory or (default / "tenants" / tenant if tenant else default))
             folder.mkdir(parents=True, exist_ok=True)
             output = available_path(folder, output_name)
             with open(output, "xb") as handle:
@@ -129,49 +133,56 @@ class AdvboxDocuments:
 
         return self.session.using(download)
 
+    def _walk_folder(self, customer_id, folder, max_files, max_total_bytes, handle):
+        """Download the files of a customer folder (and nested ones) within the limits, calling
+        ``handle(path_in_advbox, name, content)`` for each. Returns True when a limit cut the walk short."""
+        listing = self.list_customer_files(customer_id)
+        if not any(item["path"] == folder for item in listing.get("folders") or []):
+            raise ValueError(f"ADVBOX folder not found for customer {customer_id}: {folder or '(root)'}")
+        max_file_bytes = _max_download_bytes()
+        count, total, truncated, queue, visited = 0, 0, False, [folder], set()
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            if len(visited) >= MAX_FOLDERS:
+                return True
+            visited.add(current)
+            tree = self.list_customer_files(customer_id, current)
+            for item in tree["files"]:
+                if count >= max_files or total >= max_total_bytes:
+                    return True
+                limit = min(max_file_bytes, max_total_bytes - total)
+                try:
+                    content = self._fetch_bytes(item.get("downloadUrl") or item["url"], "file", limit)
+                except RuntimeError as error:
+                    if not re.search(r"ADVBOX file exceeds the .*download limit", str(error)):
+                        raise
+                    return True
+                total += len(content)
+                count += 1
+                handle(str(PurePosixPath(current) / item["name"]), item["name"], content)
+            queue += [child["path"] for child in tree["folders"] if child["path"] not in visited]
+        return truncated
+
     def download_folder(self, customer_id, folder, *, max_files=50, max_total_bytes=200 * 1024 * 1024, ocr=True):
         positive_integer(max_files, "maxFiles", 100)
         positive_integer(max_total_bytes, "maxTotalBytes", 2**53 - 1)
-        max_chars, max_file_bytes = _max_text_chars(), _max_download_bytes()
+        max_chars = _max_text_chars()
 
         def download(session):
-            listing = self.list_customer_files(customer_id)
-            if not any(item["path"] == folder for item in listing.get("folders") or []):
-                raise ValueError(f"ADVBOX folder not found for customer {customer_id}: {folder or '(root)'}")
-            files, total, truncated, queue, visited = [], 0, False, [folder], set()
-            while queue:
-                current = queue.pop(0)
-                if current in visited:
-                    continue
-                if len(visited) >= MAX_FOLDERS:
-                    truncated = True
-                    break
-                visited.add(current)
-                tree = self.list_customer_files(customer_id, current)
-                for item in tree["files"]:
-                    if len(files) >= max_files or total >= max_total_bytes:
-                        truncated = True
-                        break
-                    limit = min(max_file_bytes, max_total_bytes - total)
-                    try:
-                        content = self._fetch_bytes(item.get("downloadUrl") or item["url"], "file", limit)
-                    except RuntimeError as error:
-                        if not re.search(r"ADVBOX file exceeds the .*download limit", str(error)):
-                            raise
-                        truncated = True
-                        break
-                    total += len(content)
-                    name = str(PurePosixPath(current) / item["name"])
-                    files.append(
-                        {
-                            "name": name,
-                            "bytes": len(content),
-                            **analyze_document(content, name, max_text_chars=max_chars, ocr=ocr),
-                        }
-                    )
-                if truncated:
-                    break
-                queue += [child["path"] for child in tree["folders"] if child["path"] not in visited]
+            files = []
+
+            def parse(name, _file_name, content):
+                files.append(
+                    {
+                        "name": name,
+                        "bytes": len(content),
+                        **analyze_document(content, name, max_text_chars=max_chars, ocr=ocr),
+                    }
+                )
+
+            truncated = self._walk_folder(customer_id, folder, max_files, max_total_bytes, parse)
             with_text = [file for file in files if file.get("textCharacters") is not None]
             return {
                 "customerId": str(customer_id),
@@ -189,6 +200,35 @@ class AdvboxDocuments:
                     ),
                     "filesOcred": sum(1 for file in files if file.get("pagesRoutedToOcr")),
                 },
+            }
+
+        return self.session.using(download)
+
+    def save_folder(self, customer_id, folder, into, *, max_files=50, max_total_bytes=200 * 1024 * 1024):
+        """Save the files of a customer folder, unparsed, into the shared documents folder ``into``.
+
+        Any workflow that needs a set of documents (a filing, a review) reads them from there, whichever system
+        they came from.
+        """
+        positive_integer(max_files, "maxFiles", 100)
+        positive_integer(max_total_bytes, "maxTotalBytes", 2**53 - 1)
+
+        def download(session):
+            saved = []
+
+            def save(_path, name, content):
+                saved.append(
+                    {"name": save_folder_file(into, download_filename("", name), content), "bytes": len(content)}
+                )
+
+            truncated = self._walk_folder(customer_id, folder, max_files, max_total_bytes, save)
+            return {
+                "customerId": str(customer_id),
+                "folder": folder,
+                "savedInto": into,
+                "truncated": truncated,
+                "files": saved,
+                "totals": {"files": len(saved), "bytes": sum(file["bytes"] for file in saved)},
             }
 
         return self.session.using(download)

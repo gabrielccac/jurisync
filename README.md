@@ -20,19 +20,29 @@ src/jurisync/
     pdf.py              PDF text + metadata (pdf-inspector), safe download paths
     document_text.py    HTML/PDF text with access-denied and expired-session detection
     redaction.py        Strip tokens and raw URLs from results and logs
-    http.py             URL guard, request conventions, request logging
+    http.py             URL guard, redirect follower, request conventions, request logging
+    certificate.py      A1 certificate: load the .p12 (file or vault bytes), PEM pair for mutual TLS
+    documents.py        Document-read limits (5 per call, 10 MB), id validation, bounded streaming
+    documents_dir.py    Shared documents folder: saved files and saved subfolders (tenant-scoped)
+    runs.py             Where a filing run lives, for the filing workflow and the portal that files it
     word_to_pdf.py      DOC/DOCX → PDF through headless LibreOffice
   connectors/           One folder per system; each has a server.py MCP entry point
+    projudi/            TJGO 1G (A1 over mutual TLS): process, document index, download. base.py holds the shared plumbing;
+                        one adapter per Projudi generation (tjgo.py validated; keycloak.py TJPR/TJRR, tjam.py, tjpi.py are
+                        placeholders for portals registered with wired=False)
     pje/                TRF1 1G/2G, TRF3 1G/2G, TRF5 1G/2G and TRU, TJAP 1G, TJPE 1G/2G: one search flow for every deployment, documents,
                         Expedientes panel inboxes (inbox.py), Push registry, TRF5 draft filing; jsf.py holds the shared JSF mechanics
                         (auth/ holds SSO, A1 certificate, session cache)
-    eproc/              TRF4 (1G SC/RS/PR, 2G), TRF6 and TJRS: notice queues, process, documents (A1 certificate or Selenium login)
+    eproc/              TRF4 (1G SC/RS/PR, 2G), TRF6, TRF2 (2G, 1G RJ/ES) and TJRS: notice queues, process, documents (A1 certificate or Selenium login)
     djen/               Public DJEN/Comunica search, certidão text, JFPE deadline calendar
     juridiq/            Juridiq REST API
     advbox/             ADVBOX web session: customers, lawsuits, activities, files, tasks
   workflows/
     publications/       Juridiq publication → task pipeline and evidence validation
-    filing/             Profile-driven filing prep (ADVBOX protocol folder → PJe payload) and its MCP server
+    filing/             Profile-driven filing prep (a folder of pulled documents → payload) and its MCP server; where the
+                        documents come from is each office's connector tools, never this module. The portal side of a
+                        filing lives in the portal's connector (pje/filing for TRF5)
+  install/              setup, credential bundles, skills sync, local HTTP serving
 customers/
   jean/                 Juridiq publication triage: profile, runner, skill, notes
   victor/               DJEN → ADVBOX routing skill, TRF5 filing prep, TRF1 watcher
@@ -146,11 +156,12 @@ for an installed package and beside the code in a checkout.
 | Server | Tools | Login | Writes |
 |---|---|---|---|
 | `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_inbox`, `pje_list_watched_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1/TRF3/TJAP: password + TOTP by default, or the A1 certificate with `<PREFIX>_CERT=true` (e.g. `PJE_1G_CERT=true`; the SSO asks for TOTP only when it requires one). TRF5 (1G and 2G): A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
-| `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | ADVBOX session | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
-| `eproc` | `eproc_list_notices`, `eproc_list_processes`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `trf4-1g-pr`, `trf4-2g`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | Browser login + TOTP, or the A1 certificate over mutual TLS with `<PREFIX>_CERT=true` (TRF4); once per portal | none |
+| `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | none: it prepares a folder of documents the agent pulled with the office's own connector (ADVBOX: `advbox_save_folder`) | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
+| `eproc` | `eproc_list_notices`, `eproc_list_processes`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `trf4-1g-pr`, `trf4-2g`, `trf2-2g`, `trf2-1g-rj`, `trf2-1g-es`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | Browser login + TOTP, or the A1 certificate over mutual TLS with `<PREFIX>_CERT=true` (TRF4); once per portal | none |
+| `projudi` | `projudi_get_process`, `projudi_list_documents`, `projudi_read_documents`, `projudi_download_document` (argument `portal`, default `tjgo-1g`) | A1 certificate over mutual TLS (`PJE_A1_P12`/`PJE_A1_PIN`, or `PROJUDI_A1_*`) | none |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
 | `juridiq` | 18 read tools (publications, lawsuits, movements, events, tasks, templates, users, tags) + 8 write tools* | email + password, bearer token cached | write tools registered only with `JURIDIQ_ALLOW_WRITES=true` |
-| `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
+| `advbox` | 12 read tools (customers, lawsuits, activities, intimações via `advbox_list_publications`, members, workflows, reports, files) + downloads* + `advbox_save_folder`* (a folder into the shared documents folder, for filing) + `advbox_create_task`*, `advbox_complete_task`*, `advbox_delete_task`* | email + password + approved device | `ADVBOX_ALLOW_WRITES=true` |
 
 Long-running servers keep each portal's authenticated session in memory, so
 only the first call logs in; later calls reuse it until it expires.

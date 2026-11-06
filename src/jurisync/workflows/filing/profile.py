@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from jurisync.core import credentials
 from jurisync.paths import REPO_ROOT
 
 PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
@@ -34,7 +35,7 @@ class Profile:
         defaults = copy.deepcopy(self.defaults_template)
         attorney = defaults["attorney"]
         names = attorney.pop("cpfEnv", [])
-        attorney["cpf"] = next((os.environ[name] for name in names if os.environ.get(name)), "")
+        attorney["cpf"] = next((credentials.env(name) for name in names if credentials.env(name)), "")
         return {"portal": self.portal, **defaults}
 
     def reference(self, key):

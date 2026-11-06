@@ -16,11 +16,13 @@ from jurisync.core.mcp import http_settings, load_env_file
 
 # name -> (module, attribute holding the server, or "create_server()", attribute path to close on exit)
 SERVERS = {
+    "esaj": ("jurisync.connectors.esaj.server", "create_server()", "sessions.close"),
     "pje": ("jurisync.connectors.pje.server", "server", "sessions.close"),
     "advbox": ("jurisync.connectors.advbox.server", "server", "client.close"),
     "djen": ("jurisync.connectors.djen.server", "server", None),
     "eproc": ("jurisync.connectors.eproc.server", "create_server()", "sessions.close"),
     "juridiq": ("jurisync.connectors.juridiq.server", "create_server()", None),
+    "projudi": ("jurisync.connectors.projudi.server", "create_server()", "sessions.close"),
 }
 DEFAULT_SERVERS = ("pje", "advbox")
 

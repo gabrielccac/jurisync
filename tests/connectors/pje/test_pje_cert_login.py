@@ -38,6 +38,43 @@ class CertificateLoginChecks(unittest.TestCase):
         response.url = "https://pje1g.trf5.jus.br/pje/home"
         self.assertTrue(cert_login._authenticated(response, "pje1g.trf5.jus.br"))
 
+    def test_jt_shell_page_counts_as_authenticated(self):
+        shell = "<html><body>Painel do advogado - Procurador MARA SUSY</body></html>"
+        response = SimpleNamespace(status_code=200, url="https://pje.trt7.jus.br/primeirograu/error.seam", text=shell)
+        self.assertTrue(cert_login._authenticated(response, "pje.trt7.jus.br"))
+        plain = SimpleNamespace(status_code=200, url="https://pje.trt7.jus.br/primeirograu/error.seam", text="<html></html>")
+        self.assertFalse(cert_login._authenticated(plain, "pje.trt7.jus.br"))
+
+    def test_http_redirect_on_portal_host_is_upgraded_to_https(self):
+        redirect = SimpleNamespace(
+            status_code=302,
+            url="https://sso.cloud.pje.jus.br/auth",
+            headers={"Location": "http://pje.trt7.jus.br/pjekz/"},
+        )
+        final = SimpleNamespace(status_code=200, url="https://pje.trt7.jus.br/pjekz/", headers={})
+        session = Mock()
+        session.get.return_value = final
+        self.assertIs(cert_login._follow(session, redirect), final)
+        called_url = session.get.call_args.args[0]
+        self.assertTrue(called_url.startswith("https://pje.trt7.jus.br/pjekz/"))
+
+    def test_http_redirect_off_portal_hosts_still_fails(self):
+        redirect = SimpleNamespace(
+            status_code=302,
+            url="https://sso.cloud.pje.jus.br/auth",
+            headers={"Location": "http://evil.example/collect"},
+        )
+        with self.assertRaises(RuntimeError):
+            cert_login._follow(Mock(), redirect)
+
+    def test_legacy_challenge_extraction(self):
+        html = ('<script>ASSINATURA_MENSAGEM = "abc123"; CONVERSATION_ID = "15881";</script>'
+                '<form id="assinaturaForm" action="/2g/logarSC.seam">')
+        self.assertEqual(
+            cert_login._legacy_challenge(html), ("abc123", "/logarPJeOffice.seam?cid=15881")
+        )
+        self.assertIsNone(cert_login._legacy_challenge("<html></html>"))
+
 
 if __name__ == "__main__":
     unittest.main()

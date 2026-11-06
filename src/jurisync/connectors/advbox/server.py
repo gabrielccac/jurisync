@@ -18,6 +18,7 @@ from jurisync.connectors.advbox.parsers import compact_lawsuit_report
 from jurisync.connectors.advbox.session import require_writes
 from jurisync.core.documents_dir import resolve_saved_document
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
+from jurisync.core.tenant_local import TenantLocal
 
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
@@ -60,8 +61,9 @@ FilterUserIds = Annotated[
     ),
 ]
 
-client = AdvboxClient()
-documents = AdvboxDocuments(client)
+# One client (cookie session, CSRF token, rate-limit cooldown) per office; a local install has a single one.
+client = TenantLocal(AdvboxClient, close=lambda value: value.close())
+documents = TenantLocal(lambda: AdvboxDocuments(client.get()))
 server = MCPServer("advbox", version="1.0.0")
 
 
@@ -409,6 +411,29 @@ def download_folder(
     return CallToolResult(
         content=content, structured_content={**result, "filesParsed": sum(1 for file in files if file.get("markdown"))}
     )
+
+
+@server.tool(
+    name="advbox_save_folder",
+    title="Save an ADVBOX folder into the shared documents folder",
+    description="Save the files of a customer folder (and nested folders), unparsed, into a named subfolder of the shared documents folder, for a workflow that needs the whole set, such as filing_prepare. Never overwrites: a repeated name is suffixed. Read the folder tree first with advbox_list_files.",
+    annotations=LOCAL_WRITE,
+)
+def save_folder(
+    customerId: Id,
+    folder: Annotated[
+        str, Field(min_length=1, max_length=255, description="Folder path to save, as listed by advbox_list_files.")
+    ],
+    into: Annotated[
+        str,
+        Field(
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            description="Name of the shared-documents subfolder to save into, e.g. the filing runId.",
+        ),
+    ],
+    maxFiles: Annotated[int, Field(ge=1, le=100, description="Max files to save, 1 to 100; default 50.")] = 50,
+) -> dict[str, Any]:
+    return call(lambda: documents.save_folder(customerId, folder, into, max_files=maxFiles))
 
 
 class Attachment(BaseModel):

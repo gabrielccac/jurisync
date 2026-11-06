@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """PJe certificate + TOTP login with a native A1 signer (any PJe portal)."""
 
-import os
 import re
 import time
 import urllib.parse
@@ -14,7 +13,8 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
 from jurisync.connectors.pje.auth.sso import require_allowed_url
-from jurisync.core.http import log, log_request
+from jurisync.core import credentials
+from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
 from jurisync.core.redaction import url_shape
 from jurisync.core.totp import accounts_from_image, parse_accounts, select_account, totp
 
@@ -28,15 +28,67 @@ def _require_available(page):
 def _challenge(html):
     match = re.search(r"autenticar\('([^']+)',\s*'([^']+)'\)", html)
     if not match:
-        raise RuntimeError("TRF5 login page has no certificate challenge")
+        raise RuntimeError("PJe login page has no certificate challenge")
     return match.group(1), match.group(2)
+
+
+def _legacy_challenge(html):
+    """PJe 1.x-style pages (TJRJ 2G): ASSINATURA_MENSAGEM signed like PJeOffice.
+
+    Returns (mensagem, enviarPara): the challenge and the PJeOffice callback path
+    (``/logarPJeOffice.seam?cid=...``), per the PJeOffice protocol (tarefa
+    ``cnj.autenticador`` posts ``{uuid, mensagem, assinatura, certChain}``).
+    """
+    match = re.search(r'ASSINATURA_MENSAGEM\s*=\s*"([^"]+)"', html)
+    cid = re.search(r'CONVERSATION_ID\s*=\s*"([^"]+)"', html)
+    if not match or not cid:
+        return None
+    return match.group(1), "/logarPJeOffice.seam?cid=" + cid.group(1)
+
+
+def _legacy_login(session, config, page, key, cert, chain):
+    """Sign the legacy challenge like PJeOffice and post to its callback."""
+    import base64
+    import json
+
+    found = _legacy_challenge(page.text)
+    if not found:
+        return None
+    mensagem, enviar_para = found
+    # PJeOffice concatenates servidor (the app root) + enviarPara as plain strings.
+    action = config.base_url.rstrip("/") + "/" + enviar_para.lstrip("/")
+    require_allowed_url(action)
+    token = str(uuid.uuid4())
+    body = json.dumps(
+        {
+            "uuid": token,
+            "mensagem": mensagem,
+            "assinatura": base64.b64encode(native_signer.sign_mensagem(mensagem, key)).decode(),
+            "certChain": native_signer.certificate_chain64(cert, chain),
+        }
+    )
+    response = session.post(
+        action,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "PJeOffice/2.5.16",
+            "versao": "2.5.16",
+        },
+        impersonate=IMPERSONATE,
+        allow_redirects=False,
+        timeout=60,
+    )
+    log_request("POST", action, response.status_code)
+    return _follow(session, response)
 
 
 def _submit_code(sso_session, action, token):
     response = sso_session.post(
         action,
         data={"username": "", "password": "", "pjeoffice-code": token, "phrase": ""},
-        impersonate="chrome",
+        impersonate=IMPERSONATE,
         allow_redirects=False,
         timeout=60,
     )
@@ -44,29 +96,31 @@ def _submit_code(sso_session, action, token):
     return response
 
 
+def _upgrade_pje_http(url):
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme.lower() == "http" and (parts.hostname or "").lower() in portals.hosts("pje"):
+        # JT SSO bounces back over plain http (pjekz); the same path serves https.
+        return "https://" + url.split("://", 1)[1]
+    return url
+
+
 def _follow(sso_session, response, hops=6):
-    for _ in range(hops):
-        location = response.headers.get("Location")
-        if response.status_code not in {301, 302, 303, 307, 308} or not location:
-            break
-        next_url = urllib.parse.urljoin(response.url, location)
-        require_allowed_url(next_url)
-        response = sso_session.get(
-            next_url,
-            impersonate="chrome",
-            allow_redirects=False,
-            timeout=30,
-        )
-    return response
+    return follow_redirects(
+        sso_session, response, check=require_allowed_url, hops=hops, rewrite=_upgrade_pje_http, timeout=30
+    )
 
 
 def _authenticated(response, host):
     soup = BeautifulSoup(response.text, "html.parser")
-    return (
-        response.status_code == 200
-        and urllib.parse.urlsplit(response.url).hostname == host
-        and bool(soup.find("a", href=re.compile(r"/logout\.seam")))
-        and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
+    shell = "Painel do advogado" in response.text
+    return response.status_code == 200 and urllib.parse.urlsplit(response.url).hostname == host and (
+        (
+            bool(soup.find("a", href=re.compile(r"/logout\.seam")))
+            and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
+        )
+        # JT portals land on a shell page (via /pjekz/ + error.seam forward) that carries
+        # the user profile and menus instead of the logout/ViewState markers.
+        or shell
     )
 
 
@@ -99,10 +153,10 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
     """
     config = portals.pje(portal)
     account = _twofa(portal, twofa_data)
-    pin = pin or os.environ.get("PJE_A1_PIN")
+    pin = pin or credentials.env("PJE_A1_PIN")
     if not pin:
         raise RuntimeError("Set PJE_A1_PIN to the A1 certificate password")
-    key, cert, chain = native_signer.load_a1(p12_path or native_signer.a1_path(), pin)
+    key, cert, chain = native_signer.load_a1(p12_path, pin)
     try:
         return _login(session or requests.Session(), config, account, key, cert, chain)
     except RuntimeError as error:
@@ -114,11 +168,29 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
 
 
 def _login(session, config, account, key, cert, chain):
-    page = _follow(session, session.get(config.login_url, impersonate="chrome", allow_redirects=False, timeout=30))
+    page = _follow(session, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30))
     require_allowed_url(page.url)
     log_request("GET", config.login_url, page.status_code)
     _require_available(page)
-    _, mensagem = _challenge(page.text)
+    try:
+        _, mensagem = _challenge(page.text)
+    except RuntimeError:
+        # PJe 1.x-style pages (TJRJ 2G): sign ASSINATURA_MENSAGEM like PJeOffice.
+        legacy = _legacy_login(session, config, page, key, cert, chain)
+        if legacy is not None and _authenticated(legacy, config.host):
+            log.info("%s legacy certificate login complete -> %s", config.key, url_shape(legacy.url))
+            return session
+        # Portals like TRT7 serve no inline challenge: their login page only offers
+        # PDPJ SSO, entered via authenticateSSO.seam, which redirects to the shared SSO.
+        entry = urllib.parse.urljoin(config.login_url, "authenticateSSO.seam")
+        require_allowed_url(entry)
+        page = _follow(
+            session, session.get(entry, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
+        )
+        require_allowed_url(page.url)
+        log_request("GET", entry, page.status_code)
+        _require_available(page)
+        _, mensagem = _challenge(page.text)
     token = str(uuid.uuid4())
     payload = native_signer.build_payload(
         token,
@@ -129,9 +201,11 @@ def _login(session, config, account, key, cert, chain):
     native_signer.post_result(session, payload)
 
     soup = BeautifulSoup(page.text, "html.parser")
-    form = soup.find("form", id="loginForm")
+    # TRF5-style pages post the signed challenge to loginForm; JT SSO pages
+    # (via authenticateSSO.seam) use kc-form-login with the same pjeoffice fields.
+    form = soup.find("form", id="loginForm") or soup.find("form", id="kc-form-login")
     if not form or not form.get("action"):
-        raise RuntimeError("TRF5 login form was not returned")
+        raise RuntimeError("PJe login form was not returned")
     action = urllib.parse.urljoin(page.url, form["action"])
     require_allowed_url(action)
 
@@ -151,12 +225,18 @@ def _login(session, config, account, key, cert, chain):
     response = session.post(
         otp_action,
         data={"otp": otp, "login": "Validar"},
-        impersonate="chrome",
+        impersonate=IMPERSONATE,
         allow_redirects=False,
         timeout=60,
     )
     log_request("POST", otp_action, response.status_code)
     final = _follow(session, response)
+    if not _authenticated(final, config.host):
+        # JT portals park the flow on a /pjekz/ loader: probe an app page, whose
+        # error.seam forward renders the authenticated shell when the session holds.
+        probe = session.get(config.search_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
+        log_request("GET", config.search_url, probe.status_code)
+        final = _follow(session, probe)
     if not _authenticated(final, config.host):
         raise RuntimeError(f"{config.key} login did not reach an authenticated PJe page")
     log.info("%s certificate login complete -> %s", config.key, url_shape(final.url))

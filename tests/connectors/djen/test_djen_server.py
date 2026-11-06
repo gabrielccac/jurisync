@@ -1,12 +1,16 @@
+import json
 import sys
 import unittest
+from datetime import date
 from unittest import mock
 
 from mcp.client.client import Client
 from mcp.client.stdio import StdioServerParameters
+from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync.connectors.djen import server as djen_server
 from jurisync.connectors.djen.client import DjenError
+from jurisync.core import credentials
 
 RAW_ITEM = {
     "id": 1,
@@ -28,7 +32,13 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             tools = (await client.list_tools()).tools
         self.assertEqual(
             sorted(tool.name for tool in tools),
-            ["djen_calculate_deadline", "djen_get_certidao_text", "djen_search_communications"],
+            [
+                "djen_calculate_deadline",
+                "djen_get_certidao_text",
+                "djen_list_saved_searches",
+                "djen_search_communications",
+                "djen_search_saved",
+            ],
         )
         self.assertTrue(all(tool.annotations.read_only_hint for tool in tools))
 
@@ -223,11 +233,55 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         self.assertIn("outside the verified court calendar", result.content[0].text)
 
+    async def test_saved_searches_run_together_without_duplicates(self):
+        searches = [
+            {"label": "Victor PE", "numeroOab": "42543", "ufOab": "PE"},
+            {"label": "Victor PB", "numeroOab": "14663", "ufOab": "PB", "tribunal": "TRF5"},
+        ]
+        shared = {"id": 7, "numero_processo": "08001234520264058300", "texto": "Intime-se"}
+        pages = [
+            {"status": "success", "count": 2, "items": [shared, {"id": 8, "texto": "Cite-se"}]},
+            {"status": "success", "count": 120, "items": [shared]},
+        ]
+        with (
+            credentials.scope("office-a", {"DJEN_SEARCHES": json.dumps(searches)}),
+            mock.patch.object(djen_server, "search_page", side_effect=pages) as search,
+        ):
+            result = djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 2), itens=50)
+        first, second = (call.args[0] for call in search.call_args_list)
+        self.assertEqual((first["numeroOab"], first["ufOab"]), ("42543", "PE"))
+        self.assertNotIn("siglaTribunal", first)
+        self.assertEqual(second["siglaTribunal"], "TRF5")
+        self.assertEqual([item["id"] for item in result["items"]], [7, 8])
+        self.assertEqual([(s["new"], s["more"]) for s in result["searches"]], [(2, False), (0, True)])
+
+    async def test_saved_searches_validate_and_court_override(self):
+        with credentials.scope("office-a", {"DJEN_SEARCHES": json.dumps([{"numeroOab": "1"}])}):
+            with self.assertRaises(ValueError):
+                djen_server.saved_searches()
+        with credentials.scope("office-a", {"DJEN_SEARCHES": "[]"}), self.assertRaises(ToolError):
+            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1))
+        empty = {"status": "success", "count": 0, "items": []}
+        searches = json.dumps([{"label": "x", "numeroOab": "1", "ufOab": "PE", "tribunal": "TRF5"}])
+        with (
+            credentials.scope("office-a", {"DJEN_SEARCHES": searches}),
+            mock.patch.object(djen_server, "search_page", return_value=empty) as search,
+        ):
+            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1), tribunal="TRF1")
+        self.assertEqual(search.call_args.args[0]["siglaTribunal"], "TRF1")
+
+    def test_victor_profile_has_his_three_oabs(self):
+        with credentials.scope("victor", {"JURISYNC_CUSTOMER": "victor"}):
+            searches = djen_server.saved_searches()
+        self.assertEqual(
+            {(s["numeroOab"], s["ufOab"]) for s in searches}, {("42543", "PE"), ("14663", "PB"), ("48647", "PE")}
+        )
+
     async def test_stdio_entrypoint_starts(self):
         params = StdioServerParameters(command=sys.executable, args=["-m", "jurisync.connectors.djen.server"])
         async with Client(params) as client:
             tools = (await client.list_tools()).tools
-        self.assertEqual(len(tools), 3)
+        self.assertEqual(len(tools), 5)
 
 
 if __name__ == "__main__":

@@ -35,3 +35,11 @@ gerid
 *.har
 *.log
 *.tmp
+
+# Customers whose data stays on this machine: the repository is public
+customers/allan/
+customers/anaflavia/
+customers/denis/
+customers/patricia/
+customers/priscila/
+.claude/skills/anaflavia-iniciais-dpa

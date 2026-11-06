@@ -6,11 +6,14 @@ import json
 import os
 from pathlib import Path
 
+from jurisync.core import certificate
+from jurisync.core.http import IMPERSONATE
+
 SSO_CALLBACK = "https://sso.cloud.pje.jus.br/auth/realms/pje/pjeoffice-rest"
 
 
 def a1_path():
-    """The A1 file configured for this customer (PJE_A1_P12)."""
+    """The A1 file configured for this customer (PJE_A1_P12), for a local install."""
     path = os.environ.get("PJE_A1_P12")
     if not path:
         raise RuntimeError("Set PJE_A1_P12 to the A1 .p12/.pfx file")
@@ -18,14 +21,8 @@ def a1_path():
 
 
 def load_a1(p12_path, pin):
-    """Load (key, cert, chain) from the A1 file. PIN from caller/env only."""
-    from cryptography.hazmat.primitives.serialization import pkcs12
-
-    data = Path(p12_path).read_bytes()
-    key, cert, chain = pkcs12.load_key_and_certificates(data, (pin or "").encode("utf-8"))
-    if key is None or cert is None:
-        raise ValueError("A1 file has no private key/certificate (wrong PIN?)")
-    return key, cert, list(chain or [])
+    """Load (key, cert, chain) from the A1 file, or from the account's PJE_A1_P12 when ``p12_path`` is None."""
+    return certificate.load_a1(p12_path, pin)
 
 
 def _der_length(n):
@@ -79,7 +76,7 @@ def post_result(session, payload):
         SSO_CALLBACK,
         json=payload,
         headers={"Accept": "application/json", "versao": "2.5.16"},
-        impersonate="chrome",
+        impersonate=IMPERSONATE,
         allow_redirects=False,
         timeout=30,
     )
