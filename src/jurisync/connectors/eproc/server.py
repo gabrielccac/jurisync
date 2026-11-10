@@ -20,6 +20,7 @@ from jurisync.connectors.eproc.client import (
     list_notices,
     list_processes,
     request,
+    uses_a3,
 )
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
@@ -46,7 +47,7 @@ def configured_portals():
         key
         for key in keys
         if (portals.eproc(key).env("2FA_DATA") or portals.eproc(key).env("2FA_QR"))
-        and (portals.eproc(key).env("USERNAME") or portals.eproc(key).uses_certificate())
+        and (portals.eproc(key).env("USERNAME") or portals.eproc(key).uses_certificate() or uses_a3(key))
     )
     return ready or keys
 

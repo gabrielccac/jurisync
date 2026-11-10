@@ -209,13 +209,17 @@ class A3Signer:
             self._key = keys[0]
         return self._key
 
+    def sign_digest_info(self, digest_info):
+        """RSA PKCS#1 v1.5 over a DigestInfo built by the caller (CKM_RSA_PKCS); used by TLS client auth."""
+        self.login()
+        mechanism = self._pkcs11.Mechanism(self._pkcs11.CKM_RSA_PKCS, None)
+        return bytes(self.session.sign(self._private_key(), bytes(digest_info), mechanism))
+
     def sign(self, mensagem):
         """MD5withRSA over the challenge, as PJeOffice does."""
         if isinstance(mensagem, str):
             mensagem = mensagem.encode("utf-8")
-        self.login()
-        mechanism = self._pkcs11.Mechanism(self._pkcs11.CKM_RSA_PKCS, None)
-        return bytes(self.session.sign(self._private_key(), md5_digest_info(mensagem), mechanism))
+        return self.sign_digest_info(md5_digest_info(mensagem))
 
     def chain64(self):
         import base64

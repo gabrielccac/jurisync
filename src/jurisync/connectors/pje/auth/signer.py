@@ -65,7 +65,7 @@ class A1Signer:
     """The A1 key in memory, with the same interface as the A3 token signer."""
 
     def __init__(self, key, cert, chain):
-        self.key, self.cert, self.chain = key, cert, list(chain)
+        self.key, self.cert, self.chain = key, cert, chain
 
     def sign(self, mensagem):
         return sign_mensagem(mensagem, self.key)

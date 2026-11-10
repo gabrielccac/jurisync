@@ -44,7 +44,9 @@ class CertificateLoginChecks(unittest.TestCase):
         shell = "<html><body>Painel do advogado - Procurador MARA SUSY</body></html>"
         response = SimpleNamespace(status_code=200, url="https://pje.trt7.jus.br/primeirograu/error.seam", text=shell)
         self.assertTrue(cert_login._authenticated(response, "pje.trt7.jus.br"))
-        plain = SimpleNamespace(status_code=200, url="https://pje.trt7.jus.br/primeirograu/error.seam", text="<html></html>")
+        plain = SimpleNamespace(
+            status_code=200, url="https://pje.trt7.jus.br/primeirograu/error.seam", text="<html></html>"
+        )
         self.assertFalse(cert_login._authenticated(plain, "pje.trt7.jus.br"))
 
     def test_http_redirect_on_portal_host_is_upgraded_to_https(self):
@@ -70,11 +72,11 @@ class CertificateLoginChecks(unittest.TestCase):
             cert_login._follow(Mock(), redirect)
 
     def test_legacy_challenge_extraction(self):
-        html = ('<script>ASSINATURA_MENSAGEM = "abc123"; CONVERSATION_ID = "15881";</script>'
-                '<form id="assinaturaForm" action="/2g/logarSC.seam">')
-        self.assertEqual(
-            cert_login._legacy_challenge(html), ("abc123", "/logarPJeOffice.seam?cid=15881")
+        html = (
+            '<script>ASSINATURA_MENSAGEM = "abc123"; CONVERSATION_ID = "15881";</script>'
+            '<form id="assinaturaForm" action="/2g/logarSC.seam">'
         )
+        self.assertEqual(cert_login._legacy_challenge(html), ("abc123", "/logarPJeOffice.seam?cid=15881"))
         self.assertIsNone(cert_login._legacy_challenge("<html></html>"))
 
 

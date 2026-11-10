@@ -368,8 +368,8 @@ class CertificateLoginTest(unittest.TestCase):
         }
         signed = {}
 
-        def fake_login(session, config, account, key, cert, chain):
-            signed[credentials.tenant()] = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+        def fake_login(session, config, account, signer):
+            signed[credentials.tenant()] = signer.cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
             return session
 
         server_env = {"PJE_A1_P12": "/nao/existe/servidor.p12", "PJE_A1_PIN": "pin-do-servidor"}

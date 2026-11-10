@@ -1,0 +1,18 @@
+# Victor's choices that are not secrets.
+
+# DJEN searches the djen_search_saved tool runs (OABs from docs/djen-comunica-trf5-guia.md). The UF is required:
+# without it the same number collides across OAB sections. Narrow to one court per call with tribunal='TRF5'.
+[[djen.searches]]
+label = "Victor · OAB/PE 42543"
+numeroOab = "42543"
+ufOab = "PE"
+
+[[djen.searches]]
+label = "Victor · OAB/PB 14663"
+numeroOab = "14663"
+ufOab = "PB"
+
+[[djen.searches]]
+label = "Graziele · OAB/PE 48647"
+numeroOab = "48647"
+ufOab = "PE"

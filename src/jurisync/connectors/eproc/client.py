@@ -26,6 +26,7 @@ from jurisync.connectors.eproc.parsers import (
     parse_process_detail,
     parse_process_list_page,
 )
+from jurisync.core import credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, require_url
 from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
@@ -156,7 +157,17 @@ def _credentials(portal):
     return username, password
 
 
+def uses_a3(portal):
+    """<PREFIX>_AUTH=a3 for one portal, EPROC_AUTH=a3 for all: log in with the A3 token instead of the password."""
+    config = portals.eproc(portal)
+    return (config.env("AUTH") or credentials.env("EPROC_AUTH")).strip().lower() == "a3"
+
+
 def authenticate(portal):
+    if uses_a3(portal):
+        from jurisync.connectors.eproc import a3
+
+        return a3.login(portal)
     if portals.eproc(portal).uses_certificate():
         return cert_login(portal)
     username, password = _credentials(portal)

@@ -119,14 +119,18 @@ def _follow(sso_session, response, hops=6):
 def _authenticated(response, host, root="/pje/"):
     soup = BeautifulSoup(response.text, "html.parser")
     shell = "Painel do advogado" in response.text
-    return response.status_code == 200 and urllib.parse.urlsplit(response.url).hostname == host and (
-        (
-            bool(soup.find("a", href=re.compile(r"/logout\.seam")))
-            and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
+    return (
+        response.status_code == 200
+        and urllib.parse.urlsplit(response.url).hostname == host
+        and (
+            (
+                bool(soup.find("a", href=re.compile(re.escape(root) + r"logout\.seam")))
+                and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
+            )
+            # JT portals land on a shell page (via /pjekz/ + error.seam forward) that carries
+            # the user profile and menus instead of the logout/ViewState markers.
+            or shell
         )
-        # JT portals land on a shell page (via /pjekz/ + error.seam forward) that carries
-        # the user profile and menus instead of the logout/ViewState markers.
-        or shell
     )
 
 
@@ -224,9 +228,7 @@ def _login(session, config, account, signer):
         # PDPJ SSO, entered via authenticateSSO.seam, which redirects to the shared SSO.
         entry = urllib.parse.urljoin(config.login_url, "authenticateSSO.seam")
         require_allowed_url(entry)
-        page = _follow(
-            session, session.get(entry, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
-        )
+        page = _follow(session, session.get(entry, impersonate=IMPERSONATE, allow_redirects=False, timeout=30))
         require_allowed_url(page.url)
         log_request("GET", entry, page.status_code)
         _require_available(page, config)
