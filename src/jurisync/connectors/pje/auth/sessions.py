@@ -20,6 +20,10 @@ def auth_method(portal):
     password flow is used only when no A1 certificate is configured (``PJE_A1_P12``) and all three are set.
     """
     config = portals.pje(portal)
+    # Any PJe portal behind the national SSO can switch to the A3 token: <PREFIX>_AUTH=a3 for one portal,
+    # PJE_AUTH=a3 for all of them.
+    if (config.env("AUTH") or os.environ.get("PJE_AUTH", "")).strip().lower() == "a3":
+        return "a3_totp"
     password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD", "2FA_DATA"))
     if config.auth == "certificate_totp" and password_ready and not os.environ.get("PJE_A1_P12"):
         return "password_totp"
@@ -29,7 +33,14 @@ def auth_method(portal):
 def cache_identity(portal):
     config = portals.pje(portal)
     account = config.env("SESSION_ACCOUNT")
-    username = config.env("USERNAME") if auth_method(portal) == "password_totp" else ""
+    method = auth_method(portal)
+    if method == "password_totp":
+        username = config.env("USERNAME")
+    elif method == "a3_totp":
+        # One token per machine: the A3 login is that holder's account, keyed apart from password sessions.
+        username = f"a3:{config.env('USERNAME')}"
+    else:
+        username = ""
     if not account and not username:
         # The certificate is not part of the identity. Reuse is safe only
         # when the caller identifies that account; fresh login still works.
