@@ -1,4 +1,4 @@
-"""Offline checks for the TRF5 certificate login boundary."""
+"""Offline checks for the PJe certificate login boundary."""
 
 import unittest
 from types import SimpleNamespace
@@ -18,7 +18,9 @@ class CertificateLoginChecks(unittest.TestCase):
                 cert_login.trf5_cert_login("JBSWY3DPEHPK3PXP", session, pin="test-pin", p12_path="a1.p12"), session
             )
         load.assert_called_once_with("a1.p12", "test-pin")
-        self.assertEqual(login.call_args.args[3:], ("key", "cert", []))
+        signer = login.call_args.args[3]
+        self.assertIsInstance(signer, cert_login.native_signer.A1Signer)
+        self.assertEqual((signer.key, signer.cert, signer.chain), ("key", "cert", []))
 
     def test_redirects_and_authenticated_page_are_origin_bound(self):
         redirect = SimpleNamespace(
