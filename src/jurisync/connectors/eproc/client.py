@@ -7,6 +7,7 @@ surface.
 
 import argparse
 import json
+import os
 import re
 import sys
 from contextlib import redirect_stdout
@@ -151,7 +152,17 @@ def _credentials(portal):
     return username, password
 
 
+def uses_a3(portal):
+    """<PREFIX>_AUTH=a3 for one portal, EPROC_AUTH=a3 for all: log in with the A3 token instead of the password."""
+    config = portals.eproc(portal)
+    return (config.env("AUTH") or os.environ.get("EPROC_AUTH", "")).strip().lower() == "a3"
+
+
 def authenticate(portal):
+    if uses_a3(portal):
+        from jurisync.connectors.eproc import a3
+
+        return a3.login(portal)
     username, password = _credentials(portal)
     return login(username, password, portal_totp_account(portal), portal=portal)
 
