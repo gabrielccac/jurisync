@@ -46,7 +46,12 @@ def login_portal(portal):
     cached = load_session(portal)
     if cached is not None:
         return cached, None
-    if auth_method(portal) == "certificate_totp":
+    method = auth_method(portal)
+    if method == "a3_totp":
+        from jurisync.connectors.pje.auth.certificate import a3_cert_login
+
+        session, response = a3_cert_login(portal), None
+    elif method == "certificate_totp":
         from jurisync.connectors.pje.auth.certificate import cert_login
 
         session, response = cert_login(portal), None

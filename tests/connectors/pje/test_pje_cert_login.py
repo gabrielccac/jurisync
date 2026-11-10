@@ -19,7 +19,9 @@ class CertificateLoginChecks(unittest.TestCase):
                 session,
             )
         load.assert_called_once_with("a1.p12", "test-pin")
-        self.assertEqual(login.call_args.args[3:], ("key", "cert", []))
+        signer = login.call_args.args[3]
+        self.assertIsInstance(signer, cert_login.native_signer.A1Signer)
+        self.assertEqual((signer.key, signer.cert, signer.chain), ("key", "cert", []))
 
     def test_redirects_and_authenticated_page_are_origin_bound(self):
         redirect = SimpleNamespace(

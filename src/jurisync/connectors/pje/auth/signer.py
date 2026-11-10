@@ -1,4 +1,4 @@
-"""Sign the TRF5 SSO challenge with an A1 certificate, without PJeOffice."""
+"""Sign the PJe SSO challenge with an A1 certificate, without PJeOffice."""
 
 import argparse
 import base64
@@ -59,6 +59,19 @@ def certificate_chain64(cert, chain):
     blobs = [cert.public_bytes(Encoding.DER)]
     blobs.extend(c.public_bytes(Encoding.DER) for c in chain)
     return base64.b64encode(pkipath_encode(blobs)).decode("ascii")
+
+
+class A1Signer:
+    """The A1 key in memory, with the same interface as the A3 token signer."""
+
+    def __init__(self, key, cert, chain):
+        self.key, self.cert, self.chain = key, cert, list(chain)
+
+    def sign(self, mensagem):
+        return sign_mensagem(mensagem, self.key)
+
+    def chain64(self):
+        return certificate_chain64(self.cert, self.chain)
 
 
 def build_payload(token, mensagem, signature, chain64):
