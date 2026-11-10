@@ -110,6 +110,11 @@ PORTALS = {
         # TJRS serves its Eproc under /eproc/ (public document links use it); state justice is CNJ J=8, TR=21.
         Portal("tjrs-1g", "eproc", "TJRS", "1g", "eproc1g.tjrs.jus.br", "/eproc/", "browser_totp", "TJRS_1G",
                legacy_env_prefixes=("TJRS",), region="21", justice="8", wired=True),
+        # TJSC Eproc: password login or the A3 token through the Certisign authenticator; CNJ J=8, TR=24.
+        Portal("tjsc-1g", "eproc", "TJSC", "1g", "eproc1g.tjsc.jus.br", "/eproc/", "browser_totp", "TJSC_1G",
+               region="24", justice="8", wired=True),
+        Portal("tjsc-2g", "eproc", "TJSC", "2g", "eproc2g.tjsc.jus.br", "/eproc/", "browser_totp", "TJSC_2G",
+               region="24", justice="8", wired=True),
         Portal("stj", "stj", "STJ", "2g", "processo.stj.jus.br", "/", "none", wired=False),
     )
 }  # fmt: skip

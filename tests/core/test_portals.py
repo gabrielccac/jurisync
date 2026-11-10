@@ -26,7 +26,7 @@ class PortalRegistryTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "portal must be one of"):
                 portals.get(key, system)
         self.assertEqual(portals.keys("pje"), ("trf1-1g", "trf1-2g", "trf5-1g", "tjap-1g"))
-        self.assertEqual(portals.keys("eproc"), ("trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "tjrs-1g"))
+        self.assertEqual(portals.keys("eproc"), ("trf4-1g-sc", "trf4-1g-rs", "trf6-1g", "trf6-2g", "tjrs-1g", "tjsc-1g", "tjsc-2g"))
 
     def test_old_names_are_aliases_and_ids_carry_the_system(self):
         self.assertIs(portals.eproc("jfsc"), portals.eproc("trf4-1g-sc"))

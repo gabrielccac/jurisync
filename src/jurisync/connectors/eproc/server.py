@@ -19,6 +19,7 @@ from jurisync.connectors.eproc.client import (
     fetch_process,
     list_notices,
     request,
+    uses_a3,
 )
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
@@ -41,7 +42,11 @@ sessions = SessionPool(login=authenticate, refresh=refresh_panel, close=lambda v
 def configured_portals():
     """Eproc portals whose credentials are set; all wired portals when none are."""
     keys = portals.keys("eproc")
-    ready = tuple(key for key in keys if portals.eproc(key).env("USERNAME") and portals.eproc(key).env("2FA_DATA"))
+    ready = tuple(
+        key
+        for key in keys
+        if (portals.eproc(key).env("USERNAME") or uses_a3(key)) and portals.eproc(key).env("2FA_DATA")
+    )
     return ready or keys
 
 
