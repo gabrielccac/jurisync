@@ -21,7 +21,8 @@
         "role": "FISCAL DA LEI",
         "search": "ministério público",
         "cnpj": "26989715005414",
-        "name": "MINISTERIO PUBLICO DA UNIAO"
+        "name": "MINISTERIO PUBLICO DA UNIAO",
+        "when": "fiscalDaLei"
       }
     ],
     "characteristics": {"legalAid": true, "injunction": false, "priority": "Juízo 100% Digital"}

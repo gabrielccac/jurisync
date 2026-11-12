@@ -1,0 +1,50 @@
+# Wesley's portal access. Method and secret names only; values are in the
+# gitignored customers/wesley/.env. Select him with JURISYNC_CUSTOMER=wesley.
+# Secret prefix = portal key uppercased. PJe logs in with the A1 certificate (+ TOTP).
+
+[trf1-1g]
+method = "certificate_totp"
+secrets = ["PJE_1G_CERT"]
+
+[trf1-2g]
+method = "certificate_totp"
+secrets = ["PJE_2G_CERT", "PJE_2G_2FA_DATA|PJE_2G_2FA_QR"]
+
+[trf3-1g]
+method = "certificate_totp"
+secrets = ["PJE_TRF3_1G_CERT"]
+
+[trf5-1g]
+method = "certificate_totp"
+secrets = ["PJE_TRF5_1G_2FA_DATA|PJE_TRF5_1G_2FA_QR"]
+
+# TRF4 eproc: A1 certificate over mutual TLS, then the eproc authenticator code.
+[trf4-2g]
+method = "certificate_totp"
+secrets = ["TRF4_2G_CERT", "TRF4_2G_2FA_DATA|TRF4_2G_2FA_QR"]
+
+# Eproc 1G of the TRF4 sections; TRF6 below (its two instances share the TRF6_* account).
+[trf4-1g-sc]
+method = "certificate_totp"
+secrets = ["TRF4_1G_SC_CERT", "TRF4_1G_SC_2FA_DATA|TRF4_1G_SC_2FA_QR"]
+
+[trf4-1g-rs]
+method = "certificate_totp"
+secrets = ["TRF4_1G_RS_CERT", "TRF4_1G_RS_2FA_DATA|TRF4_1G_RS_2FA_QR"]
+
+[trf4-1g-pr]
+method = "certificate_totp"
+secrets = ["TRF4_1G_PR_CERT", "TRF4_1G_PR_2FA_DATA|TRF4_1G_PR_2FA_QR"]
+
+# TRF6 turns the certificate login off ("o acesso com certificado digital está instável"): user, password, 2FA.
+[trf6-1g]
+method = "browser_totp"
+secrets = ["TRF6_USERNAME", "TRF6_PASSWORD", "TRF6_2FA_DATA|TRF6_2FA_QR"]
+
+[trf6-2g]
+method = "browser_totp"
+secrets = ["TRF6_USERNAME", "TRF6_PASSWORD", "TRF6_2FA_DATA|TRF6_2FA_QR"]
+
+# Variables that belong to no portal (A1 certificate, Juridiq login).
+[env]
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]

@@ -1,5 +1,6 @@
 """HTTP conversation with the TRF5 PJe draft pages: requests, multipart uploads, JSF postbacks."""
 
+import time
 import uuid
 from urllib.parse import urlencode, urlsplit
 
@@ -8,7 +9,10 @@ from curl_cffi.const import CurlHttpVersion
 
 from jurisync.connectors.pje.filing.constants import PORTAL, UPDATE_URL
 from jurisync.connectors.pje.filing.names import upload_name
+from jurisync.connectors.pje.filing.retry import retrying
 from jurisync.connectors.pje.parsers import response_html
+
+READ_TIMEOUT = 45
 
 
 class Transport:
@@ -16,14 +20,30 @@ class Transport:
         self.session = session
         self.referer = None
         self.requests = 0
+        self.sleep = time.sleep
+        self.retries = 0
+
+    def _repeat(self, call):
+        """Reads change nothing in PJe, so a timeout or a PJe error page is repeated after a short wait."""
+
+        def counted(attempt, error):
+            self.retries += 1
+
+        return retrying(call, sleep=lambda seconds: self.sleep(seconds), on_retry=counted)
 
     def get(self, url):
-        self.requests += 1
-        response = self.session.get(url, impersonate="firefox147", allow_redirects=False, timeout=30)
-        self.referer = url
-        return self._html(response)
+        def once():
+            self.requests += 1
+            response = self.session.get(url, impersonate="firefox147", allow_redirects=False, timeout=READ_TIMEOUT)
+            self.referer = url
+            return self._html(response)
 
-    def post(self, url, data):
+        return self._repeat(once)
+
+    def post(self, url, data, *, retry=False):
+        """A postback. Only pass retry=True for one that reads (the document list); a write is never repeated blindly."""
+        if retry:
+            return self._repeat(lambda: self.post(url, data))
         self.requests += 1
         response = self.session.post(
             url,
@@ -36,7 +56,7 @@ class Transport:
             },
             impersonate="firefox147",
             allow_redirects=False,
-            timeout=30,
+            timeout=READ_TIMEOUT,
         )
         return self._html(response)
 
@@ -88,10 +108,11 @@ class Transport:
             raise RuntimeError(f"PJe document upload returned HTTP {response.status_code}")
         return response
 
-    def ajax(self, url, state, fields, container, action):
+    def ajax(self, url, state, fields, container, action, *, retry=False):
         return self.post(
             url,
             {"AJAXREQUEST": container, **fields, "javax.faces.ViewState": state, **action, "AJAX:EVENTS_COUNT": "1"},
+            retry=retry,
         )
 
     @staticmethod

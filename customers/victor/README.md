@@ -3,6 +3,18 @@
 This directory holds Victor-specific workflows and policy in the Jurisync
 repository. The shared ADVBOX and PJe connectors live under `src/jurisync/connectors/`.
 
+## Installing the skills
+
+On a machine with `uv tool install git+https://github.com/gabrielccac/jurisync` done, run in Claude Code
+`/plugin install victor --marketplace gabrielccac/jurisync`, then
+`jurisync-setup import victor.jurisync --register none`. The plugin lives in `plugins/victor/`
+(its `skills/` and `customers/victor` are symlinks into this folder; Claude Code copies them as real files on
+install). It installs `victor-sop-intimacoes` and `victor-pje-filing` plus the `djen`, `pje`, `advbox`, `eproc`
+and `filing` servers. Keep the plugin in its own folder: at the repo root it would also pick up the development
+`.mcp.json` and register servers that fail on other machines. Bump `version` in
+`plugins/victor/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` when a skill changes; users
+then run `/plugin update victor`. Inside this checkout the skills load through `.claude/skills/` symlinks.
+
 ## DJEN to ADVBOX tasks
 
 The customer POP rules live in
@@ -28,16 +40,15 @@ judicial due date from DJEN availability before creating its ADVBOX task:
 
 The same calculator is exposed as `djen_calculate_deadline` in the DJEN MCP.
 It returns publication, first counted day, all counted business days and
-`advboxDeadline`. Its sourced JFPE calendar currently covers 25 Sep through
+the fatal date as `dueOnBr` (DD/MM/AAAA, the format ADVBOX takes). Its sourced JFPE calendar currently covers 25 Sep through
 19 Dec 2026 and rejects dates outside that window. The agent must check that
 the extracted period applies to the represented party; calendar days,
 conditional periods and missing periods require separate handling.
 
 ## PJe filing preparation
 
-For local Codex desktop use, `skills/victor-pje-filing/SKILL.md` guides the
-preparation and PJe MCP stages. The skill is installed through a symlink in
-`~/.agents/skills`; it does not submit **Protocolar**.
+`skills/victor-pje-filing/SKILL.md` guides the preparation and PJe MCP stages for
+Claude. It does not submit **Protocolar**. See "Installing the skills" below.
 
 The existing TRF1 spreadsheet watcher runs from the repository root with
 `python -m customers.victor.workflows.pje1g_watch --help`.
@@ -285,3 +296,30 @@ uv run python -m jurisync.customers victor
 
 A new customer is a new directory with its own `portals.toml` and `.env`; a new portal
 is one row in `src/jurisync/portals.py` plus one section per customer that uses it.
+
+### PJe portals on the A1 certificate (validated 2026-10-20 and 2026-10-22)
+
+| Portal | Key | Login | Read |
+| --- | --- | --- | --- |
+| TRF5 1º grau/JEF | `trf5-1g` | A1 + authenticator | counters, inbox, Push, process, documents, expediente act |
+| TRF5 2º grau / Turmas Recursais | `trf5-2g` | A1 + authenticator | same as `trf5-1g` |
+| TRF5 Turma Regional de Uniformização | `trf5-tru` | A1 + authenticator (`PJE_TRF5_2FA_DATA`) | counters, inbox, process, documents |
+| TRF1 1º and 2º grau | `trf1-1g`, `trf1-2g` | A1 + authenticator (`PJE_1G_CERT`, `PJE_2G_CERT` pinned) | counters, inbox, process, documents |
+| TRF3 1º and 2º grau (Turmas Recursais de SP) | `trf3-1g`, `trf3-2g` | A1 + authenticator (`PJE_TRF3_1G_CERT`, `PJE_TRF3_2G_CERT` pinned) | counters, inbox, process, documents |
+| TJPE 1º and 2º grau | `tjpe-1g`, `tjpe-2g` | A1 + authenticator (`TJPE_1G_CERT`, `TJPE_2G_CERT` pinned) | counters, inbox, Push, process, documents, expediente act |
+
+The authenticator export is the same for every portal but each portal reads it from its own prefix
+(`PJE_TRF5_2FA_DATA`, `PJE_1G_2FA_DATA`, `PJE_2G_2FA_DATA`, `PJE_TRF3_1G_2FA_DATA`, `PJE_TRF3_2G_2FA_DATA`,
+`TJPE_1G_2FA_DATA`, `TJPE_2G_2FA_DATA`). The TRU reads the TRF5 one.
+
+On a 2nd-instance process the inventory also lists the first instance's documents (`ID de origem`,
+`visible_in_timeline: false`, `first_instance_copy: true`); they do not open there and come back as
+`extractionStatus: first_instance_copy`. Read the visible ones.
+
+TJPE serves both instances on `pje.cloud.tjpe.jus.br`, told apart by the path (`/1g/`, `/2g/`; DJEN's link and
+`portals.for_host(host, path)` use it). Its consulta page differs in one control: the **Pesquisar** button only
+calls the JS function `submeterPesquisa()`, so the search action to post is the one that function declares
+(`fPP:j_id479` today), not the button's id. `search.discover_controls` reads it from the page; with the button's
+id the search returns no rows. If the page ever marks reCAPTCHA as active (`captchaAtivo = true`) the search stops
+with an error and the process has to be opened in the browser. Most documents are scanned PDFs
+(`extractionStatus=ocr_needed`), as on the other portals.

@@ -23,6 +23,8 @@ import urllib.parse
 import urllib.request
 from datetime import date
 
+from jurisync.connectors.djen import bridge
+
 BASE_URL = "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
 TRIBUNAL_URL = "https://comunicaapi.pje.jus.br/api/v1/comunicacao/tribunal"
 CADERNO_URL = "https://comunicaapi.pje.jus.br/api/v1/caderno"
@@ -83,7 +85,7 @@ def build_url(
 
 
 def _read_json(url, timeout=REQUEST_TIMEOUT):
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    req = bridge.request(url, {"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.load(resp), resp.status
@@ -268,7 +270,7 @@ def fetch_certidao(comunicacao_hash, timeout=REQUEST_TIMEOUT):
     if not comunicacao_hash or not comunicacao_hash.isalnum():
         raise ValueError("hash da comunicação inválido")
     url = f"{BASE_URL}/{comunicacao_hash}/certidao"
-    req = urllib.request.Request(url, headers={"Accept": "application/pdf"})
+    req = bridge.request(url, {"Accept": "application/pdf"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read(MAX_PDF_BYTES + 1)

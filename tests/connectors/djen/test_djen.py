@@ -277,7 +277,7 @@ class DjenChecks(unittest.TestCase):
                 "numero_processo": "52375895520248210001",
             }
         )
-        self.assertEqual((tjrs["system"], tjrs["portal"], tjrs["wired"]), ("eproc", "tjrs-1g", False))
+        self.assertEqual((tjrs["system"], tjrs["portal"], tjrs["wired"]), ("eproc", "tjrs-1g", True))
         stj = documents.resolve_portal(
             {
                 "link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1",
@@ -286,9 +286,20 @@ class DjenChecks(unittest.TestCase):
         )
         self.assertEqual((stj["portal"], stj["wired"]), ("stj", False))
 
+    def test_resolve_portal_tells_the_two_tjpe_instances_apart_by_the_link_path(self):
+        base = "https://pje.cloud.tjpe.jus.br"
+        for path, expected in (
+            ("/1g/Processo/ConsultaDocumento/listView.seam?x=1", "tjpe-1g"),
+            ("/2g/Processo/x.seam", "tjpe-2g"),
+        ):
+            resolved = documents.resolve_portal({"link": base + path, "numero_processo": "00012717420268170001"})
+            self.assertEqual((resolved["system"], resolved["portal"], resolved["wired"]), ("pje", expected, True))
+        no_link = documents.resolve_portal({"link": "", "numero_processo": "00012717420268170001"})
+        self.assertEqual(no_link["portal"], "tjpe-1g/tjpe-2g")
+
     def test_resolve_portal_cnj_fallback(self):
         trf5 = documents.resolve_portal({"link": "", "numero_processo": "00035279020264058303"})
-        self.assertEqual((trf5["system"], trf5["portal"], trf5["wired"]), ("pje", "trf5-1g", True))
+        self.assertEqual((trf5["system"], trf5["portal"], trf5["wired"]), ("pje", "trf5-1g/trf5-2g", True))
         jfrs = documents.resolve_portal({"link": None, "numeroprocessocommascara": "5012366-88.2025.4.04.7104"})
         self.assertEqual(jfrs["portal"], "trf4-1g-rs")
         unknown = documents.resolve_portal({"link": "", "numero_processo": "curto"})
@@ -329,9 +340,12 @@ class DjenChecks(unittest.TestCase):
         self.assertIn(b"doc", blob)
 
     def test_fetch_attachments_guards(self):
-        tjrs = {"link": "https://eproc1g.tjrs.jus.br/eproc/x", "numero_processo": "52375895520248210001"}
+        stj = {
+            "link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1",
+            "numero_processo": "52313092320248217000",
+        }
         with self.assertRaisesRegex(ValueError, "sem conector"):
-            documents.fetch_attachments(tjrs, session=object(), document_ids=["1"])
+            documents.fetch_attachments(stj, session=object(), document_ids=["1"])
         jfrs = {"link": "https://eproc.jfrs.jus.br/eprocV2/x", "numeroprocessocommascara": "5012366-88.2025.4.04.7104"}
         with self.assertRaisesRegex(ValueError, "session"):
             documents.fetch_attachments(jfrs, document_ids=["1"])

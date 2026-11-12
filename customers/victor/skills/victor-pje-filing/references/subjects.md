@@ -1,8 +1,8 @@
 # Victor: selecting PJe Assuntos
 
 Use the petition's requested benefits and the Advbox lawsuit as evidence.
-Search `/home/gabriel/orca/jurisync/customers/victor/README.md` for the **exact lawsuit ID or CNJ** before
-selecting codes: it records subjects confirmed in earlier PJe filings. Those
+Call `filing_subjects` (`profile: "victor"`) with the **exact lawsuit ID or CNJ** before
+selecting codes: it returns the subjects confirmed in earlier PJe filings. Those
 records establish what was filed in that case, not a default for other cases.
 For a new case, put reviewed choices in the ordered `subjects` array. PJe's
 `subject-options` lookup requires an existing draft; `create-fill` checks each
@@ -23,6 +23,5 @@ These candidate choices were observed in the TRF5 1G lookup on 2026-10-05:
 | Salário-maternidade urbano | `14828` Urbano | `Salário-Maternidade` |
 
 Historic filings can contain more than one Assunto for a single claim, and
-similar petitions have different filed sets. Check the exact case's history in
-`/home/gabriel/orca/jurisync/customers/victor/README.md`; do not turn any historic combination into a
-default for new lawsuits.
+similar petitions have different filed sets. Check the exact case's history with
+`filing_subjects`; do not turn any historic combination into a default for new lawsuits.

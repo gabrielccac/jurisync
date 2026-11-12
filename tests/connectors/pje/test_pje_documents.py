@@ -8,6 +8,7 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync.connectors.pje import documents, parsers
 from jurisync.connectors.pje import process as client
+from jurisync.core.document_text import extract_document_text
 
 NUMBER = "1020340-18.2025.4.01.3100"
 URL = "https://pje1g.trf1.jus.br/pje/seam/resource/rest/pje-legacy/documento/download/TRF1/token/123/456"
@@ -108,6 +109,15 @@ class SelectedDocumentsChecks(unittest.TestCase):
             result = documents.read_selected_documents(trf5, ["456"], session=session)
         self.assertEqual(result[0]["extractionStatus"], "extracted")
 
+    def test_first_instance_copy_that_does_not_open_is_reported_as_such(self):
+        data = process()
+        data["timeline"][0]["movements"][0]["documents"][0]["first_instance_copy"] = True
+        session = Mock()
+        session.get.return_value = response(status=404)
+        result = documents.read_selected_documents(data, ["456"], session=session)[0]
+        self.assertEqual(result["extractionStatus"], "first_instance_copy")
+        self.assertEqual(result["text"], "")
+
     def test_http_errors_redirects_and_network_failures_are_not_text(self):
         for status in (302, 401, 403, 404, 429, 500):
             session = Mock()
@@ -144,21 +154,18 @@ class SelectedDocumentsChecks(unittest.TestCase):
             (b"", "text/html", "empty"),
             (b"image", "image/png", "unsupported_content"),
             (b"<html><title>Error</title>Unavailable</html>", "text/html", "unrecognized_html"),
-            (f"<html><form>{NUMBER}<input type='password'></form></html>".encode(), "text/html", "unrecognized_html"),
+            (f"<html><form>{NUMBER}<input type='password'></form></html>".encode(), "text/html", "session_expired"),
             (b"<html>Documento indisponivel</html>", "text/html", "unrecognized_html"),
         ):
             with self.subTest(status=status):
-                actual, text = documents.extract_document_text(body, kind, NUMBER)
+                actual, text = extract_document_text(body, kind, NUMBER)
                 self.assertEqual(actual, status)
                 self.assertEqual(text, "")
-        with patch.object(documents, "_extract_document_text", return_value=("pdf_parse_error", "")):
-            self.assertEqual(
-                documents.extract_document_text(b"%PDF-1.7", "application/pdf", NUMBER)[0], "pdf_extractor_unavailable"
-            )
+        self.assertEqual(extract_document_text(b"%PDF-1.7", "application/pdf", NUMBER)[0], "pdf_parse_error")
         body = (
             f"<html><style>secret-css</style><script>secret-js</script><p>{NUMBER}</p><p>A decisão</p></html>".encode()
         )
-        status, text = documents.extract_document_text(body, "text/html", NUMBER)
+        status, text = extract_document_text(body, "text/html", NUMBER)
         self.assertEqual(status, "extracted")
         self.assertNotIn("secret", text)
         self.assertIn("decisão", text)

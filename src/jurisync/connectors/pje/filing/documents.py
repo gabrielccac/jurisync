@@ -10,8 +10,46 @@ from bs4 import BeautifulSoup
 from jurisync.connectors.pje import jsf
 from jurisync.connectors.pje.filing.constants import PORTAL, UPDATE_URL
 from jurisync.connectors.pje.filing.names import same_name, upload_name
+from jurisync.connectors.pje.filing.retry import DELAYS, DocumentsNeedReview
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 from jurisync.connectors.pje.parsers import jsf_data
+
+# Passes over the draft's document list: each uploads what the list still lacks, then reads the list again.
+MAX_ROUNDS = 3
+
+
+def documents_diff(listed, expected):
+    """Compare what PJe lists on the draft with what the payload asks for, document by document.
+
+    `listed` is review_documents(); `expected` is dicts with `path` and `type`. A document is `ok` only when it is on
+    the draft exactly once with its type. `unexpected` names files PJe holds that the payload does not ask for.
+    """
+    diff = {"ok": [], "missing": [], "wrongType": [], "duplicates": [], "unexpected": []}
+    claimed = set()
+    for document in expected:
+        path = Path(document["path"]).expanduser()
+        matches = [index for index, item in enumerate(listed) if same_name(item["name"], path)]
+        claimed.update(matches)
+        if not matches:
+            diff["missing"].append(path.name)
+        elif len(matches) > 1:
+            diff["duplicates"].append(
+                {"kind": "duplicate", "name": path.name, "found": len(matches), "expected": document["type"]}
+            )
+        elif listed[matches[0]]["type"] != document["type"]:
+            diff["wrongType"].append(
+                {
+                    "kind": "wrongType",
+                    "name": path.name,
+                    "expected": document["type"],
+                    "found": listed[matches[0]]["type"],
+                }
+            )
+        else:
+            diff["ok"].append(path.name)
+    diff["unexpected"] = [item["name"] for index, item in enumerate(listed) if index not in claimed]
+    diff["verified"] = not (diff["missing"] or diff["wrongType"] or diff["duplicates"])
+    return diff
 
 
 class DocumentsMixin:
@@ -51,6 +89,7 @@ class DocumentsMixin:
             {},
             "_viewRoot",
             {"informativo": "informativo", "ajaxSingle": "informativo"},
+            retry=True,
         )
         table = BeautifulSoup(html, "html.parser").find(id="processoDocumentoGridList")
         if table is None:
@@ -183,48 +222,97 @@ class DocumentsMixin:
         """One supporting PDF: a batch of one."""
         return self.add_supporting_documents(draft_url, [document], existing=existing)[0]
 
-    def add_supporting_documents(self, draft_url, documents, existing=None, timeline=None):
-        """Upload the supporting PDFs that are not on the draft yet, all in one batch.
+    def add_supporting_documents(self, draft_url, documents, existing=None, timeline=None, progress=None):
+        """Bring the draft's supporting PDFs to what the payload asks for, in rounds that each trust PJe's own list.
 
-        With `existing` (a documents listing) no listing is read here and the caller verifies the whole set.
+        Every round compares the draft's document list with the payload, uploads what is missing in one batch, and
+        reads the list again. A row that fails (a page that did not render, a timeout) costs only that row: the next
+        round sees it is still missing and sends it again. A document PJe holds with another type, or twice, is not
+        something a rerun can fix, so it stops the run naming each one (DocumentsNeedReview).
         """
         timeline = timeline or StepTimeline(None, self, None)
         listed = existing if existing is not None else self.review_documents(draft_url)
-        missing = [item for item in documents if not self._is_listed(listed, item)]
-        if missing:
-            self._upload_batch(draft_url, missing, timeline)
-            if existing is None:
-                self._require_listed(self.review_documents(draft_url), missing)
+        first = documents_diff(listed, documents)
+        attempts, errors = {}, {}
+        for round_number in range(1, MAX_ROUNDS + 1):
+            diff = documents_diff(listed, documents)
+            self._require_fixable(diff)
+            if progress:
+                progress(self._document_states(documents, diff, attempts, errors))
+            todo = [item for item in documents if Path(item["path"]).expanduser().name in diff["missing"]]
+            if not todo:
+                break
+            for item in todo:
+                name = Path(item["path"]).expanduser().name
+                attempts[name] = attempts.get(name, 0) + 1
+            try:
+                failures = self._upload_batch(draft_url, todo, timeline)
+            except RuntimeError as error:  # the batch could not even start: nothing was kept from this round
+                failures = [(Path(item["path"]).name, f"{type(error).__name__}: {str(error)[:200]}") for item in todo]
+            errors.update(dict(failures))
+            if failures and round_number < MAX_ROUNDS:
+                self.sleep(DELAYS[min(round_number - 1, len(DELAYS) - 1)])
+            listed = self.review_documents(draft_url)
+        diff = documents_diff(listed, documents)
+        self._require_fixable(diff)
+        if progress:
+            progress(self._document_states(documents, diff, attempts, errors))
+        if diff["missing"]:
+            detail = "; ".join(f"{name}: {errors[name]}" for name in diff["missing"] if name in errors)
+            raise RuntimeError(
+                f"PJe did not retain these documents on the draft: {', '.join(diff['missing'])}"
+                + (f" ({detail})" if detail else "")
+            )
         return [
-            {"alreadyAdded": item not in missing, "name": Path(item["path"]).name, "type": item["type"]}
+            {
+                "alreadyAdded": Path(item["path"]).expanduser().name not in first["missing"],
+                "name": Path(item["path"]).name,
+                "type": item["type"],
+            }
             for item in documents
         ]
 
     @staticmethod
+    def _require_fixable(diff):
+        """Stop on what only a person can settle in PJe: a document with the wrong type or more than once."""
+        problems = diff["wrongType"] + diff["duplicates"]
+        if problems:
+            raise DocumentsNeedReview(problems)
+
+    @staticmethod
+    def _document_states(documents, diff, attempts, errors):
+        """One entry per payload document: its state on the draft, the uploads tried and the last row error."""
+        states = {}
+        for item in documents:
+            name = Path(item["path"]).expanduser().name
+            if name in diff["missing"]:
+                state = "missing"
+            elif any(problem["name"] == name for problem in diff["wrongType"]):
+                state = "wrongType"
+            elif any(problem["name"] == name for problem in diff["duplicates"]):
+                state = "duplicate"
+            else:
+                state = "verified"
+            entry = {"state": state, "attempts": attempts.get(name, 0)}
+            if state != "verified" and errors.get(name):
+                entry["error"] = errors[name]
+            states[name] = entry
+        return states
+
+    @staticmethod
     def _missing_documents(listed, documents):
         """Names of the documents that do not appear exactly once on the draft with their type."""
-        missing = []
-        for document in documents:
-            path = Path(document["path"]).expanduser()
-            saved = [item for item in listed if same_name(item["name"], path) and item["type"] == document["type"]]
-            if len(saved) != 1:
-                missing.append(path.name)
-        return missing
+        diff = documents_diff(listed, documents)
+        bad = set(diff["missing"]) | {problem["name"] for problem in diff["wrongType"] + diff["duplicates"]}
+        return [
+            Path(item["path"]).expanduser().name for item in documents if Path(item["path"]).expanduser().name in bad
+        ]
 
     def _require_listed(self, listed, documents):
         """Every document must appear exactly once on the draft with its type; name the ones that do not."""
         missing = self._missing_documents(listed, documents)
         if missing:
             raise RuntimeError(f"PJe did not retain these documents on the draft: {', '.join(missing)}")
-
-    def _is_listed(self, listed, item):
-        path = Path(item["path"]).expanduser()
-        saved = [entry for entry in listed if same_name(entry["name"], path)]
-        if not saved:
-            return False
-        if len(saved) != 1 or saved[0]["type"] != item["type"]:
-            raise RuntimeError(f"Draft has {path.name} with a different document type")
-        return True
 
     @staticmethod
     def _row_name(select):
@@ -241,6 +329,8 @@ class DocumentsMixin:
         """Register every missing supporting file in one postback, then set type, upload and save each row.
 
         All of it runs in one page session: rows registered here exist only in that session, so a reload loses them.
+        The rows and their type lists come from the registration response, which stays complete; each later answer is
+        only a partial update. A row that fails is skipped and returned as (file name, error) so the others still go.
         """
         html = self.documents_panel(draft_url)
         soup = BeautifulSoup(html, "html.parser")
@@ -289,10 +379,11 @@ class DocumentsMixin:
                 "ajaxSingle": "acaoAjaxAdicionarProcessoDocumento",
             },
         )
-        soup = BeautifulSoup(html, "html.parser")
+        registered = BeautifulSoup(html, "html.parser")
+        registered_fields = self._row_fields(html)
         selects = [
             node
-            for node in soup.find_all("select")
+            for node in registered.find_all("select")
             if (node.get("name") or "").endswith(":tipoDoc") and node.get("name") not in row_names
         ]
         pairs = []
@@ -306,44 +397,60 @@ class DocumentsMixin:
             pairs.append((select, match, Path(match["path"]).expanduser()))
         if sorted(item["path"] for _, item, _ in pairs) != sorted(item["path"] for item in items):
             raise RuntimeError("PJe did not register one row for each missing supporting document")
+        failures = []
         for select, item, path in pairs:
-            with timeline.step("supporting document", document=path.name):
-                prefix = select["name"].removesuffix(":tipoDoc")
-                soup = BeautifulSoup(html, "html.parser")
-                _, kind, _ = jsf.select_option(soup, select["name"], item["type"])
-                fields = dict(base)
-                fields.update(
-                    {
-                        name: value
-                        for name, value in jsf_data(html)[1].items()
-                        if re.match(r".+:\d+:(ordem|tipoDoc|descDoc|numeroDoc)$", name)
-                    }
-                )
-                fields[select["name"]] = kind
-                fields[prefix + ":descDoc"] = item.get("description", path.stem)
-                fields[prefix + ":numeroDoc"] = item.get("number", "")
-                container_id, action = jsf.ajax_event(select)
-                html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
-                fields["javax.faces.ViewState"] = jsf.view_state(html)
-                upload_url = PORTAL.base_url + "seam/resource/upload?cid=" + cid["value"]
-                response = self.multipart(upload_url, fields, "file[]", path, resource=True)
-                confirmation = response.json()
-                files = confirmation.get("arquivos", [])
-                if not confirmation.get("requisicao") or len(files) != 1 or not files[0].get("upload"):
-                    raise RuntimeError(f"PJe did not accept the supporting PDF bytes: {path.name}")
-                soup = BeautifulSoup(html, "html.parser")
-                update = soup.find(id=prefix + ":commandLinkAtualizarComboTipoDocumento")
-                save = soup.find(id=prefix + ":commandLinkGravar")
-                if update is None or save is None:
-                    raise RuntimeError(f"PJe did not render row actions for {path.name}")
-                fields.pop("javax.faces.ViewState")
-                container_id, action = jsf.ajax_event(update)
-                self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
-                container_id, action = jsf.ajax_event(save)
-                html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+            try:
+                with timeline.step("supporting document", document=path.name):
+                    html = self._save_row(html, base, registered, registered_fields, cid["value"], select, item, path)
+            except RuntimeError as error:  # this row only: the answer to the last good row is still the page state
+                failures.append((path.name, f"{type(error).__name__}: {str(error)[:200]}"))
+        return failures
 
-    def add_documents(self, draft_url, documents, timeline=None):
-        """Upload what is missing: the main petition, then every missing supporting file in one batch."""
+    @staticmethod
+    def _row_fields(html):
+        """The per-row fields (order, type, description, number) a page carries, by generated name."""
+        return {
+            name: value
+            for name, value in jsf_data(html)[1].items()
+            if re.match(r".+:\d+:(ordem|tipoDoc|descDoc|numeroDoc)$", name)
+        }
+
+    def _save_row(self, html, base, registered, registered_fields, cid, select, item, path):
+        """Set one row's type, send its bytes and save it; returns the page answer to carry into the next row."""
+        prefix = select["name"].removesuffix(":tipoDoc")
+        _, kind, _ = jsf.select_option(registered, select["name"], item["type"])
+        fields = dict(base)
+        fields.update(registered_fields)
+        fields.update(self._row_fields(html))
+        fields[select["name"]] = kind
+        fields[prefix + ":descDoc"] = item.get("description", path.stem)
+        fields[prefix + ":numeroDoc"] = item.get("number", "")
+        container_id, action = jsf.ajax_event(select)
+        html = self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+        fields["javax.faces.ViewState"] = jsf.view_state(html)
+        upload_url = PORTAL.base_url + "seam/resource/upload?cid=" + cid
+        response = self.multipart(upload_url, fields, "file[]", path, resource=True)
+        confirmation = response.json()
+        files = confirmation.get("arquivos", [])
+        if not confirmation.get("requisicao") or len(files) != 1 or not files[0].get("upload"):
+            raise RuntimeError(f"PJe did not accept the supporting PDF bytes: {path.name}")
+        soup = BeautifulSoup(html, "html.parser")
+        update = soup.find(id=prefix + ":commandLinkAtualizarComboTipoDocumento") or registered.find(
+            id=prefix + ":commandLinkAtualizarComboTipoDocumento"
+        )
+        save = soup.find(id=prefix + ":commandLinkGravar") or registered.find(id=prefix + ":commandLinkGravar")
+        if update is None or save is None:
+            raise RuntimeError(f"PJe did not render row actions for {path.name}")
+        fields.pop("javax.faces.ViewState")
+        container_id, action = jsf.ajax_event(update)
+        self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+        container_id, action = jsf.ajax_event(save)
+        return self.ajax(UPDATE_URL, jsf.view_state(html), fields, container_id, action)
+
+    def add_documents(self, draft_url, documents, timeline=None, progress=None):
+        """Upload what is missing: the main petition, then the supporting files in rounds (see add_supporting_documents).
+
+        `progress`, when given, is called with each supporting document's state after every round."""
         timeline = timeline or StepTimeline(None, self, None)
         with timeline.step("documents snapshot"):
             listed = self.review_documents(draft_url)
@@ -351,8 +458,10 @@ class DocumentsMixin:
         with timeline.step("main document", document=Path(main_item["path"]).name):
             main = self.add_main_document(draft_url, main_item, existing=listed)
         supporting_items = documents.get("supporting", [])
-        supporting = self.add_supporting_documents(draft_url, supporting_items, existing=listed, timeline=timeline)
-        if not (main["alreadyAdded"] and all(item["alreadyAdded"] for item in supporting)):
+        supporting = self.add_supporting_documents(
+            draft_url, supporting_items, existing=listed, timeline=timeline, progress=progress
+        )
+        if not main["alreadyAdded"]:  # the supporting rounds already verified their own files against PJe's list
             with timeline.step("documents verify"):
                 self._require_listed(
                     self.review_documents(draft_url),

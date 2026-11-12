@@ -1,12 +1,16 @@
+import json
 import sys
 import unittest
+from datetime import date
 from unittest import mock
 
 from mcp.client.client import Client
 from mcp.client.stdio import StdioServerParameters
+from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync.connectors.djen import server as djen_server
 from jurisync.connectors.djen.client import DjenError
+from jurisync.core import credentials
 
 RAW_ITEM = {
     "id": 1,
@@ -28,7 +32,13 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             tools = (await client.list_tools()).tools
         self.assertEqual(
             sorted(tool.name for tool in tools),
-            ["djen_calculate_deadline", "djen_get_certidao_text", "djen_search_communications"],
+            [
+                "djen_calculate_deadline",
+                "djen_get_certidao_text",
+                "djen_list_saved_searches",
+                "djen_search_communications",
+                "djen_search_saved",
+            ],
         )
         self.assertTrue(all(tool.annotations.read_only_hint for tool in tools))
 
@@ -37,6 +47,38 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             result = await self.call(
                 "djen_search_communications",
                 {"numeroOab": "invalid", "ufOab": "PB", "inicio": "2026-09-29", "fim": "2026-09-29"},
+            )
+        self.assertTrue(result.is_error)
+        search.assert_not_called()
+
+    async def test_accepts_optional_fields_sent_as_null(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        nulls = dict.fromkeys(
+            ["numeroOab", "ufOab", "nomeAdvogado", "nomeParte", "texto", "numeroProcesso", "meio", "tribunal"]
+        )
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {**nulls, "nomeAdvogado": "ELISANDRA BECKER", "inicio": "2026-10-20", "fim": "2026-10-20"},
+            )
+        self.assertFalse(result.is_error)
+        self.assertEqual(search.call_args.args[0]["nomeAdvogado"], "ELISANDRA BECKER")
+
+    async def test_oab_number_sent_as_json_number_is_taken_as_text(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroOab": 61216, "ufOab": "RS", "tribunal": None, "inicio": "2026-10-20", "fim": "2026-10-20"},
+            )
+        self.assertFalse(result.is_error)
+        self.assertEqual(search.call_args.args[0]["numeroOab"], "61216")
+
+    async def test_formatted_process_number_is_still_refused(self):
+        with mock.patch.object(djen_server, "search_page") as search:
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroProcesso": "5004320-76.2026.4.04.7104", "inicio": "2026-10-20", "fim": "2026-10-20"},
             )
         self.assertTrue(result.is_error)
         search.assert_not_called()
@@ -60,6 +102,23 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         params = search.call_args.args[0]
         self.assertEqual(params["nomeAdvogado"], "ELISANDRA BECKER")
         self.assertEqual((params["siglaTribunal"], params["meio"], params["numeroOab"]), ("STJ", "D", "61216"))
+
+    async def test_numeric_oab_and_process_number_are_taken_as_text(self):
+        payload = {"status": "success", "count": 0, "items": []}
+        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
+            result = await self.call(
+                "djen_search_communications",
+                {
+                    "numeroOab": 61216,
+                    "ufOab": "RS",
+                    "numeroProcesso": 50052895220264047117,
+                    "inicio": "2026-10-19",
+                    "fim": "2026-10-19",
+                },
+            )
+        self.assertFalse(result.is_error)
+        params = search.call_args.args[0]
+        self.assertEqual((params["numeroOab"], params["numeroProcesso"]), ("61216", "50052895220264047117"))
 
     async def test_oab_without_uf_and_missing_keys_are_tool_errors(self):
         with mock.patch.object(
@@ -96,6 +155,20 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["numero_processo"], "08001234520264058300")
         self.assertEqual(item["texto_limpo"], "Intime-se a parte")
         self.assertEqual(item["advogados"][0]["numero_digits"], "14663")
+        self.assertEqual(item["portal"]["portal"], "trf5-1g/trf5-2g")  # no link: the number fits both instances
+
+    async def test_each_item_names_the_pje_that_issued_it(self):
+        turma = dict(RAW_ITEM, id=2, link="https://pje2g.trf5.jus.br/pje/Processo/ConsultaDocumento/listView.seam?x=1")
+        vara = dict(RAW_ITEM, id=3, link="https://pje1g.trf5.jus.br/pje/Processo/ConsultaDocumento/listView.seam?x=2")
+        page = {"status": "success", "count": 2, "items": [turma, vara]}
+        with mock.patch.object(djen_server, "search_page", return_value=page):
+            result = await self.call(
+                "djen_search_communications",
+                {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-10-19", "fim": "2026-10-19", "compact": True},
+            )
+        self.assertEqual(
+            [item["portal"]["portal"] for item in result.structured_content["items"]], ["trf5-2g", "trf5-1g"]
+        )
 
     async def test_compact_search_keeps_one_text_and_trims_lawyers(self):
         raw = dict(RAW_ITEM)
@@ -160,11 +233,55 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         self.assertIn("outside the verified court calendar", result.content[0].text)
 
+    async def test_saved_searches_run_together_without_duplicates(self):
+        searches = [
+            {"label": "Victor PE", "numeroOab": "42543", "ufOab": "PE"},
+            {"label": "Victor PB", "numeroOab": "14663", "ufOab": "PB", "tribunal": "TRF5"},
+        ]
+        shared = {"id": 7, "numero_processo": "08001234520264058300", "texto": "Intime-se"}
+        pages = [
+            {"status": "success", "count": 2, "items": [shared, {"id": 8, "texto": "Cite-se"}]},
+            {"status": "success", "count": 120, "items": [shared]},
+        ]
+        with (
+            credentials.scope("office-a", {"DJEN_SEARCHES": json.dumps(searches)}),
+            mock.patch.object(djen_server, "search_page", side_effect=pages) as search,
+        ):
+            result = djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 2), itens=50)
+        first, second = (call.args[0] for call in search.call_args_list)
+        self.assertEqual((first["numeroOab"], first["ufOab"]), ("42543", "PE"))
+        self.assertNotIn("siglaTribunal", first)
+        self.assertEqual(second["siglaTribunal"], "TRF5")
+        self.assertEqual([item["id"] for item in result["items"]], [7, 8])
+        self.assertEqual([(s["new"], s["more"]) for s in result["searches"]], [(2, False), (0, True)])
+
+    async def test_saved_searches_validate_and_court_override(self):
+        with credentials.scope("office-a", {"DJEN_SEARCHES": json.dumps([{"numeroOab": "1"}])}):
+            with self.assertRaises(ValueError):
+                djen_server.saved_searches()
+        with credentials.scope("office-a", {"DJEN_SEARCHES": "[]"}), self.assertRaises(ToolError):
+            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1))
+        empty = {"status": "success", "count": 0, "items": []}
+        searches = json.dumps([{"label": "x", "numeroOab": "1", "ufOab": "PE", "tribunal": "TRF5"}])
+        with (
+            credentials.scope("office-a", {"DJEN_SEARCHES": searches}),
+            mock.patch.object(djen_server, "search_page", return_value=empty) as search,
+        ):
+            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1), tribunal="TRF1")
+        self.assertEqual(search.call_args.args[0]["siglaTribunal"], "TRF1")
+
+    def test_victor_profile_has_his_three_oabs(self):
+        with credentials.scope("victor", {"JURISYNC_CUSTOMER": "victor"}):
+            searches = djen_server.saved_searches()
+        self.assertEqual(
+            {(s["numeroOab"], s["ufOab"]) for s in searches}, {("42543", "PE"), ("14663", "PB"), ("48647", "PE")}
+        )
+
     async def test_stdio_entrypoint_starts(self):
         params = StdioServerParameters(command=sys.executable, args=["-m", "jurisync.connectors.djen.server"])
         async with Client(params) as client:
             tools = (await client.list_tools()).tools
-        self.assertEqual(len(tools), 3)
+        self.assertEqual(len(tools), 5)
 
 
 if __name__ == "__main__":

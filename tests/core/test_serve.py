@@ -6,8 +6,8 @@ from unittest import mock
 
 from mcp.server.mcpserver import MCPServer
 
-from jurisync import serve as serve_module
 from jurisync.core import mcp as core_mcp
+from jurisync.install import serve as serve_module
 
 
 class ServeArgumentsTest(unittest.TestCase):

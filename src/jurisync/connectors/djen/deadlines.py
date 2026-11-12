@@ -66,7 +66,7 @@ def calculate_deadline(available_on, days, calendar_id="jfpe-2026-q4"):
         "startsOn": start.isoformat(),
         "days": days,
         "dueOn": due.isoformat(),
-        "advboxDeadline": _br(due),
+        "dueOnBr": _br(due),
         "countedDates": [day.isoformat() for day in counted],
         "calendar": {
             "id": calendar_id,

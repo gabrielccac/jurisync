@@ -1,5 +1,7 @@
 # Python tooling
 .venv/
+build/
+dist/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -17,8 +19,9 @@ __pycache__/
 *.pfx
 *.key
 *.cer
-*QR*.png
-*QR*.jpeg
+*[Qq][Rr]*.png
+*[Qq][Rr]*.jpeg
+*[Qq][Rr]*.jpg
 qr_code_*
 
 # Private runtime data: portal captures, sessions, downloads, workflow state
@@ -32,3 +35,11 @@ gerid
 *.har
 *.log
 *.tmp
+
+# Customers whose data stays on this machine: the repository is public
+customers/allan/
+customers/anaflavia/
+customers/denis/
+customers/patricia/
+customers/priscila/
+.claude/skills/anaflavia-iniciais-dpa

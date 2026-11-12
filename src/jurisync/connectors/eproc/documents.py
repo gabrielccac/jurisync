@@ -10,39 +10,18 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.core.document_text import extract_document_text
+from jurisync.core.documents import MAX_DOCUMENT_BYTES, read_limited, validate_document_ids
 from jurisync.core.documents_dir import save_document
 from jurisync.core.html_pdf import html_to_pdf
 from jurisync.core.http import UnsafeUrlError, require_url
 
-MAX_DOCUMENTS = 5
-MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
-
-
-def validate_document_ids(document_ids):
-    if (
-        not isinstance(document_ids, list)
-        or not 1 <= len(document_ids) <= MAX_DOCUMENTS
-        or any(not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value) for value in document_ids)
-        or len(set(document_ids)) != len(document_ids)
-    ):
-        raise ValueError("Select 1-5 unique numeric document ID strings")
-
 
 def _read_response(response):
-    content = bytearray()
-    count = 0
-    try:
-        chunks = response.iter_content(chunk_size=64 * 1024)
-    except AttributeError:
-        chunks = [getattr(response, "content", b"")]
-    for chunk in chunks:
-        if not chunk:
-            continue
-        count += len(chunk)
-        if count > MAX_DOCUMENT_BYTES:
-            return None, "too_large"
-        content.extend(chunk)
-    return bytes(content), None
+    if not hasattr(response, "iter_content"):
+        content = getattr(response, "content", b"")
+        return (content, None) if len(content) <= MAX_DOCUMENT_BYTES else (None, "too_large")
+    content = read_limited(response, MAX_DOCUMENT_BYTES)
+    return (content, None) if content is not None else (None, "too_large")
 
 
 def _validate_url(url, action, document_id=None, *, portal):
@@ -72,9 +51,9 @@ def _wrapper_implementation(wrapper, wrapper_url):
 
 
 def _inventory(process):
-    documents = list(process.get("documentos") or process.get("documentInventory") or [])
-    for event in process.get("eventos", []):
-        documents.extend(event.get("documentos", []))
+    documents = list(process.get("documents") or process.get("documentInventory") or [])
+    for event in process.get("events", []):
+        documents.extend(event.get("documents", []))
     known = {}
     for document in documents:
         identifier = document.get("id")
@@ -89,7 +68,7 @@ def _inventory(process):
 def _item(document):
     return {
         "id": document["id"],
-        "title": document.get("titulo") or document.get("nome", ""),
+        "title": document.get("title") or document.get("name", ""),
         "status": None,
         "content_type": "",
         "format": "",
@@ -105,7 +84,7 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
     if process.get("success") is False:
         raise ValueError("A successful eproc process result is required")
     base_url = portals.eproc(portal).base_url
-    number = process.get("numero") or process.get("numero_processo") or ""
+    number = process.get("number") or process.get("processNumber") or ""
     if not isinstance(number, str):
         raise ValueError("The process number is required")
     validate_document_ids(document_ids)

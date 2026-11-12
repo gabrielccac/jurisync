@@ -2,13 +2,14 @@
 
 import time
 from http.cookiejar import Cookie
+from pathlib import Path
 
 from curl_cffi import requests
-from selenium.common.exceptions import UnexpectedAlertPresentException
+from selenium.common.exceptions import StaleElementReferenceException, UnexpectedAlertPresentException
 from seleniumbase import Driver
 
 from jurisync import portals
-from jurisync.core.totp import next_code, parse_accounts, parse_index, select_account, totp
+from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, parse_index, select_account, totp
 
 PANEL_MARKER = "acao=painel_adv_listar"
 PANEL_READY = 'a[aria-describedby="processoscomprazoemaberto"]'
@@ -24,28 +25,73 @@ LOGIN_FIELDS = {
 def portal_totp_account(portal):
     """Select this portal's TOTP account from its own authenticator export."""
     portal = portals.eproc(portal)
-    data = portal.env("EXPORT_DATA")
-    if not data:
-        raise RuntimeError(f"Set {portal.env_name('EXPORT_DATA')} in .env")
+    data, qr_path = portal.env("2FA_DATA"), portal.env("2FA_QR")
+    if not data and not qr_path:
+        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')} in .env")
     return select_account(
-        parse_accounts(data),
+        parse_accounts(data) if data else accounts_from_image(Path(qr_path)),
         match=portal.env("OTP_PROFILE_MATCH"),
         index=parse_index(portal.env("OTP_PROFILE_INDEX"), portal.env_name("OTP_PROFILE_INDEX")),
         label=portal.env_prefix,
     )
 
 
+def dismiss_alert(driver):
+    """Accept a blocking JS alert and return its text (some portals confirm new devices this way)."""
+    try:
+        alert = driver.switch_to.alert
+    except Exception:
+        return ""
+    try:
+        text = alert.text
+    except Exception:
+        text = ""
+    try:
+        alert.accept()
+    except Exception:
+        pass
+    return text
+
+
 def has(driver, selector, timeout=0.5):
     try:
         return driver.wait_for_element(selector, timeout=timeout) is not None
+    except UnexpectedAlertPresentException:
+        dismiss_alert(driver)
+        try:
+            return driver.wait_for_element(selector, timeout=timeout) is not None
+        except Exception:
+            return False
     except Exception:
         return False
+
+
+def page_hint(driver, limit=160):
+    """A short single-line excerpt of what the browser shows, for failure messages (never page source)."""
+    for selector in ("#input-error", ".alert-error", "#kc-error-message", ".alert", "body"):
+        try:
+            if has(driver, selector, 0.5):
+                text = " ".join((driver.get_text(selector) or "").split())
+                if text:
+                    return text[:limit]
+        except Exception:  # noqa: BLE001 - best effort diagnostics
+            continue
+    return ""
 
 
 def wait_for_step(driver, timeout=25):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        url = driver.get_current_url() or ""
+        try:
+            url = driver.get_current_url() or ""
+        except UnexpectedAlertPresentException:
+            text = dismiss_alert(driver)
+            if "confirma" in text.lower():
+                raise RuntimeError(
+                    "eproc asks for a confirmation code (new device/email check); "
+                    "fetch the code and continue the login with it"
+                ) from None
+            continue
         if any(has(driver, selector) for selector in LOGIN_FIELDS["otp"]):
             return "otp"
         if has(driver, "button:contains('Enviar')"):
@@ -57,7 +103,8 @@ def wait_for_step(driver, timeout=25):
         ):
             return "login"
         time.sleep(0.25)
-    raise RuntimeError("Timed out waiting for the next eproc login step")
+    hint = page_hint(driver)
+    raise RuntimeError("Timed out waiting for the next eproc login step" + (f" (page: {hint})" if hint else ""))
 
 
 def submit_captcha(driver):
@@ -113,23 +160,48 @@ def session_from_cookies(cookies):
 
 
 def _first_element(driver, selectors, timeout=10):
-    for selector in selectors:
-        if has(driver, selector, timeout=timeout):
-            return driver.wait_for_element(selector, timeout=timeout)
+    # Poll alternatives together instead of spending the full timeout on absent SSO fields.
+    deadline = time.monotonic() + timeout
+    while selectors and time.monotonic() < deadline:
+        for selector in selectors:
+            if has(driver, selector, timeout=0.1):
+                return driver.wait_for_element(selector, timeout=timeout)
+    return None
+
+
+def _fill_field(driver, selectors, value, *, timeout=10, attempts=4):
+    """Type into the first matching field, finding it again if the page re-renders under us.
+
+    Keycloak (and TJRS in particular) can replace the form between locating a field and typing in it,
+    which raises StaleElementReferenceException. Returns the field, or None when none was found.
+    """
+    for attempt in range(attempts):
+        try:
+            field = _first_element(driver, selectors, timeout=timeout)
+            if field is None:
+                return None
+            field.clear()
+            field.send_keys(value)
+            return field
+        except StaleElementReferenceException:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
     return None
 
 
 def _submit_otp(driver, code):
-    otp_field = _first_element(driver, LOGIN_FIELDS["otp"], timeout=10)
+    otp_field = _fill_field(driver, LOGIN_FIELDS["otp"], code, timeout=10)
     if otp_field is None:
         raise RuntimeError("Could not find the portal OTP field")
-    otp_field.clear()
-    otp_field.send_keys(code)
     otp_submit = next((selector for selector in LOGIN_FIELDS["otp_submit"] if has(driver, selector, 2)), None)
     if otp_submit:
         driver.click(otp_submit)
     else:
-        otp_field.send_keys("\n")
+        try:
+            otp_field.send_keys("\n")
+        except StaleElementReferenceException:
+            pass  # the page already moved on after the code was typed
     time.sleep(1)
     step = wait_for_step(driver, timeout=30)
     while step == "captcha":
@@ -146,12 +218,10 @@ def login(username, password, account, *, portal):
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
         driver.get(config.login_url)
-        username_field = _first_element(driver, LOGIN_FIELDS["username"], timeout=20)
-        password_field = _first_element(driver, LOGIN_FIELDS["password"], timeout=20)
-        if username_field is None or password_field is None:
+        if _fill_field(driver, LOGIN_FIELDS["username"], username, timeout=20) is None:
             raise RuntimeError("Could not find the portal login fields")
-        username_field.send_keys(username)
-        password_field.send_keys(password)
+        if _fill_field(driver, LOGIN_FIELDS["password"], password, timeout=20) is None:
+            raise RuntimeError("Could not find the portal login fields")
         submit = next((selector for selector in LOGIN_FIELDS["submit"] if has(driver, selector, 1)), None)
         if not submit:
             raise RuntimeError("Could not find the portal login button")
@@ -163,7 +233,8 @@ def login(username, password, account, *, portal):
             submit_captcha(driver)
             step = wait_for_step(driver)
         if step == "login":
-            raise RuntimeError("eproc rejected the username/password")
+            hint = page_hint(driver)
+            raise RuntimeError("eproc rejected the username/password" + (f" (page: {hint})" if hint else ""))
         if step == "otp":
             step = _submit_otp(driver, totp(account).now())
             if step == "otp":

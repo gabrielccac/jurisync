@@ -34,9 +34,9 @@ class EprocParserTests(unittest.TestCase):
         detail = """<table id="tblEventos"><tr id="trEvento9" class="infraEventoImportante"><td>9</td><td>01/01/2026</td><td><label class="infraEventoDescricao">Publicado</label></td><td><label class="infraEventoUsuario">sistema</label></td><td><a class="infraLinkDocumento" data-doc="8" data-nome="A" data-mimetype="pdf" href="controlador.php?acao=acessar_documento&doc=8">A1</a></td></tr></table>"""
         process = parse_process_list(listing, BASE)[0]
         parsed = parse_process_detail(detail, BASE)
-        self.assertEqual((process["id"], process["juizo"], process["classeCodigo"]), ("7", "SCUABI011", None))
+        self.assertEqual((process["id"], process["court"], process["caseClassCode"]), ("7", "SCUABI011", None))
         self.assertEqual(
-            (parsed["eventCount"], parsed["documentCount"], parsed["eventos"][0]["documentos"][0]["tipo"]),
+            (parsed["eventCount"], parsed["documentCount"], parsed["events"][0]["documents"][0]["type"]),
             (1, 1, "pdf"),
         )
 
@@ -46,10 +46,10 @@ class EprocParserTests(unittest.TestCase):
         <table id="tblPartesERepresentantes"><tr><th>AUTOR</th><th>RÉU</th></tr><tr><td><span data-parte="AUTOR">Alice</span><span id="spnCpfParteAutor0">123</span><span class="sr-only">Tipo de Usuário: ADVOGADO</span></td><td><span data-parte="REU">Bob</span></td></tr></table>
         <table id="tblEventos"><tr id="trEvento1"><td>1</td><td>01/01/2026</td><td><label class="infraEventoDescricao">Juntada</label></td><td><label class="infraEventoUsuario">user</label></td><td><a class="infraLinkDocumento" href="controlador.php?acao=acessar_documento&amp;doc=9&amp;evento=2&amp;key=k&amp;hash=h" aria-label="Visualizar documento A do tipo pdf" title="A"></a></td></tr></table>"""
         parsed = parse_process_detail(html, BASE)
-        self.assertEqual(parsed["capa"]["Situacao"], "MOVIMENTO")
-        self.assertEqual(parsed["assuntos"][0]["codigo"], "1")
-        self.assertEqual(parsed["partes"][0]["representantes"], ["ADVOGADO"])
-        self.assertEqual(parsed["documentos"][0]["id"], "9")
+        self.assertEqual(parsed["cover"]["status"], "MOVIMENTO")
+        self.assertEqual(parsed["subjects"][0]["code"], "1")
+        self.assertEqual(parsed["parties"][0]["representatives"], ["ADVOGADO"])
+        self.assertEqual(parsed["documents"][0]["id"], "9")
 
     def test_detail_discovers_event_filter_request_and_all_co_parties(self):
         html = """<script>url: 'controlador_ajax.php?acao_ajax=montar_tabela_eventos_filtrados&amp;num_processo=123&amp;hash=h'</script>
@@ -58,7 +58,7 @@ class EprocParserTests(unittest.TestCase):
         parsed = parse_process_detail(html, BASE)
         self.assertEqual(parsed["eventRequest"]["data"], {"hdnDocs": "true", "hdnExternal": "false"})
         self.assertIn("montar_tabela_eventos_filtrados", parsed["eventRequest"]["url"])
-        self.assertEqual([part["nome"] for part in parsed["partes"]], ["Alice", "Bob"])
+        self.assertEqual([part["name"] for part in parsed["parties"]], ["Alice", "Bob"])
 
     def test_list_page_complete_only_when_hidden_total_is_covered(self):
         row = '<tr class="infraTrClara"><td></td><td><a href="controlador.php?acao=processo_selecionar">1</a></td><td>C</td><td>A</td><td>E</td><td>1</td><td>2</td><td>3</td></tr>'
@@ -76,9 +76,35 @@ class EprocParserTests(unittest.TestCase):
     def test_event_response_split_reports_observed_pagination_only(self):
         row = '<table id="tblEventosNovos"><tr id="trEvento2" class="infraEventoImportante"><td>2</td><td>02/01</td><td><label class="infraEventoDescricao">Prazo</label></td><td><label class="infraEventoUsuario">u</label></td><td>sem documento</td></tr></table>'
         parsed = parse_event_response("ignored±" + row + "±ignored±controlador_ajax.php?pagina=1±3", BASE)
-        self.assertEqual(parsed["eventos"][0]["id"], "2")
+        self.assertEqual(parsed["events"][0]["id"], "2")
         self.assertEqual(parsed["pagination"]["totalPages"], 3)
         self.assertFalse(parsed["pagination"]["complete"])
+
+    def test_expired_queue_uses_seven_columns_and_caption_total(self):
+        caption = "<caption>Lista de Citações e Intimações com Decurso de Prazo (1 registro):</caption>"
+        html = f"""<input name="hdnInfraNroItens" value="0"><table class="infraTable">{caption}
+          <tr><th>Processo</th><th>Classe</th><th>Assunto</th><th>Evento e Prazo</th>
+          <th>Data envio requisição</th><th>Final Prazo</th><th>Conferido ?</th></tr>
+          <tr class="infraTrClara"><td><a href="controlador.php?acao=processo_selecionar">0000001-23.2026.4.06.3800</a>
+          Juízo: MGBHZCIV21T<span data-parte="AUTOR">Parte de teste</span></td><td>Classe</td><td>Assunto</td>
+          <td>Intimação — 10 dias</td><td>21/09/2026 17:09:03</td><td>07/10/2026 23:59:59</td>
+          <td><img alt="Conferir"></td></tr></table>"""
+        result = parse_process_list_page(html, "https://eproc1g.trf6.jus.br/eproc/")
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual(
+            (item["caseClass"], item["subject"], item["deadlineEvent"]), ("Classe", "Assunto", "Intimação — 10 dias")
+        )
+        self.assertEqual(
+            (item["requestedAt"], item["deadlineStart"], item["deadlineEnd"]),
+            ("21/09/2026 17:09:03", "", "07/10/2026 23:59:59"),
+        )
+        self.assertEqual(item["parties"], [{"role": "AUTOR", "name": "Parte de teste"}])
+        self.assertEqual(result["pagination"]["totalItems"], 1)
+        self.assertTrue(result["pagination"]["complete"])
+        unknown = parse_process_list_page(html.replace(caption, ""), BASE)
+        self.assertIsNone(unknown["pagination"]["totalItems"])
+        self.assertFalse(unknown["pagination"]["complete"])
 
 
 if __name__ == "__main__":

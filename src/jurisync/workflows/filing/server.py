@@ -7,7 +7,6 @@ MCP access. They wrap `prepare.py`, so the agent never passes file paths and nev
 """
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Annotated, Any
@@ -17,17 +16,17 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
-from jurisync.connectors.pje.filing.checkpoint import run_directory
+from jurisync.core.documents_dir import resolve_saved_folder
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
+from jurisync.core.runs import run_directory
 from jurisync.paths import REPO_ROOT
-from jurisync.workflows.filing.prepare import _write_private, finalize_review, prepare_customer
+from jurisync.workflows.filing.prepare import _write_private, finalize_review, prepare_folder
 from jurisync.workflows.filing.profile import load_profile, profile_names
 
-ERRORS = (ValueError, RuntimeError, OSError, KeyError)
+ERRORS = (ValueError, RuntimeError, OSError, KeyError)  # OSError covers FileNotFoundError for a missing folder
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
-Digits = Annotated[str, StringConstraints(pattern=r"^\d{1,12}$")]
 
 ProfileName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,40}$")]
 
@@ -47,8 +46,7 @@ def _review_view(run_id, report, payload_ready):
     """The review without local paths or hashes: the agent needs ids, names, types and problems."""
     return {
         "runId": run_id,
-        "customerId": report.get("customerId"),
-        "folder": report.get("folder"),
+        "source": report.get("source"),
         "ready": bool(report.get("ready")),
         "payloadReady": payload_ready,
         "files": [_file_view(row) for row in report.get("files", [])],
@@ -100,17 +98,32 @@ def _require_no_draft(directory):
 
 @server.tool(
     name="filing_prepare",
-    title="Prepare a TRF5 filing from the ADVBOX protocol folder",
-    description="Download the customer's 00-PROTOCOLAR folder from ADVBOX, convert Word files to PDF, split PDFs over 10 MB, classify every file and write the run's review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
+    title="Prepare a filing from a folder of documents",
+    description="Prepare the documents of a filing that were already pulled into a subfolder of the shared documents folder (sourceFolder). Pull them first with the office's own system tools, as its skill says (ADVBOX: advbox_save_folder). Converts Word files to PDF, split PDFs over 10 MB, classify every file and write the run's review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
     annotations=LOCAL_WRITE,
 )
 def prepare(
-    profile: ProfileName,
-    runId: RunId,
-    customerId: Digits,
-    facts: dict[str, Any],
-    folder: Annotated[str | None, Field(max_length=200)] = None,
-    useJev: bool = False,
+    profile: Annotated[ProfileName, Field(description="Profile name from filing_profiles, e.g. 'victor'.")],
+    runId: Annotated[
+        RunId,
+        Field(description="New run id, letters digits _ or -, up to 64 characters, e.g. 'ana-2026-10-16'."),
+    ],
+    sourceFolder: Annotated[
+        str,
+        Field(
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            description="Subfolder of the shared documents folder holding the documents to file, e.g. the one advbox_save_folder saved into.",
+        ),
+    ],
+    facts: Annotated[
+        dict[str, Any],
+        Field(
+            description="Partial JSON object with what is known: authorCpf (11 digits), subject or subjects (benefit labels from filing_subjects), author (object), classification (object), characteristics (object, e.g. claimValue and boolean flags). Anything missing becomes a review item."
+        ),
+    ],
+    useJev: Annotated[
+        bool, Field(description="true sends document text to an outside classifier. Default false.")
+    ] = False,
 ) -> dict[str, Any]:
     directory = run_directory(runId)
     _require_no_draft(directory)
@@ -118,7 +131,8 @@ def prepare(
         selected = load_profile(profile)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         _write_private(directory / "facts.json", facts)
-        prepare_customer(customerId, facts, directory, profile=selected, folder=folder, jev=useJev)
+        _, files = resolve_saved_folder(sourceFolder)
+        prepare_folder(files, facts, directory, profile=selected, source=sourceFolder, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(directory / "review.json", "Prepare did not write a review")
     return _review_view(runId, report, (directory / "payload.json").exists())
@@ -130,7 +144,9 @@ def prepare(
     description="Return the review of a prepared run again: files with their ids, roles, PJe types and problems, the petition's candidates, and whether a payload exists. Reads local files only.",
     annotations=READ_ONLY,
 )
-def review(runId: RunId) -> dict[str, Any]:
+def review(
+    runId: Annotated[RunId, Field(description="runId of a run that already has filing_prepare output.")],
+) -> dict[str, Any]:
     directory = run_directory(runId)
     report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
     return _review_view(runId, report, (directory / "payload.json").exists())
@@ -143,10 +159,20 @@ def review(runId: RunId) -> dict[str, Any]:
     annotations=LOCAL_WRITE,
 )
 def finalize(
-    profile: ProfileName,
-    runId: RunId,
-    facts: dict[str, Any] | None = None,
-    overrides: dict[str, dict[str, str]] | None = None,
+    profile: Annotated[ProfileName, Field(description="Same profile used in filing_prepare.")],
+    runId: Annotated[RunId, Field(description="runId of a prepared run.")],
+    facts: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description="Full facts object, same shape as filing_prepare. Omit to reuse the facts stored at prepare time."
+        ),
+    ] = None,
+    overrides: Annotated[
+        dict[str, dict[str, str]] | None,
+        Field(
+            description='JSON object keyed by file id from filing_review, e.g. {"<id>": {"role": "main", "type": "<PJe type>"}} or {"<id>": {"role": "skip"}} to leave the file out.'
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     directory = run_directory(runId)
     _require_no_draft(directory)
@@ -201,7 +227,15 @@ def profiles() -> dict[str, Any]:
     annotations=READ_ONLY,
 )
 def subjects(
-    profile: ProfileName, lawsuitRef: Annotated[str | None, Field(min_length=4, max_length=40)] = None
+    profile: Annotated[ProfileName, Field(description="Profile name from filing_profiles.")],
+    lawsuitRef: Annotated[
+        str | None,
+        Field(
+            min_length=4,
+            max_length=40,
+            description="Optional lawsuit id or CNJ number to look up what was filed for that case in the profile's history notes.",
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
@@ -214,7 +248,9 @@ def subjects(
 
 
 def main():
-    load_env_file(os.environ.get("JURISYNC_ENV_FILE") or REPO_ROOT / ".env")
+    # A checkout keeps credentials in its own .env; an installed package uses ~/.config/jurisync/.env.
+    checkout_env = REPO_ROOT / ".env"
+    load_env_file(checkout_env if (REPO_ROOT / "pyproject.toml").exists() and checkout_env.exists() else None)
     run_stdio(server)
 
 

@@ -24,9 +24,9 @@ Maria Daniela `33264` · João Matheus `259464` · Maria Fernanda `179652` ·
 Emilly `49187` · Brenda `72411` · Arthur `280388` · Sâmara `108476` · Fabiana `51137` ·
 Roberta `206548` · Williadja `72707` · CONTROLADORIA `216759`.
 
-Os responsáveis abaixo são o padrão do POP; o ADVBOX mostra que a equipe às vezes
-distribui diferente (ex.: `CUMPRIR ATO ORDINATÓRIO` atribuído a outra pessoa que não
-"quem protocolou").
+Os responsáveis abaixo são o padrão do POP. Exceção definida pelo escritório: em
+`CUMPRIR ATO ORDINATÓRIO` o responsável é quem fez a petição inicial do processo, lido
+no histórico do ADVBOX (§3, §1), não quem protocolou.
 
 ## 3. Átomos e cadeias
 
@@ -34,9 +34,20 @@ distribui diferente (ex.: `CUMPRIR ATO ORDINATÓRIO` atribuído a outra pessoa q
 - `ABRIR INTIMAÇÃO` `572240` (Kaíky `132063`), mesmo dia. Checklist depois.
 
 ### §1 Ato ordinatório / prazo inicial / emenda / pedido de endereço
-- `CUMPRIR ATO ORDINATÓRIO` `265427` — responsável: quem protocolou o caso (Sâmara
-  `108476` …); se ninguém protocolou, alternar Fabiana `51137` / Sâmara. Prazo conforme
-  a certidão.
+- `CUMPRIR ATO ORDINATÓRIO` `265427` — prazo conforme a certidão. Responsável: **quem fez
+  a petição inicial do processo**, porque o ato ordinatório normalmente chega depois do
+  peticionamento e quem peticionou conhece o caso. Para achar:
+  1. `advbox_lawsuit_report` do processo com `taskSearch="PETIÇÃO INICIAL"` (inclui as
+     concluídas): o responsável da tarefa `PETIÇÃO INICIAL …` (ex.: `PETIÇÃO INICIAL - PREV
+     SM-URBANO`) é o responsável do ato ordinatório. Converta o nome no ID pela lista do §2
+     (ou `advbox_list_members`).
+  2. Não confunda com `PROTOCOLAR PREV - JUD` / `PROCESSO PROTOCOLADO-JUD`: quem protocola
+     nem sempre é quem escreveu a petição.
+  3. Mais de uma `PETIÇÃO INICIAL` com responsáveis diferentes, ou tarefa com mais de um
+     responsável: mostre os nomes na prévia e pergunte. Nenhuma `PETIÇÃO INICIAL` no
+     histórico: alternar Fabiana `51137` / Sâmara `108476` e registrar na prévia que o
+     responsável não foi achado no histórico.
+  Na prévia e no comentário, cite de onde veio o responsável (tarefa, data e nome).
 
 ### §2 Laudos (anexar o laudo na tarefa)
 - Social → `ANALISAR LAUDO SOCIAL JUDICIAL` `5427574` (Emilly `49187`)
@@ -178,15 +189,40 @@ pessoais.
 
 ## 6. Dedupe (antes de criar)
 
-A equipe já cria muitas dessas tarefas. Antes de criar:
+A equipe já cria muitas dessas tarefas, e nem todas trazem o ID DJEN no comentário. Por
+isso a checagem **não** se limita a buscar o ID: **liste as tarefas do processo onde a
+nova seria criada e compare**. O passo é obrigatório, também na prévia (a prévia mostra o
+resultado da checagem).
 
-1. Procure o **ID DJEN** no histórico do processo: `advbox_lawsuit_report` com
-   `taskSearch="{id DJEN}"` (inclui tarefas concluídas). `advbox_find_tasks` só lista
-   pendentes e não busca texto de comentário; use-a para obter o `postId`.
-2. Compare tipo + processo + ato (o mesmo ato pode ter vários IDs DJEN).
-3. Se já existe: resultado `check` ou `incremento` (ver `fora-do-mapa.md` §1), não nova
-   tarefa. Casos reais a evitar: duas tarefas para a mesma proposta de acordo; duas
+1. **Liste as tarefas do processo** (pendentes e concluídas):
+   - `advbox_lawsuit_report` do processo, com `maxTasks` suficiente para cobrir o
+     histórico desde a data da comunicação (inclui concluídas e as de outros usuários);
+   - `advbox_find_tasks` do processo, para as **pendentes** e seu `postId`.
+2. **Busque o ID DJEN**: `taskSearch="{id DJEN}"` no relatório. Achou: é a mesma
+   comunicação, já tratada.
+3. **Compare mesmo sem o ID**: para cada tarefa listada, confira átomo/tipo + ato
+   (mesmo documento, decisão ou evento) + janela de datas a partir da disponibilização.
+   O mesmo ato pode ter vários IDs DJEN, e a equipe pode ter criado a tarefa à mão, com
+   título ou data um pouco diferentes. Em caso de dúvida se é o mesmo ato, leia o
+   comentário da tarefa existente; se ainda houver dúvida, **escale** (não crie).
+   **O critério é a obrigação, não o texto nem o ID.** Pergunte: o que a equipe precisa
+   fazer, sobre qual documento/decisão/evento, e a tarefa existente já cobre isso? Uma
+   intimação posterior de texto diferente pode levar à **mesma** tarefa: reiteração
+   ou republicação ("intime-se novamente", "cumpra-se a decisão anterior"), despacho que
+   só manda cumprir o que a decisão anterior já mandou, nova intimação sobre o mesmo
+   laudo, proposta de acordo ou emenda. Nesses casos é `check`; se a nova intimação traz
+   prazo ou dado diferente, é `incremento` (atualize a pendente). Já a **nova obrigação**
+   do mesmo tipo (nova perícia depois de concluída a anterior, novo prazo aberto por nova
+   decisão, tarefa anterior já concluída e novo ato exigindo nova providência) é tarefa
+   nova. Se o ato anterior já foi concluído, confirme que a nova intimação não é só eco
+   dele antes de criar.
+4. **Decida**: se já existe, resultado `check` (nada a fazer) ou `incremento` (acrescentar
+   informação à pendente, ver `fora-do-mapa.md` §1), nunca nova tarefa. Registre na
+   prévia e no comentário qual tarefa existente (`postId`, data, responsável) cobriu o ato.
+   Casos reais a evitar: duas tarefas para a mesma proposta de acordo; duas
    `ANALISAR LAUDO SOCIAL` para o mesmo laudo.
+5. **Dentro do mesmo lote**, comunicações com o mesmo ato geram uma só tarefa (a primeira
+   criada passa a constar na listagem das seguintes: releia a listagem a cada criação).
 
 ## 7. Invariantes de criação (`POST /posts`)
 

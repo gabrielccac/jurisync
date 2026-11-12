@@ -20,18 +20,27 @@ def load_env_file(path=None):
     The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json); without it the
     user's ``~/.config/jurisync/.env`` is used when it exists. When JURISYNC_CUSTOMER names a customer, its
     gitignored ``customers/<name>/.env`` is loaded first, so a customer's values
-    take precedence over the shared file.
+    take precedence over the shared file. The values its portals.toml ``[env].set`` pins (e.g. ``PJE_1G_CERT=true``)
+    come next, so a checkout behaves like an installed bundle, which writes them into the customer's file.
     """
-    from jurisync.customers import customer_env_path
+    from jurisync.customers import customer_env_path, customer_name, fixed_variables
     from jurisync.paths import USER_ENV_FILE
 
     shared = path or os.environ.get("JURISYNC_ENV_FILE") or (USER_ENV_FILE if USER_ENV_FILE.exists() else None)
-    for candidate in (customer_env_path(), shared):
-        if candidate:
-            _load_lines(candidate)
+    if shared and not customer_name():
+        # A client that registers the server without JURISYNC_CUSTOMER (Claude Desktop) can name it in the shared file.
+        _load_lines(shared, only={"JURISYNC_CUSTOMER"})
+    customer = customer_name()
+    if customer_env_path():
+        _load_lines(customer_env_path())
+    if customer:
+        for key, value in fixed_variables(customer).items():
+            os.environ.setdefault(key, value)
+    if shared:
+        _load_lines(shared)
 
 
-def _load_lines(path):
+def _load_lines(path, only=None):
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
@@ -42,6 +51,8 @@ def _load_lines(path):
             continue
         key, value = line.removeprefix("export ").split("=", 1)
         key, value = key.strip(), value.strip()
+        if only is not None and key not in only:
+            continue
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         elif " #" in value:

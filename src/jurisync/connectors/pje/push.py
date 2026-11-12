@@ -16,10 +16,9 @@ from jurisync.connectors.pje.process import login_portal
 from jurisync.core.http import IMPERSONATE, UnsafeUrlError, enable_request_logging, require_url
 from jurisync.core.redaction import url_shape
 
-PANEL_PATH = "/pje/Painel/painel_usuario/advogado.seam"
-PUSH_PATH = "/pje/Push/listView.seam?iframe=true"
+PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
+PUSH_SUFFIX = "Push/listView.seam?iframe=true"
 PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b")
-PUSH_PREFIX = "/pje/Push/listView.seam"
 PUSH_TIMEOUT = 90
 
 
@@ -52,41 +51,51 @@ def _known_host(value):
     return host
 
 
+PUSH_COLUMNS = {
+    "Data de inclusão": "registered_at",
+    "Email alternativo": "alternate_email",
+    "Observação": "observation",
+}
+
+
 def parse_push_items(html):
-    """Parse the processes registered in PJe Push (the source of Push emails)."""
+    """Parse the processes registered in PJe Push (the source of Push emails).
+
+    The grid is the one table with a "Processo" column. TRF5/TRF3/TJAP add the inclusion date, an alternate
+    e-mail and an observation; TRF1 lists only the process (1,600 of them on one page), so the other
+    columns are read by header name and left empty when the portal has none. A process registered twice
+    shows twice, as the portal's own count does.
+    """
     soup = BeautifulSoup(html, "html.parser")
     items = []
-    seen = set()
-    grids = [
-        table
-        for table in soup.find_all("table")
-        if not table.find("table")
-        and {"Processo", "Data de inclusão", "Email alternativo", "Observação"}.issubset(
-            {" ".join(head.stripped_strings) for head in table.find_all("th")}
-        )
-    ]
+    full, bare = [], []
+    for table in soup.find_all("table"):
+        if table.find("table"):
+            continue
+        heads = [" ".join(head.stripped_strings) for head in table.find_all("th")]
+        if "Processo" in heads:
+            (full if set(PUSH_COLUMNS) <= set(heads) else bare).append((table, heads))
+    # The full grid wins; a table with only the process column is the grid just where no full one exists.
+    grids = full or bare
     if not grids and not PROCESS_RE.search(soup.get_text(" ")):
         return []
     if len(grids) != 1:
         raise RuntimeError("Could not uniquely identify the PJe Push process grid")
-    for row in grids[0].find_all("tr"):
+    table, heads = grids[0]
+    for row in table.find_all("tr"):
         cells = row.find_all("td")
         values = [" ".join(c.stripped_strings) for c in cells]
         match = PROCESS_RE.search(" ".join(values))
-        if not match or match.group(0) in seen:
+        if not match:
             continue
-        seen.add(match.group(0))
         onclick = " ".join(a.get("onclick", "") for a in row.find_all("a"))
         process_id = re.search(r"construirLogicaAcesso\((\d+)\)", onclick)
-        items.append(
-            {
-                "process_number": match.group(0),
-                "registered_at": values[2] if len(values) > 2 else "",
-                "alternate_email": values[3] if len(values) > 3 else "",
-                "observation": values[4] if len(values) > 4 else "",
-                "process_id": int(process_id.group(1)) if process_id else None,
-            }
-        )
+        item = {"process_number": match.group(0)}
+        for head, key in PUSH_COLUMNS.items():
+            index = heads.index(head) if head in heads else None
+            item[key] = values[index] if index is not None and index < len(values) else ""
+        item["process_id"] = int(process_id.group(1)) if process_id else None
+        items.append(item)
     return items
 
 
@@ -109,13 +118,15 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
         if 1 <= candidate_page <= candidate_total:
             current_page, total_pages = candidate_page, candidate_total
     next_control = None
+    base_path = urlsplit(base_url).path
+    path_prefix = base_path.split("Push/", 1)[0] if "Push/" in base_path else "/"
     for element in soup.find_all(["a", "button", "input"]):
         label = " ".join((element.get_text(" "), element.get("title", ""), element.get("aria-label", ""))).casefold()
         if not any(marker in label for marker in ("próxim", "proxim", "next", "seguinte")):
             continue
         href = element.get("href")
         if href and href not in {"#", "javascript:void(0)"}:
-            _safe_url(urljoin(base_url, href), host=base_host, path_prefix="/pje/")
+            _safe_url(urljoin(base_url, href), host=base_host, path_prefix=path_prefix)
         disabled = element.has_attr("disabled") or "disabled" in (element.get("class") or [])
         next_control = not disabled
         break
@@ -134,7 +145,7 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
     if current_page and total_pages and current_page > total_pages:
         current_page = total_pages = None
     rows = rows_returned if rows_returned is not None else len(parse_push_items(html))
-    complete = result_count is not None and rows == result_count and next_control is False
+    complete = result_count is not None and rows == result_count and next_control is not True
     return {
         "results_count": result_count,
         "current_page": current_page,
@@ -150,8 +161,8 @@ def read_push(name, *, session=None):
     try:
         if owned_session:
             session, _ = login_portal(name)
-        panel_url = _portal_url(name, PANEL_PATH)
-        push_url = _portal_url(name, PUSH_PATH)
+        panel_url = _portal_url(name, f"{config.root}{PANEL_SUFFIX}")
+        push_url = _portal_url(name, f"{config.root}{PUSH_SUFFIX}")
         push = session.get(
             push_url,
             headers={"Referer": panel_url},
@@ -162,14 +173,14 @@ def read_push(name, *, session=None):
         push_url_result = getattr(push, "url", push_url)
         if push.status_code != 200:
             raise RuntimeError(f"Push list returned HTTP {push.status_code}")
-        _safe_url(push_url_result, host=config.host, path_exact=PUSH_PREFIX)
+        _safe_url(push_url_result, host=config.host, path_exact=f"{config.root}Push/listView.seam")
         html = response_html(push)
         items = parse_push_items(html)
         pagination = parse_push_page(html, len(items), base_url=push_url)
         return {
             "success": True,
             "portal": name,
-            "push_url": _safe_url(push_url, host=config.host, path_exact=PUSH_PREFIX),
+            "push_url": _safe_url(push_url, host=config.host, path_exact=f"{config.root}Push/listView.seam"),
             "pagination": pagination,
             **pagination,
             "rows_returned": len(items),

@@ -1,10 +1,12 @@
 """Find a process in any PJe deployment and read its detail page and timeline.
 
-The flow is the same for 1st and 2nd instance (and for TRF1 and TRF5): open the
+The flow is the same for 1st and 2nd instance (and for TRF1, TRF5 and TJAP): open the
 consulta page, submit the CNJ number, select the matching row, open the detail
 page with the returned CA token, then read bounded timeline pages. Live pages
-on trf1-1g, trf1-2g, and trf5-1g expose the same controls; the only per-instance
-difference is the detail URL suffix below.
+on trf1-1g, trf1-2g, trf5-1g and tjap-1g expose the same controls; the only
+per-instance difference is the detail URL suffix below. TJPE (tjpe-1g/2g) differs in one control: its
+Pesquisar button only calls the JS function submeterPesquisa(), so the action to post is the one that function
+declares (parsers.submit_function_search_action).
 """
 
 import re
@@ -28,12 +30,17 @@ from jurisync.connectors.pje.parsers import (
     parse_timeline,
     recaptcha_search_action,
     response_html,
+    submit_function_search_action,
 )
 
 MAX_TIMELINE_PAGES = 5
 DETAIL_PATH = "Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam"
 DETAIL_SUFFIX = {"1g": "&aba=", "2g": ""}
-DOWNLOAD_PATTERN = re.compile(r"window\.open\('([^']*/documento/download/TRF\d+/[^']*/\d+/)'")
+DOWNLOAD_PATTERN = re.compile(
+    r"window\.open\('([^']*/documento/download/[A-Za-z0-9]+/[^']*/\d+/)'"
+    r"|var url\s*=\s*'([^']*/seam/resource/rest/pje-legacy/documento/download/[^']*/)'\s*\+\s*idDocumento"
+    r"|<(?:iframe|embed)[^>]*\ssrc=\"([^\"]*/seam/resource/rest/pje-legacy/documento/download/)\d+\""
+)
 
 
 def _control_id(element):
@@ -61,6 +68,8 @@ def discover_controls(html):
     search = [item for item in controls if "pesquisar" in item["label"]]
     if any("executarReCaptcha()" in item["element"].get("onclick", "") for item in search):
         search_ids = {recaptcha_search_action(html)}
+    elif any(item["element"].get("onclick", "").lstrip().startswith("return pesquisar()") for item in search):
+        search_ids = {submit_function_search_action(html)}  # TJPE: the button calls submeterPesquisa()
     else:
         search_refs = {ref for item in search for ref in item["ajax_ids"]}
         search_ids = search_refs or {item["id"] for item in search if item["id"]}
@@ -215,7 +224,7 @@ def search_process(
         capture_path.chmod(0o600)
         capture_path.write_bytes(response.content)
     pattern_match = DOWNLOAD_PATTERN.search(detail_html)
-    download_pattern = pattern_match.group(1) if pattern_match else None
+    download_pattern = next((g for g in pattern_match.groups() if g), None) if pattern_match else None
     first_timeline = parse_timeline(detail_html, download_pattern, search_url)
     timeline, pagination = fetch_timeline_pages(session, detail_html, detail_url, download_pattern, search_url)
     documents = [doc for day in timeline for movement in day["movements"] for doc in movement["documents"]]

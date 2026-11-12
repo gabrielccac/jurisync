@@ -20,9 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jurisync import portals
+from jurisync.core import credentials
 
 # Methods a customer may declare. Connectors decide how each one logs in.
-METHODS = ("password_totp", "certificate_totp", "browser_totp")
+METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate_challenge", "browser_totp")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,7 +46,7 @@ def customers_dir():
 
 
 def customer_name():
-    return os.environ.get("JURISYNC_CUSTOMER", "").strip()
+    return credentials.env("JURISYNC_CUSTOMER").strip()
 
 
 def customer_dir(name):
@@ -63,6 +64,8 @@ def load_setup(name):
         raise ValueError(f"customer {name!r} has no portals.toml at {path}") from None
     setups = {}
     for key, entry in data.items():
+        if key == RESERVED_TABLE:
+            continue
         portals.get(key)  # unknown or unwired portals fail loudly
         method = entry.get("method")
         if method not in METHODS:
@@ -72,6 +75,29 @@ def load_setup(name):
             raise ValueError(f"{name}/{key}: secrets must be a list of variable names")
         setups[key] = PortalSetup(key, method, tuple(secrets))
     return setups
+
+
+RESERVED_TABLE = "env"  # [env] lists variables that belong to no portal (ADVBOX login, CPF, API keys)
+
+
+def extra_variables(name):
+    """Variables declared in the customer's ``[env]`` table: ``(required, optional)`` name lists."""
+    path = customer_dir(name) / "portals.toml"
+    try:
+        table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
+    except FileNotFoundError:
+        return [], []
+    return list(table.get("secrets", [])), list(table.get("optional", []))
+
+
+def fixed_variables(name):
+    """Variables the customer's ``[env].set`` table pins to a value (e.g. ADVBOX_ALLOW_WRITES = "true")."""
+    path = customer_dir(name) / "portals.toml"
+    try:
+        table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
+    except FileNotFoundError:
+        return {}
+    return {str(key): str(value) for key, value in (table.get("set") or {}).items()}
 
 
 CIENCIA_POLICIES = ("ask", "allow")

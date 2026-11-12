@@ -102,9 +102,9 @@ class PjeSessionCacheChecks(unittest.TestCase):
             self.assertIsNone(session_cache.load_session("trf5-1g"))
             session_cache.save_session("trf5-1g", Mock())
             expected = Mock()
-            with patch("jurisync.connectors.pje.auth.certificate.trf5_cert_login", return_value=expected) as login:
+            with patch("jurisync.connectors.pje.auth.certificate.cert_login", return_value=expected) as login:
                 self.assertIs(client.login_portal("trf5-1g")[0], expected)
-                login.assert_called_once_with()
+                login.assert_called_once_with("trf5-1g")
 
     def test_valid_cache_skips_new_login_for_selected_portal(self):
         cached = Mock()

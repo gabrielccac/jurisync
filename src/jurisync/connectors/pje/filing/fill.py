@@ -81,7 +81,13 @@ class FillMixin:
                 return self.save_characteristics(draft_url, payload["characteristics"])
 
         def documents():
-            return self.add_documents(draft_listing()["draftUrl"], payload["documents"], timeline)
+            def progress(states):
+                # What each document looks like after every round, so a stopped run says where it stands.
+                checkpoint["documentStates"], checkpoint["updatedAt"] = states, now()
+                if save:
+                    save(checkpoint)
+
+            return self.add_documents(draft_listing()["draftUrl"], payload["documents"], timeline, progress)
 
         prints = phase_fingerprints(payload)
         added = phase("subjects", prints["subjects"], subjects)

@@ -29,12 +29,6 @@ def documents_fingerprint(documents):
     return fingerprint(items)
 
 
-def run_directory(run_id):
-    """The folder of one filing run. Every server and tool that touches a run must use this same root."""
-    root = Path(os.environ.get("JURISYNC_FILING_DIR") or Path.home() / ".local/share/jurisync/filings").resolve()
-    return root / run_id
-
-
 def phase_fingerprints(payload):
     """The fingerprint each phase records in the ledger for this payload (absent phases are omitted)."""
     from jurisync.connectors.pje.filing.payload import payload_subjects

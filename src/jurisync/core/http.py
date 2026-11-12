@@ -12,6 +12,7 @@ from jurisync.core.redaction import url_shape
 
 IMPERSONATE = "chrome"  # TLS/HTTP fingerprint presented to portals behind WAFs
 TIMEOUT = 30
+REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
 log = logging.getLogger("jurisync.http")
 
@@ -47,6 +48,34 @@ def require_url(value, *, hosts, path=None, path_prefix=None, label="portal", al
     ):
         raise UnsafeUrlError(f"Unexpected {label} URL path: {url_shape(value)}")
     return value
+
+
+def follow_redirects(session, response, *, check, cert=None, hops=10, rewrite=None, timeout=TIMEOUT, impersonate=None):
+    """Follow redirect responses by hand, validating every hop with ``check(url)`` before requesting it.
+
+    ``rewrite(url)`` may adjust a hop first (e.g. an http bounce to https). A portal page can never steer an
+    authenticated session to another host, because ``check`` raises for any URL it does not accept.
+    ``impersonate`` overrides the global fingerprint for portals whose edge resets the default one.
+    """
+    from urllib.parse import urljoin
+
+    for _ in range(hops):
+        location = response.headers.get("Location")
+        if response.status_code not in REDIRECTS or not location:
+            break
+        url = urljoin(response.url, location)
+        if rewrite is not None:
+            url = rewrite(url)
+        check(url)
+        response = session.get(
+            url, impersonate=impersonate or IMPERSONATE, cert=cert, allow_redirects=False, timeout=timeout
+        )
+    return response
+
+
+def impersonate_for(config):
+    """The curl_cffi profile for a portal: its own override, else the global default."""
+    return getattr(config, "impersonate", "") or IMPERSONATE
 
 
 def same_endpoint(response_url, expected_url):

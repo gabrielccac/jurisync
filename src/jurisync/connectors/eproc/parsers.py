@@ -25,9 +25,13 @@ def parse_panel(html, base_url):
     """Discover only routes visibly advertised by the authenticated panel."""
     soup = BeautifulSoup(html, "html.parser")
     queues = {}
+    actions = {}
     for element in soup.select("a[href], form[action]"):
         absolute = _href(element.get("href") or element.get("action"), base_url)
         action = _query(absolute).get("acao", [""])[0]
+        if not action:
+            continue
+        actions.setdefault(action, absolute)
         if action in {"citacao_intimacao_prazo_aberto_listar", "citacao_intimacao_pendente_listar"}:
             queues.setdefault(action, absolute)
 
@@ -59,6 +63,7 @@ def parse_panel(html, base_url):
             "pending": queues.get("citacao_intimacao_pendente_listar"),
         },
         "queueActions": queues,
+        "actions": actions,
         "quickSearch": quick,
         "stateEndpoint": state,
     }
@@ -66,31 +71,36 @@ def parse_panel(html, base_url):
 
 def _process_row(row, base_url):
     cells = row.find_all("td", recursive=False)
-    if len(cells) < 8:
+    headers = row.find_parent("table").find_all("th")
+    expired = len(cells) == 7 and bool(headers) and "conferido" in text(headers[-1]).casefold()
+    if len(cells) < 8 and not expired:
         return None
-    link = cells[1].select_one('a[href*="acao=processo_selecionar"]')
+    # Expired-deadline rows omit the checkbox and deadline-start columns.
+    offset = 0 if expired else 1
+    process_cell = cells[offset]
+    link = process_cell.select_one('a[href*="acao=processo_selecionar"]')
     if not link:
         return None
     parties = []
-    for part in cells[1].select("[data-parte]"):
+    for part in process_cell.select("[data-parte]"):
         name = text(part)
-        if name and name not in {p["nome"] for p in parties}:
-            parties.append({"parte": part.get("data-parte", "").strip(), "nome": name})
-    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(cells[1]), re.I)
+        if name and name not in {p["name"] for p in parties}:
+            parties.append({"role": part.get("data-parte", "").strip(), "name": name})
+    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
     return {
         "id": (row.select_one("input.infraCheckbox[value]") or {}).get("value"),
-        "numero": text(link),
+        "number": text(link),
         "url": _href(link.get("href"), base_url),
-        "juizo": court.group(1) if court else "",
-        "partes": parties,
-        "classe": text(cells[2]),
-        "assunto": text(cells[3]),
-        "eventoPrazo": text(cells[4]),
-        "dataEnvioRequisicao": text(cells[5]),
-        "inicioPrazo": text(cells[6]),
-        "finalPrazo": text(cells[7]),
-        "classeCodigo": row.get("data-classe"),
-        "competencia": row.get("data-competencia"),
+        "court": court.group(1) if court else "",
+        "parties": parties,
+        "caseClass": text(cells[offset + 1]),
+        "subject": text(cells[offset + 2]),
+        "deadlineEvent": text(cells[offset + 3]),
+        "requestedAt": text(cells[offset + 4]),
+        "deadlineStart": "" if expired else text(cells[6]),
+        "deadlineEnd": text(cells[5] if expired else cells[7]),
+        "caseClassCode": row.get("data-classe"),
+        "competence": row.get("data-competencia"),
     }
 
 
@@ -109,22 +119,84 @@ def parse_process_list_page(html, base_url):
     """Return list items with pagination evidence from the returned form."""
     items = parse_process_list(html, base_url)
     soup = BeautifulSoup(html, "html.parser")
+    return {"items": items, "pagination": _list_pagination(soup, items), "diagnostics": []}
+
+
+def _list_pagination(soup, items):
     values = {node.get("name"): node.get("value", "") for node in soup.select("input[name]")}
     try:
         total_items = int(values["hdnInfraNroItens"])
     except (KeyError, TypeError, ValueError):
+        total_items = None
+    # Some queues leave the selection counter at zero but show the actual total in the caption.
+    count = re.search(r"\((\d+)\s+registros?\)", text(soup.select_one("table.infraTable caption")), re.I)
+    if count:
+        total_items = int(count[1])
+    if total_items is not None and total_items < len(items):
         total_items = None
     try:
         page = int(values.get("hdnInfraPaginaAtual", "0"))
     except (TypeError, ValueError):
         page = None
     return {
+        "page": page,
+        "totalItems": total_items,
+        "itemCount": len(items),
+        "complete": total_items is not None and len(items) >= total_items,
+    }
+
+
+def parse_lawyer_process_report(html, base_url):
+    """Parse Relação de Processos, whose columns differ from the notice queues."""
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.select_one("table.infraTable")
+    headers = [text(node) for node in table.select("th")] if table else []
+    expected = [
+        "Número Processo",
+        "Classe",
+        "Autores Principais",
+        "Réu(s)",
+        "Localidade Judicial",
+        "Assunto",
+        "Último Evento",
+        "Data/Hora Ult. Evento",
+        "Data/Hora Autuação",
+        "Valor da Causa",
+    ]
+    if headers != ["", *expected]:
+        return {"items": [], "pagination": {}, "diagnostics": ["unsupported_process_report_layout"]}
+    items = []
+    for row in table.select("tr.infraTrClara, tr.infraTrEscura"):
+        cells = row.find_all("td", recursive=False)
+        link = cells[1].select_one('a[href*="acao=processo_selecionar"]') if len(cells) == 11 else None
+        if not link or not _PROCESS_NUMBER.fullmatch(text(link)):
+            return {"items": [], "pagination": {}, "diagnostics": ["invalid_process_report_row"]}
+        items.append(
+            {
+                "number": text(link),
+                "url": _href(link.get("href"), base_url),
+                "court": text(cells[1]).removeprefix(text(link)).strip(),
+                "caseClass": text(cells[2]),
+                "parties": [
+                    {"role": role, "name": name}
+                    for index, role in ((3, "AUTOR"), (4, "REU"))
+                    for name in cells[index].stripped_strings
+                ],
+                "location": text(cells[5]),
+                "subject": text(cells[6]),
+                "lastEvent": text(cells[7]),
+                "lastEventAt": text(cells[8]),
+                "filedAt": text(cells[9]),
+                "claimValue": text(cells[10]),
+            }
+        )
+    closed = soup.select_one('input[name="chkMostrarBaixados"]')
+    return {
         "items": items,
-        "pagination": {
-            "page": page,
-            "totalItems": total_items,
-            "itemCount": len(items),
-            "complete": total_items is not None and len(items) >= total_items,
+        "pagination": _list_pagination(soup, items),
+        "filters": {
+            "includeClosed": closed.has_attr("checked") if closed else None,
+            "status": text(soup.select_one('select[name="selStatusProcesso"] option[selected]')) or None,
         },
         "diagnostics": [],
     }
@@ -141,27 +213,40 @@ def _document(anchor, base_url):
         kind = match.group(1).lower() if match else ""
     return {
         "id": anchor.get("data-doc") or (query.get("doc") or [None])[0],
-        "nome": anchor.get("data-nome") or title,
-        "tipo": kind,
+        "name": anchor.get("data-nome") or title,
+        "type": kind,
         "url": href,
         "ariaLabel": label,
-        "titulo": title or label,
-        "evento": (query.get("evento") or [None])[0],
+        "title": title or label,
+        "event": (query.get("evento") or [None])[0],
         "key": (query.get("key") or [None])[0],
-        "mesmoGrau": (query.get("mesmoGrau") or [None])[0],
+        "sameInstance": (query.get("mesmoGrau") or [None])[0],
         "hash": (query.get("hash") or [None])[0],
     }
+
+
+# The portal's cover-page field ids (txtNumProcesso, txtClasse, ...) mapped to the connector's field names.
+COVER_FIELDS = {
+    "NumProcesso": "number",
+    "Classe": "caseClass",
+    "Competencia": "competence",
+    "Autuacao": "filedAt",
+    "Situacao": "status",
+    "OrgaoJulgador": "judgingBody",
+    "Magistrado": "judge",
+    "Localidade": "location",
+}
 
 
 def _cover(soup):
     cover = {}
     for node in soup.select("#fldCapa [id^=txt]"):
         key = node.get("id", "txt")[3:]
-        cover[key] = text(node)
+        cover[COVER_FIELDS.get(key, key)] = text(node)
     fieldset = soup.select_one("#fldCapa")
     if fieldset:
-        cover.setdefault("classeCodigo", fieldset.get("data-classe"))
-        cover.setdefault("competenciaCodigo", fieldset.get("data-competencia"))
+        cover.setdefault("caseClassCode", fieldset.get("data-classe"))
+        cover.setdefault("competenceCode", fieldset.get("data-competencia"))
     return {key: value for key, value in cover.items() if value not in (None, "")}
 
 
@@ -173,7 +258,7 @@ def _subjects(soup):
     for row in table.select("tr"):
         cells = [text(cell) for cell in row.find_all(["td", "th"], recursive=False)]
         if len(cells) >= 2 and "Código" not in cells:
-            result.append({"codigo": cells[0], "descricao": cells[1], "principal": cells[2] if len(cells) > 2 else ""})
+            result.append({"code": cells[0], "description": cells[1], "primary": cells[2] if len(cells) > 2 else ""})
     return result
 
 
@@ -201,18 +286,18 @@ def _parties(soup):
             seen = set()
             for part in cell.select("[data-parte]"):
                 name = text(part)
-                papel = part.get("data-parte", role).strip()
-                key = (papel, headers[index] if index < len(headers) else role, name, cpf)
+                party_role = part.get("data-parte", role).strip()
+                key = (party_role, headers[index] if index < len(headers) else role, name, cpf)
                 if not name or key in seen:
                     continue
                 seen.add(key)
                 result.append(
                     {
-                        "papel": papel,
-                        "grupo": headers[index] if index < len(headers) else role,
-                        "nome": name,
-                        "documento": cpf,
-                        "representantes": representatives,
+                        "role": party_role,
+                        "group": headers[index] if index < len(headers) else role,
+                        "name": name,
+                        "taxId": cpf,
+                        "representatives": representatives,
                     }
                 )
     return result
@@ -230,15 +315,15 @@ def _event_rows(soup, base_url):
         result.append(
             {
                 "id": re.sub(r"\D", "", row.get("id", "")),
-                "dataHora": text(cells[1]),
+                "dateTime": text(cells[1]),
                 "label": text(label) or text(cells[2]),
-                "descricao": text(cells[2]),
-                "usuario": text(user),
-                "usuarioDetalhes": (user.get("aria-label", "") if user else "").replace("<br>", " ").strip(),
-                "parte": row.get("data-parte"),
+                "description": text(cells[2]),
+                "user": text(user),
+                "userDetails": (user.get("aria-label", "") if user else "").replace("<br>", " ").strip(),
+                "role": row.get("data-parte"),
                 "classes": row.get("class", []),
-                "tipo": "tarefa" if any("Prazo" in c for c in row.get("class", [])) else "evento",
-                "documentos": docs,
+                "kind": "task" if any("Prazo" in c for c in row.get("class", [])) else "event",
+                "documents": docs,
             }
         )
     return result
@@ -246,11 +331,11 @@ def _event_rows(soup, base_url):
 
 def _event_result(soup, *, complete=True, pagination=None, base_url):
     events = _event_rows(soup, base_url)
-    documents = [doc for event in events for doc in event["documentos"]]
+    documents = [doc for event in events for doc in event["documents"]]
     documents = list({doc["id"]: doc for doc in documents if doc.get("id")}.values())
     return {
-        "eventos": events,
-        "documentos": documents,
+        "events": events,
+        "documents": documents,
         "eventCount": len(events),
         "documentCount": len(documents),
         "pagination": pagination or {"page": 0, "totalPages": None, "complete": complete},
@@ -278,23 +363,23 @@ def parse_event_response(body, base_url):
 def parse_process_detail(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
     result = {
-        "partes": _parties(soup),
-        "assuntos": _subjects(soup),
-        "eventos": [],
-        "documentos": [],
-        "capa": _cover(soup),
-        "informacoesAdicionais": text(soup.select_one("#fldInformacoesAdicionais_content")),
+        "parties": _parties(soup),
+        "subjects": _subjects(soup),
+        "events": [],
+        "documents": [],
+        "cover": _cover(soup),
+        "additionalInformation": text(soup.select_one("#fldInformacoesAdicionais_content")),
         "pagination": {"page": 0, "totalPages": None, "complete": True},
     }
-    result["titulo"] = text(soup.select_one("h1, h2, .infraLegendObrigatorio"))
-    result["numero"] = text(soup.select_one("#txtNumProcesso")) or next(
+    result["title"] = text(soup.select_one("h1, h2, .infraLegendObrigatorio"))
+    result["number"] = text(soup.select_one("#txtNumProcesso")) or next(
         iter(_PROCESS_NUMBER.findall(soup.get_text(" ", strip=True))), None
     )
-    result["eventos"] = _event_rows(soup, base_url)
-    documents = [doc for event in result["eventos"] for doc in event["documentos"]]
-    result["documentos"] = list({doc["id"]: doc for doc in documents if doc.get("id")}.values())
-    result["eventCount"] = len(result["eventos"])
-    result["documentCount"] = len(result["documentos"])
+    result["events"] = _event_rows(soup, base_url)
+    documents = [doc for event in result["events"] for doc in event["documents"]]
+    result["documents"] = list({doc["id"]: doc for doc in documents if doc.get("id")}.values())
+    result["eventCount"] = len(result["events"])
+    result["documentCount"] = len(result["documents"])
     event_url = re.search(
         r"[\"']([^\"']*controlador_ajax\.php\?acao_ajax=montar_tabela_eventos_filtrados[^\"']*)[\"']", html
     )

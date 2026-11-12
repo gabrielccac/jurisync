@@ -19,11 +19,11 @@ PROCEDENTES" (0004674-54).
 
 | `sigla_tribunal` | Ação |
 |---|---|
-| `TRF5` (1º grau/JEF, `pje1g.trf5.jus.br`) | Seguir esta referência |
+| `TRF5` (1º grau/JEF em `pje1g.trf5.jus.br`; Turmas Recursais em `pje2g.trf5.jus.br`) | Seguir esta referência; o PJe a ler é o `portal` do item (`enriquecimento-pje.md` §0) |
 | `TRF1`, `TJPE`, `TRT6` | Fora do escopo: tratar manualmente. Portais TRF1 são proibidos nesta skill; TJPE não tem calendário JFPE |
 
 Amostra de 06/10: TRF5 42, TJPE 5, TRF1 2, TRT6 1. O credenciamento do cliente
-(certificado A1 + TOTP) vale só para `trf5-1g`.
+(certificado A1 + TOTP) vale para `trf5-1g` e `trf5-2g`.
 
 ## 2. Gate de direção
 
@@ -67,7 +67,7 @@ comando pode estar na certidão (`djen_get_certidao_text`) ou no PJe.
 | P10 | Sentença improcedente / extintiva | "julgo improcedente"; "extingo o processo sem resolução do mérito" | §3.2 / §3.3. **Parcial → fora do mapa FM-01** | N1 |
 | P11 | Homologação de acordo com obrigação ao INSS | "homologo… a transação… INSS cumpra a obrigação de fazer no prazo de N dias" | **Fora do mapa FM-02** | N1 |
 | P12 | Cálculo a apresentar | "apresentar os cálculos dos valores retroativos" | §4 `DILIGÊNCIA` + `ANALISE/MANIFESTAÇÃO DOS CALCULOS` | N2 |
-| P13 | Decisão da Turma Recursal | `RECURSO INOMINADO`, "Turma Recursal" | §9 só se **colegiado e definitivo**; monocrática ou diligência → **FM-04/05/06** | N0 |
+| P13 | Decisão da Turma Recursal | `RECURSO INOMINADO`, "Turma Recursal" | §9 só se **colegiado e definitivo**; monocrática ou diligência → **FM-04/05/06** | N0; N1 no `trf5-2g` quando o texto não diz se é monocrático ou colegiado (§6) |
 | P15 | Despacho que pede endereço p/ perícia social | "determino a realização da perícia social… trazer aos autos endereço atualizado" | §1 `CUMPRIR ATO ORDINATÓRIO` (ou check se já cumprido) | N1 |
 | P16 | Cumprimento de sentença / implantação | classe "Cumprimento de Sentença contra a Fazenda"; despacho sobre INSS | §3.1 `ACOMPANHAR IMPLANTAÇÃO - JUD` | N1 |
 | P17 | Perícia nomeada com quesitos facultativos | "nomeio o perito… facultada a indicação de assistente e quesitos no prazo de N dias" | **Fora do mapa FM-03** | N1 |

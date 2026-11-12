@@ -51,9 +51,13 @@ NOT_A_DOCUMENT_MARKERS = (
 )
 
 
-def _looks_like_document(text):
+def _has_not_a_document_marker(text):
     lowered = text.casefold()
-    return len(text) >= UNNUMBERED_MIN_CHARACTERS and not any(marker in lowered for marker in NOT_A_DOCUMENT_MARKERS)
+    return any(marker in lowered for marker in NOT_A_DOCUMENT_MARKERS)
+
+
+def _looks_like_document(text):
+    return len(text) >= UNNUMBERED_MIN_CHARACTERS and not _has_not_a_document_marker(text)
 
 
 def _pdf_has_images(reader):
@@ -74,7 +78,8 @@ def extract_document_text(content, content_type="", process_number="", *, allow_
 
     HTML that does not print the process number is normally rejected as an unknown page. With
     ``allow_unnumbered`` (for callers that already fetched the document by a process-bound ID), a
-    substantial page without error or login markers is returned as ``extracted_unnumbered``.
+    substantial page without error or login markers is returned as ``extracted_unnumbered``; a short one,
+    also without markers, as ``short_html`` (text included, not vouched for).
     """
     if not content or not content.strip():
         return "empty", ""
@@ -127,5 +132,9 @@ def extract_document_text(content, content_type="", process_number="", *, allow_
         if digits not in haystack:
             if allow_unnumbered and _looks_like_document(text):
                 return "extracted_unnumbered", text
+            if allow_unnumbered and not _has_not_a_document_marker(text):
+                # A cover or placeholder page ("PETIÇÃO INICIAL E DOCUMENTOS ANEXADOS."): too short to vouch for,
+                # but its text is what the portal served, so the reader sees it and decides.
+                return "short_html", text
             return "unrecognized_html", ""
     return "extracted", text

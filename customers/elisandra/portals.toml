@@ -1,11 +1,17 @@
 # Elisandra's portal access. Method and secret names only; values are in the
 # gitignored customers/elisandra/.env. "A|B" means either variable is enough.
 # Eproc logins are browser_totp: user, password and the TOTP export (or profile match).
+# Secret prefix = portal key uppercased; names USERNAME, PASSWORD, 2FA_DATA (legacy USUARIO/SENHA/EXPORT_DATA and JFSC_*/JFRS_*/JRFS_* prefixes still read).
 
 [trf4-1g-sc]
 method = "browser_totp"
-secrets = ["JFSC_USUARIO", "JFSC_SENHA", "JFSC_EXPORT_DATA"]
+secrets = ["TRF4_1G_SC_USERNAME|TRF4_1G_SC_USUARIO", "TRF4_1G_SC_PASSWORD|TRF4_1G_SC_SENHA", "TRF4_1G_SC_2FA_DATA|TRF4_1G_SC_EXPORT_DATA"]
 
 [trf4-1g-rs]
 method = "browser_totp"
-secrets = ["JFRS_USUARIO|JRFS_USUARIO", "JFRS_SENHA|JRFS_SENHA", "JFRS_EXPORT_DATA|JRFS_EXPORT_DATA"]
+secrets = ["TRF4_1G_RS_USERNAME|TRF4_1G_RS_USUARIO", "TRF4_1G_RS_PASSWORD|TRF4_1G_RS_SENHA", "TRF4_1G_RS_2FA_DATA|TRF4_1G_RS_EXPORT_DATA"]
+
+# State court (TJRS). Own password; same QR, TOTP profile 0 (Eproc/TJRS).
+[tjrs-1g]
+method = "browser_totp"
+secrets = ["TJRS_1G_USERNAME|TJRS_1G_USUARIO", "TJRS_1G_PASSWORD|TJRS_1G_SENHA", "TJRS_1G_2FA_DATA|TJRS_1G_EXPORT_DATA"]

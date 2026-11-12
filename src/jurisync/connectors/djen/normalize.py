@@ -61,6 +61,7 @@ COMPACT_KEYS = (
     "hash",
     "ativo",
     "data_cancelamento",
+    "portal",
 )
 
 

@@ -1,6 +1,6 @@
 import base64
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from jurisync.connectors.eproc import client
 from jurisync.connectors.eproc.auth import portal_totp_account, session_from_cookies
@@ -45,26 +45,39 @@ class EprocAuthTests(unittest.TestCase):
 
     def test_portal_credentials_are_isolated(self):
         environment = {
-            "JFSC_USUARIO": "jfsc-user",
-            "JFSC_SENHA": "jfsc-pass",
-            "JRFS_USUARIO": "jrfs-user",
-            "JRFS_SENHA": "jrfs-pass",
+            "TRF4_1G_SC_USERNAME": "sc-user",
+            "TRF4_1G_SC_PASSWORD": "sc-pass",
+            "TRF4_1G_RS_USERNAME": "rs-user",
+            "TRF4_1G_RS_PASSWORD": "rs-pass",
         }
         with patch.dict("os.environ", environment, clear=True):
+            self.assertEqual(client._credentials("jfsc"), ("sc-user", "sc-pass"))
+            self.assertEqual(client._credentials("jfrs"), ("rs-user", "rs-pass"))
+
+        # Legacy prefixes (JFSC_*, JFRS_*, JRFS_*) still resolve when the canonical names are absent.
+        with patch.dict(
+            "os.environ",
+            {
+                "JFSC_USUARIO": "jfsc-user",
+                "JFSC_SENHA": "jfsc-pass",
+                "JRFS_USUARIO": "jrfs-user",
+                "JRFS_SENHA": "jrfs-pass",
+            },
+            clear=True,
+        ):
             self.assertEqual(client._credentials("jfsc"), ("jfsc-user", "jfsc-pass"))
-            # Legacy JRFS_* variables still work for the jfrs portal.
             self.assertEqual(client._credentials("jfrs"), ("jrfs-user", "jrfs-pass"))
 
         with (
             patch.dict(
                 "os.environ",
                 {
-                    "JFSC_USUARIO": "jfsc-user",
-                    "JFSC_SENHA": "jfsc-pass",
+                    "TRF4_1G_SC_USERNAME": "sc-user",
+                    "TRF4_1G_SC_PASSWORD": "sc-pass",
                 },
                 clear=True,
             ),
-            self.assertRaisesRegex(RuntimeError, "JFRS_USUARIO"),
+            self.assertRaisesRegex(RuntimeError, "TRF4_1G_RS_USERNAME"),
         ):
             client._credentials("jfrs")
 
@@ -85,6 +98,70 @@ class EprocAuthTests(unittest.TestCase):
             )
         finally:
             session.close()
+
+
+class FillFieldTests(unittest.TestCase):
+    def test_legacy_field_does_not_wait_for_absent_sso_field(self):
+        from jurisync.connectors.eproc import auth
+
+        for kind, timeout in (("username", 20), ("password", 20), ("otp", 10)):
+            with self.subTest(kind=kind):
+                selectors = auth.LOGIN_FIELDS[kind]
+                driver = Mock()
+                with patch.object(auth, "has", side_effect=[False, True]) as has:
+                    field = auth._first_element(driver, selectors, timeout=timeout)
+                self.assertIs(field, driver.wait_for_element.return_value)
+                self.assertTrue(all(call.kwargs["timeout"] < 1 for call in has.call_args_list))
+                driver.wait_for_element.assert_called_once_with(selectors[1], timeout=timeout)
+
+    def test_delayed_field_is_checked_again_within_shared_timeout(self):
+        from jurisync.connectors.eproc import auth
+
+        driver = Mock()
+        with (
+            patch.object(auth.time, "monotonic", side_effect=[0, 0, 1]),
+            patch.object(auth, "has", side_effect=[False, False, True]),
+        ):
+            field = auth._first_element(driver, ("#username", "#txtUsuario"), timeout=20)
+        self.assertIs(field, driver.wait_for_element.return_value)
+        driver.wait_for_element.assert_called_once_with("#username", timeout=20)
+
+    def test_missing_fields_share_one_timeout(self):
+        from jurisync.connectors.eproc import auth
+
+        driver = Mock()
+        with (
+            patch.object(auth.time, "monotonic", side_effect=[0, 0, 20]),
+            patch.object(auth, "has", return_value=False) as has,
+        ):
+            self.assertIsNone(auth._first_element(driver, ("#username", "#txtUsuario"), timeout=20))
+        self.assertEqual(has.call_count, 2)
+        driver.wait_for_element.assert_not_called()
+
+    def test_field_is_found_again_when_the_page_re_renders(self):
+        from selenium.common.exceptions import StaleElementReferenceException
+
+        from jurisync.connectors.eproc import auth
+
+        class Field:
+            def __init__(self, stale):
+                self.stale, self.typed = stale, []
+
+            def clear(self):
+                if self.stale:
+                    raise StaleElementReferenceException("stale")
+
+            def send_keys(self, value):
+                self.typed.append(value)
+
+        fields = [Field(True), Field(False)]
+        driver = Mock()
+        driver.wait_for_element.side_effect = [fields[0], fields[0], fields[1], fields[1]]
+        with patch.object(auth.time, "sleep") as sleep:
+            field = auth._fill_field(driver, ("#otp",), "123456")
+        self.assertIs(field, fields[1])
+        self.assertEqual(fields[1].typed, ["123456"])
+        sleep.assert_called_once_with(0.5)
 
 
 if __name__ == "__main__":

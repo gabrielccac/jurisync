@@ -48,16 +48,15 @@
         "JURISYNC_CUSTOMER": "victor"
       }
     },
-    "inss-gerid": {
+    "projudi": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
       "args": [
         "-m",
-        "jurisync.connectors.inss.server"
+        "jurisync.connectors.projudi.server"
       ],
       "env": {
-        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
-        "JURISYNC_CUSTOMER": "victor"
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
       }
     },
     "advbox": {
@@ -82,6 +81,17 @@
       "env": {
         "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env",
         "JURISYNC_CUSTOMER": "victor"
+      }
+    },
+    "esaj": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": [
+        "-m",
+        "jurisync.connectors.esaj.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
       }
     }
   }

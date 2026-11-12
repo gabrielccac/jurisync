@@ -19,3 +19,28 @@ class AuthMethodTest(unittest.TestCase):
             self.assertEqual(auth_method("trf5-1g"), "certificate_totp")
         with mock.patch.dict("os.environ", {"PJE_1G_USERNAME": "u"}, clear=True):
             self.assertEqual(auth_method("trf1-1g"), "password_totp")
+
+    def test_other_pje_portals_use_the_certificate_only_when_they_opt_in(self):
+        certificate = {
+            "PJE_A1_P12": "/x/a1.p12",
+            "PJE_1G_USERNAME": "u",
+            "PJE_1G_PASSWORD": "p",
+            "PJE_1G_2FA_DATA": "s",
+        }
+        with mock.patch.dict("os.environ", certificate, clear=True):
+            self.assertEqual(auth_method("trf1-1g"), "password_totp")
+        with mock.patch.dict("os.environ", {**certificate, "PJE_1G_CERT": "true"}, clear=True):
+            self.assertEqual(auth_method("trf1-1g"), "certificate_totp")
+        with mock.patch.dict("os.environ", {"PJE_1G_CERT": "true"}, clear=True):
+            self.assertEqual(auth_method("trf1-1g"), "password_totp")
+
+
+class CertificateTwofaTest(unittest.TestCase):
+    def test_totp_is_optional_and_trf5_keeps_its_earlier_variable_names(self):
+        from jurisync.connectors.pje.auth.certificate import _twofa
+
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(_twofa("trf1-1g"))
+        with mock.patch.dict("os.environ", {"PJE_TRF5_2FA_DATA": "JBSWY3DPEHPK3PXP"}, clear=True):
+            self.assertIsNotNone(_twofa("trf5-1g"))
+            self.assertIsNone(_twofa("trf1-2g"))

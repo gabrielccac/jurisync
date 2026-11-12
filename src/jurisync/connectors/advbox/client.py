@@ -1,6 +1,5 @@
 """Named ADVBOX operations: listings, reports, workflows, and guarded task writes."""
 
-import os
 import re
 from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
@@ -23,6 +22,7 @@ from jurisync.connectors.advbox.parsers import (
     parse_workflows,
 )
 from jurisync.connectors.advbox.session import AdvboxSession, require_writes
+from jurisync.core import credentials
 
 DEFAULT_STEPS = (9, 1, 6, 2, 3, 4, 5, 7)
 TABLES = {
@@ -442,7 +442,7 @@ class AdvboxClient:
 
     def upload_folder(self):
         """The account's staging folder: ADVBOX_UPLOAD_FOLDER, else the one the task form announces for this login."""
-        configured = os.environ.get("ADVBOX_UPLOAD_FOLDER")
+        configured = credentials.env("ADVBOX_UPLOAD_FOLDER")
         if configured:
             return configured
         if getattr(self, "_discovered_folder", None) is None:
