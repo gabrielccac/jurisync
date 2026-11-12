@@ -493,9 +493,17 @@ Implicações diretas:
 
 ```python
 Portal(
-    "tjpi-1g", "projudi", "TJPI", "1g",
-    "projudi.tjpi.jus.br", "/projudi", "form_login", "TJPI_1G",
-    region="18", justice="8", flavor="tjpi-publico",
+    "tjpi-1g",
+    "projudi",
+    "TJPI",
+    "1g",
+    "projudi.tjpi.jus.br",
+    "/projudi",
+    "form_login",
+    "TJPI_1G",
+    region="18",
+    justice="8",
+    flavor="tjpi-publico",
 )
 ```
 

@@ -624,9 +624,18 @@ O TJRR não é `tjgo-servlet` nem o `legacy-frameset` puro (TJAM). É
 
 ```python
 Portal(
-    "tjrr-1g", "projudi", "TJRR", "1g",
-    "projudi.tjrr.jus.br", "/projudi/", "password_totp", "TJRR_1G",
-    region="23", justice="8", wired=False, guess_by_number=False,
+    "tjrr-1g",
+    "projudi",
+    "TJRR",
+    "1g",
+    "projudi.tjrr.jus.br",
+    "/projudi/",
+    "password_totp",
+    "TJRR_1G",
+    region="23",
+    justice="8",
+    wired=False,
+    guess_by_number=False,
     flavor="legacy-keycloak",
 )
 ```

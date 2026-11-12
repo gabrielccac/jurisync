@@ -526,9 +526,21 @@ O TJPR não é `tjgo-servlet` nem o `legacy-frameset` puro (TJAM/TJRR): é
 **legacy + Keycloak + token `_tj`**. O registry atual já tem:
 
 ```python
-Portal("tjpr-projudi-1g", "projudi", "TJPR", "1g", "projudi.tjpr.jus.br", "/projudi/",
-       "password", "TJPR_PROJUDI_1G", region="16", justice="8",
-       wired=False, guess_by_number=False, flavor="legacy-frameset")
+Portal(
+    "tjpr-projudi-1g",
+    "projudi",
+    "TJPR",
+    "1g",
+    "projudi.tjpr.jus.br",
+    "/projudi/",
+    "password",
+    "TJPR_PROJUDI_1G",
+    region="16",
+    justice="8",
+    wired=False,
+    guess_by_number=False,
+    flavor="legacy-frameset",
+)
 ```
 
 Proposta: **manter a chave `tjpr-projudi-1g`** e ajustar o flavor/auth, sem
@@ -536,10 +548,19 @@ duplicar o portal:
 
 ```python
 Portal(
-    "tjpr-projudi-1g", "projudi", "TJPR", "1g",
-    "projudi.tjpr.jus.br", "/projudi/", "password_totp", "TJPR_PROJUDI_1G",
-    region="16", justice="8", wired=False, guess_by_number=False,
-    flavor="legacy-keycloak",   # ou legacy-frameset + config de SSO/_tj
+    "tjpr-projudi-1g",
+    "projudi",
+    "TJPR",
+    "1g",
+    "projudi.tjpr.jus.br",
+    "/projudi/",
+    "password_totp",
+    "TJPR_PROJUDI_1G",
+    region="16",
+    justice="8",
+    wired=False,
+    guess_by_number=False,
+    flavor="legacy-keycloak",  # ou legacy-frameset + config de SSO/_tj
 )
 # 2º grau usa o mesmo host/app (opcaoConsultaPublica=2); não criar sessão separada
 # sem necessidade. Um portal "tjpr" com parâmetro degree é preferível a duplicar.

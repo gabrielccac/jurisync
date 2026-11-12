@@ -13,6 +13,7 @@ A missing or empty "password" makes the server fall back to GOVBR_PASSWORD from 
 --mode isolated: one inss-mcp process per client (no shared state, the safe baseline).
 --mode shared:   one inss-mcp process, all calls in flight together (tests its concurrency).
 """
+
 import argparse
 import asyncio
 import json

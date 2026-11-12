@@ -677,9 +677,17 @@ com adaptações locais (SAJ na consulta pública, certificado interno, F5).
 
 ```python
 Portal(
-    "tjam-1g", "projudi", "TJAM", "1g",
-    "projudi.tjam.jus.br", "/projudi/", "password", "TJAM_1G",
-    region="04", justice="8", flavor="legacy-frameset-tjam",
+    "tjam-1g",
+    "projudi",
+    "TJAM",
+    "1g",
+    "projudi.tjam.jus.br",
+    "/projudi/",
+    "password",
+    "TJAM_1G",
+    region="04",
+    justice="8",
+    flavor="legacy-frameset-tjam",
 )
 # wired=False até smoke live com credencial real.
 ```
@@ -723,20 +731,23 @@ O `tjam.py` implementa o que é específico:
 
 ```python
 def login(session, username, password):
-    r = session.get(LOGIN_URL)                      # 200, cookies
+    r = session.get(LOGIN_URL)  # 200, cookies
     html = r.content.decode("iso-8859-1")
     form = parse_form(html, id="formLogin")
-    action = form.action                            # inclui ;jsessionid e _tj
+    action = form.action  # inclui ;jsessionid e _tj
     salt = re.search(r'hex_md5\("([0-9a-f]*)"\s*\+\s*login\)', html).group(1)
     tck = md5((salt + username).encode()).hexdigest()
-    r = session.post(action, data={
-        "login": username,
-        "senha": password,
-        "tck": tck,
-        "latitude": "",
-        "longitude": "",
-        "locationGranted": "false",
-    })
+    r = session.post(
+        action,
+        data={
+            "login": username,
+            "senha": password,
+            "tck": tck,
+            "latitude": "",
+            "longitude": "",
+            "locationGranted": "false",
+        },
+    )
     if "Usuário ou senha inválidos" in text(r):
         raise AuthFailed
     if "Erro de acesso ao Projudi" in text(r):

@@ -226,10 +226,32 @@ src/jurisync/connectors/esaj/
 Registro sugerido:
 
 ```python
-Portal("tjsp-esaj", "esaj", "TJSP", "1g", "esaj.tjsp.jus.br", "/", "certificate_challenge", "TJSP_ESAJ",
-       region="26", justice="8", flavor="esaj-cas")
-Portal("tjms-esaj", "esaj", "TJMS", "1g", "esaj.tjms.jus.br", "/", "certificate_challenge", "TJMS_ESAJ",
-       region="12", justice="8", flavor="esaj-cas")
+Portal(
+    "tjsp-esaj",
+    "esaj",
+    "TJSP",
+    "1g",
+    "esaj.tjsp.jus.br",
+    "/",
+    "certificate_challenge",
+    "TJSP_ESAJ",
+    region="26",
+    justice="8",
+    flavor="esaj-cas",
+)
+Portal(
+    "tjms-esaj",
+    "esaj",
+    "TJMS",
+    "1g",
+    "esaj.tjms.jus.br",
+    "/",
+    "certificate_challenge",
+    "TJMS_ESAJ",
+    region="12",
+    justice="8",
+    flavor="esaj-cas",
+)
 ```
 
 Tools:

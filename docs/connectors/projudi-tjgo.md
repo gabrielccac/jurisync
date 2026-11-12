@@ -297,9 +297,17 @@ Adicionar ao `portals.py` (com `flavor`/adapter por geração):
 
 ```python
 Portal(
-    "tjgo-1g", "projudi", "TJGO", "1g",
-    "projudi.tjgo.jus.br", "/", "certificate_mtls", "TJGO_1G",
-    region="09", justice="8", flavor="tjgo-servlet",
+    "tjgo-1g",
+    "projudi",
+    "TJGO",
+    "1g",
+    "projudi.tjgo.jus.br",
+    "/",
+    "certificate_mtls",
+    "TJGO_1G",
+    region="09",
+    justice="8",
+    flavor="tjgo-servlet",
 )
 # Placeholders, wired=False até smoke live:
 # tjpr-1g, tjam-1g, tjrr-1g  -> flavor="legacy-frameset"
