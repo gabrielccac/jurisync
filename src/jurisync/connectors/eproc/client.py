@@ -171,7 +171,15 @@ def authenticate(portal):
     if portals.eproc(portal).uses_certificate():
         return cert_login(portal)
     username, password = _credentials(portal)
-    return login(username, password, portal_totp_account(portal), portal=portal)
+    account = portal_totp_account(portal)
+    # Classic eproc asks for a client certificate after the password; a headless browser hangs on the picker when
+    # an A3 token is plugged in. Log in over HTTP when the portal shows the classic form (nothing sent otherwise).
+    from jurisync.connectors.eproc import http_login
+
+    try:
+        return http_login.login(username, password, account, portal=portal)
+    except http_login.NotClassicLogin:
+        return login(username, password, account, portal=portal)
 
 
 def _first(mapping, *keys):

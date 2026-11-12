@@ -13,6 +13,8 @@ from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, p
 
 PANEL_MARKER = "acao=painel_adv_listar"
 PANEL_READY = 'a[aria-describedby="processoscomprazoemaberto"]'
+# TJMG's panel builds the deadline table in JS without that aria attribute; its panel form is always present.
+PANEL_READY_ALT = ("#frmPainelAdvogado",)
 LOGIN_FIELDS = {
     "username": ("#username", "#txtUsuario"),
     "password": ("#password", "#pwdSenha"),
@@ -96,7 +98,7 @@ def wait_for_step(driver, timeout=25):
             return "otp"
         if has(driver, "button:contains('Enviar')"):
             return "captcha"
-        if PANEL_MARKER in url and has(driver, PANEL_READY):
+        if PANEL_MARKER in url and any(has(driver, selector) for selector in (PANEL_READY, *PANEL_READY_ALT)):
             return "panel"
         if has(driver, "#username") and any(
             has(driver, selector) for selector in ("#input-error", ".alert-error", "#kc-error-message")
@@ -210,6 +212,49 @@ def _submit_otp(driver, code):
     return step
 
 
+_POST_LOGIN_JS = """
+const [user, pass, url, done] = arguments;
+const body = new URLSearchParams({txtUsuario: user, pwdSenha: pass, hdnAcao: 'login', hdnDebug: ''});
+fetch(url, {method: 'POST', body, redirect: 'manual', credentials: 'include',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+  .then(r => done(r.type + ':' + r.status)).catch(e => done('error:' + e));
+"""
+
+
+def _classic_cert_login(driver, config):
+    """Classic eproc asks for the client certificate at priv/login_cert.php after the password.
+
+    Headless Chrome cannot answer the certificate picker, so: the password is posted from inside the page (keeping
+    the bot-protection cookies valid), login_cert.php is fetched with the A3 token over mTLS, and the browser resumes
+    at the URL it redirects to (entrar_cert -> principal, the 2FA form). Returns the next login step.
+    """
+    from urllib.parse import parse_qsl, urlsplit
+
+    from jurisync.connectors.pje.auth import a3
+    from jurisync.core import mtls
+
+    cert_url = config.url("priv/login_cert.php?acao_origem=")
+    cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
+    with a3.token_lock(), a3.A3Signer() as token:
+        cert = mtls.fetch(cert_url, signer=token, cookies=cookies)
+    if not cert.certificate_sent:
+        raise RuntimeError("eproc did not ask for the certificate at login_cert.php")
+    target = cert.location
+    if not target:
+        raise RuntimeError(f"login_cert.php answered HTTP {cert.status} without a redirect")
+    query = dict(parse_qsl(urlsplit(target).query))
+    if "erro" in query:
+        raise RuntimeError(f"eproc refused the login at the certificate step (erro={query['erro']}; password or A3)")
+    for name, value in cert.cookies().items():
+        try:
+            driver.add_cookie({"name": name, "value": value, "path": "/"})
+        except Exception:  # noqa: BLE001 - a cookie the browser refuses is not fatal here
+            pass
+    driver.get(target)
+    time.sleep(1)
+    return wait_for_step(driver)
+
+
 def login(username, password, account, *, portal):
     if account["type"] != "totp":
         raise ValueError("Selected authenticator account is not TOTP")
@@ -218,6 +263,28 @@ def login(username, password, account, *, portal):
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
         driver.get(config.login_url)
+        classic = _first_element(driver, ("#txtUsuario", "#username"), timeout=20)
+        if classic is not None and has(driver, "#txtUsuario", 0.5) and has(driver, "#pwdSenha", 0.5):
+            # Classic eproc form (TRF6, TJMG): password, then the A3 certificate, then the TOTP.
+            result = driver.execute_async_script(
+                _POST_LOGIN_JS, username, password, config.url("externo_controlador.php?acao=login_cert")
+            )
+            if not str(result).startswith("opaqueredirect"):
+                raise RuntimeError(f"Unexpected answer to the eproc password step: {result}")
+            step = _classic_cert_login(driver, config)
+            if step == "otp":
+                step = _submit_otp(driver, totp(account).now())
+                if step == "otp":
+                    step = _submit_otp(driver, next_code(account))
+                if step == "otp":
+                    raise RuntimeError("eproc rejected the OTP")
+            if step != "panel":
+                raise RuntimeError(f"Unexpected eproc login step after the certificate: {step}")
+            session = session_from_cookies(driver.get_cookies())
+            if not any(cookie.name == "PHPSESSID" for cookie in session.cookies.jar):
+                session.close()
+                raise RuntimeError("Authenticated panel loaded without a PHPSESSID cookie")
+            return session, driver.page_source, driver.get_current_url()
         if _fill_field(driver, LOGIN_FIELDS["username"], username, timeout=20) is None:
             raise RuntimeError("Could not find the portal login fields")
         if _fill_field(driver, LOGIN_FIELDS["password"], password, timeout=20) is None:
