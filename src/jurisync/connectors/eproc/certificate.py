@@ -231,19 +231,19 @@ def _otp_step(session, config, response, account):
     raise LoginRejected("eproc rejected the OTP")
 
 
-def _tjms_login(session, config, key, cert, chain, account):
-    """TJMS 1G uses the local certificate form, not Keycloak."""
+def _local_certificate_login(session, config, key, cert, chain, account):
+    """TJMS 1G and TJMG 2G use the local certificate form, not Keycloak."""
     page = _follow(
         session, config, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT)
     )
     soup = BeautifulSoup(page.text, "html.parser")
     form, target = soup.select_one("form#frmLogin"), soup.select_one("#destino_v2_cert")
     if form is None or target is None:
-        raise RuntimeError("TJMS certificate login form was not returned")
+        raise RuntimeError("Local eproc certificate login form was not returned")
     action = urllib.parse.urljoin(page.url, target.get("value", ""))
     require_login_url(config, action)
     if action != config.url("externo_controlador.php?acao=login_cert"):
-        raise RuntimeError("TJMS certificate form returned an unexpected action")
+        raise RuntimeError("Local eproc certificate form returned an unexpected action")
     fields = {
         i["name"]: i.get("value", "")
         for i in form.select("input[name]")
@@ -265,12 +265,12 @@ def _tjms_login(session, config, key, cert, chain, account):
         button = soup.select_one("#btnValidar")
         action_match = re.search(r"Submit\(['\"]([^'\"]+)", button.get("onclick", "")) if button else None
         if form is None or action_match is None or action_match[1] != "2fa_validar":
-            raise RuntimeError("TJMS TOTP form was not recognized")
+            raise RuntimeError("Local eproc TOTP form was not recognized")
         action = urllib.parse.urljoin(response.url, form.get("action") or "index.php")
         require_login_url(config, action)
         parts = urllib.parse.urlsplit(action)
         if parts.path not in {"/index.php", config.root + "index.php"} or parts.query:
-            raise RuntimeError("TJMS TOTP form returned an unexpected action")
+            raise RuntimeError("Local eproc TOTP form returned an unexpected action")
         fields = {i["name"]: i.get("value", "") for i in form.select('input[type="hidden"][name]')}
         fields.pop("chkLiberarDispositivo", None)
         fields.update(hdnAcao=action_match[1])
@@ -281,7 +281,7 @@ def _tjms_login(session, config, key, cert, chain, account):
             session.post(action, data=fields, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT),
         )
     if not is_panel(response.url) or not any(c.name == "PHPSESSID" for c in session.cookies.jar):
-        raise RuntimeError("TJMS certificate login did not reach the panel")
+        raise RuntimeError("Local eproc certificate login did not reach the panel")
     return session, response.text, response.url
 
 
@@ -294,8 +294,8 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
     account = portal_totp_account(config)
     key, cert, chain = native_signer.load_a1(p12_path, pin)
     session = session or requests.Session()
-    if config.key == "tjms-eproc-1g":
-        return _tjms_login(session, config, key, cert, chain, account)
+    if config.key in {"tjms-eproc-1g", "tjmg-2g"}:
+        return _local_certificate_login(session, config, key, cert, chain, account)
     with client_certificate(key, cert, chain) as pem:
         page = _login_page(session, config)
         if _classic_certificate_url(page, config):

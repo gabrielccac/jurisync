@@ -220,6 +220,8 @@ PORTALS = {
         # PJes. Single-host PJes serve /pje/; TJRJ/TJPI split instances by path like TJCE/TJPE.
         Portal("tjmg-1g", "eproc", "TJMG", "1g", "eproc1g.tjmg.jus.br", "/eproc/", "browser_totp", "TJMG_1G",
                region="13", justice="8"),
+        Portal("tjmg-2g", "eproc", "TJMG", "2g", "eproc2g.tjmg.jus.br", "/eproc/", "certificate_totp", "TJMG_2G",
+               region="13", justice="8"),
         # TJMS also has e-SAJ; a process number alone cannot identify its eproc cases.
         Portal("tjms-eproc-1g", "eproc", "TJMS", "1g", "eproc1g.tjms.jus.br", "/eproc/", "certificate_totp", "TJMS_1G",
                region="12", justice="8", guess_by_number=False),

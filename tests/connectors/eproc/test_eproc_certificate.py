@@ -135,7 +135,8 @@ class CertificateLoginTest(unittest.TestCase):
             pem.return_value.__enter__.return_value = ("cert.pem", "key.pem")
             code.return_value.now.return_value = "123456"
             self.assertEqual(
-                certificate._tjms_login(session, config, None, None, [], {}), (session, panel.text, panel.url)
+                certificate._local_certificate_login(session, config, None, None, [], {}),
+                (session, panel.text, panel.url),
             )
         self.assertEqual(session.post.call_count, 2)
         submitted = session.post.call_args_list[1].kwargs["data"]
@@ -325,3 +326,13 @@ class LoginFlowTest(unittest.TestCase):
         )
         self.assertEqual(result[2], panel)
         self.assertEqual(session.calls[2][2], {"otp": "123456", "login": "Sign In"})
+
+    def test_tjmg_second_instance_dispatches_to_the_local_certificate_form(self):
+        session = object()
+        with (
+            mock.patch.object(certificate, "portal_totp_account", return_value={}),
+            mock.patch.object(certificate.native_signer, "load_a1", return_value=(None, None, [])),
+            mock.patch.object(certificate, "_local_certificate_login", return_value="authenticated") as local,
+        ):
+            self.assertEqual(certificate.cert_login("tjmg-2g", pin="example", session=session), "authenticated")
+        self.assertEqual(local.call_args.args[1].key, "tjmg-2g")

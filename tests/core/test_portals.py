@@ -75,6 +75,7 @@ class PortalRegistryTest(unittest.TestCase):
             portals.keys("eproc"),
             (
                 "tjmg-1g",
+                "tjmg-2g",
                 "tjms-eproc-1g",
                 "tjrj-eproc-1g",
                 "tjpr-1g",
@@ -134,6 +135,7 @@ class PortalRegistryTest(unittest.TestCase):
                 self.assertEqual((config.justice, config.region, config.instance), ("5", region, instance))
                 self.assertIs(portals.for_host(config.host, config.root + "login.seam"), config)
         self.assertEqual(portals.for_host("eproc1g.tjms.jus.br").key, "tjms-eproc-1g")
+        self.assertEqual(portals.for_host("eproc2g.tjmg.jus.br").key, "tjmg-2g")
         self.assertEqual([p.key for p in portals.for_process("0001234-56.2026.8.12.0001")], ["tjms-esaj"])
         self.assertEqual(portals.for_host("eproc1g.tjrs.jus.br").key, "tjrs-1g")
         self.assertEqual(portals.for_host("pje.tjap.jus.br").key, "tjap-1g")
