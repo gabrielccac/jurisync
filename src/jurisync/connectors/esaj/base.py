@@ -47,6 +47,24 @@ def require_portal_url(config, value, label="e-SAJ URL"):
     return require_url(value, hosts={config.host}, label=label)
 
 
+def consultation(key):
+    """The first-instance consultation application: TJMS serves ``cpopg5``, the other e-SAJ courts ``cpopg``."""
+    return "cpopg5" if key == "tjms-esaj" else "cpopg"
+
+
+def upgrade_scheme(config):
+    """A redirect rewriter for portals behind a TLS-terminating balancer (TJAL): its CAS sends the ticket redirect to
+    ``http://`` on the portal's own host. Only that scheme is upgraded; the host check still runs on the result."""
+
+    def rewrite(url):
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme == "http" and (parts.hostname or "").lower() == config.host and parts.port in (None, 80):
+            return urllib.parse.urlunsplit(parts._replace(scheme="https", netloc=config.host))
+        return url
+
+    return rewrite
+
+
 # --- Login ----------------------------------------------------------------------------------------------------------
 
 
@@ -123,14 +141,21 @@ def login(portal, *, pin=None, p12_path=None, session=None):
         allow_redirects=False,
         timeout=TIMEOUT,
     )
-    page = follow_redirects(session, page, check=lambda url: require_portal_url(config, url))
+    page = follow_redirects(
+        session, page, check=lambda url: require_portal_url(config, url), rewrite=upgrade_scheme(config)
+    )
     log_request("GET", page.url, page.status_code)
     action, fields = login_form(page.text, page.url, config)
     fields["certificadoSelecionado"] = certificate_der_b64(cert)
     fields["signature"] = sign_challenge(key, challenge_from(page.text))
     response = session.post(action, data=fields, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT)
     log_request("POST", action, response.status_code)
-    follow_redirects(session, response, check=lambda url: require_portal_url(config, url, "e-SAJ login redirect"))
+    follow_redirects(
+        session,
+        response,
+        check=lambda url: require_portal_url(config, url, "e-SAJ login redirect"),
+        rewrite=upgrade_scheme(config),
+    )
     if not any(cookie.name == "CASTGC" for cookie in session.cookies.jar):
         raise LoginRejected("e-SAJ did not accept the A1 certificate")
     return session
@@ -164,7 +189,7 @@ def request(session, portal, method, path, **kwargs):
         for _ in range(10):
             if response.status_code not in REDIRECTS or not response.headers.get("Location"):
                 break
-            target = urllib.parse.urljoin(response.url, response.headers["Location"])
+            target = upgrade_scheme(config)(urllib.parse.urljoin(response.url, response.headers["Location"]))
             try:
                 require_portal_url(config, target, "e-SAJ redirect")
             finally:
@@ -172,7 +197,10 @@ def request(session, portal, method, path, **kwargs):
             response = session.get(target, impersonate=IMPERSONATE, allow_redirects=False, stream=True, timeout=TIMEOUT)
     else:
         response = follow_redirects(
-            session, response, check=lambda target: require_portal_url(config, target, "e-SAJ redirect")
+            session,
+            response,
+            check=lambda target: require_portal_url(config, target, "e-SAJ redirect"),
+            rewrite=upgrade_scheme(config),
         )
     if kwargs.get("stream") and (is_cas_login_page(response) or response.status_code in (401, 403, *REDIRECTS)):
         response.close()
@@ -422,10 +450,10 @@ def consultation_search(session, portal, adapter, number):
 
 
 def load_process(session, portal, number):
-    from jurisync.connectors.esaj import parsers, tjms, tjsp
+    from jurisync.connectors.esaj import parsers, tjal, tjms, tjsp
 
     number = process_number(number, portal)
-    adapter = {tjsp.PORTAL: tjsp, tjms.PORTAL: tjms}[portals.esaj(portal).key]
+    adapter = {tjsp.PORTAL: tjsp, tjms.PORTAL: tjms, tjal.PORTAL: tjal}[portals.esaj(portal).key]
     detail_response = None
     source = "dashboard"
     data = dashboard_process(session, portal, number)
@@ -529,7 +557,7 @@ def document_inventory(session, portal, number):
     link = item["urlPasta"]
     require_portal_url(portals.esaj(portal), link)
     parts = urllib.parse.urlsplit(link)
-    prefix = "cpopg" if portals.esaj(portal).key == "tjsp-esaj" else "cpopg5"
+    prefix = consultation(portals.esaj(portal).key)
     if parts.path != f"/{prefix}/abrirPastaDigitalIntegracao.do":
         raise EsajParseError("Unexpected document viewer endpoint")
     response = request(session, portal, "GET", parts.path + "?" + parts.query)

@@ -346,3 +346,37 @@ def test_petition_tasks_are_read_only_and_sanitized(monkeypatch):
     assert result["items"] == [{"id": 1, "situacao": "AGUARDANDO_ASSINATURA"}]
     assert request.call_args.args[2:] == ("GET", "tarefas-adv/api/peticoes")
     assert request.call_args.kwargs["params"] == {"situacao": "AGUARDANDO_ASSINATURA"}
+
+
+def test_tjal_is_registered_on_its_own_host_with_the_consultation_of_tjsp():
+    config = portals.esaj("tjal-esaj")
+    assert (config.host, config.auth, config.justice, config.region) == (
+        "www2.tjal.jus.br",
+        "certificate_challenge",
+        "8",
+        "02",
+    )
+    assert config.login_url == "https://www2.tjal.jus.br/sajcas/login"
+    assert base.consultation("tjal-esaj") == "cpopg" and base.consultation("tjsp-esaj") == "cpopg"
+    assert base.consultation("tjms-esaj") == "cpopg5"
+    assert base.process_number("0000001-00.2026.8.02.0001", "tjal-esaj")
+    with pytest.raises(ValueError):
+        base.process_number(NUMBER, "tjal-esaj")
+
+
+def test_an_http_ticket_redirect_on_the_portal_host_is_upgraded_and_nothing_else():
+    # TJAL's CAS answers the ticket redirect with http:// on its own host (TLS ends at the balancer).
+    config = portals.esaj("tjal-esaj")
+    rewrite = base.upgrade_scheme(config)
+    assert rewrite("http://www2.tjal.jus.br/tarefas-adv/?ticket=T") == "https://www2.tjal.jus.br/tarefas-adv/?ticket=T"
+    assert rewrite("http://evil.invalid/tarefas-adv/") == "http://evil.invalid/tarefas-adv/"
+    assert rewrite("http://www2.tjal.jus.br:8080/x") == "http://www2.tjal.jus.br:8080/x"
+    session = Mock()
+    session.request.return_value = response(status=302, url="https://www2.tjal.jus.br/caixapostal/")
+    session.request.return_value.headers["Location"] = "http://www2.tjal.jus.br/sajcas/login?ticket=T"
+    session.get.return_value = response(url="https://www2.tjal.jus.br/caixapostal/abrirCaixaPostal.do")
+    base.request(session, "tjal-esaj", "GET", "caixapostal/abrirCaixaPostal.do")
+    assert session.get.call_args.args[0] == "https://www2.tjal.jus.br/sajcas/login?ticket=T"
+    session.request.return_value.headers["Location"] = "http://evil.invalid/steal"
+    with pytest.raises(UnsafeUrlError):
+        base.request(session, "tjal-esaj", "GET", "caixapostal/abrirCaixaPostal.do")

@@ -347,6 +347,10 @@ PORTALS = {
                region="26", justice="8", guess_by_number=False, flavor="esaj-cas"),
         Portal("tjms-esaj", "esaj", "TJMS", "1g", "esaj.tjms.jus.br", "/", "certificate_challenge", "TJMS_ESAJ",
                region="12", justice="8", flavor="esaj-cas"),
+        # TJAL's e-SAJ lives on www2.tjal.jus.br (portal at /esaj/portal.do; CAS, consultation and mailbox at the root,
+        # like TJSP); same certificate-challenge login with the A1.
+        Portal("tjal-esaj", "esaj", "TJAL", "1g", "www2.tjal.jus.br", "/", "certificate_challenge", "TJAL_ESAJ",
+               region="02", justice="8", flavor="esaj-cas"),
         Portal("stj", "stj", "STJ", "2g", "processo.stj.jus.br", "/", "none", wired=False),
     )
 }  # fmt: skip

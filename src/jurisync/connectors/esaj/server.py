@@ -36,7 +36,7 @@ def call(portal, read):
 
 def create_server():
     Portal = Literal[portals.keys("esaj")]  # noqa: N806
-    portal_field = Field(description="e-SAJ portal: tjsp-esaj or tjms-esaj. A1 challenge login.")
+    portal_field = Field(description="e-SAJ portal: tjsp-esaj, tjms-esaj or tjal-esaj. A1 challenge login.")
     number_field = Field(description="Formatted CNJ process number for this court.", min_length=25, max_length=25)
     server = MCPServer("esaj", version="1.0.0")
 

@@ -28,6 +28,7 @@ from pathlib import Path
 import websocket
 
 from jurisync import portals
+from jurisync.connectors.esaj.base import consultation
 from jurisync.core import credentials
 
 TOKEN_INPUT = "#id_recaptcha_response_token"
@@ -271,7 +272,7 @@ class BrowserBridge:
         if not self.enabled:
             raise BrowserBridgeError("Browser bridge is off")
         config = portals.esaj(portal)
-        prefix = "cpopg" if config.key == "tjsp-esaj" else "cpopg5"
+        prefix = consultation(config.key)
         endpoint = self.start()
         target = self._target(endpoint, config.host, prefix)
         tab = CdpTarget(target["webSocketDebuggerUrl"], timeout=self.timeout)
@@ -307,7 +308,7 @@ class BrowserBridge:
         if not parts.path.endswith(_ALLOWED_SUFFIXES):
             raise BrowserBridgeError("Browser bridge received an unexpected endpoint")
         endpoint = self.start()
-        target = self._target(endpoint, config.host, "cpopg" if config.key == "tjsp-esaj" else "cpopg5")
+        target = self._target(endpoint, config.host, consultation(config.key))
         tab = CdpTarget(target["webSocketDebuggerUrl"], timeout=self.timeout)
         injected = []
         try:
