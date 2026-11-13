@@ -8,3 +8,5 @@ Validated with an A1 certificate + TOTP through the national SSO (`flavor="kz"`,
 | trt12-2g | 2026-11-13 | counters, Meus Expedientes, process read, document read (PDF + text) | |
 | trt15-1g | 2026-11-13 | counters (36/4/5), Meus Expedientes (4 caixas), process read (5 expedientes completos), document read (PDF + text) | 30 intimacoes/30d |
 | trt15-2g | 2026-11-13 | counters (2/1/2), Meus Expedientes, process read, document read (PDF + text) | |
+| trt1-1g | 2026-11-13 | counters (22/3/7), Meus Expedientes (3 caixas), process read (17 expedientes completos), document read (PDF + text) | 25 intimacoes/30d |
+| trt1-2g | 2026-11-13 | counters (1/0/0), Meus Expedientes (vazia no momento), process read e document read via Acervo Geral (PDF + text) | |

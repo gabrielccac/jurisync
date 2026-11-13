@@ -99,12 +99,12 @@ class Session:
         return Response(404, {"codigoErro": "X"})
 
 
-TRT_PORTALS = ["trt12-1g", "trt12-2g", "trt15-1g", "trt15-2g"]
+TRT_PORTALS = ["trt12-1g", "trt12-2g", "trt15-1g", "trt15-2g", "trt1-1g", "trt1-2g"]
 
 
 def test_only_the_judicial_portals_use_the_rest_flavor():
     kz_portals = {key for key in portals.keys("pje") if portals.pje(key).kz}
-    assert kz_portals == {"trt7-1g", "trt7-2g", "trt18-1g", "trt18-2g", "trt12-1g", "trt12-2g", "trt15-1g", "trt15-2g", "tst"}
+    assert kz_portals == {"trt7-1g", "trt7-2g", "trt18-1g", "trt18-2g", "trt12-1g", "trt12-2g", "trt15-1g", "trt15-2g", "trt1-1g", "trt1-2g", "tst"}
     for key in ("trf5-1g", "trf5-2g", "tjce-1g", "trf1-1g", "trf3-1g", "tjpe-1g"):
         assert not portals.pje(key).kz
 
