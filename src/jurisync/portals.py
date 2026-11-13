@@ -353,6 +353,10 @@ PORTALS = {
         # like TJSP); same certificate-challenge login with the A1.
         Portal("tjal-esaj", "esaj", "TJAL", "1g", "www2.tjal.jus.br", "/", "certificate_challenge", "TJAL_ESAJ",
                region="02", justice="8", flavor="esaj-cas"),
+        # TJAM's e-SAJ (old case stock) lives on consultasaj.tjam.jus.br; the CAS ticket redirect also goes to http://
+        # on that host. Same A1 certificate-challenge login. Current cases are in Projudi/PJe, so no guessing by number.
+        Portal("tjam-esaj", "esaj", "TJAM", "1g", "consultasaj.tjam.jus.br", "/", "certificate_challenge", "TJAM_ESAJ",
+               region="04", justice="8", guess_by_number=False, flavor="esaj-cas"),
         Portal("stj", "stj", "STJ", "2g", "processo.stj.jus.br", "/", "none", wired=False),
     )
 }  # fmt: skip

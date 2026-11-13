@@ -380,3 +380,20 @@ def test_an_http_ticket_redirect_on_the_portal_host_is_upgraded_and_nothing_else
     session.request.return_value.headers["Location"] = "http://evil.invalid/steal"
     with pytest.raises(UnsafeUrlError):
         base.request(session, "tjal-esaj", "GET", "caixapostal/abrirCaixaPostal.do")
+
+
+def test_tjam_esaj_is_registered_on_the_consultasaj_host_and_upgrades_its_http_redirect():
+    config = portals.esaj("tjam-esaj")
+    assert (config.host, config.auth, config.justice, config.region) == (
+        "consultasaj.tjam.jus.br",
+        "certificate_challenge",
+        "8",
+        "04",
+    )
+    assert config.login_url == "https://consultasaj.tjam.jus.br/sajcas/login"
+    assert base.consultation("tjam-esaj") == "cpopg"
+    assert base.process_number("0000001-00.2026.8.04.0001", "tjam-esaj")
+    rewrite = base.upgrade_scheme(config)
+    url = "http://consultasaj.tjam.jus.br/esajperfil/abrirConfirmacaoDados.do"
+    assert rewrite(url) == url.replace("http://", "https://", 1)
+    assert rewrite("http://evil.invalid/esajperfil/") == "http://evil.invalid/esajperfil/"

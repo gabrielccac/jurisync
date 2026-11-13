@@ -105,3 +105,19 @@ na validação foi escolhida a OAB principal já fornecida, sem alterar arquivos
 - PEMs efêmeros são removidos pelo contexto do conector. Scripts e resultados
   temporários próprios foram removidos ao concluir. Permanecem código, testes,
   relatórios e commits locais; nenhum push.
+
+## Parte E — fechamento de TJPR 1G e e-SAJ TJAM (13/11/2026, tarefa autorizada)
+
+| Portal | Login | Leituras | Tentativas |
+|---|---|---|---|
+| eproc `tjpr-1g` | OK: A1 + TOTP, tela de perfil, escolhido ADVOGADO (OAB principal, sem "definir como padrao") e Painel do Advogado (`frmPainelAdvogado`) | Filas: prazos abertos 0, pendentes 0, urgentes 0, acordo 0, art. 334 0, decurso de prazo 1, pauta 0; relacao de processos 1 item | 2 (a 1a parou com `TJPR_1G_PROFILE_MATCH` ausente: a tela mostra 2 perfis ADVOGADO, de duas OABs) |
+| e-SAJ `tjam-esaj` | Login 1 OK (CASTGC, redirect http elevado a https); login 2 caiu em `tarefas-adv/erroDesconhecido.do` (erro do portal, recusado pelo guard) | intimacoes 0, audiencias 0, peticoes 0, caixa postal 1; `esaj/api/auth/session` = 404, logo `usuarioLogado` nao lido | 2 |
+
+- O conector eproc ja tratava a selecao de perfil no 1G; faltava o cadastro
+  `tjpr-1g` usar `certificate_totp` e o seletor de OAB no ambiente do processo.
+- As 171 intimacoes de 30 dias nao aparecem no eproc nas filas do perfil da OAB
+  principal; o outro perfil (segunda OAB) nao foi testado (limite de tentativas).
+- Commits: `fix(eproc): TJPR 1G logs in with the A1 certificate like 2G`; cherry-pick
+  de 504a9d9 (TJAL + `upgrade_scheme`); `feat(esaj): register TJAM e-SAJ`.
+- Testes: 1016 passed, 1 failed (o mesmo DJEN/Victor, ausencia de `customers/victor`). ruff limpo.
+- A1 com o mesmo SHA-256 antes e depois. Nada gravado em `.env`/`portals.toml`. Temporarios apagados.
