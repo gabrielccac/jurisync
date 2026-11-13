@@ -50,6 +50,8 @@ class PortalRegistryTest(unittest.TestCase):
                 "trt15-2g",
                 "trt1-1g",
                 "trt1-2g",
+                "trt3-1g",
+                "trt3-2g",
                 "tst",
                 "tjrj-1g",
                 "tjrj-2g",

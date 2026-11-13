@@ -16,3 +16,8 @@ Harness temporario fora do repo (/tmp/trtwork). Segredos so no ambiente do proce
 - trt1-1g: login OK (1). counters 22/3/7, inbox OK (3 caixas), process OK (17 expedientes), document OK.
 - trt1-2g: login OK (2 tentativas, ambas entraram; a 2a foi para ler processo pelo Acervo, pois Meus Expedientes estava vazia). counters 1/0/0, inbox OK (vazia), process e document OK via Acervo.
 - Cadastrado: sim.
+
+## TRT3 - concluido
+- trt3-1g: login OK (1). counters 14/4/7, inbox OK (4 caixas), process OK (23 expedientes), document OK.
+- trt3-2g: login OK (1). counters 2/0/1, inbox OK (vazia), process e document OK via Acervo.
+- Cadastrado: sim.
