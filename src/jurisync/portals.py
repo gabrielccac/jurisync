@@ -63,7 +63,8 @@ class Portal:
         if self.system == "esaj":
             return self.url("sajcas/login")
         if self.system == "projudi":
-            return self.url("LogOn" if self.flavor == "tjgo-servlet" else "usuario/logon.do?actionType=inicio")
+            entry = {"tjgo-servlet": "LogOn", "legacy-keycloak": "autenticacao.do"}  # the Keycloak entry starts the SSO
+            return self.url(entry.get(self.flavor, "usuario/logon.do?actionType=inicio"))
         if self.system == "eproc":
             # The Eproc root redirects to the SSO login. The externo_controlador.php
             # path is 403-blocked on some deployments (e.g. TJRS behind Cloudflare).
