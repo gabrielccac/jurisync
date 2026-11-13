@@ -285,6 +285,18 @@ def _local_certificate_login(session, config, key, cert, chain, account):
     return session, response.text, response.url
 
 
+def rooted(config, url):
+    """The panel URL under the portal's application root.
+
+    TJAC's SSO sends the browser back to ``/controlador.php`` while the application (and every link it serves) lives under
+    ``/eproc/``; relative links resolved against the first would leave the root the route checks require.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.hostname == config.host and not parts.path.startswith(config.root):
+        return urllib.parse.urlunsplit(parts._replace(path=config.root + parts.path.rsplit("/", 1)[-1]))
+    return url
+
+
 def cert_login(portal, *, pin=None, p12_path=None, session=None):
     """Return ``(session, panel_html, panel_url)`` like the browser login, using the A1 certificate."""
     config = portals.eproc(portal)
@@ -338,4 +350,4 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
             )
     if not is_panel(response.url) or not any(c.name == "PHPSESSID" for c in session.cookies.jar):
         raise RuntimeError("eproc certificate login did not reach the panel")
-    return session, response.text, response.url
+    return session, response.text, rooted(config, response.url)

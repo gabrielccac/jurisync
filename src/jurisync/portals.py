@@ -300,6 +300,13 @@ PORTALS = {
                region="24", justice="8"),
         Portal("tjsc-2g", "eproc", "TJSC", "2g", "eproc2g.tjsc.jus.br", "/eproc/", "browser_totp", "TJSC_2G",
                region="24", justice="8"),
+        # TJAC's Eproc (CNJ J=8, TR=01): Keycloak SSO (sso.tjac.jus.br, realm eproc) with the certificate on
+        # certificado-sso.tjac.jus.br, then the authenticator code. The 2FA profile is the one "Eproc/TJAC",
+        # shared by both instances (TJAC_EPROC_*).
+        Portal("tjac-1g", "eproc", "TJAC", "1g", "eproc1g.tjac.jus.br", "/eproc/", "browser_totp", "TJAC_1G",
+               legacy_env_prefixes=("TJAC_EPROC",), region="01", justice="8"),
+        Portal("tjac-2g", "eproc", "TJAC", "2g", "eproc2g.tjac.jus.br", "/eproc/", "browser_totp", "TJAC_2G",
+               legacy_env_prefixes=("TJAC_EPROC",), region="01", justice="8"),
         Portal("tjto-1g", "eproc", "TJTO", "1g", "eproc1.tjto.jus.br", "/eprocV2_prod_1grau/", "browser_totp", "TJTO_1G",
                region="27", justice="8"),
         Portal("tjto-2g", "eproc", "TJTO", "2g", "eproc2.tjto.jus.br", "/eprocV2_prod_2grau/", "browser_totp", "TJTO_2G",

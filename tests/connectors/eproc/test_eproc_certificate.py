@@ -336,3 +336,34 @@ class LoginFlowTest(unittest.TestCase):
         ):
             self.assertEqual(certificate.cert_login("tjmg-2g", pin="example", session=session), "authenticated")
         self.assertEqual(local.call_args.args[1].key, "tjmg-2g")
+
+
+class TjacTests(unittest.TestCase):
+    """TJAC: Keycloak SSO on sso.tjac.jus.br, certificate on certificado-sso.tjac.jus.br, one 2FA profile for 1G and 2G."""
+
+    def test_both_instances_are_registered_and_share_the_authenticator_profile(self):
+        for key, host in (("tjac-1g", "eproc1g.tjac.jus.br"), ("tjac-2g", "eproc2g.tjac.jus.br")):
+            config = portals.eproc(key)
+            self.assertEqual((config.host, config.root, config.justice, config.region), (host, "/eproc/", "8", "01"))
+            with mock.patch.dict("os.environ", {"TJAC_EPROC_2FA_QR": "/qr.jpg"}, clear=True):
+                self.assertEqual(config.env("2FA_QR"), "/qr.jpg")
+        self.assertEqual(portals.for_process("0000001-00.2025.8.01.0001")[0].tribunal, "TJAC")
+
+    def test_its_sso_hosts_are_accepted_and_another_courts_are_not(self):
+        config = portals.eproc("tjac-1g")
+        for host in ("sso.tjac.jus.br", "certificado-sso.tjac.jus.br"):
+            certificate.require_login_url(config, f"https://{host}/realms/eproc/protocol/openid-connect/auth")
+        with self.assertRaises(UnsafeUrlError):
+            certificate.require_login_url(config, "https://certificado-sso.tjal.jus.br/realms/eproc")
+
+    def test_the_panel_url_the_sso_returns_without_the_application_root_is_put_back_under_it(self):
+        config = portals.eproc("tjac-1g")
+        landed = "https://eproc1g.tjac.jus.br/controlador.php?acao=painel_adv_listar&hash=x"
+        self.assertEqual(
+            certificate.rooted(config, landed),
+            "https://eproc1g.tjac.jus.br/eproc/controlador.php?acao=painel_adv_listar&hash=x",
+        )
+        already = "https://eproc1g.tjac.jus.br/eproc/controlador.php?acao=painel_adv_listar"
+        self.assertEqual(certificate.rooted(config, already), already)
+        other = "https://elsewhere.example/controlador.php"
+        self.assertEqual(certificate.rooted(config, other), other)
