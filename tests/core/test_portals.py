@@ -69,6 +69,10 @@ class PortalRegistryTest(unittest.TestCase):
                 "tjpb-1g",
                 "tjpi-1g",
                 "tjpi-2g",
+                "tjrn-1g",
+                "tjrn-2g",
+                "tjro-1g",
+                "tjro-2g",
             ),
         )
         self.assertEqual(
@@ -121,6 +125,22 @@ class PortalRegistryTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"TJRS_1G_USUARIO": "old", "TJRS_1G_USERNAME": "new"}, clear=True):
             self.assertEqual(tjrs.env("USERNAME"), "new")
         self.assertEqual(tjrs.env_name("2FA_DATA"), "TJRS_1G_2FA_DATA")
+
+    def test_tjrn_and_tjro_pje_use_the_certificate_and_their_own_hosts(self):
+        expected = {
+            "tjrn-1g": ("pje1g.tjrn.jus.br", "20", "TJRN_1G"),
+            "tjrn-2g": ("pje2g.tjrn.jus.br", "20", "TJRN_2G"),
+            "tjro-1g": ("pjepg.tjro.jus.br", "22", "TJRO_1G"),
+            "tjro-2g": ("pjesg.tjro.jus.br", "22", "TJRO_2G"),
+        }
+        for key, (host, region, prefix) in expected.items():
+            portal = portals.pje(key)
+            self.assertEqual((portal.host, portal.region, portal.env_prefix), (host, region, prefix))
+            self.assertEqual(portal.auth, "certificate_totp")
+            self.assertEqual(portal.login_url, f"https://{host}/pje/login.seam")
+            self.assertEqual(portals.for_host(host).key, key)
+        self.assertEqual([p.key for p in portals.for_process("0801148-12.2026.8.20.5135")], ["tjrn-1g", "tjrn-2g"])
+        self.assertEqual([p.key for p in portals.for_process("7001234-56.2026.8.22.0001")], ["tjro-1g", "tjro-2g"])
 
     def test_host_and_process_routing(self):
         for key, region, instance in (

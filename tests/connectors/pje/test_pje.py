@@ -188,6 +188,21 @@ class PjeChecks(unittest.TestCase):
         self.assertEqual(result["items"][0]["process_id"], "123")
         self.assertEqual(result["items"][0]["priority"], "Prioritário")
 
+    def test_search_table_without_leading_column_is_parsed(self):
+        """TJPI's result table has 8 columns: the process number is the first cell, not the second."""
+        html = (
+            '<table id="fPP:processosTable"><tr><td><a onclick="idProcessoSelecionado:2748118">'
+            "1020340-18.2025.8.18.0051</a></td><td><i title=\"Liminar\"></i></td><td>Vara Unica</td>"
+            "<td>15/09/2026</td><td>PROCEDIMENTO COMUM</td><td>AUTOR</td><td>REU</td><td>Concluso</td></tr></table>"
+        )
+        item = parsers.parse_search_results(html)["items"][0]
+        self.assertEqual(item["process_id"], "2748118")
+        self.assertEqual(item["priority"], "Liminar")
+        self.assertEqual(item["judicial_body"], "Vara Unica")
+        self.assertEqual(item["passive_party"], "REU")
+        self.assertEqual(item["last_movement"], "Concluso")
+        self.assertEqual(parsers.matching_process_id(html, "1020340-18.2025.8.18.0051")[0], "2748118")
+
     def test_search_never_selects_a_different_process(self):
         html = """<table id="fPP:processosTable"><tr><td></td><td><a onclick="idProcessoSelecionado:123">1020340-18.2025.4.01.3100</a></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>"""
         self.assertEqual(parsers.matching_process_id(html, "1020340-18.2025.4.01.3100")[0], "123")

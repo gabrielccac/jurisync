@@ -181,11 +181,20 @@ def parse_search_results(html):
     items = []
     for row in table.find_all("tr"):
         cells = row.find_all("td", recursive=False)
-        if len(cells) < 9:
+        # Most PJes put a leading column before the process number; the TJPI table starts with it.
+        offset = next(
+            (
+                index
+                for index in (1, 0)
+                if len(cells) >= index + 8
+                and re.fullmatch(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}", clean_text(cells[index].get_text(" ")))
+            ),
+            None,
+        )
+        if offset is None:
             continue
-        process_number = clean_text(cells[1].get_text(" "))
-        if not re.fullmatch(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}", process_number):
-            continue
+        process_number = clean_text(cells[offset].get_text(" "))
+        cells = cells[offset - 1 :] if offset else [None, *cells]
         process_link = cells[1].find("a")
         process_id_match = re.search(r"idProcessoSelecionado['\"]?\s*:\s*(\d+)", str(row))
         characteristic = cells[2].find(attrs={"title": True})

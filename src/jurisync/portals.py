@@ -254,6 +254,15 @@ PORTALS = {
                region="18", justice="8"),
         Portal("tjpi-2g", "pje", "TJPI", "2g", "pje.tjpi.jus.br", "/2g/", "certificate_totp", "TJPI_2G",
                region="18", justice="8"),
+        Portal("tjrn-1g", "pje", "TJRN", "1g", "pje1g.tjrn.jus.br", "/pje/", "certificate_totp", "TJRN_1G",
+               region="20", justice="8"),
+        Portal("tjrn-2g", "pje", "TJRN", "2g", "pje2g.tjrn.jus.br", "/pje/", "certificate_totp", "TJRN_2G",
+               region="20", justice="8"),
+        # TJRO: pjepg = 1º grau (SSO client pje-tjro-1g), pjesg = 2º grau (pje-tjro-2g); pje.tjro.jus.br only redirects.
+        Portal("tjro-1g", "pje", "TJRO", "1g", "pjepg.tjro.jus.br", "/pje/", "certificate_totp", "TJRO_1G",
+               region="22", justice="8"),
+        Portal("tjro-2g", "pje", "TJRO", "2g", "pjesg.tjro.jus.br", "/pje/", "certificate_totp", "TJRO_2G",
+               region="22", justice="8"),
         Portal(
             "trf4-1g-sc", "eproc", "TRF4", "1g", "eproc.jfsc.jus.br", "/eprocV2/", "browser_totp", "TRF4_1G_SC",
             legacy_env_prefixes=("JFSC",), region="04", origins=("72",),
