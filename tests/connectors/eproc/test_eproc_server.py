@@ -28,6 +28,7 @@ class EprocServerTest(unittest.TestCase):
                 server.configured_portals(),
                 (
                     "tjmg-1g",
+                    "tjms-eproc-1g",
                     "tjrj-eproc-1g",
                     "tjpr-1g",
                     "trf4-1g-sc",

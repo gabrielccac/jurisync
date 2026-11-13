@@ -119,7 +119,10 @@ def _follow(sso_session, response, hops=6):
 
 def _require_registered(response, config):
     """PJe sends a user it does not know to the public pre-registration page, after the SSO accepted the login."""
-    if "/publico/usuario/cadastro" in urllib.parse.urlsplit(response.url).path:
+    path = urllib.parse.urlsplit(response.url).path
+    if path.endswith("/errorUnexpected.seam"):
+        raise RuntimeError(f"{config.key}: the portal returned errorUnexpected.seam; no authenticated session")
+    if "/publico/usuario/cadastro" in path:
         raise RuntimeError(
             f"{config.key}: the SSO login worked but this user is not registered in this PJe "
             "(redirected to its pre-registration page); the court must register the lawyer first"
@@ -127,6 +130,8 @@ def _require_registered(response, config):
 
 
 def _authenticated(response, host, root="/pje/"):
+    if urllib.parse.urlsplit(response.url).path.endswith("/errorUnexpected.seam"):
+        return False
     soup = BeautifulSoup(response.text, "html.parser")
     shell = "Painel do advogado" in response.text
     return (

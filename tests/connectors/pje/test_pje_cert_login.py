@@ -48,6 +48,10 @@ class CertificateLoginChecks(unittest.TestCase):
             status_code=200, url="https://pje.trt7.jus.br/primeirograu/error.seam", text="<html></html>"
         )
         self.assertFalse(cert_login._authenticated(plain, "pje.trt7.jus.br"))
+        response.url = "https://pje.trt9.jus.br/segundograu/errorUnexpected.seam"
+        self.assertFalse(cert_login._authenticated(response, "pje.trt9.jus.br"))
+        with self.assertRaisesRegex(RuntimeError, "no authenticated session"):
+            cert_login._require_registered(response, SimpleNamespace(key="trt9-2g"))
 
     def test_http_redirect_on_portal_host_is_upgraded_to_https(self):
         redirect = SimpleNamespace(

@@ -42,6 +42,10 @@ class PortalRegistryTest(unittest.TestCase):
                 "tjce-2g",
                 "trt7-1g",
                 "trt7-2g",
+                "trt4-1g",
+                "trt9-1g",
+                "trt2-1g",
+                "trt2-2g",
                 "trt18-1g",
                 "trt18-2g",
                 "trt12-1g",
@@ -71,6 +75,7 @@ class PortalRegistryTest(unittest.TestCase):
             portals.keys("eproc"),
             (
                 "tjmg-1g",
+                "tjms-eproc-1g",
                 "tjrj-eproc-1g",
                 "tjpr-1g",
                 "trf4-1g-sc",
@@ -117,6 +122,19 @@ class PortalRegistryTest(unittest.TestCase):
         self.assertEqual(tjrs.env_name("2FA_DATA"), "TJRS_1G_2FA_DATA")
 
     def test_host_and_process_routing(self):
+        for key, region, instance in (
+            ("trt4-1g", "04", "1g"),
+            ("trt9-1g", "09", "1g"),
+            ("trt2-1g", "02", "1g"),
+            ("trt2-2g", "02", "2g"),
+        ):
+            with self.subTest(portal=key):
+                config = portals.pje(key)
+                self.assertTrue(config.kz)
+                self.assertEqual((config.justice, config.region, config.instance), ("5", region, instance))
+                self.assertIs(portals.for_host(config.host, config.root + "login.seam"), config)
+        self.assertEqual(portals.for_host("eproc1g.tjms.jus.br").key, "tjms-eproc-1g")
+        self.assertEqual([p.key for p in portals.for_process("0001234-56.2026.8.12.0001")], ["tjms-esaj"])
         self.assertEqual(portals.for_host("eproc1g.tjrs.jus.br").key, "tjrs-1g")
         self.assertEqual(portals.for_host("pje.tjap.jus.br").key, "tjap-1g")
         self.assertIsNone(portals.for_host("evil.example"))

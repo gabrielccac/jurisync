@@ -74,6 +74,8 @@ def require_login_url(config, value):
     """
     hosts = {config.host, BROKER_HOST}
     host = (urllib.parse.urlsplit(value or "").hostname or "").lower()
+    if config.key == "tjms-eproc-1g" and host == "mtls.tjms.jus.br":
+        return require_url(value, hosts={host}, path="/priv/login_cert.php", label="TJMS certificate login")
     if is_sso_host(config, host):
         hosts.add(host)
     return require_url(value, hosts=hosts, label="eproc login redirect")
@@ -229,6 +231,60 @@ def _otp_step(session, config, response, account):
     raise LoginRejected("eproc rejected the OTP")
 
 
+def _tjms_login(session, config, key, cert, chain, account):
+    """TJMS 1G uses the local certificate form, not Keycloak."""
+    page = _follow(
+        session, config, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT)
+    )
+    soup = BeautifulSoup(page.text, "html.parser")
+    form, target = soup.select_one("form#frmLogin"), soup.select_one("#destino_v2_cert")
+    if form is None or target is None:
+        raise RuntimeError("TJMS certificate login form was not returned")
+    action = urllib.parse.urljoin(page.url, target.get("value", ""))
+    require_login_url(config, action)
+    if action != config.url("externo_controlador.php?acao=login_cert"):
+        raise RuntimeError("TJMS certificate form returned an unexpected action")
+    fields = {
+        i["name"]: i.get("value", "")
+        for i in form.select("input[name]")
+        if i.get("type", "text") in {"hidden", "text", "password"}
+    }
+    with client_certificate(key, cert, chain) as pem:
+        response = _follow(
+            session,
+            config,
+            session.post(
+                action, data=fields, cert=pem, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT
+            ),
+            cert=pem,
+        )
+    soup = BeautifulSoup(response.text, "html.parser")
+    field = soup.select_one("#txtAcessoCodigo")
+    if field is not None:
+        form = field.find_parent("form")
+        button = soup.select_one("#btnValidar")
+        action_match = re.search(r"Submit\(['\"]([^'\"]+)", button.get("onclick", "")) if button else None
+        if form is None or action_match is None or action_match[1] != "2fa_validar":
+            raise RuntimeError("TJMS TOTP form was not recognized")
+        action = urllib.parse.urljoin(response.url, form.get("action") or "index.php")
+        require_login_url(config, action)
+        parts = urllib.parse.urlsplit(action)
+        if parts.path not in {"/index.php", config.root + "index.php"} or parts.query:
+            raise RuntimeError("TJMS TOTP form returned an unexpected action")
+        fields = {i["name"]: i.get("value", "") for i in form.select('input[type="hidden"][name]')}
+        fields.pop("chkLiberarDispositivo", None)
+        fields.update(hdnAcao=action_match[1])
+        fields[field["name"]] = totp(account).now()
+        response = _follow(
+            session,
+            config,
+            session.post(action, data=fields, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT),
+        )
+    if not is_panel(response.url) or not any(c.name == "PHPSESSID" for c in session.cookies.jar):
+        raise RuntimeError("TJMS certificate login did not reach the panel")
+    return session, response.text, response.url
+
+
 def cert_login(portal, *, pin=None, p12_path=None, session=None):
     """Return ``(session, panel_html, panel_url)`` like the browser login, using the A1 certificate."""
     config = portals.eproc(portal)
@@ -238,6 +294,8 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
     account = portal_totp_account(config)
     key, cert, chain = native_signer.load_a1(p12_path, pin)
     session = session or requests.Session()
+    if config.key == "tjms-eproc-1g":
+        return _tjms_login(session, config, key, cert, chain, account)
     with client_certificate(key, cert, chain) as pem:
         page = _login_page(session, config)
         if _classic_certificate_url(page, config):

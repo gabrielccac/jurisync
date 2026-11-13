@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from jurisync import portals
@@ -79,11 +80,67 @@ class CertificateLoginTest(unittest.TestCase):
         with self.assertRaises(UnsafeUrlError):
             certificate._certificate_url(button, LOGIN, self.config)
 
+    def test_tjms_certificate_host_is_bound_to_its_exact_login_path(self):
+        config = portals.Portal(
+            "tjms-eproc-1g", "eproc", "TJMS", "1g", "eproc1g.tjms.jus.br", "/eproc/", "certificate_totp"
+        )
+        allowed = "https://mtls.tjms.jus.br/priv/login_cert.php?state=example"
+        certificate.require_login_url(config, allowed)
+        for url in (allowed.replace("https:", "http:"), allowed.replace("login_cert.php", "other.php")):
+            with self.subTest(url=url), self.assertRaises(UnsafeUrlError):
+                certificate.require_login_url(config, url)
+        with self.assertRaises(UnsafeUrlError):
+            certificate.require_login_url(self.config, allowed)
+
     def test_forms_are_read_with_their_hidden_fields(self):
         html = '<form id="kc-x509-login-info" action="/auth?a=1"><input name="login" value="x"><input></form>'
         action, fields = certificate._form(html, LOGIN, self.config, "kc-x509-login-info")
         self.assertEqual((action, fields), ("https://eproc-sso.trf4.jus.br/auth?a=1", {"login": "x"}))
         self.assertEqual(certificate._form(html, LOGIN, self.config, "other"), (None, {}))
+
+    def test_tjms_local_certificate_and_otp_do_not_release_device(self):
+        config = portals.eproc("tjms-eproc-1g")
+        page = SimpleNamespace(
+            status_code=200,
+            url=config.login_url,
+            headers={},
+            text='<form id="frmLogin"><input name="hdnAcao" type="hidden" value="login"></form>'
+            '<input id="destino_v2_cert" value="externo_controlador.php?acao=login_cert">',
+        )
+        otp = SimpleNamespace(
+            status_code=200,
+            url=config.url("externo_controlador.php?acao=2fa_codigo"),
+            headers={},
+            text='<form id="frmLogin" action="index.php">'
+            '<input id="txtAcessoCodigo" name="txtAcessoCodigo">'
+            '<input name="hdnAcao" type="hidden" value="2fa_codigo">'
+            '<input name="chkLiberarDispositivo" type="checkbox" value="1" checked>'
+            '<input name="chkLiberarDispositivo" type="hidden" value="1">'
+            '<button id="btnValidar" onclick="Submit(\'2fa_validar\')">Validar</button></form>',
+        )
+        panel = SimpleNamespace(
+            status_code=200,
+            url=config.url("controlador.php?acao=painel_adv_listar"),
+            headers={},
+            text='<form id="frmPainelAdvogado"></form>',
+        )
+        session = mock.Mock()
+        session.get.return_value = page
+        session.post.side_effect = [otp, panel]
+        session.cookies.jar = [SimpleNamespace(name="PHPSESSID")]
+        with (
+            mock.patch.object(certificate, "client_certificate") as pem,
+            mock.patch.object(certificate, "totp") as code,
+        ):
+            pem.return_value.__enter__.return_value = ("cert.pem", "key.pem")
+            code.return_value.now.return_value = "123456"
+            self.assertEqual(
+                certificate._tjms_login(session, config, None, None, [], {}), (session, panel.text, panel.url)
+            )
+        self.assertEqual(session.post.call_count, 2)
+        submitted = session.post.call_args_list[1].kwargs["data"]
+        self.assertEqual(submitted, {"hdnAcao": "2fa_validar", "txtAcessoCodigo": "123456"})
+        self.assertNotIn("chkLiberarDispositivo", submitted)
 
     def test_a_portal_opts_into_the_certificate_with_its_own_flag(self):
         with mock.patch.dict("os.environ", {"PJE_A1_P12": "/a1.p12", "TRF4_2G_CERT": "true"}, clear=True):

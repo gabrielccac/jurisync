@@ -140,6 +140,7 @@ method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT3_2G_2FA_DATA|TRT3_2G_2FA_QR"]
 
 # Validados em 13/11 pelo Jurandir (branch feat/trt-4-9-2-tjms).
+
 [trt4-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT4_1G_2FA_DATA|TRT4_1G_2FA_QR"]
