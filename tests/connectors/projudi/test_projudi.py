@@ -149,6 +149,7 @@ class PortalRegistryTest(unittest.TestCase):
     def test_projudi_portals_never_shadow_other_systems(self):
         self.assertEqual(portals.PORTALS["tjpr-1g"].system, "eproc")
         self.assertEqual(portals.PORTALS["tjpi-1g"].system, "pje")
+        self.assertEqual(portals.PORTALS["tjpr-1g"].auth, "certificate_totp")
         self.assertEqual([p.key for p in portals.for_process("0000001-23.2026.8.16.0001")], ["tjpr-1g", "tjpr-2g"])
 
 

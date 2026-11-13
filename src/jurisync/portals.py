@@ -229,7 +229,7 @@ PORTALS = {
                region="12", justice="8", guess_by_number=False),
         Portal("tjrj-eproc-1g", "eproc", "TJRJ", "1g", "eproc1g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_1G",
                region="19", justice="8"),
-        Portal("tjpr-1g", "eproc", "TJPR", "1g", "eproc1g.tjpr.jus.br", "/eproc/", "browser_totp", "TJPR_1G",
+        Portal("tjpr-1g", "eproc", "TJPR", "1g", "eproc1g.tjpr.jus.br", "/eproc/", "certificate_totp", "TJPR_1G",
                region="16", justice="8"),
         Portal("tjpr-2g", "eproc", "TJPR", "2g", "eproc2g.tjpr.jus.br", "/eproc/", "certificate_totp", "TJPR_2G",
                region="16", justice="8"),
