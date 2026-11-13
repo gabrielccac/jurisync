@@ -99,9 +99,12 @@ class Session:
         return Response(404, {"codigoErro": "X"})
 
 
+TRT_PORTALS = ["trt12-1g", "trt12-2g"]
+
+
 def test_only_the_judicial_portals_use_the_rest_flavor():
     kz_portals = {key for key in portals.keys("pje") if portals.pje(key).kz}
-    assert kz_portals == {"trt7-1g", "trt7-2g", "trt18-1g", "trt18-2g", "tst"}
+    assert kz_portals == {"trt7-1g", "trt7-2g", "trt18-1g", "trt18-2g", "trt12-1g", "trt12-2g", "tst"}
     for key in ("trf5-1g", "trf5-2g", "tjce-1g", "trf1-1g", "trf3-1g", "tjpe-1g"):
         assert not portals.pje(key).kz
 
@@ -427,3 +430,13 @@ def test_fixtures_carry_no_real_looking_cpf():
     for path in FIXTURES.glob("*.json"):
         for cpf in re.findall(r"\d{3}\.\d{3}\.\d{3}-\d{2}", path.read_text()):
             assert len(set(re.sub(r"\D", "", cpf))) == 1, f"{path.name} has a CPF that is not an obvious placeholder"
+
+
+def test_trt_portals_use_the_national_pattern():
+    for key in TRT_PORTALS:
+        number, grade = key.removeprefix("trt").split("-")
+        config = portals.pje(key)
+        assert (config.host, config.region, config.justice, config.kz) == (f"pje.trt{number}.jus.br", f"{int(number):02d}", "5", True)
+        assert config.root == ("/primeirograu/" if grade == "1g" else "/segundograu/")
+        assert config.env_prefix == f"TRT{number}_{grade.upper()}"
+        assert portals.pje(key).auth == "certificate_totp"

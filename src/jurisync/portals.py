@@ -165,6 +165,14 @@ PORTALS = {
             region="18", justice="5", flavor="kz",
         ),
         Portal(
+            "trt12-1g", "pje", "TRT12", "1g", "pje.trt12.jus.br", "/primeirograu/", "certificate_totp", "TRT12_1G",
+            region="12", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt12-2g", "pje", "TRT12", "2g", "pje.trt12.jus.br", "/segundograu/", "certificate_totp", "TRT12_2G",
+            region="12", justice="5", flavor="kz",
+        ),
+        Portal(
             "tst", "pje", "TST", "2g", "pje.tst.jus.br", "/tst/", "certificate_totp", "TST",
             region="00", justice="5", guess_by_number=False, flavor="kz",
         ),
