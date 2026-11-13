@@ -40,6 +40,7 @@ class Portal:
     origins: tuple[str, ...] = field(default=())  # CNJ "OOOO" prefixes served by this portal
     wired: bool = True  # False: recognized, but no connector yet
     guess_by_number: bool = True  # False: never suggested from a process number alone (only a link host picks it)
+    login_path: str = ""  # Projudi: the page that starts the login when the flavor's default entry is not it
     flavor: str = ""  # Projudi/e-SAJ generation (adapter): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST)
     impersonate: str = ""  # curl_cffi profile override; "" keeps the global default (see core.http.IMPERSONATE)
 
@@ -64,7 +65,7 @@ class Portal:
             return self.url("sajcas/login")
         if self.system == "projudi":
             entry = {"tjgo-servlet": "LogOn", "legacy-keycloak": "autenticacao.do"}  # the Keycloak entry starts the SSO
-            return self.url(entry.get(self.flavor, "usuario/logon.do?actionType=inicio"))
+            return self.url(self.login_path or entry.get(self.flavor, "usuario/logon.do?actionType=inicio"))
         if self.system == "eproc":
             # The Eproc root redirects to the SSO login. The externo_controlador.php
             # path is 403-blocked on some deployments (e.g. TJRS behind Cloudflare).
@@ -325,7 +326,8 @@ PORTALS = {
                "TJPR_PROJUDI_1G", region="16", justice="8", wired=False, guess_by_number=False,
                flavor="legacy-keycloak"),
         Portal("tjrr-1g", "projudi", "TJRR", "1g", "projudi.tjrr.jus.br", "/projudi/", "password_totp", "TJRR_1G",
-               region="23", justice="8", wired=False, guess_by_number=False, flavor="legacy-keycloak"),
+               legacy_env_prefixes=("TJRR_PROJUDI",), region="23", justice="8", wired=False, guess_by_number=False,
+               flavor="legacy-keycloak", login_path="tjpr/autenticacao.do"),
         Portal("tjam-1g", "projudi", "TJAM", "1g", "projudi.tjam.jus.br", "/projudi/", "password", "TJAM_1G",
                region="04", justice="8", wired=False, guess_by_number=False, flavor="legacy-local"),
         Portal("tjpi-projudi-1g", "projudi", "TJPI", "1g", "projudi.tjpi.jus.br", "/projudi/", "password",

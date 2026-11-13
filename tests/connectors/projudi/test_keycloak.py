@@ -129,9 +129,10 @@ class RegistryTest(unittest.TestCase):
         self.assertNotIn("legacy-keycloak", server.ADAPTERS)  # no MCP tool reaches it until a live smoke proves it
         self.assertEqual(portals.PORTALS[KEY].login_url, APP + "autenticacao.do")
 
-    def test_other_keycloak_courts_have_no_configuration(self):
-        with self.assertRaisesRegex(NotImplementedError, "no Keycloak configuration"):
-            keycloak.sso_for(portals.PORTALS["tjrr-1g"])
+    def test_courts_of_other_generations_have_no_keycloak_configuration(self):
+        for key in ("tjam-1g", "tjpi-projudi-1g"):
+            with self.subTest(key=key), self.assertRaisesRegex(NotImplementedError, "no Keycloak configuration"):
+                keycloak.sso_for(portals.PORTALS[key])
 
     def test_the_adapter_has_no_certificate_login(self):
         self.assertFalse(hasattr(keycloak, "load_certificate"))
@@ -368,6 +369,132 @@ class ReadsTest(unittest.TestCase):
             with self.subTest(call=call), self.assertRaises(keycloak.DocumentsBlocked):
                 call()
         self.assertEqual(session.calls, [])
+
+
+# --- TJRR: same generation, Keycloak without /auth, its own entry page and customer prefix ---------------------------
+
+RR_KEY = "tjrr-1g"
+RR_APP = "https://projudi.tjrr.jus.br/projudi/"
+RR_SSO = "https://keycloak.tjrr.jus.br/realms/projudi/"
+RR_LOGIN_ACTION = RR_SSO + "login-actions/authenticate?session_code=S1&execution=E1&client_id=projudi-client&tab_id=T1"
+RR_OTP_ACTION = RR_SSO + "login-actions/authenticate?session_code=S2&execution=E2&client_id=projudi-client&tab_id=T2"
+RR_ENV = {
+    "TJRR_PROJUDI_USERNAME": USERNAME,
+    "TJRR_PROJUDI_PASSWORD": PASSWORD,
+    "TJRR_PROJUDI_2FA_DATA": f"otpauth://totp/PROJUDI%20TJRR?secret={OTP_SECRET}",
+}
+
+
+def rr_routes(*, credentials_result="otp", login_page=None):
+    login_page = login_page or LOGIN_PAGE.replace(LOGIN_ACTION, RR_LOGIN_ACTION)
+    otp_page = OTP_PAGE.replace(OTP_ACTION, RR_OTP_ACTION)
+    pages = {"otp": otp_page, "login": login_page, "captcha": CAPTCHA_PAGE}
+
+    def routes(method, url, kwargs):
+        if url == RR_APP + "tjpr/autenticacao.do":
+            return response(302, location=RR_SSO + "protocol/openid-connect/auth?client_id=projudi-client")
+        if url.startswith(RR_SSO + "protocol/openid-connect/auth"):
+            return response(200, login_page)
+        if url == RR_LOGIN_ACTION:
+            return response(200, pages[credentials_result])
+        if url == RR_OTP_ACTION:
+            return response(302, location=RR_APP + "tjpr/autenticacao.do?code=C&state=S")
+        if url.startswith(RR_APP + "tjpr/autenticacao.do?code="):
+            return response(302, location=RR_APP)
+        if url == RR_APP:
+            return response(200, FRAMESET)
+        if url == RR_APP + "home.do":
+            return response(200, "<a href='x?_tj=1'>x</a>")
+        raise AssertionError(f"unexpected {method} {url}")
+
+    return routes
+
+
+def wired_rr(test):
+    patcher = mock.patch.dict(portals.PORTALS, {RR_KEY: dataclasses.replace(portals.PORTALS[RR_KEY], wired=True)})
+    env = mock.patch.dict(os.environ, RR_ENV)
+    test.addCleanup(patcher.stop)
+    test.addCleanup(env.stop)
+    patcher.start()
+    env.start()
+
+
+def migration_export(accounts):
+    """A Google Authenticator export payload (protobuf, base64) for ``[(issuer, name, secret_bytes)]``."""
+    import base64
+
+    def field(number, payload):
+        return bytes([number << 3 | 2, len(payload)]) + payload
+
+    def varint(number, value):
+        return bytes([number << 3, value])
+
+    data = b""
+    for issuer, name, secret in accounts:
+        data += field(
+            1,
+            field(1, secret)
+            + field(2, name.encode())
+            + field(3, issuer.encode())
+            + varint(4, 1)
+            + varint(5, 1)
+            + varint(6, 2),
+        )
+    return "otpauth-migration://offline?data=" + base64.urlsafe_b64encode(data).decode()
+
+
+class TjrrTest(unittest.TestCase):
+    def setUp(self):
+        wired_rr(self)
+
+    def test_login_uses_the_tjrr_entry_and_a_realm_without_auth_and_the_projudi_customer_prefix(self):
+        self.assertEqual(portals.PORTALS[RR_KEY].login_url, RR_APP + keycloak.SSO[RR_KEY].entry)
+        session = FakeSession(rr_routes())
+        keycloak.ADAPTER.login(RR_KEY, session=session)
+        self.assertEqual(session.calls[0][1], RR_APP + "tjpr/autenticacao.do")
+        credentials, otp = [call[2]["data"] for call in session.posts()]
+        self.assertEqual(credentials, {"credentialId": "", "username": USERNAME, "password": PASSWORD})
+        self.assertEqual(set(otp), {"credentialId", "otp"})
+        self.assertEqual(len(session.posts()), 2)
+
+    def test_an_sso_form_under_the_tjpr_style_auth_prefix_is_refused_for_tjrr(self):
+        wrong = LOGIN_PAGE.replace(LOGIN_ACTION, "https://keycloak.tjrr.jus.br/auth/realms/projudi/login-actions/x")
+        with self.assertRaises(UnsafeUrlError):
+            keycloak.ADAPTER.login(RR_KEY, session=FakeSession(rr_routes(login_page=wrong)))
+
+    def test_wrong_password_and_captcha_stop_after_one_post(self):
+        for result, error in (("login", LoginRejected), ("captcha", keycloak.HumanVerificationRequired)):
+            with self.subTest(result=result):
+                session = FakeSession(rr_routes(credentials_result=result))
+                with self.assertRaises(error):
+                    keycloak.ADAPTER.login(RR_KEY, session=session)
+                self.assertEqual(len(session.posts()), 1)
+
+    def test_missing_customer_credentials_send_nothing(self):
+        with mock.patch.dict(os.environ, {"TJRR_PROJUDI_PASSWORD": ""}):
+            session = FakeSession(rr_routes())
+            with self.assertRaisesRegex(keycloak.MissingCredentials, "TJRR_1G_PASSWORD"):
+                keycloak.ADAPTER.login(RR_KEY, session=session)
+            self.assertEqual(session.calls, [])
+
+    def test_the_explicit_profile_is_chosen_and_an_ambiguous_export_is_never_guessed(self):
+        export = migration_export(
+            [("Projudi", "12345678901", b"AAAAAAAAAA"), ("PROJUDI TJRR", "12345678901", b"BBBBBBBBBB")]
+        )
+        config = portals.PORTALS[RR_KEY]
+        with mock.patch.dict(os.environ, {"TJRR_PROJUDI_2FA_DATA": export}):
+            with self.assertRaisesRegex(ValueError, "profile"):
+                keycloak.otp_account(config)
+            with mock.patch.dict(os.environ, {"TJRR_PROJUDI_OTP_PROFILE_MATCH": "PROJUDI TJRR"}):
+                account = keycloak.otp_account(config)
+        self.assertEqual(account["issuer"], "PROJUDI TJRR")
+        import base64
+
+        self.assertEqual(base64.b32decode(account["secret"]), b"BBBBBBBBBB")
+
+    def test_documents_stay_blocked(self):
+        with self.assertRaises(keycloak.DocumentsBlocked):
+            keycloak.ADAPTER.download(FakeSession(lambda *_: self.fail("no request")), RR_KEY, "1", "h")
 
 
 if __name__ == "__main__":
