@@ -16,7 +16,9 @@ O conector recusa qualquer URL que não seja https; agora `esaj.base.upgrade_sch
 
 - Login com o A1: `CASTGC` emitido; `esaj/api/auth/session` com `usuarioLogado: true` (24 OABs, sem código por e-mail).
 - Leituras: `esaj_get_session`, `intimacoes` (19 itens), `audiencias` (1), `peticoes` (2) e caixa postal (20 itens): ok.
-- Leitura de processo (`load_process`, `cpopg`, documentos): **não validada ao vivo**. O limite de 3 tentativas de login
-  foi consumido (1ª: trava do redirect http; 2ª: login; 3ª: leituras acima). O adaptador `tjal.py` usa `cpopg` como o
-  TJSP; a consulta pública pode exigir CAPTCHA, que não é contornado.
+- Leitura de processo (`load_process`, consulta `cpopg`): ok em um 4º login, autorizado só para isso. Um processo da
+  conta (de uma intimação) foi lido por HTTP puro (`consultationSource: http`), sem CAPTCHA: campos, 2 partes e 51
+  movimentações. Nenhum documento foi aberto e nenhuma ciência foi dada. O adaptador `tjal.py` (`cpopg`, como o TJSP)
+  não precisou de mudança; a rota extra de movimentações do TJSP (`carregarMovimentacoesAjax`) não é usada no TJAL.
+  Documentos (inventário/PDF) seguem não validados.
 - 2º grau (`cposg`) não está cadastrado.
