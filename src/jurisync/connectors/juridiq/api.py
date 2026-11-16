@@ -1,7 +1,7 @@
 """Juridiq REST client: cached bearer session and named operations.
 
-The bearer token is cached per account in a private file and refreshed once
-on a 401. Writes require JURIDIQ_ALLOW_WRITES=true; the
+The bearer token is cached per account in a private file, kept in memory by the client that read it, and refreshed
+once on a 401. Each client reuses one HTTP session. Writes require JURIDIQ_ALLOW_WRITES=true; the
 POST /generic-tables query is a read.
 """
 
@@ -9,16 +9,20 @@ import base64
 import hashlib
 import json
 import os
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from curl_cffi import requests
+from curl_cffi.requests.exceptions import RequestException
 
 from jurisync.core import credentials
 from jurisync.paths import user_cache
 
 MAX_PAGINATION_PAGES = 10_000
+# The unread listing filters on the client, so a long backlog of read items would walk the whole account.
+MAX_UNREAD_PAGES = 20
 
 
 class JuridiqError(RuntimeError):
@@ -157,14 +161,39 @@ def _template_body(payload):
     return body
 
 
-def _send(method, url, headers, body):
-    with requests.Session() as session:
-        return session.request(method, url, headers=headers, data=body, allow_redirects=False, timeout=60)
+def _digits(value):
+    return "".join(character for character in str(value) if character.isdigit())
+
+
+def _record(payload):
+    """The record inside a single-item answer, with or without a ``data`` envelope."""
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        return payload["data"]
+    return payload if isinstance(payload, dict) else {}
 
 
 class JuridiqApi:
-    def __init__(self, send=_send):
-        self._send = send
+    def __init__(self, send=None):
+        self._http = None
+        self._lock = threading.Lock()
+        self._tokens = {}  # (session file, API base) -> {"token", "expiresAt"}: one entry per account and office
+        self._send = send or self._session_send
+
+    def _session_send(self, method, url, headers, body):
+        """One HTTP session per client, opened on first use. Authentication is the bearer header only: cookies
+        are discarded, so nothing an answer sets is carried into another office's request."""
+        with self._lock:
+            if self._http is None:
+                self._http = requests.Session()
+        return self._http.request(
+            method, url, headers=headers, data=body, allow_redirects=False, timeout=60, discard_cookies=True
+        )
+
+    def close(self):
+        with self._lock:
+            http, self._http = self._http, None
+        if http is not None:
+            http.close()
 
     # -- session -------------------------------------------------------------
 
@@ -204,19 +233,26 @@ class JuridiqApi:
         return token
 
     def token(self, force_refresh=False):
+        """The account's bearer token: from memory, else the private file, else a login. The file is read once per
+        account, not on every request."""
         settings = config()
-        try:
-            cached = json.loads(settings["sessionFile"].read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            cached = None
-        if (
-            not force_refresh
-            and isinstance(cached, dict)
-            and cached.get("baseUrl") == settings["apiBaseUrl"]
-            and is_fresh(cached)
-        ):
-            return cached["token"]
-        return self._login(settings)
+        key = (str(settings["sessionFile"]), settings["apiBaseUrl"])
+        if not force_refresh:
+            held = self._tokens.get(key)
+            # Deleting the file (a logout, or another process dropping a refused token) also drops the copy here.
+            if held and is_fresh(held) and settings["sessionFile"].exists():
+                return held["token"]
+            try:
+                cached = json.loads(settings["sessionFile"].read_text(encoding="utf-8"))
+            except (FileNotFoundError, ValueError):
+                cached = None
+            if isinstance(cached, dict) and cached.get("baseUrl") == settings["apiBaseUrl"] and is_fresh(cached):
+                self._tokens[key] = {"token": cached["token"], "expiresAt": cached.get("expiresAt")}
+                return cached["token"]
+        self._tokens.pop(key, None)
+        token = self._login(settings)
+        self._tokens[key] = {"token": token, "expiresAt": jwt_expiry(token)}
+        return token
 
     def request(self, path, method="GET", body=None):
         settings = config()
@@ -293,12 +329,19 @@ class JuridiqApi:
         return self.json(f"/publication?{query}")
 
     def _all_pages(self, fetch_page, *, limit=100, maxResults=None, resource, select=lambda item: True):
+        return self._walk_pages(fetch_page, limit=limit, maxResults=maxResults, resource=resource, select=select)[0]
+
+    def _walk_pages(self, fetch_page, *, limit=100, maxResults=None, maxPages=None, resource, select=lambda item: True):
+        """Walk a listing page by page. Returns (results, truncated, pages read); ``truncated`` means ``maxPages``
+        stopped the walk while the listing still had pages."""
         size = min(100, int(limit)) if limit and limit >= 1 else None
         if size is None:
             raise ValueError("limit must be a positive number")
         maximum = float("inf") if maxResults is None else int(maxResults)
         results, ids, page = [], set(), 1
         while len(results) < maximum:
+            if maxPages is not None and page > maxPages:
+                return results, True, page - 1
             if page > MAX_PAGINATION_PAGES:
                 raise JuridiqError(f"Juridiq {resource} pagination exceeded {MAX_PAGINATION_PAGES} pages.")
             batch = fetch_page(page, size)
@@ -314,27 +357,32 @@ class JuridiqApi:
             if len(batch) < size:
                 break
             page += 1
-        return results
+        return results, False, page
+
+    @staticmethod
+    def _unread(item):
+        return item.get("readAt") is None and item.get("isHandled") is not True
 
     def all_unread_publications(self, *, limit=100, maxResults=None):
-        def unread(item):
-            return item.get("readAt") is None and item.get("isHandled") is not True
-
         return self._all_pages(
             lambda page, size: payload_data(self.publication_page(page=page, limit=size)),
             limit=limit,
             maxResults=maxResults,
             resource="publication",
-            select=unread,
+            select=self._unread,
         )
 
-    def all_publications(self, *, limit=100, maxResults=None):
-        return self._all_pages(
-            lambda page, size: payload_data(self.publication_page(page=page, limit=size, unreadOnly=False)),
+    def unread_publications(self, *, limit=100, maxResults=None, maxPages=MAX_UNREAD_PAGES):
+        """Unread publications from at most ``maxPages`` pages, saying when the cap cut the listing short."""
+        results, truncated, pages = self._walk_pages(
+            lambda page, size: payload_data(self.publication_page(page=page, limit=size)),
             limit=limit,
             maxResults=maxResults,
+            maxPages=maxPages,
             resource="publication",
+            select=self._unread,
         )
+        return {"result": results, "truncated": truncated, "pagesRead": pages}
 
     def get_publication(self, publication_id):
         return self.json(f"/publication/{_segment(publication_id, 'publicationId')}")
@@ -380,14 +428,42 @@ class JuridiqApi:
         query = _query([], tagId=tagId, content=content, instance=instance)
         return self.json(f"/lawSuit/movements/{_segment(lawsuit_id, 'lawSuitId')}{'?' + query if query else ''}")
 
+    def _create(self, path, payload, what):
+        """POST a new record once. When the outcome is unknown (no answer, or a 5xx) the error says so: the record
+        may exist, and a blind retry would duplicate it."""
+        unconfirmed = (
+            f"Juridiq did not confirm the request: the {what} MAY have been created. Search for it before retrying; "
+            "do not repeat the call without checking."
+        )
+        try:
+            return self.json(path, "POST", payload)
+        except RequestException as error:
+            raise JuridiqError(f"{unconfirmed} Cause: {type(error).__name__}.") from error
+        except JuridiqError as error:
+            if error.status is None or not 500 <= error.status <= 599:
+                raise
+            raise JuridiqError(f"{unconfirmed} Cause: HTTP {error.status}.", error.status, error.payload) from error
+
     def create_lawsuit(self, payload):
-        return self.json("/lawSuit/", "POST", _object(payload, "lawSuit payload"))
+        return self._create("/lawSuit/", _object(payload, "lawSuit payload"), "lawsuit")
 
     def update_lawsuit(self, lawsuit_id, patch):
         return self.json(f"/lawSuit/{_segment(lawsuit_id, 'lawSuitId')}", "PATCH", _object(patch, "lawSuit patch"))
 
-    def delete_lawsuit(self, lawsuit_id):
+    def delete_lawsuit(self, lawsuit_id, *, expect_process_number="", dry_run=False):
+        """Delete one lawsuit. ``expect_process_number`` refuses the call unless the lawsuit has that number
+        (punctuation ignored); ``dry_run`` returns the lawsuit that would be deleted and deletes nothing."""
         _segment(lawsuit_id, "lawSuitId")
+        if expect_process_number or dry_run:
+            record = _record(self.get_lawsuit(lawsuit_id))
+            number = str(record.get("processNumber") or "")
+            if expect_process_number and _digits(expect_process_number) != _digits(number):
+                raise ValueError(
+                    f"Lawsuit {lawsuit_id} has process number {number or '(none)'}, not the expected one; "
+                    "refusing to delete"
+                )
+            if dry_run:
+                return {"dryRun": True, "action": "delete", "lawSuitId": lawsuit_id, "wouldDelete": record}
         return self.json("/lawSuit/", "DELETE", {"id": [lawsuit_id]})
 
     # -- office --------------------------------------------------------------
@@ -491,13 +567,24 @@ class JuridiqApi:
         return self.json(f"/comment/?taskId={_segment(task_id, 'taskId')}")
 
     def create_task(self, payload):
-        return self.json("/task/", "POST", _object(payload, "task payload"))
+        return self._create("/task/", _object(payload, "task payload"), "task")
 
     def update_task(self, task_id, patch):
         return self.json(f"/task/{_segment(task_id, 'taskId')}", "PATCH", _object(patch, "task patch"))
 
-    def delete_task(self, task_id):
+    def delete_task(self, task_id, *, expect_title="", dry_run=False):
+        """Delete one task. ``expect_title`` refuses the call unless the task's title contains it (case ignored);
+        ``dry_run`` returns the task that would be deleted and deletes nothing."""
         _segment(task_id, "taskId")
+        if expect_title or dry_run:
+            record = _record(self.get_task(task_id))
+            title = str(record.get("title") or "")
+            if expect_title and expect_title.casefold() not in title.casefold():
+                raise ValueError(
+                    f"Task {task_id} is titled {title!r}, which lacks the expected text; refusing to delete"
+                )
+            if dry_run:
+                return {"dryRun": True, "action": "delete", "taskId": task_id, "wouldDelete": record}
         return self.json("/task/", "DELETE", {"id": [task_id]})
 
     def events(self, *, page=1, limit=50, **filters):
@@ -530,4 +617,4 @@ class JuridiqApi:
         return self.json(f"/event/{_segment(event_id, 'eventId')}")
 
     def create_event(self, payload):
-        return self.json("/event/", "POST", _object(payload, "event payload"))
+        return self._create("/event/", _object(payload, "event payload"), "event")

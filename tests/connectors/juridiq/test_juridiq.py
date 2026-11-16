@@ -266,12 +266,12 @@ class ClientTest(JuridiqTestCase):
             three = "limit=100" in parts.query
             return {"data": [{"id": "pub-1"}, {"id": "pub-2"}] + ([{"id": "pub-3"}] if three else [])}
 
-        fake = FakeJuridiq(routes={"/publication": page})
+        fake = FakeJuridiq(routes={"/lawSuit": page})
         api = JuridiqApi(send=fake)
-        self.assertEqual(api.all_publications(limit=200, maxResults=2), [{"id": "pub-1"}, {"id": "pub-2"}])
+        self.assertEqual(api.all_lawsuits(limit=200, maxResults=2), [{"id": "pub-1"}, {"id": "pub-2"}])
         self.assertIn("limit=100", fake.requests[0]["query"])
         with self.assertRaisesRegex(RuntimeError, "duplicate/invalid IDs"):
-            api.all_publications(limit=2)
+            api.all_lawsuits(limit=2)
         self.assertEqual(len(fake.requests), 3)
 
     def test_unread_pagination_filters_handled_items(self):
@@ -294,6 +294,138 @@ class ClientTest(JuridiqTestCase):
         calls.clear()
         self.assertEqual([item["id"] for item in api.all_unread_publications(limit=2, maxResults=1)], ["unread-1"])
         self.assertEqual(calls, [1])
+
+
+class SessionReuseTest(JuridiqTestCase):
+    def test_token_file_is_read_once_and_kept_in_memory(self):
+        fake = FakeJuridiq()
+        api = JuridiqApi(send=fake)
+        api.request("/user/me")
+        with mock.patch.object(Path, "read_text", side_effect=AssertionError("token file read again")):
+            for _ in range(3):
+                api.request("/user/me")
+        self.assertEqual(fake.logins, 1)
+        self.assertEqual(len({request["auth"] for request in fake.requests}), 1)
+
+    def test_deleting_the_file_or_changing_the_account_drops_the_memory_copy(self):
+        fake = FakeJuridiq()
+        api = JuridiqApi(send=fake)
+        first = api.token()
+        self.session_file.unlink()
+        self.assertNotEqual(api.token(), first)
+        self.assertEqual(fake.logins, 2)
+        other = self.session_file.with_name("other.json")
+        with mock.patch.dict(os.environ, {"JURIDIQ_SESSION_FILE": str(other)}):
+            api.token()
+        self.assertEqual(fake.logins, 3)  # another account's file: its own entry, not the first one's token
+
+    def test_one_http_session_per_client_without_cookies(self):
+        api = JuridiqApi()
+        self.addCleanup(api.close)
+        with mock.patch("jurisync.connectors.juridiq.api.requests.Session") as session:
+            session.return_value.request.return_value = Response({"data": []})
+            self.session_file.write_text(
+                json.dumps({"token": "t", "baseUrl": "https://api.example.invalid", "expiresAt": None})
+            )
+            api.request("/user/me")
+            api.request("/user/me")
+        self.assertEqual(session.call_count, 1)
+        self.assertEqual(session.return_value.request.call_count, 2)
+        self.assertTrue(session.return_value.request.call_args.kwargs["discard_cookies"])
+        api.close()
+        session.return_value.close.assert_called_once()
+
+
+class GuardTest(JuridiqTestCase):
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.dict(os.environ, {"JURIDIQ_ALLOW_WRITES": "true"})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_unread_listing_stops_at_the_page_cap_and_says_so(self):
+        def page(parts):
+            number = int(dict(item.split("=") for item in parts.query.split("&"))["page"])
+            return {"data": [{"id": f"p{number}-{n}", "readAt": "2026-09-01" if n else None} for n in range(2)]}
+
+        fake = FakeJuridiq(routes={"/publication": page})
+        api = JuridiqApi(send=fake)
+        result = api.unread_publications(limit=2, maxPages=3)
+        self.assertEqual([item["id"] for item in result["result"]], ["p1-0", "p2-0", "p3-0"])
+        self.assertEqual((result["truncated"], result["pagesRead"], len(fake.requests)), (True, 3, 3))
+        short = JuridiqApi(send=FakeJuridiq(routes={"/publication": {"data": [{"id": "a"}]}})).unread_publications()
+        self.assertEqual((short["truncated"], len(short["result"])), (False, 1))
+        capped = api.unread_publications(limit=2, maxResults=1, maxPages=3)
+        self.assertEqual((len(capped["result"]), capped["truncated"]), (1, False))
+
+    def test_delete_guards_and_dry_run(self):
+        routes = {
+            "/task/t-1": {"id": "t-1", "title": "Contestar ação"},
+            "/lawSuit/l-1": {"data": {"id": "l-1", "processNumber": "0800123-45.2026.4.05.8300"}},
+        }
+        fake = FakeJuridiq(routes=routes)
+        api = JuridiqApi(send=fake)
+        preview = api.delete_task("t-1", dry_run=True)
+        self.assertEqual((preview["dryRun"], preview["wouldDelete"]["title"]), (True, "Contestar ação"))
+        self.assertEqual(api.delete_lawsuit("l-1", dry_run=True)["wouldDelete"]["id"], "l-1")
+        with self.assertRaisesRegex(ValueError, "lacks the expected text"):
+            api.delete_task("t-1", expect_title="Recurso")
+        with self.assertRaisesRegex(ValueError, "not the expected one"):
+            api.delete_lawsuit("l-1", expect_process_number="0800999-45.2026.4.05.8300")
+        self.assertEqual([r["method"] for r in fake.requests if r["method"] != "GET"], [])
+        api.delete_task("t-1", expect_title="contestar")
+        api.delete_lawsuit("l-1", expect_process_number="08001234520264058300")
+        api.delete_task("t-2")  # no guard asked: no extra read, as before
+        deletes = [(r["path"], r["body"]) for r in fake.requests if r["method"] == "DELETE"]
+        self.assertEqual(
+            deletes, [("/task/", {"id": ["t-1"]}), ("/lawSuit/", {"id": ["l-1"]}), ("/task/", {"id": ["t-2"]})]
+        )
+        self.assertNotIn("/task/t-2", [r["path"] for r in fake.requests])
+
+    def test_unconfirmed_creation_says_the_record_may_exist(self):
+        from curl_cffi.requests.exceptions import Timeout
+
+        from jurisync.connectors.juridiq.api import JuridiqError
+
+        calls = []
+
+        def timeout(method, url, headers, body):
+            if url.endswith("/auth/login"):
+                return FakeJuridiq()(method, url, headers, body)
+            calls.append(method)
+            raise Timeout("no answer")
+
+        with self.assertRaisesRegex(JuridiqError, "task MAY have been created.*Search for it before retrying"):
+            JuridiqApi(send=timeout).create_task({"title": "x"})
+        self.assertEqual(calls, ["POST"])  # never replayed
+        api = JuridiqApi(send=FakeJuridiq(statuses=[502]))
+        with self.assertRaisesRegex(JuridiqError, "event MAY have been created"):
+            api.create_event({"title": "x"})
+        refused = JuridiqApi(send=FakeJuridiq(routes={"/lawSuit/": {"message": "inválido"}}, statuses=[422]))
+        with self.assertRaises(JuridiqError) as caught:
+            refused.create_lawsuit({"processNumber": "1"})
+        self.assertNotIn("MAY have been created", str(caught.exception))
+
+    def test_delete_tools_take_the_optional_guards(self):
+        fake = FakeJuridiq(routes={"/task/00000000-0000-0000-0000-000000000001": {"id": "x", "title": "Contestar"}})
+        task = "00000000-0000-0000-0000-000000000001"
+
+        async def run():
+            async with Client(create_server(allow_writes=True, api=JuridiqApi(send=fake))) as client:
+                tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+                preview = await client.call_tool("juridiq_delete_task", {"taskId": task, "dryRun": True})
+                refused = await client.call_tool("juridiq_delete_task", {"taskId": task, "expectTitle": "Recurso"})
+                pending = await client.call_tool("juridiq_list_pending_publications", {})
+                return tools, preview, refused, pending
+
+        tools, preview, refused, pending = asyncio.run(run())
+        self.assertEqual(tools["juridiq_delete_task"].input_schema["required"], ["taskId"])
+        self.assertEqual(tools["juridiq_delete_lawsuit"].input_schema["required"], ["lawSuitId"])
+        self.assertIn("expectProcessNumber", tools["juridiq_delete_lawsuit"].input_schema["properties"])
+        self.assertTrue(preview.structured_content["dryRun"])
+        self.assertTrue(refused.is_error)
+        self.assertEqual(pending.structured_content, {"result": [], "truncated": False, "pagesRead": 1})
+        self.assertFalse([r for r in fake.requests if r["method"] == "DELETE"])
 
 
 class ServerTest(JuridiqTestCase):

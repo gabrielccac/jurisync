@@ -310,10 +310,10 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_pending_publications",
         "List pending Juridiq publications",
-        "List unread Juridiq publications for the configured account. Read-only.",
+        "List unread Juridiq publications for the configured account (result). The listing reads at most 20 pages of 100 records; truncated=true means that cap stopped it before the end, so unread publications may be missing: narrow with juridiq_list_publications (date range). Read-only.",
     )
     def list_pending_publications(maxResults: Annotated[int, Field(ge=1, le=500)] = 100) -> dict[str, Any]:
-        return call(lambda: api.all_unread_publications(maxResults=maxResults))
+        return call(lambda: api.unread_publications(maxResults=maxResults))
 
     @read(
         "juridiq_list_publications",
@@ -365,7 +365,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_lawsuit",
         "Create Juridiq lawsuit",
-        "Create a lawsuit in the configured Juridiq account. Required payload fields are serviceStep, responsibleIds (UUIDs), and persons with name/personOrigin. personOrigin must be Cliente or Requerida. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a lawsuit in the configured Juridiq account. Required payload fields are serviceStep, responsibleIds (UUIDs), and persons with name/personOrigin. personOrigin must be Cliente or Requerida. If Juridiq does not confirm the creation (timeout, connection error, 5xx) the error says the lawsuit MAY have been created: search with juridiq_find_lawsuit before retrying. Available only when JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_lawsuit(payload: LawSuitCreate) -> dict[str, Any]:
@@ -383,11 +383,25 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_delete_lawsuit",
         "Delete Juridiq lawsuit",
-        "Delete only the explicitly supplied lawsuit in the configured Juridiq account. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Delete only the explicitly supplied lawsuit in the configured Juridiq account. dryRun=true deletes nothing and returns the lawsuit that would be deleted. expectProcessNumber refuses the call unless the lawsuit has that process number. Available only when JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
-    def delete_lawsuit(lawSuitId: Id) -> dict[str, Any]:
-        return call(lambda: api.delete_lawsuit(str(lawSuitId)))
+    def delete_lawsuit(
+        lawSuitId: Id,
+        dryRun: Annotated[
+            bool, Field(description="true deletes nothing and returns the lawsuit that would be deleted. Use it first.")
+        ] = False,
+        expectProcessNumber: Annotated[
+            str,
+            Field(
+                max_length=40,
+                description="Process number the lawsuit must have (punctuation ignored); the deletion is refused otherwise. Empty for no check.",
+            ),
+        ] = "",
+    ) -> dict[str, Any]:
+        return call(
+            lambda: api.delete_lawsuit(str(lawSuitId), expect_process_number=expectProcessNumber, dry_run=dryRun)
+        )
 
     @read(
         "juridiq_list_lawsuit_movements",
@@ -578,7 +592,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_task",
         "Create Juridiq task",
-        "Create a task in the configured Juridiq account. Required payload fields are title, priority (Baixa, Média or Alta), columnId (a Kanban column UUID from juridiq_list_task_columns), and initialDate. Use responsiblesId, not responsibleIds. lawSuitId is optional but recommended: pass it (find it with juridiq_find_lawsuit) so the task shows up in the process it belongs to; without it the task is created standalone. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a task in the configured Juridiq account. Required payload fields are title, priority (Baixa, Média or Alta), columnId (a Kanban column UUID from juridiq_list_task_columns), and initialDate. Use responsiblesId, not responsibleIds. lawSuitId is optional but recommended: pass it (find it with juridiq_find_lawsuit) so the task shows up in the process it belongs to; without it the task is created standalone. If Juridiq does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search with juridiq_list_tasks before retrying. Available only when JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_task(payload: TaskCreate) -> dict[str, Any]:
@@ -596,11 +610,23 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_delete_task",
         "Delete Juridiq task",
-        "Delete only the explicitly supplied task in the configured Juridiq account. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Delete only the explicitly supplied task in the configured Juridiq account. dryRun=true deletes nothing and returns the task that would be deleted. expectTitle refuses the call unless the task's title contains that text. Available only when JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
-    def delete_task(taskId: Id) -> dict[str, Any]:
-        return call(lambda: api.delete_task(str(taskId)))
+    def delete_task(
+        taskId: Id,
+        dryRun: Annotated[
+            bool, Field(description="true deletes nothing and returns the task that would be deleted. Use it first.")
+        ] = False,
+        expectTitle: Annotated[
+            str,
+            Field(
+                max_length=255,
+                description="Text the task's title must contain (case ignored); the deletion is refused otherwise. Empty for no check.",
+            ),
+        ] = "",
+    ) -> dict[str, Any]:
+        return call(lambda: api.delete_task(str(taskId), expect_title=expectTitle, dry_run=dryRun))
 
     @write(
         "juridiq_create_tag",
