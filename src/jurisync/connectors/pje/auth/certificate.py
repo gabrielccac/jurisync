@@ -89,6 +89,12 @@ def _legacy_login(session, config, page, signer):
     if not answer.startswith("Sucesso"):
         reason = answer[len("Erro:") :] if answer.startswith("Erro:") else f"HTTP {response.status_code}"
         reason = " ".join(BeautifulSoup(reason, "html.parser").get_text(" ").split())[:500]
+        if re.search(r"Certificado n[ãa]o encont", reason):
+            # The callback read the signature and the chain and found no user for the holder's certificate.
+            raise RuntimeError(
+                f"{config.key}: the portal found no user for this certificate (Certificado não encontrado); "
+                f"the lawyer is probably not registered in this PJe. Portal message: {reason}"
+            )
         raise RuntimeError(f"{config.key}: the PJeOffice callback refused the certificate login: {reason}")
     home = f"{root}/homePJeOffice.seam?cid={cid}"
     require_allowed_url(home)

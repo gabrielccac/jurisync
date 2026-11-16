@@ -34,6 +34,13 @@ class CertificateLoginChecks(unittest.TestCase):
             cert_login._follow(session, redirect)
         session.get.assert_not_called()
 
+    def test_legacy_login_names_an_unknown_certificate(self):
+        config, page, signer, session, _ = self._legacy(
+            "Erro:Não foi possível realizar a autenticação: Certificado não encont"
+        )
+        with self.assertRaisesRegex(RuntimeError, "found no user for this certificate"):
+            cert_login._legacy_login(session, config, page, signer)
+
         html = '<a href="/pje/logout.seam">Sair</a><input name="javax.faces.ViewState">'
         response = SimpleNamespace(status_code=200, url="https://pje1g.trf1.jus.br/pje/home", text=html)
         self.assertFalse(cert_login._authenticated(response, "pje1g.trf5.jus.br"))
