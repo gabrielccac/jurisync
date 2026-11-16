@@ -17,7 +17,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import jsf, kz
+from jurisync.connectors.pje import acervo, jsf, kz
 from jurisync.connectors.pje.expedientes import ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
@@ -183,6 +183,32 @@ def search_process(
     response = post_ajax(session, second, search_url)
     decoded = unescape(response_html(response))
     process_id, search_results = matching_process_id(decoded, process_number)
+    if not process_id and acervo.captcha_refused(decoded):
+        # TJRN 1G: the search wants a reCAPTCHA token only a browser can produce. The lawyer panel's Acervo
+        # opens the same detail page with its own access key, so the process is looked up there instead.
+        found = acervo.find_process(session, process_number, portal=portal)
+        if not found:
+            return {
+                "success": False,
+                "error": "The process search asks for reCAPTCHA and the process is not in the lawyer's Acervo",
+                "search_results": search_results,
+                "timeline": [],
+            }
+        process_id, ca = found
+        search_results = {**search_results, "via": "acervo"}
+        return _read_detail(
+            session,
+            config,
+            process_id,
+            ca,
+            parts,
+            search_results,
+            raw_html_path,
+            referer=config.base_url + acervo.PANEL_SUFFIX,
+            ato_expediente=ato_expediente,
+            ato_text_limit=ato_text_limit,
+            ato_allow_pending=ato_allow_pending,
+        )
     if not process_id:
         error = (
             "Search result table was not returned"
@@ -214,9 +240,39 @@ def search_process(
             "search_results": search_results,
             "timeline": [],
         }
+    return _read_detail(
+        session,
+        config,
+        process_id,
+        ca_match.group(1),
+        parts,
+        search_results,
+        raw_html_path,
+        referer=search_url,
+        ato_expediente=ato_expediente,
+        ato_text_limit=ato_text_limit,
+        ato_allow_pending=ato_allow_pending,
+    )
 
-    detail_url = config.url(f"{DETAIL_PATH}?id={process_id}&ca={ca_match.group(1)}{DETAIL_SUFFIX[config.instance]}")
-    response = jsf.get(session, detail_url, label=f"{config.key} detail page", referer=search_url)
+
+def _read_detail(
+    session,
+    config,
+    process_id,
+    ca,
+    parts,
+    search_results,
+    raw_html_path,
+    *,
+    referer,
+    ato_expediente=None,
+    ato_text_limit=20000,
+    ato_allow_pending=False,
+):
+    """Open the detail page of a process found by the search (or the Acervo) and read timeline and expedientes."""
+    search_url = config.search_url
+    detail_url = config.url(f"{DETAIL_PATH}?id={process_id}&ca={ca}{DETAIL_SUFFIX[config.instance]}")
+    response = jsf.get(session, detail_url, label=f"{config.key} detail page", referer=referer)
     detail_html = response_html(response)
     canonical_number = "{}-{}.{}.{}.{}.{}".format(*parts)
     if not detail_matches_process_number(detail_html, canonical_number):

@@ -21,6 +21,21 @@ LOGIN_MARKERS = ('id="loginform"', "id='loginform'", "/pje/login.seam")
 PARTIAL_UPDATE = re.compile(r"<update\b[^>]*\bid=[\"']([^\"']+)[\"'][^>]*>(.*?)</update>", re.I | re.S)
 
 
+# -- A4J submits ---------------------------------------------------------------
+
+
+def a4j_submit(javascript, default_container=None):
+    """(form id, container id, parameters) of the ``A4J.AJAX.Submit`` call in an attribute."""
+    javascript = re.sub(r"\\x([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), javascript)
+    call = re.search(r"A4J\.AJAX\.Submit\(\s*'([^']+)'", javascript)
+    if not call:
+        raise RuntimeError("PJe did not render the panel's Ajax action")
+    container = re.search(r"'containerId':'([^']+)'", javascript)
+    parameters = re.search(r"'parameters':\{([^}]*)\}", javascript)
+    values = dict(re.findall(r"'([^']+)':'([^']*)'", parameters.group(1))) if parameters else {}
+    return call.group(1), container.group(1) if container else default_container, values
+
+
 # -- page state ----------------------------------------------------------------
 
 

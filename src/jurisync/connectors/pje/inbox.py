@@ -22,11 +22,11 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.pje import jsf, kz
+from jurisync.connectors.pje.acervo import PANEL_SUFFIX
 from jurisync.connectors.pje.expedientes import NOTICE, PRAZO
 from jurisync.connectors.pje.parsers import response_html
 from jurisync.connectors.pje.process import login_portal
 
-PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
 CONTAINER = "conteudoAbaExpedientes"
 BUCKET_ROW = re.compile(r"formAbaExpediente:listaAgrSitExp:(\d+):linhaN1$")
 NODE_ID = re.compile(
@@ -139,14 +139,7 @@ def check_request(kind, control, form, parameters, extra=()):
 
 def a4j_submit(javascript):
     """(form id, container id, parameters) of the ``A4J.AJAX.Submit`` call in an attribute."""
-    javascript = re.sub(r"\\x([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), javascript)
-    call = re.search(r"A4J\.AJAX\.Submit\(\s*'([^']+)'", javascript)
-    if not call:
-        raise RuntimeError("PJe did not render the panel's Ajax action")
-    container = re.search(r"'containerId':'([^']+)'", javascript)
-    parameters = re.search(r"'parameters':\{([^}]*)\}", javascript)
-    values = dict(re.findall(r"'([^']+)':'([^']*)'", parameters.group(1))) if parameters else {}
-    return call.group(1), container.group(1) if container else CONTAINER, values
+    return jsf.a4j_submit(javascript, CONTAINER)
 
 
 # -- parsing -------------------------------------------------------------------
