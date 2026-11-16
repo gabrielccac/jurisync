@@ -47,6 +47,8 @@ SSO_PARENTS = {
     "jfpr.jus.br": "trf4.jus.br",
     "jfrj.jus.br": "trf2.jus.br",
     "jfes.jus.br": "trf2.jus.br",
+    # TNU (CJF) logs in at the TRF4 eproc realm (eproc-sso.trf4, certificate at eproc-sso-certificado.trf4).
+    "cjf.jus.br": "trf4.jus.br",
 }
 SSO_WORDS = {"sso", "keycloak"}
 

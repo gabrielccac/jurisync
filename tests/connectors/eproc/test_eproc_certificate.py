@@ -48,7 +48,7 @@ class CertificateLoginTest(unittest.TestCase):
             "tjsc-1g": ("cert-sso.tjsc.jus.br", "sso.tjsc.jus.br"),
             "tjsp-1g": ("certificado-sso.tjsp.jus.br",),
             "tjrs-1g": ("keycloak-eks.tjrs.jus.br", "sso.eproc.tjrs.jus.br"),
-            "tnu": ("sso.cjf.jus.br",),
+            "tnu": ("sso.cjf.jus.br", "eproc-sso.trf4.jus.br", "eproc-sso-certificado.trf4.jus.br"),
         }
         for portal, hosts in accepted.items():
             config = portals.eproc(portal)
