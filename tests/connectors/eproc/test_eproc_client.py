@@ -156,6 +156,30 @@ class EprocClientTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["diagnostics"], ["process_not_found"])
 
+    def test_search_sent_to_the_consulta_form_is_not_found(self):
+        # TRF2 2G answers a number it does not hold with a redirect to Consulta Processual.
+        session = Session(
+            [Response(302, url=BASE, headers={"Location": "controlador.php?acao=processo_consultar&hash=x"})]
+        )
+        panel = {
+            "quickSearch": {
+                "action": "controlador.php?acao=processo_pesquisa_rapida&hash=x",
+                "method": "post",
+                "numberField": "n",
+                "submitField": "s",
+                "submitValue": "",
+                "returnField": "r",
+                "returnValue": "p",
+            }
+        }
+        with patch.object(client, "parse_panel", return_value=panel):
+            result = client.fetch_process(NUMBER, session=session, panel_html="", panel_url=BASE, portal="jfsc")
+        self.assertFalse(result["success"])
+        self.assertEqual(result["diagnostics"], ["process_not_found"])
+        self.assertEqual(len(session.calls), 1)  # the search form itself is never opened
+        with self.assertRaises(RuntimeError):
+            client.require_route(BASE + "controlador.php?acao=processo_consultar", portal="jfsc")
+
     def test_queue_uses_parser_pagination_and_does_not_claim_complete(self):
         session = Session([Response(200, "queue")])
         with (
