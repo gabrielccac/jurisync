@@ -52,15 +52,24 @@ def consultation(key):
     return "cpopg5" if key == "tjms-esaj" else "cpopg"
 
 
+JSESSIONID = re.compile(r";jsessionid=[^/?#;]*$", re.IGNORECASE)
+
+
 def upgrade_scheme(config):
-    """A redirect rewriter for portals behind a TLS-terminating balancer (TJAL): its CAS sends the ticket redirect to
-    ``http://`` on the portal's own host. Only that scheme is upgraded; the host check still runs on the result."""
+    """A redirect rewriter for portals behind a TLS-terminating balancer (TJAL, TJAM): their CAS sends the ticket
+    redirect to ``http://`` on the portal's own host. Only that scheme is upgraded; the host check still runs on the
+    result. A trailing ``;jsessionid=`` path parameter (TJAM puts one on its redirects) is dropped too: the session
+    cookie already carries it, and the guard refuses any other ``;`` in a path."""
 
     def rewrite(url):
         parts = urllib.parse.urlsplit(url)
-        if parts.scheme == "http" and (parts.hostname or "").lower() == config.host and parts.port in (None, 80):
-            return urllib.parse.urlunsplit(parts._replace(scheme="https", netloc=config.host))
-        return url
+        if (parts.hostname or "").lower() != config.host:
+            return url
+        if parts.scheme == "http" and parts.port in (None, 80):
+            parts = parts._replace(scheme="https", netloc=config.host)
+        elif parts.scheme != "https":
+            return url
+        return urllib.parse.urlunsplit(parts._replace(path=JSESSIONID.sub("", parts.path)))
 
     return rewrite
 
@@ -128,23 +137,38 @@ def login_form(html, page_url, config):
     return action, fields
 
 
+def login_page(session, config):
+    """The CAS login page, reached the way a browser does: through the task panel, which names its own ``service``.
+
+    The CAS checks the ticket against that exact string, and the courts do not all spell it alike (TJAM's panel asks
+    for ``tarefas-adv//j_spring_cas_security_check``, with two slashes). A ticket issued for another spelling is refused
+    by the panel, which then answers with its ``erroDesconhecido.do`` page. When the panel does not lead to the CAS
+    login page, the standard service is asked for directly.
+    """
+    check = lambda url: require_portal_url(config, url)  # noqa: E731
+    page = session.get(config.url("tarefas-adv/"), impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT)
+    page = follow_redirects(session, page, check=check, rewrite=upgrade_scheme(config))
+    log_request("GET", page.url, page.status_code)
+    if is_cas_login_page(page) and "service=" in (urllib.parse.urlsplit(page.url).query or ""):
+        return page
+    page = session.get(
+        config.url("sajcas/login"),
+        params={"service": config.url(SERVICE_PATH)},
+        impersonate=IMPERSONATE,
+        allow_redirects=False,
+        timeout=TIMEOUT,
+    )
+    page = follow_redirects(session, page, check=check, rewrite=upgrade_scheme(config))
+    log_request("GET", page.url, page.status_code)
+    return page
+
+
 def login(portal, *, pin=None, p12_path=None, session=None):
     """An authenticated ``requests.Session`` for the portal, logged in with the A1 certificate."""
     config = portals.esaj(portal)
     key, cert, _chain = load_certificate(pin=pin, p12_path=p12_path)
     session = session or requests.Session()
-    service = config.url(SERVICE_PATH)
-    page = session.get(
-        config.url("sajcas/login"),
-        params={"service": service},
-        impersonate=IMPERSONATE,
-        allow_redirects=False,
-        timeout=TIMEOUT,
-    )
-    page = follow_redirects(
-        session, page, check=lambda url: require_portal_url(config, url), rewrite=upgrade_scheme(config)
-    )
-    log_request("GET", page.url, page.status_code)
+    page = login_page(session, config)
     action, fields = login_form(page.text, page.url, config)
     fields["certificadoSelecionado"] = certificate_der_b64(cert)
     fields["signature"] = sign_challenge(key, challenge_from(page.text))
@@ -213,15 +237,32 @@ def request(session, portal, method, path, **kwargs):
     return response
 
 
+CAS_LOGGED_IN = re.compile(r"usuarioLogadoNoCasServer\s*:\s*(true|false)")
+
+
+def cas_logged_in(session, config):
+    """What the CAS says about its own ticket cookie (``sajcas/verificarLogin.js``, the script every e-SAJ page loads).
+
+    Courts on the older portal (TJAM) have no ``esaj/api/auth/session``; this script is their session check.
+    Returns True or False, or None when the answer is not the expected script.
+    """
+    response = session.get(
+        config.url("sajcas/verificarLogin.js"), impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT
+    )
+    log_request("GET", response.url, response.status_code)
+    match = CAS_LOGGED_IN.search(response.text or "") if response.status_code == 200 else None
+    return None if match is None else match.group(1) == "true"
+
+
 def refresh(portal, session):
-    """Pool liveness check: the session API still says the user is logged in."""
+    """Pool liveness check: the session API still says the user is logged in (the CAS script where there is no API)."""
+    config = portals.esaj(portal)
     try:
         response = session.get(
-            portals.esaj(portal).url("esaj/api/auth/session"),
-            impersonate=IMPERSONATE,
-            allow_redirects=False,
-            timeout=TIMEOUT,
+            config.url("esaj/api/auth/session"), impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT
         )
+        if response.status_code == 404:
+            return session if cas_logged_in(session, config) else None
         return session if response.status_code == 200 and response.json().get("usuarioLogado") else None
     except (requests.exceptions.RequestException, ValueError):
         return None
@@ -246,7 +287,13 @@ def get_session(session, portal):
     from jurisync.connectors.esaj import bridge
     from jurisync.connectors.esaj.parsers import public_json
 
-    value = json_response(request(session, portal, "GET", "esaj/api/auth/session"))
+    response = request(session, portal, "GET", "esaj/api/auth/session")
+    if response.status_code == 404:
+        # The older portal (TJAM) has no session API: the CAS script answers, without OABs or services.
+        if not cas_logged_in(session, portals.esaj(portal)):
+            raise EsajSessionExpired("e-SAJ session expired")
+        return {"usuarioLogado": True, "sessionSource": "sajcas", "captchaBridge": bridge.bridge_status()}
+    value = json_response(response)
     if not isinstance(value, dict) or not value.get("usuarioLogado"):
         raise EsajSessionExpired("e-SAJ session expired")
     result = public_json({k: value[k] for k in ("usuarioLogado", "oabs", "servicosDisponiveis") if k in value})
@@ -450,10 +497,10 @@ def consultation_search(session, portal, adapter, number):
 
 
 def load_process(session, portal, number):
-    from jurisync.connectors.esaj import parsers, tjal, tjms, tjsp
+    from jurisync.connectors.esaj import parsers, tjal, tjam, tjms, tjsp
 
     number = process_number(number, portal)
-    adapter = {tjsp.PORTAL: tjsp, tjms.PORTAL: tjms, tjal.PORTAL: tjal}[portals.esaj(portal).key]
+    adapter = {tjsp.PORTAL: tjsp, tjms.PORTAL: tjms, tjal.PORTAL: tjal, tjam.PORTAL: tjam}[portals.esaj(portal).key]
     detail_response = None
     source = "dashboard"
     data = dashboard_process(session, portal, number)
@@ -471,6 +518,11 @@ def load_process(session, portal, number):
                     response = token_search(session, portal, adapter, number, start)
                     source = "http_token"
                 except EsajBlocked:
+                    if parsers.not_found(response.content):
+                        raise EsajBlocked(
+                            "This e-SAJ has no process with this number (it may be on another system of the court)",
+                            "not_found",
+                        ) from None
                     raise EsajBlocked("No unique process detail available to this account") from None
                 if "/show.do" in urllib.parse.urlsplit(response.url).path:
                     detail_response, link = response, response.url

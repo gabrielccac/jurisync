@@ -397,3 +397,102 @@ def test_tjam_esaj_is_registered_on_the_consultasaj_host_and_upgrades_its_http_r
     url = "http://consultasaj.tjam.jus.br/esajperfil/abrirConfirmacaoDados.do"
     assert rewrite(url) == url.replace("http://", "https://", 1)
     assert rewrite("http://evil.invalid/esajperfil/") == "http://evil.invalid/esajperfil/"
+
+
+def redirect(location, url):
+    reply = response(status=302, url=url)
+    reply.headers["Location"] = location
+    return reply
+
+
+def test_tjam_login_page_comes_from_the_panel_with_its_own_service_spelling():
+    # TJAM's panel names its CAS service with two slashes; a ticket for the standard spelling ends on erroDesconhecido.
+    config = portals.esaj("tjam-esaj")
+    service = "https%3A%2F%2Fconsultasaj.tjam.jus.br%2Ftarefas-adv%2F%2Fj_spring_cas_security_check"
+    login_url = f"https://consultasaj.tjam.jus.br/sajcas/login?service={service}"
+    session = Mock()
+    session.get.side_effect = [
+        redirect(login_url, "https://consultasaj.tjam.jus.br/tarefas-adv/"),
+        response(url=login_url),
+    ]
+    page = base.login_page(session, config)
+    assert page.url == login_url
+    assert session.get.call_args_list[0].args[0] == "https://consultasaj.tjam.jus.br/tarefas-adv/"
+    assert session.get.call_count == 2
+
+
+def test_login_page_falls_back_to_the_standard_service_when_the_panel_does_not_lead_to_the_cas():
+    config = portals.esaj("tjsp-esaj")
+    session = Mock()
+    session.get.side_effect = [
+        response(status=404, url="https://esaj.tjsp.jus.br/tarefas-adv/"),
+        response(url="https://esaj.tjsp.jus.br/sajcas/login?service=x"),
+    ]
+    base.login_page(session, config)
+    assert session.get.call_args.args[0] == "https://esaj.tjsp.jus.br/sajcas/login"
+    assert session.get.call_args.kwargs["params"] == {"service": config.url(base.SERVICE_PATH)}
+
+
+def test_rewrite_drops_a_trailing_jsessionid_only_on_the_portal_host():
+    rewrite = base.upgrade_scheme(portals.esaj("tjam-esaj"))
+    assert (
+        rewrite("https://consultasaj.tjam.jus.br/tarefas-adv/erroDesconhecido.do;jsessionid=ABC.n1?x=1")
+        == "https://consultasaj.tjam.jus.br/tarefas-adv/erroDesconhecido.do?x=1"
+    )
+    assert rewrite("https://evil.invalid/a;jsessionid=ABC") == "https://evil.invalid/a;jsessionid=ABC"
+    with pytest.raises(UnsafeUrlError):
+        base.require_portal_url(portals.esaj("tjam-esaj"), rewrite("https://consultasaj.tjam.jus.br/a;x=1"))
+
+
+def test_session_check_uses_the_cas_script_where_the_session_api_is_missing(monkeypatch):
+    session = Mock()
+    session.get.side_effect = [
+        response(status=404, url="https://consultasaj.tjam.jus.br/esaj/api/auth/session"),
+        response("window.sajcas = { usuarioLogadoNoCasServer: true };", url="https://consultasaj.tjam.jus.br/x"),
+    ]
+    assert base.refresh("tjam-esaj", session) is session
+    assert session.get.call_args.args[0] == "https://consultasaj.tjam.jus.br/sajcas/verificarLogin.js"
+    session.get.side_effect = [
+        response(status=404),
+        response("window.sajcas = { usuarioLogadoNoCasServer: false };"),
+    ]
+    assert base.refresh("tjam-esaj", session) is None
+    monkeypatch.setattr(base, "request", Mock(return_value=response(status=404)))
+    session.get.side_effect = [response("window.sajcas = { usuarioLogadoNoCasServer: true };")]
+    result = base.get_session(session, "tjam-esaj")
+    assert result["usuarioLogado"] is True and result["sessionSource"] == "sajcas"
+    session.get.side_effect = [response("window.sajcas = { usuarioLogadoNoCasServer: false };")]
+    with pytest.raises(base.EsajSessionExpired):
+        base.get_session(session, "tjam-esaj")
+
+
+def test_tjam_process_uses_the_cpopg_consultation(monkeypatch):
+    number = "0000001-00.2026.8.04.0001"
+    detail = response(
+        f'<span id="numeroProcesso">{number}</span><span id="classeProcesso">Classe</span>',
+        url="https://consultasaj.tjam.jus.br/cpopg/show.do?processo.codigo=X",
+    )
+    monkeypatch.setattr(base, "dashboard_process", lambda *a: None)
+    monkeypatch.setattr(base, "consultation_search", lambda s, p, adapter, n: (detail, "http"))
+    result = base.load_process(None, "tjam-esaj", number)
+    assert result["fields"]["classeProcesso"] == "Classe" and result["consultationSource"] == "http"
+
+
+def test_a_number_the_consultation_does_not_know_is_reported_as_not_found(monkeypatch):
+    # TJAM's e-SAJ holds only the old case stock: current numbers answer with the consultation's "no information" page.
+    page = response(
+        "<div>Não existem informações disponíveis para os parâmetros informados.</div>",
+        url="https://consultasaj.tjam.jus.br/cpopg/search.do",
+    )
+    monkeypatch.setattr(base, "dashboard_process", lambda *a: None)
+    monkeypatch.setattr(base, "consultation_search", lambda *a: (page, "http"))
+    monkeypatch.setattr(base, "request", lambda *a, **k: page)
+
+    def no_token(*a):
+        raise base.EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
+
+    monkeypatch.setattr(base, "token_search", no_token)
+    with pytest.raises(base.EsajBlocked) as error:
+        base.load_process(None, "tjam-esaj", "0000001-00.2026.8.04.0001")
+    assert error.value.reason == "not_found"
+    assert not parsers.not_found("<div>Processo 1</div>")
