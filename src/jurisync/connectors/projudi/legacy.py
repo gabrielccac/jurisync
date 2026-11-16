@@ -74,7 +74,7 @@ def hidden_fields(form):
     return {
         field["name"]: field.get("value", "")
         for field in form.find_all("input", attrs={"type": "hidden"})
-        if field.get("name")
+        if field.get("name") and not re.search(r"remember|trust|device|liberar|padrao|padr[aã]o", field["name"], re.I)
     }
 
 

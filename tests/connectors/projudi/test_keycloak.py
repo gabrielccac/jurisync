@@ -33,6 +33,7 @@ ENV = {
 LOGIN_PAGE = f"""<html><body><form id="kc-form-login" action="{LOGIN_ACTION}" method="post">
 <input id="username" name="username" type="text"><input id="password" name="password" type="password">
 <input id="rememberMe" name="rememberMe" type="checkbox"><input type="hidden" name="credentialId">
+<input type="hidden" name="trustDevice" value="true"><input type="hidden" name="usuarioPadrao" value="true">
 <input name="login" id="kc-login" type="submit" value="Entrar"></form></body></html>"""
 OTP_PAGE = f"""<html><body><form id="kc-otp-login-form" action="{OTP_ACTION}" method="post">
 <input id="otp" name="otp" type="text"><input type="hidden" name="credentialId" value="cred-1">
