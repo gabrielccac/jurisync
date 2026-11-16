@@ -33,6 +33,19 @@ def _has_field(text, name):
     return BeautifulSoup(text, "html.parser").find(attrs={"name": name}) is not None
 
 
+def _has_login_form(text):
+    """Whether the page shows the classic form: visible ``txtUsuario`` and ``pwdSenha`` inputs.
+
+    The TRF4 Keycloak page (TRF4, its sections and TNU) carries a hidden ``frm-login`` with the same two names; posting
+    the password to the portal's ``login_cert`` from there would send the credentials down the classic route.
+    """
+    soup = BeautifulSoup(text, "html.parser")
+    return all(
+        any(field.get("type", "text").lower() != "hidden" for field in soup.find_all("input", attrs={"name": name}))
+        for name in ("txtUsuario", "pwdSenha")
+    )
+
+
 def _acao(url):
     return dict(parse_qsl(urlsplit(url).query)).get("acao", "")
 
@@ -97,7 +110,7 @@ def login(username, password, account, *, portal, signer=None):
         page = session.get(config.login_url, impersonate="chrome", timeout=60)
         if page.status_code >= 500:
             raise RuntimeError(f"{config.tribunal} eproc is unavailable (HTTP {page.status_code})")
-        if not (_has_field(page.text, "txtUsuario") and _has_field(page.text, "pwdSenha")):
+        if not _has_login_form(page.text):
             raise NotClassicLogin(f"{config.key}: no classic eproc login form")
         if "captcha" in page.text.lower():
             raise NotClassicLogin(f"{config.key}: login page shows a CAPTCHA")

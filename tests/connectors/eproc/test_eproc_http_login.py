@@ -34,6 +34,20 @@ class ClassicFormDetection(unittest.TestCase):
                 http_login.login("u", "p", ACCOUNT, portal="tjmg-1g", signer=Mock())
         session.post.assert_not_called()
 
+    def test_keycloak_page_with_hidden_classic_fields_sends_nothing(self):
+        # TRF4 SSO (TRF4 sections, TNU): the Keycloak form plus a hidden frm-login with the classic field names.
+        page = (
+            '<form id="kc-form-login"><input name="username"><input name="password" type="password"></form>'
+            '<form id="frm-login" action="https://eproctnu.cjf.jus.br/eproc/index.php">'
+            '<input type="hidden" name="hdnAcao"><input type="hidden" name="txtUsuario">'
+            '<input type="hidden" name="pwdSenha"></form>'
+        )
+        session = session_with([reply("https://eproc-sso.trf4.jus.br/realms/eproc/", text=page)], [])
+        with patch.object(http_login.requests, "Session", return_value=session):
+            with self.assertRaises(http_login.NotClassicLogin):
+                http_login.login("u", "p", ACCOUNT, portal="tnu", signer=Mock())
+        session.post.assert_not_called()
+
 
 class CertificateFlow(unittest.TestCase):
     def test_password_then_a3_then_totp_reach_the_panel(self):
