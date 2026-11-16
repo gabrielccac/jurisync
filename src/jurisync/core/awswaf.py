@@ -7,8 +7,9 @@ WAF accepts the answer it sets an ``aws-waf-token`` cookie. That cookie is copie
 the HTTP session, which then reaches the portal like any other.
 
 The approach follows gabrielccac/captcha-solver (tiles + instruction -> JSON array of
-tile numbers). ``OPENROUTER_API_KEY`` pays for the model; ``JURISYNC_CAPTCHA_MODEL``
-overrides the default model.
+tile numbers). The OpenRouter key comes from ``JURISYNC_CAPTCHA_API_KEY``, a machine setting shared by every
+office on this computer, or else the office's own ``OPENROUTER_API_KEY``; ``JURISYNC_CAPTCHA_MODEL`` overrides the
+default model.
 """
 
 import base64
@@ -47,6 +48,11 @@ return {
   text: root.innerText.slice(0, 400),
 };
 """
+
+
+def captcha_api_key():
+    """The OpenRouter key that pays for CAPTCHA answers: the shared machine key, else the office's own."""
+    return credentials.env("JURISYNC_CAPTCHA_API_KEY") or credentials.env("OPENROUTER_API_KEY")
 
 
 def is_challenge(response):
@@ -125,9 +131,11 @@ def solve(url, *, api_key=None, model=None, max_puzzles=MAX_PUZZLES, debug_dir=N
     """Pass the WAF CAPTCHA at ``url`` in a headless browser; return its cookies."""
     from seleniumbase import Driver
 
-    api_key = api_key or credentials.env("OPENROUTER_API_KEY")
+    api_key = api_key or captcha_api_key()
     if not api_key:
-        raise RuntimeError("The portal shows an AWS WAF CAPTCHA: set OPENROUTER_API_KEY to solve it")
+        raise RuntimeError(
+            "The portal shows an AWS WAF CAPTCHA: set JURISYNC_CAPTCHA_API_KEY (or OPENROUTER_API_KEY) to solve it"
+        )
     model = model or credentials.env("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
