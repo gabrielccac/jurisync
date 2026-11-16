@@ -16,11 +16,15 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 import unicodedata
 from pathlib import Path
 
+from jurisync.core.mcp import sanitize_diagnostics
 from jurisync.core.pdf import analyze_document, available_path
 from jurisync.core.word_to_pdf import convert_word_to_pdf
+from jurisync.workflows.petitions.calc import digits, money
 
 from .classify import claim_value_candidates, classify_document, cpf_candidates, document_kind
 from .profile import load_profile
@@ -43,14 +47,58 @@ def _sha256(content):
     return hashlib.sha256(content).hexdigest()
 
 
-def _digits(value):
-    return re.sub(r"\D", "", str(value or ""))
+OVERRIDE_ROLES = ("main", "supporting", "skip")
+PAYLOAD_FILE = "payload.json"
 
 
-def _write_private(path, value):
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-        json.dump(value, output, ensure_ascii=False, indent=2)
+def write_private(path, value):
+    """Write JSON readable only by the owner, whole or not at all: a reader never sees a half-written file."""
+    path = Path(path)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")  # mkstemp creates it 0600
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(value, output, ensure_ascii=False, indent=2)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def discard_payload(directory):
+    """Drop the run's payload before a step that will rebuild it, so a failed step never leaves an older one to file."""
+    (Path(directory) / PAYLOAD_FILE).unlink(missing_ok=True)
+
+
+def _failure(error):
+    """A reason safe to show the agent: exception text may carry a command line or local paths."""
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "the converter timed out"
+    if isinstance(error, subprocess.CalledProcessError):
+        return "the converter exited with an error"
+    if isinstance(error, (ValueError, RuntimeError)):
+        return sanitize_diagnostics(error) or type(error).__name__
+    return type(error).__name__
+
+
+def _same_amount(first, second):
+    try:
+        return money(first) is not None and money(first) == money(second)
+    except ValueError:
+        return False
+
+
+def petition_mismatches(facts, claim_values, cpfs):
+    """What stops a filing: a claim value or CPF the petition states that differs from the case facts.
+
+    Petitions do not always state them, so finding none is not a problem.
+    """
+    problems = []
+    claim_value = (facts.get("characteristics") or {}).get("claimValue")
+    if claim_values and claim_value and not any(_same_amount(claim_value, candidate) for candidate in claim_values):
+        problems.append(("claimValue", "Case claimValue differs from the petition's stated claim value"))
+    if cpfs and facts.get("authorCpf") and digits(facts["authorCpf"]) not in cpfs:
+        problems.append(("authorCpf", "Author CPF was not found among the petition's formatted CPFs"))
+    return problems
 
 
 def require_facts(facts, defaults):
@@ -79,7 +127,7 @@ def require_facts(facts, defaults):
     missing = [name for name, value in required.items() if not value]
     if missing:
         raise ValueError(f"Missing case facts or office setting: {', '.join(missing)}")
-    if not re.fullmatch(r"\d{11}", _digits(facts["authorCpf"])):
+    if not re.fullmatch(r"\d{11}", digits(facts["authorCpf"])):
         raise ValueError("authorCpf must have 11 digits")
     if "address" in author:
         address = author["address"]
@@ -117,7 +165,7 @@ def build_payload(facts, documents, defaults):
         **defaults,
         "classification": {"area": "DIREITO PREVIDENCIÁRIO", **facts["classification"]},
         "subjects": facts.get("subjects") or [facts["subject"]],
-        "authorCpf": _digits(facts["authorCpf"]),
+        "authorCpf": digits(facts["authorCpf"]),
         "author": {"name": author["name"], **({"address": author["address"]} if author.get("address") else {})},
         "characteristics": {
             **defaults["characteristics"],
@@ -186,7 +234,12 @@ def _safe_classify(name, text, jev_options=None, rules=None):
     try:
         return classify_document(name, text, rules=rules, **(jev_options or {}))
     except Exception as error:  # Classification problems become review items, not crashes.
-        return {"role": "supporting", "type": None, "method": "jev", "review": str(error)}
+        return {
+            "role": "supporting",
+            "type": None,
+            "method": "jev",
+            "review": f"Classification failed: {_failure(error)}",
+        }
 
 
 def _is_pdf(content):
@@ -267,7 +320,7 @@ def _prepare_row(entry, index, directory, unlabeled_petition, seen_hashes, profi
             try:
                 row["path"] = str(convert_word_to_pdf(path, directory / "converted" / sha256 / f"{path.stem}.pdf"))
             except Exception as error:
-                row["review"] = f"PDF conversion failed: {error}"
+                row["review"] = f"PDF conversion failed: {_failure(error)}"
         else:
             row["review"] = "Document is not a PDF or convertible Word file"
     if Path(row["path"]).suffix.lower() == ".pdf":
@@ -287,22 +340,25 @@ def _prepare_row(entry, index, directory, unlabeled_petition, seen_hashes, profi
                         filter(None, [row.get("review"), "Confirm split PDF page ranges before upload"])
                     )
                 except Exception as error:
-                    row["review"] = f"PDF splitting needs review: {error}"
+                    row["review"] = f"PDF splitting needs review: {_failure(error)}"
         row["path"] = _stage_upload(row["path"], directory)
         for part in row.get("parts") or []:
             part["path"] = _stage_upload(part["path"], directory)
     return row
 
 
-def prepare_folder(files, facts, out_dir, *, profile, source="", jev=True):
-    """Convert, split and classify the pulled documents. `jev=False` keeps document text off the network.
+def prepare_folder(files, facts, out_dir, *, profile, source="", jev=False):
+    """Convert, split and classify the pulled documents. Document text stays off the network unless ``jev`` is true.
 
     ``files`` are paths of the documents to prepare (a folder the agent filled from the office's own system);
-    ``source`` is a label for the review (the folder name).
+    ``source`` is a label for the review (the folder name). The review and payload of an earlier prepare in the same
+    folder are removed first: whatever this call leaves behind is its own result.
     """
-    jev_options = None if jev else {"openrouter_key": "", "api_key": ""}
+    jev_options = {} if jev else {"jev": False}
     directory = Path(out_dir).resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    discard_payload(directory)
+    (directory / "review.json").unlink(missing_ok=True)
     entries = [{"name": Path(path).name, "path": str(path)} for path in files]
     if not entries:
         raise ValueError(f"The source folder has no files: {source or '(unnamed)'}")
@@ -326,13 +382,10 @@ def prepare_folder(files, facts, out_dir, *, profile, source="", jev=True):
     candidates = {"claimValues": [], "cpfs": []}
     if len(mains) == 1 and mains[0].get("uploadSha256"):
         candidates["claimValues"], candidates["cpfs"] = _petition_candidates(mains[0]["path"])
-        claim_value = (facts.get("characteristics") or {}).get("claimValue")
-        if claim_value and candidates["claimValues"] and claim_value not in candidates["claimValues"]:
-            review.append({"name": "claimValue", "reason": "Case fact differs from the petition's stated claim value"})
-        if facts.get("authorCpf") and candidates["cpfs"] and _digits(facts["authorCpf"]) not in candidates["cpfs"]:
-            review.append(
-                {"name": "authorCpf", "reason": "Author CPF was not found among the petition's formatted CPFs"}
-            )
+        review += [
+            {"name": name, "reason": reason}
+            for name, reason in petition_mismatches(facts, candidates["claimValues"], candidates["cpfs"])
+        ]
     try:
         require_facts(facts, profile.defaults())
     except ValueError as error:
@@ -341,8 +394,8 @@ def prepare_folder(files, facts, out_dir, *, profile, source="", jev=True):
     if not review:
         try:
             payload = build_payload(facts, _main_document(rows), profile.defaults())
-            payload_path = directory / "payload.json"
-            _write_private(payload_path, payload)
+            payload_path = directory / PAYLOAD_FILE
+            write_private(payload_path, payload)
         except ValueError as error:
             review.append({"name": "case facts", "reason": str(error)})
     fallbacks = [
@@ -364,7 +417,7 @@ def prepare_folder(files, facts, out_dir, *, profile, source="", jev=True):
         "ready": not review,
         "fallbacks": fallbacks,
     }
-    _write_private(directory / "review.json", report)
+    write_private(directory / "review.json", report)
     return {
         "ready": report["ready"],
         "review": review,
@@ -401,10 +454,35 @@ def _verify_row(row):
             raise ValueError(f"Split PDF changed or is invalid: {part['path']}")
 
 
+def validate_overrides(overrides, known_ids):
+    """An override is the reviewer's choice of role and PJe type for one file of the review, nothing else."""
+    if not isinstance(overrides, dict):
+        raise ValueError("Overrides must be an object keyed by file id")
+    unknown = sorted(set(overrides) - set(known_ids))
+    if unknown:
+        raise ValueError(f"Overrides name files that are not in the review: {', '.join(map(str, unknown))}")
+    for identifier, choice in overrides.items():
+        if not isinstance(choice, dict) or not choice:
+            raise ValueError(f"Override for {identifier} must be an object with role and/or type")
+        extra = sorted(set(choice) - {"role", "type"})
+        if extra:
+            raise ValueError(f"Override for {identifier} may only set role and type, not: {', '.join(map(str, extra))}")
+        if "role" in choice and choice["role"] not in OVERRIDE_ROLES:
+            raise ValueError(f"Override role for {identifier} must be one of: {', '.join(OVERRIDE_ROLES)}")
+        if "type" in choice and (not isinstance(choice["type"], str) or not choice["type"].strip()):
+            raise ValueError(f"Override type for {identifier} must be a PJe document type")
+
+
 def finalize_review(review_path, facts, overrides=None, *, profile):
-    """Apply the reviewer's explicit choices and write payload.json next to review.json."""
+    """Apply the reviewer's explicit choices and write payload.json next to review.json.
+
+    The payload of an earlier step is removed first, so a refusal here never leaves an older payload to be filed.
+    """
     overrides = overrides or {}
+    destination = Path(review_path).resolve().parent / PAYLOAD_FILE
+    discard_payload(destination.parent)
     report = json.loads(Path(review_path).read_text(encoding="utf-8"))
+    validate_overrides(overrides, [row["id"] for row in report["files"]])
     rows = []
     for original in report["files"]:
         choice = overrides.get(original["id"])
@@ -418,14 +496,11 @@ def finalize_review(review_path, facts, overrides=None, *, profile):
     mains = [row for row in rows if row["role"] == "main"]
     if len(mains) != 1:
         raise ValueError(f"Expected one main petition, found {len(mains)}")
-    claim_values, cpfs = _petition_candidates(mains[0]["path"])
-    if claim_values and (facts.get("characteristics") or {}).get("claimValue") not in claim_values:
-        raise ValueError("Case claimValue differs from the selected petition's stated value")
-    if cpfs and _digits(facts.get("authorCpf")) not in cpfs:
-        raise ValueError("Author CPF was not found among the selected petition's formatted CPFs")
     payload = build_payload(facts, _main_document(rows), profile.defaults())
-    destination = Path(review_path).resolve().parent / "payload.json"
-    _write_private(destination, payload)
+    mismatches = petition_mismatches(facts, *_petition_candidates(mains[0]["path"]))
+    if mismatches:
+        raise ValueError("; ".join(reason for _, reason in mismatches))
+    write_private(destination, payload)
     return {"ready": True, "payloadPath": str(destination), "documentCount": len(rows)}
 
 

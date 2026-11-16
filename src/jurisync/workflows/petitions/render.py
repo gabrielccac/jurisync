@@ -1,151 +1,220 @@
-"""Render an audited petition to an editable .docx and, from it, a PDF."""
+"""Write an audited draft into the office's Word template (.docx, editable) and, from it, a PDF."""
 
-import re
-import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_COLOR_INDEX
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Pt, RGBColor
 
-from jurisync.workflows.petitions.preflight import ROMAN, UNNUMBERED
+from jurisync.core.word_to_pdf import convert_word_to_pdf
+from jurisync.workflows.petitions import minuta
 
-PENDING = re.compile(r"\[PENDENTE:[^\]]*\]")
-IMAGE = re.compile(r"\[\[IMG\|([^|\]]*)\|([^\]]*)\]\]")
-NUMBERED_TITLE = re.compile(r"^[IVX]+\s*[—–-]\s*")
-TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
-TABLE_RULE = re.compile(r"^\s*\|?[\s:|-]+\|?\s*$")
-CENTERED = {"qual.titulo_acao"}
-FOOTER = {"fecho.rodape_escritorio"}
+# Paragraph styles of the office template; a document without them falls back to Normal with direct formatting.
+STYLES = {
+    "enderecamento": "Enderecamento",
+    "titulo": "Titulo da Acao",
+    "secao": "Secao",
+    "subtitulo": "Subtitulo",
+    "citacao": "Citacao",
+    "pedido": "Pedido",
+    "fecho": "Fecho",
+    "assinatura": "Assinatura",
+    "corpo": "Corpo",
+    "legenda": "Legenda",
+    "imagem": "Imagem",
+    "pendencias": "Pendencias",
+}
+MAX_WIDTH, MAX_HEIGHT = 14, 11  # cm: a phone print keeps its proportion without taking a whole page
+RED = RGBColor(0x9C, 0x00, 0x06)
 
 
-def _paragraph(document, text, *, bold=False, center=False, indent=True):
-    paragraph = document.add_paragraph()
-    position = 0
-    for match in PENDING.finditer(text):
-        paragraph.add_run(text[position : match.start()]).bold = bold
-        mark = paragraph.add_run(match.group(0))
-        mark.bold = True
-        mark.font.highlight_color = WD_COLOR_INDEX.YELLOW
-        position = match.end()
-    paragraph.add_run(text[position:]).bold = bold
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER if center else WD_ALIGN_PARAGRAPH.JUSTIFY
-    if indent and not center:
-        paragraph.paragraph_format.first_line_indent = Cm(2)
-    paragraph.paragraph_format.space_after = Pt(8)
-    paragraph.paragraph_format.keep_with_next = bold and not center
+def _style(document, kind):
+    name = STYLES.get(kind, "Normal")
+    return name if name in [style.name for style in document.styles] else "Normal"
+
+
+def _fallback(paragraph, kind):
+    """Direct formatting when the document has no office styles (a draft without the template)."""
+    if paragraph.style.name != "Normal":
+        return
+    if kind in ("enderecamento", "titulo", "secao", "subtitulo", "assinatura", "pendencias"):
+        for run in paragraph.runs:
+            run.bold = True
+    if kind in ("enderecamento", "titulo", "fecho", "assinatura", "legenda", "imagem", "pendencias"):
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    else:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    if kind == "corpo":
+        paragraph.paragraph_format.first_line_indent = Cm(1.5)
+    if kind == "citacao":
+        paragraph.paragraph_format.left_indent = Cm(4)
+        for run in paragraph.runs:
+            run.italic = True
+
+
+def _paragraph(document, kind, text):
+    paragraph = document.add_paragraph(style=_style(document, kind))
+    for piece, bold, italic, underline, pending in minuta.runs(text):
+        run = paragraph.add_run(piece)
+        run.bold = bold or None
+        run.italic = italic or None
+        run.underline = underline or None
+        if pending:
+            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            run.font.color.rgb = RED
+    _fallback(paragraph, kind)
     return paragraph
 
 
-def _open_items_page(document, assembled):
-    """The list at the end of a draft with open items. It is not part of the petition and must leave before filing."""
-    items = assembled.get("pendencias") or {}
-    lines = [f"{item['descricao']}. Resolve: {item['quem_resolve']}." for item in items.get("faltas") or []]
-    lines += [f"Conflito: {item.get('descricao', item.get('campo', ''))}." for item in items.get("conflitos") or []]
-    lines += [f"Aviso: {item}" for item in items.get("avisos_fortes") or []]
-    if not lines and not items.get("marcadas_no_texto"):
-        return
-    document.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-    _paragraph(document, "PENDÊNCIAS DESTA MINUTA (retirar esta página antes do protocolo)", bold=True, center=True)
-    if items.get("confirmado_por"):
-        _paragraph(document, f"Seguiu com pendências por decisão de: {items['confirmado_por']}.", indent=False)
-    for line in lines or items["marcadas_no_texto"]:
-        _paragraph(document, f"- {line}", indent=False)
-
-
 def _table(document, rows):
-    cells = [[cell.strip() for cell in row.strip().strip("|").split("|")] for row in rows if not TABLE_RULE.match(row)]
-    table = document.add_table(rows=len(cells), cols=max(len(row) for row in cells))
-    table.style = "Table Grid" if "Table Grid" in [style.name for style in document.styles] else None
-    for row_index, row in enumerate(cells):
+    table = document.add_table(rows=len(rows), cols=max(len(row) for row in rows))
+    table.autofit = True
+    if "Table Grid" in [style.name for style in document.styles]:
+        table.style = "Table Grid"
+    for row_index, row in enumerate(rows):
         for column, value in enumerate(row):
-            table.cell(row_index, column).text = value
+            cell = table.cell(row_index, column)
+            cell.text = ""
+            paragraph = cell.paragraphs[0]
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.paragraph_format.first_line_indent = Cm(0)
+            paragraph.paragraph_format.left_indent = Cm(0)
+            for piece, bold, italic, underline, _ in minuta.runs(value):
+                run = paragraph.add_run(piece)
+                run.bold = True if row_index == 0 else bold or None  # the first row is the header
+                run.italic, run.underline = italic or None, underline or None
+                run.font.size = Pt(10)
     document.add_paragraph()
 
 
-def _write_line(document, line, *, center, bold, indent, prefix=""):
-    position = 0
-    for match in IMAGE.finditer(line):
-        if line[position : match.start()].strip():
-            _paragraph(
-                document, prefix + line[position : match.start()].strip(), center=center, bold=bold, indent=indent
-            )
-            prefix = ""
-        _image(document, match.group(1), match.group(2))
-        position = match.end()
-    rest = line[position:].strip()
-    if rest:
-        _paragraph(document, prefix + rest, center=center, bold=bold, indent=indent)
+def image_file(path, root):
+    """The image inside the case folder. Paths come from the draft, so no other local file may be embedded."""
+    name = Path(path).name
+    if root is None:
+        raise ValueError(f"Imagem {name}: informe a pasta do caso para incluir imagens.")
+    root = Path(root).resolve()
+    file = (root / path).resolve()  # follows .. and symbolic links; an absolute path replaces the root
+    if not file.is_relative_to(root):
+        raise ValueError(f"Imagem {name}: arquivo fora da pasta do caso não pode ser incluído.")
+    if not file.is_file():
+        raise ValueError(f"Imagem {name}: arquivo não encontrado na pasta do caso.")
+    return file
 
 
-def _write_text(document, item, prefix=""):
-    section = item["secao"]
-    center = section == "enderecamento" or item["id"] in CENTERED
-    bold = center
-    rows = []
-    for line in filter(None, (part.strip() for part in item["texto"].split("\n"))):
-        if TABLE_ROW.match(line):
-            rows.append(line)
-            continue
-        if rows:
-            _table(document, rows)
-            rows = []
-        _write_line(
-            document,
-            line.upper() if section == "enderecamento" else line,
-            center=center or section == "fecho",
-            bold=bold,
-            indent=section not in ("fecho", "pedido"),
-            prefix=prefix,
-        )
-        prefix = ""
-    if rows:
-        _table(document, rows)
+def _pdf_pages(file, folder):
+    """Each page of a PDF as PNG without its blank margins, so a PDF proof shows like any print."""
+    subprocess.run(
+        ["pdftoppm", "-png", "-r", "110", str(file), str(Path(folder) / "pagina")],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    pages = sorted(Path(folder).glob("pagina*.png"))
+    for page in pages:
+        _trim(page)
+    return pages
 
 
-def _image(document, path, caption):
-    if not Path(path).is_file():
-        raise ValueError("Imagem indicada no dossiê não foi encontrada.")
-    document.add_picture(path, width=Cm(14))
-    document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if caption:
-        _paragraph(document, caption, center=True)
+def _trim(file):
+    from PIL import Image, ImageOps
+
+    with Image.open(file) as picture:
+        box = ImageOps.invert(picture.convert("L")).point(lambda value: 255 if value > 20 else 0).getbbox()
+        if box:
+            left, top, right, bottom = box
+            margin = 20
+            picture.crop(
+                (
+                    max(left - margin, 0),
+                    max(top - margin, 0),
+                    min(right + margin, picture.width),
+                    min(bottom + margin, picture.height),
+                )
+            ).save(file)
 
 
-def to_docx(assembled, section_titles, output, *, template=None, footer=None):
-    if not assembled["ok"]:
-        raise ValueError("A peça tem problemas na auditoria e não pode ser gerada.")
+def _add_picture(document, file):
+    from PIL import Image
+
+    with Image.open(file) as picture:
+        width, height = picture.size
+    paragraph = document.add_paragraph(style=_style(document, "imagem"))
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run()
+    if height / width > MAX_HEIGHT / MAX_WIDTH:
+        run.add_picture(str(file), height=Cm(MAX_HEIGHT))
+    else:
+        run.add_picture(str(file), width=Cm(MAX_WIDTH))
+
+
+def _image(document, item, root):
+    file = image_file(item["arquivo"], root)
+    if file.suffix.casefold() == ".pdf":
+        with tempfile.TemporaryDirectory() as folder:
+            try:
+                pages = _pdf_pages(file, folder)
+            except (subprocess.SubprocessError, OSError) as error:
+                raise ValueError(f"Imagem {file.name}: não foi possível converter o PDF.") from error
+            for page in pages:
+                _add_picture(document, page)
+    else:
+        _add_picture(document, file)
+    if item.get("legenda"):
+        _paragraph(document, "legenda", item["legenda"])
+
+
+def _open_items_page(document, marks, open_items, confirmed_by):
+    """The list at the end of a draft with open items. It is not part of the petition and leaves before filing."""
+    if not marks and not open_items:
+        return
+    document.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+    _paragraph(document, "pendencias", "PENDÊNCIAS DESTA MINUTA (retirar esta página antes do protocolo)")
+    if confirmed_by:
+        _paragraph(document, "corpo", f"Seguiu com pendências por decisão de: {confirmed_by}.")
+    for mark in marks:
+        _paragraph(document, "pedido", f"No texto: {mark[len('[PENDENTE:') : -1].strip()}")
+    groups = {}
+    for item in open_items:  # {"item": ..., "quem": "cliente|colaborador|advogada"} or plain text
+        who = item.get("quem") if isinstance(item, dict) else None
+        text = str(item.get("item") if isinstance(item, dict) else item).strip()
+        groups.setdefault(who or "", []).append(text if text.endswith(("?", "!", ".")) else text + ".")
+    for who, texts in groups.items():
+        if who:
+            _paragraph(document, "subtitulo", f"Resolve: {who}")
+        for text in texts:
+            _paragraph(document, "pedido", text)
+
+
+def to_docx(items, output, *, template=None, image_root=None, open_items=(), confirmed_by=None):
+    """Write the draft paragraphs into a copy of the template; the template's own body text is dropped."""
     document = Document(template) if template else Document()
+    body = document.element.body
+    for element in list(body):
+        if element.tag.endswith("}sectPr"):
+            continue
+        body.remove(element)
     if not template:
         style = document.styles["Normal"]
-        style.font.name = "Times New Roman"
-        style.font.size = Pt(12)
-    for item in assembled["itens"]:
-        if item["id"] in FOOTER:
-            footer = footer or item["texto"]
-    if footer:
-        document.sections[0].footer.paragraphs[0].text = footer
-    current, numeral, subtitle, letter = None, 0, 0, 0
-    for item in assembled["itens"]:
-        section = item["secao"]
-        if item["id"] in FOOTER:
-            continue
-        if section != current:
-            current, subtitle, letter = section, 0, 0
-            if section not in UNNUMBERED:
-                title = NUMBERED_TITLE.sub("", section_titles[section]).upper()
-                _paragraph(document, f"{ROMAN[numeral]} – {title}", bold=True, indent=False)
-                numeral += 1
-        if item["imprime_titulo"] and section not in UNNUMBERED:
-            subtitle += 1
-            _paragraph(document, f"{subtitle}. {item['titulo']}", bold=True, indent=False)
-        prefix = ""
-        if section == "pedido" and item["id"] != "pedido.abertura":
-            prefix = f"{chr(97 + letter)}) "
+        style.font.name, style.font.size = "Times New Roman", Pt(12)
+    letter = 0
+    for item in items:
+        kind = item["tipo"]
+        if kind == "secao":
+            letter = 0
+        if kind == "imagem":
+            _image(document, item, image_root)
+        elif kind == "tabela":
+            _table(document, item["linhas"])
+        elif kind == "pedido":
+            _paragraph(document, kind, f"{chr(97 + letter % 26)}) {item['texto']}")
             letter += 1
-        _write_text(document, item, prefix)
-    _open_items_page(document, assembled)
+        else:
+            paragraph = _paragraph(document, kind, item["texto"])
+            if kind == "fecho":  # the closing stays on the page of the signature
+                paragraph.paragraph_format.keep_with_next = True
+    _open_items_page(document, minuta.pending_marks(items), list(open_items), confirmed_by)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     document.save(output)
@@ -153,15 +222,11 @@ def to_docx(assembled, section_titles, output, *, template=None, footer=None):
 
 
 def to_pdf(docx_path, folder=None):
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-    if not soffice:
-        raise RuntimeError("LibreOffice não está instalado; o .docx foi gerado, o PDF não.")
+    """Convert the .docx with the shared converter (isolated LibreOffice profile, output checked)."""
     docx_path = Path(docx_path)
-    folder = Path(folder or docx_path.parent)
-    subprocess.run(
-        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(folder), str(docx_path)],
-        check=True,
-        capture_output=True,
-        timeout=180,
-    )
-    return folder / f"{docx_path.stem}.pdf"
+    destination = Path(folder or docx_path.parent) / f"{docx_path.stem}.pdf"
+    try:
+        return convert_word_to_pdf(docx_path, destination)
+    except (subprocess.SubprocessError, OSError) as error:
+        # The exception text carries the command line and temporary paths; keep them out of what is shown.
+        raise RuntimeError("O LibreOffice não conseguiu converter; o .docx foi gerado, o PDF não.") from error

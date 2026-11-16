@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,6 +161,11 @@ class PayloadTest(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
         os.environ.pop("VICTOR_PJE_GRAZIELE_CPF", None)
+        found = mock.patch(
+            "jurisync.workflows.filing.prepare._petition_candidates", return_value=(["5.000,00"], ["12345678909"])
+        )
+        found.start()
+        self.addCleanup(found.stop)
 
     def test_uncertain_supporting_files_fall_back_without_blocking(self):
         flagged = apply_supporting_fallback(
@@ -300,6 +306,164 @@ class PrepareFolderTest(unittest.TestCase):
             result = prepare_folder(sorted(Path(source).iterdir()), FACTS, out, profile=PROFILE, jev=False)
         self.assertFalse(result["ready"])
         self.assertTrue(any("not a PDF" in item["reason"] for item in result["review"]))
+
+
+FOUND = (["5.000,00"], ["12345678909"])
+
+
+def candidates(values=FOUND):
+    return mock.patch("jurisync.workflows.filing.prepare._petition_candidates", return_value=values)
+
+
+class RunFolder(unittest.TestCase):
+    def setUp(self):
+        patch = mock.patch.dict(os.environ, {"VICTOR_PJE_ATTORNEY_CPF": "12345678909"})
+        patch.start()
+        self.addCleanup(patch.stop)
+        for holder in ("source", "out"):
+            directory = tempfile.TemporaryDirectory()
+            self.addCleanup(directory.cleanup)
+            setattr(self, holder, Path(directory.name))
+        self.write({"PETIÇÃO INICIAL.pdf": b"%PDF-1.4\npetition", "0-PA.pdf": b"%PDF-1.4\nadministrative"})
+        self.payload = self.out / "payload.json"
+
+    def write(self, files):
+        for name, content in files.items():
+            (self.source / name).write_bytes(content)
+
+    def prepare(self, facts=FACTS, found=FOUND):
+        with candidates(found):
+            return prepare_folder(sorted(self.source.iterdir()), facts, self.out, profile=PROFILE, source="docs")
+
+
+class StalePayloadTest(RunFolder):
+    def test_a_second_prepare_with_review_items_removes_the_earlier_payload(self):
+        self.assertTrue(self.prepare()["ready"])
+        self.assertTrue(self.payload.exists())
+        second = self.prepare({**FACTS, "authorCpf": ""})
+        self.assertFalse(second["ready"])
+        self.assertIsNone(second["payloadPath"])
+        self.assertFalse(self.payload.exists())
+
+    def test_a_prepare_that_raises_leaves_no_payload_and_no_review_from_the_earlier_run(self):
+        self.prepare()
+        with self.assertRaisesRegex(ValueError, "has no files"):
+            prepare_folder([], FACTS, self.out, profile=PROFILE, source="empty")
+        self.assertFalse(self.payload.exists())
+        self.assertFalse((self.out / "review.json").exists())
+
+    def test_a_finalize_that_raises_removes_the_earlier_payload(self):
+        self.prepare()
+        review = self.out / "review.json"
+        with candidates():
+            self.assertTrue(finalize_review(review, FACTS, profile=PROFILE)["ready"])
+            self.assertTrue(self.payload.exists())
+            with self.assertRaisesRegex(ValueError, "authorCpf"):
+                finalize_review(review, {**FACTS, "authorCpf": ""}, profile=PROFILE)
+        self.assertFalse(self.payload.exists())
+
+    def test_the_payload_is_written_whole_and_private(self):
+        self.prepare()
+        self.assertEqual(oct(self.payload.stat().st_mode & 0o777), "0o600")
+        self.assertEqual(json.loads(self.payload.read_text())["authorCpf"], "12345678909")
+        self.assertEqual(sorted(path.name for path in self.out.glob("*.json*")), ["payload.json", "review.json"])
+
+
+class OverrideTest(RunFolder):
+    def finalize(self, overrides):
+        with candidates():
+            return finalize_review(self.out / "review.json", FACTS, overrides, profile=PROFILE)
+
+    def test_an_override_changes_only_role_and_type(self):
+        self.prepare()
+        report = json.loads((self.out / "review.json").read_text())
+        supporting = next(row for row in report["files"] if row["role"] == "supporting")
+        other = self.source / "0-PA.pdf"
+        for extra in ({"path": str(other)}, {"uploadSha256": "0" * 64}, {"parts": []}, {"name": "x.pdf"}):
+            with self.assertRaisesRegex(ValueError, "only set role and type"):
+                self.finalize({supporting["id"]: {"role": "supporting", "type": "Planilha", **extra}})
+        for bad in ({"role": "principal"}, {"type": 3}, "skip"):
+            with self.assertRaisesRegex(ValueError, "Override"):
+                self.finalize({supporting["id"]: bad})
+        with self.assertRaisesRegex(ValueError, "not in the review"):
+            self.finalize({"nope:9": {"role": "skip"}})
+        self.finalize({supporting["id"]: {"role": "supporting", "type": "Planilha"}})
+        documents = json.loads(self.payload.read_text())["documents"]
+        self.assertEqual(documents["supporting"][0]["type"], "Planilha")
+        self.assertEqual(documents["supporting"][0]["path"], supporting["path"])
+        self.finalize({supporting["id"]: {"role": "skip"}})
+        self.assertEqual(json.loads(self.payload.read_text())["documents"]["supporting"], [])
+
+
+class PetitionCrossCheckTest(RunFolder):
+    def reasons(self, result):
+        return {item["name"]: item["reason"] for item in result["review"]}
+
+    def test_a_petition_without_claim_value_or_cpf_passes(self):
+        result = self.prepare(found=([], []))
+        self.assertTrue(result["ready"])
+        self.assertTrue(self.payload.exists())
+
+    def test_claim_values_are_compared_as_amounts(self):
+        facts = {**FACTS, "characteristics": {"claimValue": "5000,00"}}
+        self.assertTrue(self.prepare(facts)["ready"])
+        with candidates():
+            self.assertTrue(finalize_review(self.out / "review.json", facts, profile=PROFILE)["ready"])
+        different = self.prepare(found=(["5.000,01", "x"], FOUND[1]))
+        self.assertIn("differs", self.reasons(different)["claimValue"])
+        self.assertIn("not found", self.reasons(self.prepare(found=(FOUND[0], ["11122233344"])))["authorCpf"])
+
+    def test_finalize_refuses_only_a_claim_value_or_cpf_that_differs(self):
+        self.prepare()
+        review = self.out / "review.json"
+        for found in (([], FOUND[1]), (FOUND[0], []), ([], [])):
+            with candidates(found):
+                self.assertTrue(finalize_review(review, FACTS, profile=PROFILE)["ready"])
+        for found, message in (
+            ((["9.000,00"], FOUND[1]), "claimValue differs"),
+            ((FOUND[0], ["11122233344"]), "CPF was not found"),
+        ):
+            with candidates(found), self.assertRaisesRegex(ValueError, message):
+                finalize_review(review, FACTS, profile=PROFILE)
+            self.assertFalse(self.payload.exists())
+
+
+class ReviewReasonTest(RunFolder):
+    def test_a_failed_conversion_or_classifier_never_puts_commands_or_paths_in_the_review(self):
+        self.write({"LAUDO.docx": b"not a real docx", "EXAME.pdf": b"%PDF-1.4\nexam"})
+        failure = subprocess.CalledProcessError(1, ["/usr/bin/libreoffice", "--outdir", "/tmp/jurisync-secret/x"])
+        with (
+            mock.patch("jurisync.workflows.filing.prepare.convert_word_to_pdf", side_effect=failure),
+            mock.patch(
+                "jurisync.workflows.filing.prepare.classify_document",
+                side_effect=OSError(2, "No such file", "/home/office/private/model.bin"),
+            ),
+        ):
+            result = self.prepare()
+        text = json.dumps(result["review"])
+        for hidden in ("libreoffice", "jurisync-secret", "/home/office", "model.bin", "--outdir"):
+            self.assertNotIn(hidden, text)
+        reasons = " | ".join(item["reason"] for item in result["review"])
+        self.assertIn("PDF conversion failed: the converter exited with an error", reasons)
+
+    def test_jev_off_is_reported_as_off_not_as_a_missing_key(self):
+        off = classify_document("DESPACHO.pdf", "Content " * 20, jev=False)
+        self.assertIn("off", off["review"])
+        self.assertNotIn("OPENROUTER", off["review"])
+        missing = classify_document("DESPACHO.pdf", "Content " * 20, openrouter_key="", api_key="")
+        self.assertIn("OPENROUTER_API_KEY", missing["review"])
+
+    def test_prepare_keeps_jev_off_unless_asked(self):
+        self.write({"DESPACHO.pdf": b"%PDF-1.4\nnote"})
+        seen = []
+
+        def classify(name, text, *, rules=None, **options):
+            seen.append(options)
+            return {"role": "main" if "PETI" in name else "supporting", "type": "Petição inicial", "method": "x"}
+
+        with mock.patch("jurisync.workflows.filing.prepare.classify_document", classify):
+            self.prepare()
+        self.assertTrue(seen and all(options == {"jev": False} for options in seen))
 
 
 if __name__ == "__main__":

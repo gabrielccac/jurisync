@@ -20,8 +20,16 @@ from jurisync.core.documents_dir import resolve_saved_folder
 from jurisync.core.mcp import READ_ONLY, load_env_file, run_stdio, tool_errors
 from jurisync.core.runs import run_directory
 from jurisync.paths import REPO_ROOT
-from jurisync.workflows.filing.prepare import _write_private, finalize_review, prepare_folder
+from jurisync.workflows.filing.prepare import (
+    PAYLOAD_FILE,
+    discard_payload,
+    finalize_review,
+    prepare_folder,
+    validate_overrides,
+    write_private,
+)
 from jurisync.workflows.filing.profile import load_profile, profile_names
+from jurisync.workflows.petitions.calc import digits
 
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)  # OSError covers FileNotFoundError for a missing folder
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
@@ -57,8 +65,8 @@ def _review_view(run_id, report, payload_ready):
 
 
 def _mask_cpf(value):
-    digits = re.sub(r"\D", "", str(value or ""))
-    return f"{digits[:3]}.***.***-{digits[-2:]}" if len(digits) == 11 else None
+    cpf = digits(value)
+    return f"{cpf[:3]}.***.***-{cpf[-2:]}" if len(cpf) == 11 else None
 
 
 def _payload_view(payload):
@@ -89,6 +97,11 @@ def _read_json(path, missing):
     if not path.exists():
         raise ToolError(missing)
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _payload_ready(directory):
+    """True only for a payload the latest prepare or finalize wrote: both remove the earlier one before they start."""
+    return (directory / PAYLOAD_FILE).is_file()
 
 
 def _require_no_draft(directory):
@@ -129,13 +142,15 @@ def prepare(
     _require_no_draft(directory)
     with tool_errors("Filing", *ERRORS):
         selected = load_profile(profile)
+        # From here the run is being rebuilt: an earlier payload must not survive a prepare that fails or needs review.
+        discard_payload(directory)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        _write_private(directory / "facts.json", facts)
+        write_private(directory / "facts.json", facts)
         _, files = resolve_saved_folder(sourceFolder)
         prepare_folder(files, facts, directory, profile=selected, source=sourceFolder, jev=useJev)
     # prepare returns a short summary; the review file holds the files and the petition's candidates.
     report = _read_json(directory / "review.json", "Prepare did not write a review")
-    return _review_view(runId, report, (directory / "payload.json").exists())
+    return _review_view(runId, report, bool(report.get("ready")) and _payload_ready(directory))
 
 
 @server.tool(
@@ -149,13 +164,13 @@ def review(
 ) -> dict[str, Any]:
     directory = run_directory(runId)
     report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
-    return _review_view(runId, report, (directory / "payload.json").exists())
+    return _review_view(runId, report, _payload_ready(directory))
 
 
 @server.tool(
     name="filing_finalize",
     title="Write the filing payload for a prepared run",
-    description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition. `overrides` maps a file id from the review to {role, type}, or {role: 'skip'} to leave a file out. Omit `facts` to reuse the facts given to prepare. Returns a summary of what the draft will contain.",
+    description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition's text. `overrides` maps a file id from the review to {role, type} and nothing else (role is main, supporting or skip; {role: 'skip'} leaves a file out). Omit `facts` to reuse the facts given to prepare. A refusal removes any payload written earlier for this run. Returns a summary of what the draft will contain.",
     annotations=LOCAL_WRITE,
 )
 def finalize(
@@ -176,17 +191,18 @@ def finalize(
 ) -> dict[str, Any]:
     directory = run_directory(runId)
     _require_no_draft(directory)
+    # Whatever this call ends in, the payload of an earlier step is gone: only a finalize that succeeds leaves one.
+    discard_payload(directory)
     report = _read_json(directory / "review.json", "This run has no review yet; call filing_prepare first")
-    if facts is None:
-        facts = _read_json(directory / "facts.json", "This run has no stored facts; pass facts")
-    else:
-        _write_private(directory / "facts.json", facts)
-    unknown = sorted(set(overrides or {}) - {row["id"] for row in report.get("files", [])})
-    if unknown:
-        raise ToolError(f"Overrides name files that are not in the review: {', '.join(unknown)}")
     with tool_errors("Filing", *ERRORS):
-        result = finalize_review(directory / "review.json", facts, overrides or {}, profile=load_profile(profile))
-    payload = _read_json(directory / "payload.json", "The payload was not written")
+        selected = load_profile(profile)
+        validate_overrides(overrides or {}, [row["id"] for row in report.get("files", [])])
+        if facts is None:
+            facts = _read_json(directory / "facts.json", "This run has no stored facts; pass facts")
+        else:
+            write_private(directory / "facts.json", facts)
+        result = finalize_review(directory / "review.json", facts, overrides or {}, profile=selected)
+    payload = _read_json(directory / PAYLOAD_FILE, "The payload was not written")
     return {
         "runId": runId,
         "ready": bool(result.get("ready")),
@@ -207,7 +223,7 @@ def _subject_table(path):
 @server.tool(
     name="filing_profiles",
     title="List the available filing profiles",
-    description="List the customer filing profiles this server can use (name, portal, description). A profile holds one office's defaults and conventions; the customer's skill says which one to pass to the other filing tools.",
+    description="List the filing profiles this office can use (name, portal, description). A profile holds one office's defaults and conventions; the customer's skill says which one to pass to the other filing tools.",
     annotations=READ_ONLY,
 )
 def profiles() -> dict[str, Any]:
@@ -218,6 +234,22 @@ def profiles() -> dict[str, Any]:
                 for name in profile_names()
             ]
         }
+
+
+CNJ_NUMBER = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b")
+
+
+def _lawsuit_reference(value):
+    """The digits of a whole lawsuit id or CNJ number. Shorter numbers (a year, a day) would match other cases' notes."""
+    text = str(value).strip()
+    if not (re.fullmatch(r"\d{5,}", text) or CNJ_NUMBER.fullmatch(text)):
+        raise ValueError("lawsuitRef must be a whole lawsuit id or CNJ number")
+    return digits(text)
+
+
+def _references(text):
+    """Every whole number and CNJ number a history paragraph mentions, as digits."""
+    return set(re.findall(r"\d+", text)) | {digits(match) for match in CNJ_NUMBER.findall(text)}
 
 
 @server.tool(
@@ -233,7 +265,7 @@ def subjects(
         Field(
             min_length=4,
             max_length=40,
-            description="Optional lawsuit id or CNJ number to look up what was filed for that case in the profile's history notes.",
+            description="Optional whole lawsuit id (5 digits or more) or CNJ number to look up what was filed for that case in the profile's history notes. Partial numbers match nothing.",
         ),
     ] = None,
 ) -> dict[str, Any]:
@@ -241,9 +273,10 @@ def subjects(
         selected = load_profile(profile)
         history_path = selected.reference("history")
         history = []
-        if lawsuitRef and history_path and history_path.exists():
+        reference = _lawsuit_reference(lawsuitRef) if lawsuitRef else None
+        if reference and history_path and history_path.exists():
             paragraphs = re.split(r"\n\s*\n", history_path.read_text(encoding="utf-8"))
-            history = [" ".join(text.split())[:900] for text in paragraphs if lawsuitRef in text][:4]
+            history = [" ".join(text.split())[:900] for text in paragraphs if reference in _references(text)][:4]
         return {"candidates": _subject_table(selected.reference("subjects")), "history": history}
 
 

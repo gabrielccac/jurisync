@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jurisync.core import credentials
+from jurisync.customers import customer_name
 from jurisync.paths import REPO_ROOT
 
 PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
@@ -54,8 +55,25 @@ def _profile_files():
     return sorted(root.glob(f"*/{PROFILE_FILE}"))
 
 
+def _office():
+    """The customer whose profile this process (or hosted request) may use; ``None`` when any may be used.
+
+    A local install or hosted office with ``JURISYNC_CUSTOMER`` gets that customer's profile only. A hosted office
+    with no customer gets none (""). Only a checkout with no customer selected, a developer's, sees every profile.
+    """
+    customer = customer_name()
+    if customer or credentials.tenant():
+        return customer
+    return None
+
+
+def _available(name):
+    office = _office()
+    return office is None or name == office
+
+
 def profile_names():
-    return [path.parent.name for path in _profile_files()]
+    return [path.parent.name for path in _profile_files() if _available(path.parent.name)]
 
 
 def _pattern_list(values, label):
@@ -69,6 +87,8 @@ def _pattern_list(values, label):
 def load_profile(name):
     if not isinstance(name, str) or not PROFILE_NAME.fullmatch(name):
         raise ValueError("Profile names use lowercase letters, digits and hyphens")
+    if not _available(name):
+        raise ValueError(f"Filing profile {name} is not available to this office")
     path = next((file for file in _profile_files() if file.parent.name == name), None)
     if path is None:
         raise ValueError(f"No filing profile named {name}; available: {', '.join(profile_names()) or 'none'}")

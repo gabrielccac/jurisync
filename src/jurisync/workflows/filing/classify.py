@@ -147,7 +147,8 @@ def ask_jev(name, text, *, post=_post_json, openrouter_key=None, api_key=None, s
     raise RuntimeError("Jev API kept returning rate-limit responses")
 
 
-def classify_document(name, text, *, rules=None, **jev_options):
+def classify_document(name, text, *, rules=None, jev=True, **jev_options):
+    """Classify one file. ``jev=False`` never sends its text out: what the name and content cannot decide is reviewed."""
     kind = document_kind(name, rules)
     if kind == "petition":
         return {"role": "main", "type": "Petição inicial", "method": "filename"}
@@ -170,6 +171,13 @@ def classify_document(name, text, *, rules=None, **jev_options):
             return {"role": "supporting", "type": None, "method": "content", "review": f"Decision outcome: {outcome}"}
     if len(str(text).strip()) < 80:
         return {"role": "supporting", "type": None, "method": "content", "review": "No readable document text"}
+    if not jev:
+        return {
+            "role": "supporting",
+            "type": None,
+            "method": "content",
+            "review": "Jev classification is off (useJev false); choose the document type",
+        }
     jev = ask_jev(name, text, **jev_options)
     if not jev:
         return {
