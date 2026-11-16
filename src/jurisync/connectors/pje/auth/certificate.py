@@ -18,10 +18,11 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
 from jurisync.connectors.pje.auth.sso import require_allowed_url
-from jurisync.core import credentials
+from jurisync.core import awswaf, credentials
 from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
 from jurisync.core.redaction import url_shape
-from jurisync.core.totp import accounts_from_image, parse_accounts, parse_index, select_account, totp
+from jurisync.core.session_pool import LoginRejected
+from jurisync.core.totp import accounts_from_image, parse_accounts, portal_account, totp
 
 
 def _require_available(page, config=None):
@@ -116,6 +117,15 @@ def _follow(sso_session, response, hops=6):
     )
 
 
+def _require_registered(response, config):
+    """PJe sends a user it does not know to the public pre-registration page, after the SSO accepted the login."""
+    if "/publico/usuario/cadastro" in urllib.parse.urlsplit(response.url).path:
+        raise RuntimeError(
+            f"{config.key}: the SSO login worked but this user is not registered in this PJe "
+            "(redirected to its pre-registration page); the court must register the lawyer first"
+        )
+
+
 def _authenticated(response, host, root="/pje/"):
     soup = BeautifulSoup(response.text, "html.parser")
     shell = "Painel do advogado" in response.text
@@ -143,17 +153,10 @@ def _twofa(portal, twofa_data=None):
     data = twofa_data or config.env("2FA_DATA")
     qr_path = config.env("2FA_QR")
     if data:
-        accounts, label = parse_accounts(data), f"{config.env_prefix}_2FA_DATA"
-    elif qr_path:
-        accounts, label = accounts_from_image(Path(qr_path)), f"{config.env_prefix}_2FA_QR"
-    else:
-        return None
-    return select_account(
-        accounts,
-        match=config.env("OTP_PROFILE_MATCH"),
-        index=parse_index(config.env("OTP_PROFILE_INDEX"), f"{config.env_prefix}_OTP_PROFILE_INDEX"),
-        label=label,
-    )
+        return portal_account(config, parse_accounts(data))
+    if qr_path:
+        return portal_account(config, accounts_from_image(Path(qr_path)))
+    return None
 
 
 # A login that stops short of the authenticated page is often a TOTP code the SSO already took or one that expired
@@ -184,7 +187,13 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
             raise
         log.info("%s login stopped short (%s); retrying in the next TOTP window", config.key, error)
         sleep(_seconds_to_next_window(clock()))
-        return _login(requests.Session(), config, account, signer)
+        try:
+            return _login(requests.Session(), config, account, signer)
+        except RuntimeError as second:
+            if not any(marker in str(second) for marker in RETRYABLE_LOGIN):
+                raise
+            # Two codes in two windows were refused: stop here, or every tool call spends two more attempts.
+            raise LoginRejected(f"{second} (twice; check the TOTP secret and the certificate)") from None
 
 
 def a3_cert_login(portal, session=None, *, signer=None):
@@ -215,6 +224,17 @@ def _login(session, config, account, signer):
     page = _follow(session, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30))
     require_allowed_url(page.url)
     log_request("GET", config.login_url, page.status_code)
+    if awswaf.is_challenge(page):
+        # TJES 1G: an AWS WAF CAPTCHA answers instead of PJe until the session carries its token.
+        log.info("%s shows an AWS WAF CAPTCHA; solving it in a browser", config.key)
+        awswaf.apply(session, awswaf.solve(config.login_url))
+        page = _follow(
+            session, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
+        )
+        require_allowed_url(page.url)
+        log_request("GET", config.login_url, page.status_code)
+        if awswaf.is_challenge(page):
+            raise RuntimeError(f"{config.key}: the AWS WAF still asks for a CAPTCHA after it was solved")
     _require_available(page, config)
     try:
         _, mensagem = _challenge(page.text, config)
@@ -247,6 +267,7 @@ def _login(session, config, account, signer):
     require_allowed_url(action)
 
     response = _follow(session, _submit_code(session, action, token))
+    _require_registered(response, config)
     if _authenticated(response, config.host, config.root):
         log.info("%s certificate login complete (no OTP asked) -> %s", config.key, url_shape(response.url))
         return session
@@ -268,12 +289,14 @@ def _login(session, config, account, signer):
     )
     log_request("POST", otp_action, response.status_code)
     final = _follow(session, response)
+    _require_registered(final, config)
     if not _authenticated(final, config.host, config.root):
         # JT portals park the flow on a /pjekz/ loader: probe an app page, whose
         # error.seam forward renders the authenticated shell when the session holds.
         probe = session.get(config.search_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
         log_request("GET", config.search_url, probe.status_code)
         final = _follow(session, probe)
+    _require_registered(final, config)
     if not _authenticated(final, config.host, config.root):
         raise RuntimeError(f"{config.key} login did not reach an authenticated PJe page")
     log.info("%s certificate login complete -> %s", config.key, url_shape(final.url))

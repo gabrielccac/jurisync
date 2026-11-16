@@ -1,0 +1,44 @@
+{
+ "pagina": 1,
+ "tamanhoPagina": 40,
+ "qtdPaginas": 1,
+ "totalRegistros": 2,
+ "resultado": [
+  {
+   "id": 1000001,
+   "descricaoOrgaoJulgador": "Vara do Trabalho de Teste",
+   "classeJudicial": "ATOrd",
+   "numero": 1,
+   "numeroProcesso": "0000001-00.2026.5.07.0001",
+   "segredoDeJustica": false,
+   "codigoStatusProcesso": "DISTRIBUIDO",
+   "prioridadeProcessual": 4,
+   "nomeParteAutora": "AUTOR TESTE",
+   "qtdeParteAutora": 4,
+   "nomeParteRe": "REU TESTE",
+   "qtdeParteRe": 1,
+   "dataAutuacao": "2026-06-17T16:04:56.440945",
+   "juizoDigital": false,
+   "dataArquivamento": "2026-11-04T14:19:27.507",
+   "siglaOrgaoJulgador": "001TST"
+  },
+  {
+   "id": 1000002,
+   "descricaoOrgaoJulgador": "Vara do Trabalho de Teste",
+   "classeJudicial": "ATOrd",
+   "numero": 2,
+   "numeroProcesso": "0000002-00.2026.5.07.0001",
+   "segredoDeJustica": false,
+   "codigoStatusProcesso": "DISTRIBUIDO",
+   "prioridadeProcessual": 0,
+   "nomeParteAutora": "AUTOR TESTE",
+   "qtdeParteAutora": 1,
+   "nomeParteRe": "REU TESTE",
+   "qtdeParteRe": 1,
+   "dataAutuacao": "2026-07-23T16:15:07.771217",
+   "juizoDigital": false,
+   "dataArquivamento": "2026-10-31T01:00:11.69",
+   "siglaOrgaoJulgador": "001TST"
+  }
+ ]
+}

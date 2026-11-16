@@ -223,11 +223,78 @@ class ReadDocumentsTest(unittest.TestCase):
         self.assertTrue(self.read_with(noticed)[1]["success"])
         self.assertTrue(self.read_with(other)[1]["success"])
 
-    def test_unreadable_expedientes_tab_does_not_block_but_is_reported(self):
-        session, result = self.read_with(None)
+    def test_unreadable_expedientes_tab_refuses_the_read_until_the_user_agrees(self):
+        session = Mock()
+        found = {**copy.deepcopy(process()), "expedientes": None}
+        with patch.object(client.search, "search_process", return_value=found):
+            with self.assertRaisesRegex(client.NoticeUnchecked, "ciência not checked.*acknowledgeCiencia=true"):
+                client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session)
+        session.get.assert_not_called()
+        session, result = self.read_with(None, acknowledge_ciencia=True)
         self.assertTrue(result["success"])
         self.assertIs(result["cienciaChecked"], False)
         session.get.assert_called()
+
+    def test_expedientes_not_read_in_full_refuse_the_read(self):
+        session = Mock()
+        found = {**copy.deepcopy(process()), "expedientes": [], "expedientes_complete": False}
+        with patch.object(client.search, "search_process", return_value=found):
+            with self.assertRaisesRegex(client.NoticeUnchecked, "could not be read in full"):
+                client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session)
+            session.get.assert_not_called()
+            session.get.return_value = response(CERTIDAO)
+            result = client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session, acknowledge_ciencia=True)
+        self.assertIs(result["cienciaChecked"], False)
+
+    def refused(self, expedientes, document_ids=("456",), timeline=None):
+        session = Mock()
+        found = {**copy.deepcopy(process()), "expedientes": expedientes}
+        if timeline is not None:
+            found["timeline"] = timeline
+        with patch.object(client.search, "search_process", return_value=found):
+            with self.assertRaises(client.PendingNotice) as raised:
+                client.read_documents(NUMBER, list(document_ids), portal="trf5-1g", session=session)
+        session.get.assert_not_called()
+        return str(raised.exception)
+
+    def test_a_pending_communication_without_a_document_id_blocks_every_document(self):
+        unlinked = [{"expedienteId": "7", "documentId": None, "tipo": "Citação", "parte": "RÉ", "ciencia": None}]
+        message = self.refused(unlinked)
+        self.assertIn("7 (Citação", message)
+        self.assertIn("no document id", message)
+        _, result = self.read_with(unlinked, acknowledge_ciencia=True)
+        self.assertEqual(result["ciencia"]["pendenteAoLer"][0]["expedienteId"], "7")
+
+    def test_documents_attached_to_a_pending_act_are_refused_with_it(self):
+        def document(identifier):
+            return {"id": identifier, "title": "x", "download_url": URL[:-3] + identifier}
+
+        timeline = [
+            {"date": "05 out. 2026", "movements": [{"documents": [document("900"), document("456")]}]},
+            {"date": "04 out. 2026", "movements": [{"documents": [document("457")]}]},
+        ]
+        pending = [{"expedienteId": "9", "documentId": "900", "tipo": "Intimação", "parte": "A", "ciencia": None}]
+        self.assertIn("attachment", self.refused(pending, ["456"], timeline))
+        session = Mock()
+        session.get.return_value = response(CERTIDAO)
+        found = {**copy.deepcopy(process()), "expedientes": pending, "timeline": timeline}
+        with patch.object(client.search, "search_process", return_value=found):
+            result = client.read_documents(NUMBER, ["457"], portal="trf5-1g", session=session)
+        self.assertTrue(result["success"])
+        self.assertNotIn("ciencia", result)
+
+    def test_a_document_the_timeline_does_not_show_is_refused_while_a_ciencia_is_pending(self):
+        pending = [{"expedienteId": "9", "documentId": "900", "tipo": "Intimação", "parte": "A", "ciencia": None}]
+        found = {
+            **copy.deepcopy(process()),
+            "expedientes": pending,
+            "document_inventory": [{"id": "458", "title": None, "download_url": URL[:-3] + "458"}],
+        }
+        session = Mock()
+        with patch.object(client.search, "search_process", return_value=found):
+            with self.assertRaises(client.PendingNotice):
+                client.read_documents(NUMBER, ["458"], portal="trf5-1g", session=session)
+        session.get.assert_not_called()
 
     def test_failed_search_and_wrong_tribunal_do_not_read_anything(self):
         session = Mock()
@@ -235,6 +302,21 @@ class ReadDocumentsTest(unittest.TestCase):
             result = client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session)
         self.assertEqual((result["success"], result["documents"]), (False, []))
         session.get.assert_not_called()
+        failed = {
+            "success": False,
+            "error": "Process not found or returned process number did not match",
+            "diagnostics": [{"code": "x"}],
+        }
+        with patch.object(client.search, "search_process", return_value=failed):
+            result = client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session)
+        self.assertEqual(result["error"], "Process not found or returned process number did not match")
+        self.assertEqual(result["diagnostics"], [{"code": "x"}])
+        from mcp.server.mcpserver.exceptions import ToolError
+
+        from jurisync.core.mcp import require_success
+
+        with self.assertRaisesRegex(ToolError, "Process not found"):
+            require_success("PJe", result)
         with self.assertRaises(ValueError):
             client.read_documents("1020340-18.2025.4.01.3100", ["456"], portal="trf5-1g", session=session)
         with self.assertRaises(ValueError):

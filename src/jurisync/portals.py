@@ -40,10 +40,13 @@ class Portal:
     origins: tuple[str, ...] = field(default=())  # CNJ "OOOO" prefixes served by this portal
     wired: bool = True  # False: recognized, but no connector yet
     guess_by_number: bool = True  # False: never suggested from a process number alone (only a link host picks it)
-    flavor: str = (
-        ""  # Projudi/e-SAJ generation (adapter): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico"
-    )
+    flavor: str = ""  # Projudi/e-SAJ generation (adapter): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST)
     impersonate: str = ""  # curl_cffi profile override; "" keeps the global default (see core.http.IMPERSONATE)
+
+    @property
+    def kz(self):
+        """PJe-JT 2.x: the lawyer panel and process pages are the Angular app (PJe-KZ) over REST, not JSF."""
+        return self.system == "pje" and self.flavor == "kz"
 
     @property
     def id(self):
@@ -147,23 +150,23 @@ PORTALS = {
         # SSO/certificate mechanics as the other PJes.
         Portal(
             "trt7-1g", "pje", "TRT7", "1g", "pje.trt7.jus.br", "/primeirograu/", "certificate_totp", "TRT7_1G",
-            region="07", justice="5",
+            region="07", justice="5", flavor="kz",
         ),
         Portal(
             "trt7-2g", "pje", "TRT7", "2g", "pje.trt7.jus.br", "/segundograu/", "certificate_totp", "TRT7_2G",
-            region="07", justice="5",
+            region="07", justice="5", flavor="kz",
         ),
         Portal(
             "trt18-1g", "pje", "TRT18", "1g", "pje.trt18.jus.br", "/primeirograu/", "certificate_totp", "TRT18_1G",
-            region="18", justice="5",
+            region="18", justice="5", flavor="kz",
         ),
         Portal(
             "trt18-2g", "pje", "TRT18", "2g", "pje.trt18.jus.br", "/segundograu/", "certificate_totp", "TRT18_2G",
-            region="18", justice="5",
+            region="18", justice="5", flavor="kz",
         ),
         Portal(
             "tst", "pje", "TST", "2g", "pje.tst.jus.br", "/tst/", "certificate_totp", "TST",
-            region="00", justice="5", guess_by_number=False,
+            region="00", justice="5", guess_by_number=False, flavor="kz",
         ),
         # State courts from one office's map (hosts as listed there; CNJ J=8): the three Eprocs first, then the
         # PJes. Single-host PJes serve /pje/; TJRJ/TJPI split instances by path like TJCE/TJPE.
@@ -185,7 +188,10 @@ PORTALS = {
                region="14", justice="8"),
         Portal("tjma-1g", "pje", "TJMA", "1g", "pje.tjma.jus.br", "/pje/", "certificate_totp", "TJMA_1G",
                region="10", justice="8"),
+        # TJES 1G sits behind an AWS WAF image CAPTCHA (HTTP 405); the login solves it (core/awswaf.py).
         Portal("tjes-1g", "pje", "TJES", "1g", "pje.tjes.jus.br", "/pje/", "certificate_totp", "TJES_1G",
+               region="08", justice="8"),
+        Portal("tjes-2g", "pje", "TJES", "2g", "pje.tjes.jus.br", "/pje2g/", "certificate_totp", "TJES_2G",
                region="08", justice="8"),
         Portal("tjba-1g", "pje", "TJBA", "1g", "pje.tjba.jus.br", "/pje/", "certificate_totp", "TJBA_1G",
                region="05", justice="8"),
@@ -225,7 +231,7 @@ PORTALS = {
         Portal("tjrs-1g", "eproc", "TJRS", "1g", "eproc1g.tjrs.jus.br", "/eproc/", "browser_totp", "TJRS_1G",
                legacy_env_prefixes=("TJRS",), region="21", justice="8", wired=True),
         # State-court Eprocs below are registered for Denis (authenticator profiles
-        # Eproc/TJSC, Eproc/TJTO, Eproc/TNU, Eproc/TJSP); no connector reads them yet.
+        # Eproc/TJSC, Eproc/TJTO, Eproc/TNU, Eproc/TJSP); the Eproc connector serves them.
         Portal("tjsc-1g", "eproc", "TJSC", "1g", "eproc1g.tjsc.jus.br", "/eproc/", "browser_totp", "TJSC_1G",
                region="24", justice="8"),
         Portal("tjsc-2g", "eproc", "TJSC", "2g", "eproc2g.tjsc.jus.br", "/eproc/", "browser_totp", "TJSC_2G",

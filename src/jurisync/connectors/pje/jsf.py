@@ -131,31 +131,6 @@ def parse_partial_response(payload):
     return {"updates": updates, "view_state": state}
 
 
-def apply_partial_updates(form_html, payload):
-    """Apply partial-response fragments to the last full form so the next request has live state."""
-    parsed = parse_partial_response(payload)
-    if not parsed["updates"]:
-        return _text(payload)
-    soup = BeautifulSoup(form_html, "html.parser")
-    for update_id, content in parsed["updates"].items():
-        if update_id.endswith("ViewState"):
-            for element in soup.find_all("input", attrs={"name": "javax.faces.ViewState"}):
-                element["value"] = parsed["view_state"] or content.strip()
-            continue
-        target = soup.find(id=update_id)
-        if not target:
-            continue
-        fragment = BeautifulSoup(content, "html.parser")
-        roots = list(fragment.body.contents if fragment.body else fragment.contents)
-        if len(roots) == 1 and getattr(roots[0], "get", lambda *_: None)("id") == update_id:
-            target.replace_with(roots[0])
-            continue
-        target.clear()
-        for root in roots:
-            target.append(root)
-    return str(soup)
-
-
 # -- requests ------------------------------------------------------------------
 
 

@@ -170,26 +170,35 @@ class SelectedDocumentsChecks(unittest.TestCase):
         self.assertNotIn("secret", text)
         self.assertIn("decisão", text)
 
-    def test_client_selective_read_keeps_owned_session_until_finished(self):
+    def test_process_read_never_fetches_document_bodies(self):
+        # Document texts are read only by read_documents, which checks for a pending ciência first.
         session = Mock()
-        session.get.return_value = response()
         with (
             patch.object(client, "login_portal", return_value=(session, None)) as login,
             patch.object(client.search, "search_process", return_value=process()),
         ):
-            result = client.fetch_process(NUMBER, scope="all", document_ids=["456"], portal="trf1-1g")
-        self.assertEqual(result["attachments"][0]["extractionStatus"], "extracted")
+            result = client.fetch_process(NUMBER, scope="all", portal="trf1-1g")
+            with self.assertRaises(TypeError):
+                client.fetch_process(NUMBER, scope="all", document_ids=["456"], portal="trf1-1g")
+        self.assertTrue(result["success"])
+        self.assertNotIn("attachments", result)
         login.assert_called_once()
-        session.get.assert_called_once()
+        session.get.assert_not_called()
         session.close.assert_called_once()
         with patch.object(client, "login_portal") as login:
-            for kwargs in ({"scope": "latest"}, {"scope": "all", "fetch_documents": True}):
-                with self.assertRaises(ValueError):
-                    client.fetch_process(NUMBER, document_ids=["456"], portal="trf1-1g", **kwargs)
-            for invalid in ([], ["456", "456"], [456], "456"):
-                with self.assertRaises(ValueError):
-                    client.fetch_process(NUMBER, scope="all", document_ids=invalid, portal="trf1-1g")
+            with self.assertRaises(ValueError):
+                client.fetch_process(NUMBER, scope="all", fetch_documents=True, portal="trf1-1g")
             login.assert_not_called()
+
+    def test_the_process_tool_has_no_document_argument(self):
+        import asyncio
+
+        from jurisync.connectors.pje import server
+
+        tools = {tool.name: tool for tool in asyncio.run(server.server.list_tools())}
+        self.assertNotIn("documentIds", tools["pje_get_process"].input_schema["properties"])
+        self.assertIn("pje_read_documents", tools["pje_get_process"].description)
+        self.assertIn("documentIds", tools["pje_read_documents"].input_schema["properties"])
 
     def test_client_scope_page_uses_first_page_and_all_merges_bounded_pages(self):
         first = {"date": "07 set. 2026", "movements": []}

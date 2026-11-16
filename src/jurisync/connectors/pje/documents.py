@@ -46,6 +46,10 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     if region is None or region != config.region:
         raise ValueError("Process number tribunal does not match the portal")
     validate_document_ids(document_ids)
+    if config.kz:
+        from jurisync.connectors.pje import kz
+
+        return kz.read_documents(process, document_ids, session=session, save=save)
     known = {}
     documents = list(process.get("document_inventory") or process.get("documentInventory") or [])
     documents.extend(

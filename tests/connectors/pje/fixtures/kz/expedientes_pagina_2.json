@@ -1,0 +1,27 @@
+{
+ "pagina": 2,
+ "tamanhoPagina": 2,
+ "qtdPaginas": 2,
+ "totalRegistros": 3,
+ "resultado": [
+  {
+   "id": 7000013,
+   "idProcessoExpediente": 8400013,
+   "idDocumento": 9000007,
+   "nomePessoaParte": "FULANO DE TAL",
+   "tipoExpediente": "Intimação",
+   "codigoMeioExpediente": "P",
+   "meioExpediente": "Diário Eletrônico",
+   "meioExpedienteEnum": "DIARIO_ELETRONICO",
+   "prazoLegal": 8,
+   "tipoPrazoEnum": "DIAS",
+   "tipoPrazo": "dias úteis",
+   "fechado": false,
+   "permiteCienciaManual": false,
+   "dataCriacao": "2026-11-04T14:19:27.046181",
+   "dataCiencia": null,
+   "cienciaViaSistema": false,
+   "prazoVencido": false
+  }
+ ]
+}

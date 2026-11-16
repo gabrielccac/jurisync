@@ -173,7 +173,7 @@ class BackgroundFillTests(unittest.TestCase):
                 again = server._start_fill("run1", "create-fill")
                 status = server.draft_status("run1")
                 release.set()
-                server.fill_jobs["run1"].join(5)
+                server.fill_jobs[("", "run1")].join(5)
         self.assertEqual(first["state"], "started")
         self.assertEqual(again["state"], "already-running")
         self.assertEqual(status["result"]["state"], "starting")
@@ -218,8 +218,84 @@ class BackgroundFillTests(unittest.TestCase):
                 payload.write_text("{}")
                 paths.return_value = (payload, Path(tmp) / "checkpoint.json")
                 server._start_fill("run-ctx", "create-fill")
-                server.fill_jobs["run-ctx"].join(5)
+                server.fill_jobs[("office-a", "run-ctx")].join(5)
         self.assertEqual(seen["tenant"], "office-a")
+
+    def test_fill_jobs_and_errors_are_kept_per_office(self):
+        from jurisync.connectors.pje import server
+        from jurisync.core import credentials
+
+        self.addCleanup(server.fill_errors.clear)
+
+        class Pool:
+            def session(self, key):
+                raise RuntimeError(
+                    "login failed at https://pje1g.trf5.jus.br/pje/login.seam?ca=abc123 reading /home/office/a1.p12"
+                )
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"JURISYNC_FILING_DIR": tmp}):
+            with mock.patch.object(server, "sessions", Pool()):
+                with credentials.scope("office-a", {}):
+                    server._fill_job("same-run", "fill")
+                    failed = server.draft_status("same-run")
+                with credentials.scope("office-b", {}):
+                    with self.assertRaisesRegex(Exception, "no checkpoint yet"):
+                        server.draft_status("same-run")
+        self.assertEqual(list(server.fill_errors), [("office-a", "same-run")])
+        error = failed["result"]["error"]
+        self.assertEqual(failed["result"]["state"], "failed")
+        self.assertIn("RuntimeError: login failed", error)
+        for leaked in ("https://", "abc123", "/home/office", "a1.p12"):
+            self.assertNotIn(leaked, error)
+
+    def test_recorded_run_errors_reach_the_agent_without_paths_or_urls(self):
+        from jurisync.connectors.pje.filing.status import run_status
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp, "checkpoint.json")
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "error": "OSError: cannot read /home/office/docs/laudo.pdf from https://pje1g.trf5.jus.br/pje/x",
+                    }
+                )
+            )
+            error = run_status(checkpoint)["error"]
+        self.assertIn("OSError: cannot read", error)
+        self.assertNotIn("/home/office", error)
+        self.assertNotIn("https://", error)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp, "checkpoint.json")
+            checkpoint.write_text(json.dumps({"status": "complete"}))
+            self.assertIsNone(run_status(checkpoint)["error"])
+
+    def test_only_the_act_reader_is_marked_as_not_read_only(self):
+        import asyncio
+
+        from jurisync.connectors.pje import server
+
+        tools = {tool.name: tool.annotations for tool in asyncio.run(server.server.list_tools())}
+        ato = tools["pje_read_expediente_ato"]
+        self.assertEqual(
+            (ato.read_only_hint, ato.destructive_hint, ato.idempotent_hint, ato.open_world_hint),
+            (False, True, False, True),
+        )
+        for name in ("pje_get_process", "pje_list_inbox", "pje_list_expediente_counters", "pje_list_watched_processes"):
+            self.assertTrue(tools[name].read_only_hint, name)
+        self.assertFalse(tools["pje_read_documents"].read_only_hint)
+
+    def test_watched_processes_tool_takes_a_window_and_a_process_filter(self):
+        import asyncio
+
+        from jurisync.connectors.pje import server
+
+        tools = {tool.name: tool for tool in asyncio.run(server.server.list_tools())}
+        properties = tools["pje_list_watched_processes"].input_schema["properties"]
+        self.assertEqual((properties["limit"]["default"], properties["limit"]["maximum"]), (100, 500))
+        self.assertEqual(properties["offset"]["default"], 0)
+        self.assertIn("processNumber", properties)
+        self.assertIn("bucket", tools["pje_list_expediente_counters"].input_schema["properties"])
 
 
 if __name__ == "__main__":

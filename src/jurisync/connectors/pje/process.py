@@ -11,16 +11,18 @@ from jurisync.connectors.pje.auth.sessions import auth_method, load_session, sav
 from jurisync.connectors.pje.auth.sso import login_session
 from jurisync.connectors.pje.documents import read_selected_documents, validate_document_ids
 from jurisync.connectors.pje.expedientes import (
+    NoticeUnchecked,
     PendingNotice,
     ciencia_report,
     open_deadlines,
     pending_message,
     pending_notice,
+    unchecked_message,
 )
 from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core.http import enable_request_logging
 from jurisync.core.redaction import drop_keys
-from jurisync.core.totp import parse_accounts, parse_index, select_account
+from jurisync.core.totp import parse_accounts, portal_account
 
 
 def credentials(portal):
@@ -31,12 +33,7 @@ def credentials(portal):
         values[field] = portal.env(field)
         if not values[field]:
             raise RuntimeError(f"Set {portal.env_name(field)}")
-    account = select_account(
-        parse_accounts(values["2FA_DATA"]),
-        match=portal.env("OTP_PROFILE_MATCH"),
-        index=parse_index(portal.env("OTP_PROFILE_INDEX"), portal.env_name("OTP_PROFILE_INDEX")),
-        label=portal.env_prefix,
-    )
+    account = portal_account(portal, parse_accounts(values["2FA_DATA"]))
     return values["USERNAME"], values["PASSWORD"], account
 
 
@@ -73,7 +70,6 @@ def fetch_process(
     portal,
     session=None,
     raw_html_path=None,
-    document_ids=None,
     ato_expediente=None,
     ato_text_limit=20000,
     ato_allow_pending=False,
@@ -82,8 +78,8 @@ def fetch_process(
 
     latest means the latest date bucket, which may contain several movements.
     page means the first HTML timeline page; all merges the bounded pages returned
-    by the search layer. Bodies are fetched only with explicit document_ids.
-    document_ids selects at most five joined documents and extracts supported HTML/PDF.
+    by the search layer. Document bodies are never fetched here: ``read_documents`` is the only
+    reader, because it checks for a pending ciência first.
     """
     config = portals.pje(portal)
     if scope not in ("latest", "page", "all"):
@@ -93,12 +89,8 @@ def fetch_process(
         raise ValueError(f"Process number does not belong to {config.tribunal}")
     if download_dir and not fetch_documents:
         raise ValueError("download_dir requires fetch_documents=True")
-    if document_ids is not None and (scope not in ("page", "all") or fetch_documents or download_dir):
-        raise ValueError("document_ids requires scope=page or all and cannot combine with bulk downloads")
     if fetch_documents or download_dir:
-        raise ValueError("Bulk document fetching is retired; pass document_ids")
-    if document_ids is not None:
-        validate_document_ids(document_ids)
+        raise ValueError("Bulk document fetching is retired; use read_documents")
     owned_session = session is None
     if owned_session:
         session, _ = login_portal(portal)
@@ -112,11 +104,6 @@ def fetch_process(
         result = dict(raw_result or {})
         timeline = _all_timeline(result)
         selected = _select_timeline(timeline, scope, _first_timeline_page(result))
-        attachments = []
-        if document_ids is not None and result.get("success"):
-            attachments = read_selected_documents(
-                {**result, "portal": portal, "timeline": timeline}, document_ids, session=session
-            )
         inventory = _document_inventory(result, timeline)
         pagination = dict(result.get("pagination") or {})
         pagination.setdefault("page", 1 if result.get("success") else 0)
@@ -142,8 +129,7 @@ def fetch_process(
             "parties": result.get("parties") or [],
             "timeline": selected,
             "documentInventory": inventory,
-            "attachments": attachments,
-            "expedientes": _expedientes(result.get("expedientes")),
+            "expedientes": _expedientes(result.get("expedientes"), complete=_expedientes_complete(result)),
             "ato": result.get("ato"),
             "pagination": pagination,
             "diagnostics": list(result.get("diagnostics") or []),
@@ -186,10 +172,23 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
     try:
         result = dict(search.search_process(session, process_number, None, portal=portal) or {})
         if not result.get("success"):
-            return {"success": False, "portal": portal, "processNumber": process_number, "documents": []}
+            return {
+                "success": False,
+                "portal": portal,
+                "processNumber": process_number,
+                "documents": [],
+                "error": result.get("error") or "the process could not be opened",
+                "diagnostics": list(result.get("diagnostics") or []),
+            }
         timeline = _all_timeline(result)
-        checked = _require_notice(result.get("expedientes"), document_ids) if not acknowledge_ciencia else None
-        pending = pending_notice(result.get("expedientes") or [], document_ids)
+        unchecked = _notice_unchecked(result)
+        pending = pending_notice(result.get("expedientes") or [], document_ids, timeline)
+        if not acknowledge_ciencia:
+            # Fail closed: nothing is fetched unless the expedientes prove no pending ciência is involved.
+            if unchecked:
+                raise NoticeUnchecked(unchecked_message(unchecked))
+            if pending:
+                raise PendingNotice(pending_message(pending))
         documents = read_selected_documents(
             {**result, "portal": portal, "timeline": timeline}, document_ids, session=session, save=save
         )
@@ -206,19 +205,21 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
         "processNumber": process_number,
         "processId": result.get("processo_id"),
         "documents": documents,
-        **({"cienciaChecked": False} if checked is False else {}),
+        **({"cienciaChecked": False} if unchecked else {}),
         **({"ciencia": ciencia_report(pending)} if pending else {}),
     }
 
 
-def _require_notice(expedientes, document_ids):
-    """Refuse a pending communication's document; False when the tab could not be checked."""
-    if expedientes is None:
-        return False
-    pending = pending_notice(expedientes, document_ids)
-    if pending:
-        raise PendingNotice(pending_message(pending))
-    return True
+def _expedientes_complete(result):
+    """A search result that does not say its expedientes are complete is taken at its word only when it has them."""
+    return result.get("expedientes") is not None and result.get("expedientes_complete", True) is not False
+
+
+def _notice_unchecked(result):
+    """Why the ciência state of this process is unknown ("unavailable", "incomplete"), or None when it is known."""
+    if result.get("expedientes") is None:
+        return "unavailable"
+    return None if _expedientes_complete(result) else "incomplete"
 
 
 def _all_timeline(result):
@@ -273,8 +274,11 @@ def _document_inventory(result, timeline):
 REDACTED_KEYS = {"download_url", "url", "href", "hash", "ca", "viewstate"}
 
 
-def _expedientes(items, limit=30):
-    """Newest communications first, as PJe lists them, plus the ones still open."""
+def _expedientes(items, limit=30, *, complete=True):
+    """Newest communications first, as PJe lists them, plus the ones still open.
+
+    ``complete`` is false when the portal's list was not read in full: a pending ciência may be missing from it.
+    """
     if items is None:
         return None
     items = [
@@ -283,6 +287,7 @@ def _expedientes(items, limit=30):
     ]
     return {
         "total": len(items),
+        "complete": complete,
         "abertos": open_deadlines(items),
         "items": items[:limit],
         "truncated": len(items) > limit,
@@ -325,10 +330,6 @@ def movement_candidates(result):
     return candidates
 
 
-# Compatibility for callers of the original adapter. These records are movements.
-publication_candidates = movement_candidates
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Read PJe process movements (TRF1/TJAP password login, TRF5 certificate login)"
@@ -341,11 +342,6 @@ def main():
     parser.add_argument("--process-number", required=True)
     parser.add_argument("--scope", choices=("latest", "page", "all"), default="page")
     parser.add_argument("--save-detail-html", help="Save the authenticated 1G detail response locally")
-    parser.add_argument(
-        "--document-id",
-        action="append",
-        help="Read one inventory document ID; repeat up to five times (scope page or all)",
-    )
     args = parser.parse_args()
     enable_request_logging()
     with redirect_stdout(sys.stderr):
@@ -354,7 +350,6 @@ def main():
             args.scope,
             portal=args.portal,
             raw_html_path=args.save_detail_html,
-            document_ids=args.document_id,
         )
     result["movement_candidates"] = movement_candidates(result)
     print(json.dumps(result, ensure_ascii=False, indent=2))

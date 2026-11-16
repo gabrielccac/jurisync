@@ -82,3 +82,21 @@ class CertificateLoginChecks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_aws_waf_captcha_is_solved_before_the_login_page(self):
+        waf = SimpleNamespace(
+            status_code=405,
+            url="https://pje.tjes.jus.br/pje/login.seam",
+            headers={},
+            text='<title>Human Verification</title><script src="https://x.captcha.awswaf.com/captcha.js"></script>',
+        )
+        session = Mock()
+        session.get.side_effect = [waf, waf]
+        with (
+            patch.object(cert_login.awswaf, "solve", return_value=[{"name": "aws-waf-token", "value": "t"}]) as solve,
+            self.assertRaisesRegex(RuntimeError, "still asks for a CAPTCHA"),
+        ):
+            cert_login._login(session, cert_login.portals.pje("tjes-1g"), None, "key", "cert", [])
+        solve.assert_called_once_with("https://pje.tjes.jus.br/pje/login.seam")
+        session.cookies.set.assert_called_once_with("aws-waf-token", "t", domain="", path="/")
+        self.assertEqual(session.get.call_count, 2)

@@ -21,7 +21,7 @@ from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.connectors.pje.push import read_push
 from jurisync.core import credentials
-from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, sanitize_diagnostics, serve, tool_errors
 from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
@@ -83,7 +83,7 @@ def _notifications(portal, read):
 @server.tool(
     name="pje_get_process",
     title="Get PJe process context",
-    description="Retrieve a read-only PJe process result from the selected portal with metadata, parties, bounded timeline pages, document inventory and optionally up to five selected document texts. TRF5 1º Grau/JEF uses certificate login. scope=latest returns the newest date bucket; scope=page returns the first timeline page; scope=all merges the bounded pages returned by the search layer. It also returns expedientes from the process Expedientes tab: each communication per recipient with channel, notice date, days and the deadline date PJe computed (limite), plus the ones still open (abertos). This returns movements, not confirmed publications.",
+    description="Retrieve a read-only PJe process result from the selected portal with metadata, parties, bounded timeline pages and the document inventory (ids and titles only: read document texts with pje_read_documents, which checks for a pending ciência first). TRF5 1º Grau/JEF uses certificate login. scope=latest returns the newest date bucket; scope=page returns the first timeline page; scope=all merges the bounded pages returned by the search layer. It also returns expedientes from the process Expedientes tab: each communication per recipient with channel, notice date, days and the deadline date PJe computed (limite), plus the ones still open (abertos); expedientes.complete=false means the list was not read in full. This returns movements, not confirmed publications.",
     annotations=READ_ONLY,
 )
 def get_process(
@@ -97,16 +97,9 @@ def get_process(
             description="'page' (default): first timeline page. 'latest': newest date only. 'all': merges bounded pages, slower."
         ),
     ] = "page",
-    documentIds: Annotated[
-        list[Annotated[str, Field(min_length=1)]],
-        Field(
-            max_length=5,
-            description='Optional JSON list of up to 5 document ids from documentInventory, e.g. ["195268244"]; empty means no texts.',
-        ),
-    ] = [],
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
-        result = fetch_process(processNumber, scope, portal=portal, session=session, document_ids=documentIds or None)
+        result = fetch_process(processNumber, scope, portal=portal, session=session)
     result["movement_candidates"] = movement_candidates(result)
     return require_success("PJe", result)
 
@@ -114,7 +107,7 @@ def get_process(
 @server.tool(
     name="pje_read_documents",
     title="Read PJe documents",
-    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except the act of a communication whose ciência is not registered yet: reading it may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. When such a read happens the result has ciencia.pendenteAoLer and an aviso: tell the user and note it in the task. If the Expedientes tab cannot be read the check is skipped and the result says cienciaChecked=false.",
+    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except what may belong to a communication whose ciência is not registered yet: its act, the documents attached to that act, and any document of a process that has a pending communication with no document id. Reading those may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. The read is also refused, with nothing opened, when the process' expedientes could not be read or not in full (the error starts with 'ciência not checked'): retry later, or ask the user before using acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. When such a read happens the result has ciencia.pendenteAoLer and an aviso (and cienciaChecked=false when the expedientes were unreadable): tell the user and note it in the task.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def read_documents_tool(
@@ -162,7 +155,8 @@ def read_documents_tool(
     name="pje_read_expediente_ato",
     title="Read the act behind a PJe expediente",
     description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Communications whose notice (ciência) is already registered are opened by default. A pending one is refused (error in ato.error) because opening it may register the party's ciência and start the deadline: ask the user, and only with their explicit yes repeat the call with acknowledgeCiencia=true (customers with ciencia_on_read = 'allow' in settings.toml open them by default). When a pending one is opened, ato.ciencia lists it with an aviso: tell the user and note it in the task.",
-    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+    # Opening a pending act registers the ciência and starts a deadline: not a read-only, repeatable call.
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
 def read_expediente_ato_tool(
     processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
@@ -194,6 +188,12 @@ def read_expediente_ato_tool(
             ato_text_limit=textLimit,
             ato_allow_pending=_allow_ciencia(acknowledgeCiencia),
         )
+    if result.get("success") and result.get("ato") is None:
+        # The expedientes could not be read, so the ciência state of this one is unknown: nothing was opened.
+        result["ato"] = {
+            "expedienteId": expedienteId,
+            "error": "the process' expedientes could not be read, so the act was not opened; try again later",
+        }
     return require_success(
         "PJe",
         {k: result[k] for k in ("success", "source", "portal", "processNumber", "ato", "diagnostics")}
@@ -209,7 +209,7 @@ def read_expediente_ato_tool(
 @server.tool(
     name="pje_list_expediente_counters",
     title="List PJe Expedientes counters",
-    description="Read the PJe lawyer panel's Expedientes buckets (the same for every login) with their counts. With regions=true each bucket that has items also lists its regions and inboxes with counts (jurisdictions, boxes the profile has), which vary per user. Opening a bucket or expanding a region does not notify anyone; no expediente row is opened and nothing is acknowledged.",
+    description="Read the PJe lawyer panel's Expedientes buckets (the same for every login) with their counts. With regions=true each bucket that has items also lists its regions and inboxes with counts (jurisdictions, boxes the profile has), which vary per user; that walks every bucket and is slow. To see the regions of one bucket pass bucket instead (its index or part of its label). Opening a bucket or expanding a region does not notify anyone; no expediente row is opened and nothing is acknowledged.",
     annotations=READ_ONLY,
 )
 def expediente_counters(
@@ -217,14 +217,22 @@ def expediente_counters(
     regions: Annotated[
         bool, Field(description="true also lists regions and inboxes under each non-empty bucket.")
     ] = False,
+    bucket: Annotated[
+        str | None,
+        Field(
+            description="Bucket index (e.g. '0') or part of its label: lists the regions and inboxes of that bucket only. Leave empty for counts only."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
-    return _notifications(portal, lambda name, session: read_counters(name, session=session, tree=regions))
+    return _notifications(
+        portal, lambda name, session: read_counters(name, session=session, tree=regions, bucket=bucket)
+    )
 
 
 @server.tool(
     name="pje_list_inbox",
     title="List PJe Expedientes inbox rows",
-    description="List the communications of a PJe panel bucket (default 0, Pendentes de ciência ou de resposta; pass its index or part of its label) from the panel's inboxes, region by region, all pages up to maxPages (40 rows per page). Each row has the expediente id, type, recipient, channel, expedition date, notice (ciência) and whether it is still pending, days, PJe's deadline (limite), the process number and the last movement; read the act with pje_read_expediente_ato and the process with pje_get_process. regions keeps only inboxes whose path contains one of the texts. processNumber, expedidoDe/expedidoAte (YYYY-MM-DD, expedition date interval) and expedienteId run the inbox's own search. inboxes[].complete is true only when the rows read equal the total PJe reports. Read-only: it never takes ciência, replies, selects or distributes expedientes.",
+    description="List the communications of a PJe panel bucket (default: Pendentes de ciência ou de resposta, index 0; on the PJe-JT portals, TRT/TST, Meus Expedientes; pass its index or part of its label, and an index the portal does not have is an error that lists the valid ones) from the panel's inboxes, region by region, all pages up to maxPages (40 rows per page). Each row has the expediente id, type, recipient, channel, expedition date, notice (ciência) and whether it is still pending, days, PJe's deadline (limite), the process number and the last movement; read the act with pje_read_expediente_ato and the process with pje_get_process. regions keeps only inboxes whose path contains one of the texts. processNumber, expedidoDe/expedidoAte (YYYY-MM-DD, expedition date interval) and expedienteId run the inbox's own search. inboxes[].complete is true only when the rows read equal the total PJe reports. Read-only: it never takes ciência, replies, selects or distributes expedientes.",
     annotations=READ_ONLY,
 )
 def list_inbox(
@@ -232,7 +240,7 @@ def list_inbox(
     bucket: Annotated[
         str | None,
         Field(
-            description="Bucket index (e.g. '0') or part of its label, e.g. 'Pendentes de ciência'. Default: bucket 0. See pje_list_expediente_counters."
+            description="Bucket index (e.g. '0') or part of its label, e.g. 'Pendentes de ciência'. Leave empty for the default pending bucket; indexes differ on TRT/TST portals. See pje_list_expediente_counters."
         ),
     ] = None,
     regions: Annotated[
@@ -284,11 +292,23 @@ def list_inbox(
 @server.tool(
     name="pje_list_watched_processes",
     title="List PJe Push watched processes",
-    description="Read the authenticated PJe Push watched-process registry. It reports registered processes and bounded pagination metadata, not movement or publication email text; no page replay or watch mutations are performed.",
+    description="Read the authenticated PJe Push watched-process registry: limit rows (default 100) starting at offset, with total and hasMore; call again with offset += limit while hasMore is true. processNumber returns only that process' registrations (total 0 means it is not watched). It reports registered processes, not movement or publication email text; no page replay or watch mutations are performed.",
     annotations=READ_ONLY,
 )
-def watched_processes(portal: Portal) -> dict[str, Any]:
-    return _notifications(portal, read_push)
+def watched_processes(
+    portal: Portal,
+    limit: Annotated[int, Field(ge=1, le=500, description="Rows to return, 1 to 500; default 100.")] = 100,
+    offset: Annotated[int, Field(ge=0, description="Rows to skip; default 0.")] = 0,
+    processNumber: Annotated[
+        str | None, Field(description="CNJ process number with punctuation: keeps only that process' rows.")
+    ] = None,
+) -> dict[str, Any]:
+    return _notifications(
+        portal,
+        lambda name, session: read_push(
+            name, session=session, limit=limit, offset=offset, process_number=processNumber or None
+        ),
+    )
 
 
 def draft_paths(run_id):
@@ -298,20 +318,27 @@ def draft_paths(run_id):
 
 BACKGROUND_STAGES = frozenset({"create-fill", "fill", "resume"})
 # Fills take minutes, longer than a tool call may last, so they run in a thread of this server and report through
-# pje_draft_status. A fill that fails before its checkpoint exists can only leave its error here.
+# pje_draft_status. A fill that fails before its checkpoint exists can only leave its error here. Both are keyed
+# by (tenant, runId), the identity the session pool uses: two offices may pick the same run name.
 fill_jobs = {}
 fill_errors = {}
 
 
+def _job_key(run_id):
+    return (credentials.tenant(), run_id)
+
+
 def _fill_job(run_id, stage):
+    key = _job_key(run_id)  # the job runs in a copy of the caller's context, so this is the caller's tenant
     payload, checkpoint = draft_paths(run_id)
     try:
         # The pooled session is reused and refreshed, so a fill and its retries do not log in again each time.
         with sessions.session("trf5-1g") as session:
             filing.run_stage(stage, payload_path=str(payload), checkpoint_path=str(checkpoint), session=session)
-        fill_errors.pop(run_id, None)
+        fill_errors.pop(key, None)
     except BaseException as error:
-        fill_errors[run_id] = f"{type(error).__name__}: {str(error)[:300]}"
+        # The text goes to the calling agent: no URLs, local paths or session tokens.
+        fill_errors[key] = sanitize_diagnostics(f"{type(error).__name__}: {error}")[:300]
 
 
 def _start_fill(run_id, requested):
@@ -320,7 +347,8 @@ def _start_fill(run_id, requested):
     stage = "fill" if requested == "resume" else requested
     if not draft_writes_enabled():
         raise ToolError("PJe draft writes are disabled; set PJE_ALLOW_DRAFT_WRITES=true to create or fill a draft")
-    running = fill_jobs.get(run_id)
+    key = _job_key(run_id)
+    running = fill_jobs.get(key)
     if running is not None and running.is_alive():
         return {"runId": run_id, "success": True, "stage": requested, "state": "already-running"}
     payload, checkpoint = draft_paths(run_id)
@@ -330,11 +358,11 @@ def _start_fill(run_id, requested):
             raise ToolError("This run already has a draft; use stage fill to continue it")
         if stage == "fill" and not checkpoint.exists():
             raise ToolError("This run has no draft yet; use stage create-fill")
-    fill_errors.pop(run_id, None)
+    fill_errors.pop(key, None)
     # A new thread starts with an empty context: carry the caller's credential scope (the office, when hosted).
     context = contextvars.copy_context()
     job = threading.Thread(target=context.run, args=(_fill_job, run_id, stage), name=f"pje-fill-{run_id}", daemon=True)
-    fill_jobs[run_id] = job
+    fill_jobs[key] = job
     job.start()
     return {
         "runId": run_id,
@@ -437,20 +465,21 @@ def draft_delete(
 )
 def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
     _, checkpoint = draft_paths(runId)
-    job = fill_jobs.get(runId)
+    key = _job_key(runId)
+    job = fill_jobs.get(key)
     if not checkpoint.exists():
         if job is not None and job.is_alive():
             return {"runId": runId, "success": True, "result": {"state": "starting", "conclusion": "not_checked"}}
-        if runId in fill_errors:
-            return {"runId": runId, "success": True, "result": {"state": "failed", "error": fill_errors[runId]}}
+        if key in fill_errors:
+            return {"runId": runId, "success": True, "result": {"state": "failed", "error": fill_errors[key]}}
         raise ToolError("This run has no checkpoint yet")
     response = _draft_stage("PJe draft status", "status-check" if checkPje else "status", runId)
     if job is not None and job.is_alive() and response["result"]["state"] == "unknown":
         response["result"]["state"] = "running"
-    if runId in fill_errors and not (job is not None and job.is_alive()):
+    if key in fill_errors and not (job is not None and job.is_alive()):
         # A start that failed before it touched the checkpoint (a login that did not go through) is not in the
         # checkpoint; without this line the run would still look as if nothing had been tried.
-        response["result"]["lastStartError"] = fill_errors[runId]
+        response["result"]["lastStartError"] = fill_errors[key]
     return response
 
 

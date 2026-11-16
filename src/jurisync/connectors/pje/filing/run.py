@@ -13,7 +13,8 @@ from jurisync.connectors.pje.filing.payload import payload_subjects, validate_fi
 from jurisync.connectors.pje.filing.status import run_status
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 from jurisync.core.http import enable_request_logging
-from jurisync.core.mcp import load_env_file
+from jurisync.core.mcp import load_env_file, sanitize_diagnostics
+from jurisync.core.session_pool import SessionPool
 from jurisync.paths import REPO_ROOT
 
 STAGES = (
@@ -56,6 +57,16 @@ WRITE_STAGES = frozenset(
 )
 
 
+# A run without a caller's session logs in through a pool, so the login semaphore and the cool-down after rejected
+# credentials apply. Each run still gets a new login and closes it itself: the pooled entry is never reused.
+logins = SessionPool(
+    login=lambda portal: cert_login(portal),
+    refresh=lambda portal, session: None,
+    close=lambda session: None,
+    revalidate_after=-1,
+)
+
+
 def _timeline(checkpoint_path, client, stage):
     return StepTimeline(Path(checkpoint_path).with_name("filing-steps.json"), client, stage)
 
@@ -84,7 +95,8 @@ def _fill(client, checkpoint, checkpoint_path, payload, stage, verify_all):
         result = client.fill_draft(checkpoint, payload, timeline, verify_all=verify_all, save=save)
     except BaseException as error:
         failed = isinstance(error, Exception)
-        message = f"{type(error).__name__}: {str(error)[:300]}"
+        # Read back by pje_draft_status: no URLs, local paths or session tokens in the recorded text.
+        message = sanitize_diagnostics(f"{type(error).__name__}: {error}")[:300]
         checkpoint.update(status="failed" if failed else "interrupted", error=message, updatedAt=now())
         save(checkpoint)
         raise
@@ -145,84 +157,86 @@ def run_stage(
         raise ValueError("Only trf5-1g is supported")
     if stage in ("create-fill", "fill"):
         validate_fill_payload(payload)
-    owned = session is None
-    if owned:
-        session = cert_login("trf5-1g")
-    try:
-        client = DraftClient(session)
-        if stage == "pending-search":
-            result = client.search_pending_drafts(name=name, cpf=cpf)
-        elif stage == "delete-draft":
-            result = client.delete_draft(draft_id, name)
-        elif stage == "classification":
-            result = client.classification_options(payload["classification"])
-        elif stage in ("create", "create-fill"):
-            if not checkpoint_path:
-                raise ValueError("--checkpoint is required to save the new draft ID")
-            destination = Path(checkpoint_path)
-            if destination.exists():
-                raise FileExistsError(f"Checkpoint already exists: {destination}")
-            result = client.create_draft(payload["classification"])
-            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-                json.dump(
-                    {"draftId": result["draftId"], "draftUrl": result["draftUrl"], "stage": "created"},
-                    output,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            if stage == "create-fill":
-                created = {"draftId": result["draftId"], "draftUrl": result["draftUrl"], "stage": "created"}
-                result["filling"] = _fill(client, created, destination, payload, stage, verify_all)
+    if session is None:
+        with logins.session("trf5-1g") as owned:
+            try:
+                return _run(stage, payload, owned, checkpoint_path, search, page, name, cpf, verify_all, draft_id)
+            finally:
+                owned.close()
+    return _run(stage, payload, session, checkpoint_path, search, page, name, cpf, verify_all, draft_id)
+
+
+def _run(stage, payload, session, checkpoint_path, search, page, name, cpf, verify_all, draft_id):
+    client = DraftClient(session)
+    if stage == "pending-search":
+        result = client.search_pending_drafts(name=name, cpf=cpf)
+    elif stage == "delete-draft":
+        result = client.delete_draft(draft_id, name)
+    elif stage == "classification":
+        result = client.classification_options(payload["classification"])
+    elif stage in ("create", "create-fill"):
+        if not checkpoint_path:
+            raise ValueError("--checkpoint is required to save the new draft ID")
+        destination = Path(checkpoint_path)
+        if destination.exists():
+            raise FileExistsError(f"Checkpoint already exists: {destination}")
+        result = client.create_draft(payload["classification"])
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(
+                {"draftId": result["draftId"], "draftUrl": result["draftUrl"], "stage": "created"},
+                output,
+                ensure_ascii=False,
+                indent=2,
+            )
+        if stage == "create-fill":
+            created = {"draftId": result["draftId"], "draftUrl": result["draftUrl"], "stage": "created"}
+            result["filling"] = _fill(client, created, destination, payload, stage, verify_all)
+    else:
+        if not checkpoint_path:
+            raise ValueError("--checkpoint is required after classification")
+        with open(checkpoint_path, encoding="utf-8") as source:
+            checkpoint = json.load(source)
+        if stage == "status-check":
+            result = run_status(checkpoint_path, payload, client)
+        elif stage == "subject-options":
+            result = client.search_subjects(checkpoint["draftUrl"], search, page)
+        elif stage == "subject":
+            added_subjects = client.add_subjects(checkpoint["draftUrl"], payload_subjects(payload))
+            result = added_subjects[0] if "subject" in payload else added_subjects
+        elif stage == "fill":
+            result = _fill(client, checkpoint, checkpoint_path, payload, stage, verify_all)
+        elif stage == "pending":
+            result = client.pending_draft(checkpoint["draftId"], payload["author"]["name"])
+        elif stage == "public-bodies":
+            result = {}
+            if "passive" in payload:
+                result["passive"] = client.add_passive_body(checkpoint["draftUrl"], payload["passive"])
+            if "otherParticipants" in payload:
+                result["otherParticipants"] = [
+                    client.add_other_participant(checkpoint["draftUrl"], body) for body in payload["otherParticipants"]
+                ]
+        elif stage == "attorney":
+            result = client.add_attorney(checkpoint["draftUrl"], payload["attorney"])
+        elif stage == "characteristics":
+            result = client.save_characteristics(checkpoint["draftUrl"], payload["characteristics"])
+        elif stage == "main-document":
+            draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
+            result = client.add_main_document(draft_url, payload["documents"]["main"])
+        elif stage == "supporting-documents":
+            draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
+            result = client.add_supporting_documents(draft_url, payload["documents"].get("supporting", []))
+        elif stage == "documents":
+            draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
+            result = client.add_documents(draft_url, payload["documents"])
         else:
-            if not checkpoint_path:
-                raise ValueError("--checkpoint is required after classification")
-            with open(checkpoint_path, encoding="utf-8") as source:
-                checkpoint = json.load(source)
-            if stage == "status-check":
-                result = run_status(checkpoint_path, payload, client)
-            elif stage == "subject-options":
-                result = client.search_subjects(checkpoint["draftUrl"], search, page)
-            elif stage == "subject":
-                added_subjects = client.add_subjects(checkpoint["draftUrl"], payload_subjects(payload))
-                result = added_subjects[0] if "subject" in payload else added_subjects
-            elif stage == "fill":
-                result = _fill(client, checkpoint, checkpoint_path, payload, stage, verify_all)
-            elif stage == "pending":
-                result = client.pending_draft(checkpoint["draftId"], payload["author"]["name"])
-            elif stage == "public-bodies":
-                result = {}
-                if "passive" in payload:
-                    result["passive"] = client.add_passive_body(checkpoint["draftUrl"], payload["passive"])
-                if "otherParticipants" in payload:
-                    result["otherParticipants"] = [
-                        client.add_other_participant(checkpoint["draftUrl"], body)
-                        for body in payload["otherParticipants"]
-                    ]
-            elif stage == "attorney":
-                result = client.add_attorney(checkpoint["draftUrl"], payload["attorney"])
-            elif stage == "characteristics":
-                result = client.save_characteristics(checkpoint["draftUrl"], payload["characteristics"])
-            elif stage == "main-document":
-                draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_main_document(draft_url, payload["documents"]["main"])
-            elif stage == "supporting-documents":
-                draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_supporting_documents(draft_url, payload["documents"].get("supporting", []))
-            elif stage == "documents":
-                draft_url = client.pending_draft_url(checkpoint["draftId"], payload["author"]["name"])
-                result = client.add_documents(draft_url, payload["documents"])
-            else:
-                result = client.add_author(
-                    checkpoint["draftUrl"],
-                    payload["authorCpf"],
-                    payload["author"]["name"],
-                    payload["author"].get("address"),
-                )
-        return result
-    finally:
-        if owned:
-            session.close()
+            result = client.add_author(
+                checkpoint["draftUrl"],
+                payload["authorCpf"],
+                payload["author"]["name"],
+                payload["author"].get("address"),
+            )
+    return result
 
 
 def main():

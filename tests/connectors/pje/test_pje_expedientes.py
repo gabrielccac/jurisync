@@ -137,6 +137,54 @@ def test_ato_of_a_pending_communication_opens_only_with_permission():
     assert ato["ciencia"]["pendenteAoLer"][0]["expedienteId"] == "1"
 
 
+def test_tab_is_complete_only_when_every_row_was_parsed_and_there_is_one_page():
+    html = page(row(exp="1"), row(exp="2"))
+    assert expedientes.tab_complete(html, expedientes.parse_expedientes(html))
+    empty = page()
+    assert expedientes.tab_complete(empty, expedientes.parse_expedientes(empty))
+    # No table at all: an empty process and a tab that did not load look the same, so it is not vouched for.
+    assert not expedientes.tab_complete("<html></html>", [])
+    unparsed = page(row(exp="1"), "<tr><td>Outro formato de linha</td><td>x</td></tr>")
+    assert not expedientes.tab_complete(unparsed, expedientes.parse_expedientes(unparsed))
+    scroller = '<table class="rich-datascr"><tr><td class="rich-datascr-act">1</td><td class="rich-datascr-inact">2</td></tr></table>'
+    paged = page(row(exp="1")).replace("</html>", scroller + "</html>")
+    assert not expedientes.tab_complete(paged, expedientes.parse_expedientes(paged))
+    single = page(row(exp="1")).replace(
+        "</html>", scroller.replace('<td class="rich-datascr-inact">2</td>', "") + "</html>"
+    )
+    assert expedientes.tab_complete(single, expedientes.parse_expedientes(single))
+
+
+def test_fetch_reports_a_paged_tab_as_incomplete():
+    from unittest.mock import Mock, patch
+
+    body = page(row(exp="1")).replace("</html>", '<td class="rich-datascr-inact">2</td></html>')
+    detail = '<form id="navbar"><input type="hidden" name="javax.faces.ViewState" value="j_id4"/></form>'
+    answer = Mock(status_code=200, content=body.encode(), headers={})
+    with patch.object(expedientes.jsf, "post", return_value=answer):
+        items, complete = expedientes.fetch_expedientes(Mock(), detail, "https://pje1g.trf5.jus.br/pje/x")
+    assert [item["expedienteId"] for item in items] == ["1"] and complete is False
+
+
+def test_pending_notice_covers_unlinked_communications_and_documents_of_the_same_entry():
+    items = [
+        {"expedienteId": "1", "documentId": "10", "ciencia": None},
+        {"expedienteId": "2", "documentId": None, "ciencia": None},
+        {"expedienteId": "3", "documentId": None, "ciencia": {"por": "x", "em": "2026-10-01"}},
+    ]
+    assert [i["expedienteId"] for i in expedientes.pending_notice(items, ["99"])] == ["2"]
+    timeline = [
+        {"movements": [{"documents": [{"id": "10"}, {"id": "11"}]}, {"documents": [{"id": "12"}]}]},
+    ]
+    linked = items[:1]
+    assert [i["expedienteId"] for i in expedientes.pending_notice(linked, ["11"], timeline)] == ["1"]
+    assert expedientes.pending_notice(linked, ["12"], timeline) == []
+    # 13 is not in the loaded timeline: it cannot be told apart from an attachment of the pending act.
+    assert [i["expedienteId"] for i in expedientes.pending_notice(linked, ["12", "13"], timeline)] == ["1"]
+    assert "ciência not checked" in expedientes.unchecked_message("unavailable")
+    assert issubclass(expedientes.NoticeUnchecked, expedientes.PendingNotice)
+
+
 def test_pending_notice_matches_only_requested_documents_without_ciencia():
     items = [
         {"expedienteId": "1", "documentId": "10", "ciencia": None},

@@ -1,0 +1,25 @@
+{
+ "autuadoEm": "2026-06-17T16:04:56.440945",
+ "distribuidoEm": "2026-06-17T16:04:56.440944",
+ "valorDaCausa": 225000.0,
+ "segredoDeJustica": false,
+ "justicaGratuita": true,
+ "tutelaOuLiminar": false,
+ "juizoDigital": false,
+ "labelFaseProcessual": "Conhecimento",
+ "labelStatusProcesso": "Distribuído",
+ "classeJudicial": {
+  "descricao": "Ação Trabalhista - Rito Ordinário",
+  "sigla": "ATOrd"
+ },
+ "id": 1000001,
+ "numero": "0000001-00.2026.5.07.0001",
+ "orgaoJulgador": {
+  "id": 1,
+  "descricao": "Vara do Trabalho de Teste"
+ },
+ "jurisdicao": {
+  "id": 1,
+  "descricao": "Cidade Teste"
+ }
+}

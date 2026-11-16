@@ -69,6 +69,10 @@ def cache_path(portal):
 def is_authenticated(session, portal):
     """Return whether the session still opens the authenticated process search."""
     config = portals.pje(portal)
+    if config.kz:
+        from jurisync.connectors.pje import kz
+
+        return kz.is_authenticated(session, portal)
     try:
         response = session.get(config.search_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=20)
     except requests.exceptions.RequestException:

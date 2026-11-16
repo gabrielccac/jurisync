@@ -9,8 +9,9 @@ discovered from the markup instead of listed here.
 
 Opening a bucket, expanding a branch, opening an inbox and turning a page do not notify
 anyone. The rows also carry controls that do (``Tomar ciência`` starts the deadline,
-``Responder`` opens the reply), so every request goes through ``check_control``: only the
-four read-only shapes below are ever posted.
+``Responder`` opens the reply), so every request goes through ``check_request``: only the
+read-only control shapes below are ever posted, with nothing beside them but the tree and filter
+state of the page.
 """
 
 import math
@@ -20,7 +21,7 @@ from html import unescape
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje import jsf, kz
 from jurisync.connectors.pje.expedientes import NOTICE, PRAZO
 from jurisync.connectors.pje.parsers import response_html
 from jurisync.connectors.pje.process import login_portal
@@ -63,6 +64,10 @@ def _count(text):
     return int(match.group(1)) if match else 0
 
 
+def _has_count(text):
+    return bool(re.search(r"\d+\s*$", text.strip()))
+
+
 def _date(value):
     day, month, year = value[:10].split("/")
     return f"{year}-{month}-{day}"
@@ -73,6 +78,60 @@ def check_control(kind, control):
     if kind not in SAFE_CONTROL or FORBIDDEN.search(control) or not SAFE_CONTROL[kind].match(control):
         raise RuntimeError(f"PJe panel control refused ({kind}): it is not a read-only inbox control")
     return control
+
+
+def _refuse(kind, what):
+    raise RuntimeError(f"PJe panel request refused ({kind}): {what}")
+
+
+def check_parameters(kind, control, parameters):
+    """The A4J parameters of a request must be the control pair of ``control`` and nothing else.
+
+    The parameters come from the page's own ``onclick``, so they are not trusted: a JSF component runs when its id
+    is posted, whatever ``ajaxSingle`` says. Allowed are ``ajaxSingle=<control>`` and the control itself
+    (``<control>=<control>``; for a page turn ``<scroller>=<page number>``). A branch posts a second id of the same
+    node (the expander, which differs from the node id in its generated suffix only). No key or value may name an
+    action (``FORBIDDEN``).
+    """
+    check_control(kind, control)
+    for key, value in parameters.items():
+        key, value = str(key), str(value)
+        if FORBIDDEN.search(key) or FORBIDDEN.search(value):
+            _refuse(kind, "a parameter names an action that is not a read")
+        if key == "ajaxSingle":
+            allowed = value == control
+        elif kind == "page":
+            allowed = key == control and value.isdigit()
+        elif kind == "branch":
+            same_node = key.rpartition("::")[0] == control.rpartition("::")[0]
+            allowed = key == value and same_node and bool(SAFE_CONTROL[kind].match(key))
+        else:
+            allowed = key == value == control
+        if not allowed:
+            _refuse(kind, "the page asked for a parameter that is not the control being opened")
+    return parameters
+
+
+STATE_FIELD = re.compile(r"^formAbaExpediente:listaAgrSitExp:\d+:.+(?:NodeExpanded|:input)$")
+
+
+def check_request(kind, control, form, parameters, extra=()):
+    """Refuse a panel request unless it is a read-only control with only known state beside it.
+
+    ``extra`` may hold the tree's state (``...NodeExpanded``, ``...:input``), the inbox form's filter and header
+    fields (``formExpedientes:...``, never a row's own field) and the view state. Their names and the tree values
+    are page-supplied and must not name an action; filter values are what the caller searched for.
+    """
+    check_parameters(kind, control, parameters)
+    if FORBIDDEN.search(form):
+        _refuse(kind, "the form is not a read-only panel form")
+    for name, value in extra:
+        tree = bool(STATE_FIELD.match(name))
+        listing = name.startswith("formExpedientes:") and not ROW_ID.search(name)
+        if not (tree or listing or name == "javax.faces.ViewState"):
+            _refuse(kind, "a field outside the panel's tree and filter state would be posted")
+        if FORBIDDEN.search(name) or (tree and FORBIDDEN.search(str(value))):
+            _refuse(kind, "a state field names an action that is not a read")
 
 
 # -- A4J submits ---------------------------------------------------------------
@@ -154,6 +213,7 @@ def parse_tree(html, bucket):
         expander = table.find(attrs={"rich:onexpand": True})
         flag = table.find("input", id=re.compile(r"NodeExpanded$"))
         label, count = _text_and_count(anchor) if anchor else ("", 0)
+        badge = anchor.select_one(".pull-right") if anchor else None
         if not count:
             main_row = table.find("tr", id=re.compile(r":mainRow$"))
             count = _count(_clean(main_row)) if main_row else 0
@@ -162,6 +222,8 @@ def parse_tree(html, bucket):
             "parent": parent,
             "label": label,
             "count": count,
+            # True only when the row's own counter was read: without it a 0 means "unknown", not "empty".
+            "counted": bool(badge and _has_count(_clean(badge))),
             "kind": icon["title"] if icon else None,
             "expanded": bool(flag and flag.get("value") == "true"),
             "expand": _submit(expander["rich:onexpand"]) if expander and not inbox else None,
@@ -357,7 +419,7 @@ class Panel:
         return parse_buckets(self.html)
 
     def _post(self, kind, control, form, container, parameters, extra=()):
-        check_control(kind, control)
+        check_request(kind, control, form, parameters, extra)
         body = [
             ("AJAXREQUEST", container),
             *extra,
@@ -455,12 +517,24 @@ def _wanted(path, regions):
     return not regions or any(r.casefold() in " / ".join(path).casefold() for r in regions)
 
 
+def _empty(node):
+    """A branch or inbox whose own counter reads 0; one that shows no counter is not known to be empty."""
+    return node.get("counted", False) and node["count"] == 0
+
+
 def walk(panel, bucket, regions=None):
-    """Expand a bucket's tree down to its inboxes (only branches matching ``regions`` if given)."""
+    """Expand a bucket's tree down to its inboxes (only branches matching ``regions`` if given).
+
+    A branch whose counter is 0 is listed but not expanded: there is nothing under it to read.
+    """
     nodes = {node["id"]: node for node in panel.open_bucket(bucket)}
     for _ in range(MAX_DEPTH):
         paths = _paths(nodes)
-        pending = [n for n in nodes.values() if n["expand"] and not n["expanded"] and _wanted(paths[n["id"]], regions)]
+        pending = [
+            n
+            for n in nodes.values()
+            if n["expand"] and not n["expanded"] and not _empty(n) and _wanted(paths[n["id"]], regions)
+        ]
         if not pending:
             break
         for node in pending:
@@ -470,8 +544,13 @@ def walk(panel, bucket, regions=None):
     return nodes
 
 
-def read_counters(portal, *, session=None, tree=False):
-    """The fixed buckets with their counts; ``tree=True`` also lists each bucket's regions and inboxes."""
+def read_counters(portal, *, session=None, tree=False, bucket=None):
+    """The fixed buckets with their counts; ``tree=True`` also lists each bucket's regions and inboxes.
+
+    ``bucket`` (index or part of the label) lists the regions of that bucket only, without walking the others.
+    """
+    if portals.pje(portal).kz:
+        return _kz_call(portal, session, lambda s: kz.read_counters(s, portal, tree=tree, bucket=bucket))
     with _panel(portal, session) as panel:
         buckets = panel.open()
         result = {
@@ -481,10 +560,11 @@ def read_counters(portal, *, session=None, tree=False):
             "buckets": [{k: b[k] for k in ("index", "label", "count")} for b in buckets],
             "notifications": [],
         }
-        if tree:
-            for bucket, out in zip(buckets, result["buckets"], strict=True):
-                if bucket["count"] > 0:
-                    nodes = walk(panel, bucket)
+        only = _select_bucket(buckets, bucket) if bucket is not None else None
+        if tree or only is not None:
+            for item, out in zip(buckets, result["buckets"], strict=True):
+                if item["count"] > 0 and (only is None or item is only):
+                    nodes = walk(panel, item)
                     paths = _paths(nodes)
                     out["regions"] = [
                         {"path": paths[n["id"]], "count": n["count"], "kind": n["kind"], "inbox": bool(n["inbox"])}
@@ -502,6 +582,12 @@ def read_inbox(portal, *, bucket=None, regions=None, filters=None, max_pages=25,
     the rows read reach the total PJe reports for it; more rows than the total means the inbox
     gained items while its pages were being read (``changedWhileReading``), and they are all kept.
     """
+    if portals.pje(portal).kz:
+        return _kz_call(
+            portal,
+            session,
+            lambda s: kz.read_inbox(s, portal, bucket=bucket, regions=regions, filters=filters, max_pages=max_pages),
+        )
     with _panel(portal, session) as panel:
         selected = _select_bucket(panel.open(), bucket)
         if not selected["count"]:
@@ -510,7 +596,7 @@ def read_inbox(portal, *, bucket=None, regions=None, filters=None, max_pages=25,
         paths = _paths(nodes)
         inboxes = []
         for node in nodes.values():
-            if node["inbox"] and _wanted(paths[node["id"]], regions):
+            if node["inbox"] and not _empty(node) and _wanted(paths[node["id"]], regions):
                 inboxes.append(_read_pages(panel, node, paths[node["id"]], max_pages, filters))
         return {
             "success": True,
@@ -546,6 +632,18 @@ def _read_pages(panel, node, path, max_pages, filters=None):
         "changedWhileReading": len(rows) > page["total"],
         "rows": list(rows.values()),
     }
+
+
+def _kz_call(portal, session, read):
+    """Run a PJe-JT REST read on the supplied session, or on a fresh login that is closed afterwards."""
+    owned = session is None
+    if owned:
+        session, _ = login_portal(portal)
+    try:
+        return read(session)
+    finally:
+        if owned:
+            session.close()
 
 
 class _panel:

@@ -1,0 +1,23 @@
+[
+ {
+  "quantidadeProcessos": 5,
+  "idAgrupamentoProcessoTarefa": 1,
+  "nomeAgrupamentoTarefa": "Acervo Geral",
+  "ordem": 1,
+  "destaque": false
+ },
+ {
+  "quantidadeProcessos": 1,
+  "idAgrupamentoProcessoTarefa": 2,
+  "nomeAgrupamentoTarefa": "Meus Expedientes",
+  "ordem": 2,
+  "destaque": false
+ },
+ {
+  "quantidadeProcessos": 58,
+  "idAgrupamentoProcessoTarefa": 5,
+  "nomeAgrupamentoTarefa": "Arquivados",
+  "ordem": 3,
+  "destaque": false
+ }
+]

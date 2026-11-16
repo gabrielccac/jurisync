@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Shared PJe SSO (Keycloak) and TOTP authentication."""
 
-import json
 import re
-from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
@@ -12,6 +10,7 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.core.http import IMPERSONATE, TIMEOUT, log_request, require_url
 from jurisync.core.redaction import url_shape
+from jurisync.core.session_pool import LoginRejected
 from jurisync.core.totp import totp
 
 SSO_HOST = "sso.cloud.pje.jus.br"
@@ -51,24 +50,6 @@ def credential_failure(html):
     return "The portal returned no OTP form; credentials may be rejected or the login page changed"
 
 
-def cookie_inventory(session):
-    return sorted({cookie.name for cookie in session.cookies.jar})
-
-
-def save_cookies(session, path):
-    values = []
-    for cookie in session.cookies.jar:
-        values.append(
-            {
-                "name": cookie.name,
-                "value": cookie.value,
-                "domain": cookie.domain,
-                "path": cookie.path,
-            }
-        )
-    Path(path).write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
 def get_with_log(session, url):
     require_allowed_url(url)
     response = session.get(url, allow_redirects=False, impersonate=IMPERSONATE, timeout=TIMEOUT)
@@ -98,7 +79,9 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     try:
         otp_url = form_action(response.text, response.url, "kc-otp-login-form")
     except RuntimeError as error:
-        raise RuntimeError(f"{credential_failure(response.text)} ({error})") from None
+        reason = credential_failure(response.text)
+        refused = "rejected the username/password" in reason or "expired password" in reason
+        raise (LoginRejected if refused else RuntimeError)(f"{reason} ({error})") from None
     otp = totp(account).now()
 
     response = session.post(
@@ -109,7 +92,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     )
     log_request("POST", otp_url, response.status_code)
     if response.status_code not in {301, 302, 303, 307, 308}:
-        raise RuntimeError("OTP submission did not redirect; the code may be invalid or expired")
+        raise LoginRejected("OTP submission did not redirect; the code may be invalid or expired")
 
     for _ in range(8):
         location = response.headers.get("Location")

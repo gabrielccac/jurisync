@@ -17,7 +17,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje import jsf, kz
 from jurisync.connectors.pje.expedientes import ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
@@ -131,6 +131,16 @@ def search_process(
     ato_allow_pending=False,
 ):
     config = portals.pje(portal)
+    if config.kz:
+        return kz.search_process(
+            session,
+            process_number,
+            raw_html_path,
+            portal=portal,
+            ato_expediente=ato_expediente,
+            ato_text_limit=ato_text_limit,
+            ato_allow_pending=ato_allow_pending,
+        )
     search_url = config.search_url
     parts = parse_process_number(process_number)
     response = jsf.get(session, search_url, label=f"{config.key} search page", referer=config.base_url)
@@ -230,10 +240,12 @@ def search_process(
     documents = [doc for day in timeline for movement in day["movements"] for doc in movement["documents"]]
     diagnostics = []
     try:
-        expedientes = fetch_expedientes(session, detail_html, detail_url)
+        expedientes, expedientes_complete = fetch_expedientes(session, detail_html, detail_url)
     except RuntimeError as error:
-        expedientes = None
+        expedientes, expedientes_complete = None, False
         diagnostics.append({"code": "expedientes_unavailable", "message": str(error)[:200]})
+    if expedientes is not None and not expedientes_complete:
+        diagnostics.append({"code": "expedientes_incomplete", "message": "the Expedientes tab was not read in full"})
     ato = None
     if ato_expediente and expedientes is not None:
         ato = {"expedienteId": str(ato_expediente)}
@@ -267,6 +279,7 @@ def search_process(
         "pagination": pagination,
         "latest_update": timeline[0] if timeline else None,
         "expedientes": expedientes,
+        "expedientes_complete": expedientes_complete,
         "ato": ato,
         "diagnostics": diagnostics,
     }

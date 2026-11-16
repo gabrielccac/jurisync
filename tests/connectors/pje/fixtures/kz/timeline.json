@@ -1,0 +1,99 @@
+[
+ {
+  "id": 9000001,
+  "titulo": "Publicado(a) o(a) intimação em 06/11/2026",
+  "data": "2026-11-05T03:22:48.647419",
+  "documento": false,
+  "tipoPolo": "movimento",
+  "codigoMovimentoCNJ": "92",
+  "nomeResponsavel": "FULANO"
+ },
+ {
+  "id": 9000002,
+  "titulo": "Disponibilizado\n(a) o(a) intimação no Diário da Justiça Eletrônico do dia 05/11/2026",
+  "data": "2026-11-05T03:22:48.370418",
+  "documento": false,
+  "tipoPolo": "movimento",
+  "codigoMovimentoCNJ": "1061",
+  "nomeResponsavel": "FULANO"
+ },
+ {
+  "id": 9000003,
+  "titulo": "Publicado(a) o(a) intimação em 06/11/2026",
+  "data": "2026-11-05T03:22:47.618883",
+  "documento": false,
+  "tipoPolo": "movimento",
+  "codigoMovimentoCNJ": "92",
+  "nomeResponsavel": "FULANO"
+ },
+ {
+  "id": 9100002,
+  "idUnicoDocumento": "6273777",
+  "titulo": "Intimação",
+  "tipo": "Intimação",
+  "data": "2026-11-04T14:20:16.381842",
+  "documento": true,
+  "tipoPolo": "Magistrado",
+  "nomeResponsavel": "FULANO"
+ },
+ {
+  "id": 9000005,
+  "idUnicoDocumento": "34a324d",
+  "titulo": "Decisão",
+  "tipo": "Decisão",
+  "data": "2026-11-04T14:19:16.381842",
+  "documento": true,
+  "tipoPolo": "Magistrado",
+  "nomeResponsavel": "FULANO"
+ },
+ {
+  "id": 9000006,
+  "idUnicoDocumento": "e7598f9",
+  "titulo": "Recurso Ordinário",
+  "tipo": "Recurso Ordinário",
+  "data": "2026-11-03T11:46:25.618043",
+  "documento": true,
+  "tipoPolo": "ativo",
+  "nomeResponsavel": "FULANO"
+ },
+ {
+  "id": 9000007,
+  "idUnicoDocumento": "bfe53ff",
+  "titulo": "Certidão",
+  "tipo": "Certidão",
+  "data": "2026-08-04T14:41:43.272458",
+  "documento": true,
+  "tipoPolo": "Servidor",
+  "anexos": [
+   {
+    "id": 9000008,
+    "idUnicoDocumento": "1da7eb3",
+    "titulo": "Anexo teste",
+    "tipo": "Documento Diverso",
+    "data": "2026-08-04T14:41:43.273638"
+   },
+   {
+    "id": 9000009,
+    "idUnicoDocumento": "ff3e712",
+    "titulo": "Anexo teste",
+    "tipo": "Documento Diverso",
+    "data": "2026-08-04T14:41:43.274818"
+   },
+   {
+    "id": 9000010,
+    "idUnicoDocumento": "31c99b8",
+    "titulo": "Anexo teste",
+    "tipo": "Documento Diverso",
+    "data": "2026-08-04T14:41:43.275998"
+   },
+   {
+    "id": 9000011,
+    "idUnicoDocumento": "a8742ee",
+    "titulo": "Anexo teste",
+    "tipo": "Documento Diverso",
+    "data": "2026-08-04T14:41:43.277178"
+   }
+  ],
+  "nomeResponsavel": "FULANO"
+ }
+]

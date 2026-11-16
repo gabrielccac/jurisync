@@ -1,0 +1,10 @@
+{
+ "pagina": 1,
+ "tamanhoPagina": 50,
+ "qtdPaginas": 1,
+ "totalRegistros": 2,
+ "resultado": [
+  {"id": 9001, "dataInclusao": "2026-10-01T10:00:00.000", "idProcesso": 1000001, "numeroProcesso": "0000001-00.2026.5.07.0001", "classeJudicial": "ATOrd", "segredoDeJustica": false},
+  {"id": 9002, "dataInclusao": "2026-09-01T09:30:00.000", "idProcesso": 1000002, "numeroProcesso": "0000002-00.2026.5.07.0002", "classeJudicial": "ATSum", "segredoDeJustica": false}
+ ]
+}

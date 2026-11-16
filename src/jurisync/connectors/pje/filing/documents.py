@@ -343,7 +343,7 @@ class DocumentsMixin:
         paths = [Path(item["path"]).expanduser() for item in items]
         for path in paths:
             if path.suffix.lower() != ".pdf" or not path.is_file() or path.stat().st_size > 10_000_000:
-                raise ValueError(f"Supporting document must be an existing PDF of at most 10 MB: {path}")
+                raise ValueError(f"Supporting document must be an existing PDF of at most 10 MB: {path.name}")
             with path.open("rb") as source:
                 if source.read(5) != b"%PDF-":
                     raise ValueError(f"Supporting document is not a PDF: {path.name}")

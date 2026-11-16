@@ -8,6 +8,7 @@ from pathlib import Path
 
 from jurisync.core import certificate
 from jurisync.core.http import IMPERSONATE
+from jurisync.core.session_pool import LoginRejected
 
 SSO_CALLBACK = "https://sso.cloud.pje.jus.br/auth/realms/pje/pjeoffice-rest"
 
@@ -94,7 +95,8 @@ def post_result(session, payload):
         timeout=30,
     )
     if not 200 <= response.status_code < 300:
-        raise RuntimeError(f"SSO rejected the certificate callback (HTTP {response.status_code})")
+        refused = LoginRejected if response.status_code in {401, 403} else RuntimeError
+        raise refused(f"SSO rejected the certificate callback (HTTP {response.status_code})")
     return response
 
 

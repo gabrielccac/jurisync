@@ -1,0 +1,15 @@
+{
+ "ATIVO": [
+  {
+   "nome": "AUTOR TESTE",
+   "tipo": "RECLAMANTE",
+   "documento": "111.111.111-11"
+  }
+ ],
+ "PASSIVO": [
+  {
+   "nome": "REU TESTE",
+   "tipo": "RECLAMADO"
+  }
+ ]
+}

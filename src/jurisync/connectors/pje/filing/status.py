@@ -9,6 +9,7 @@ from pathlib import Path
 
 from jurisync.connectors.pje.filing.checkpoint import phase_fingerprints, pid_alive
 from jurisync.connectors.pje.filing.documents import documents_diff
+from jurisync.core.mcp import sanitize_diagnostics
 
 LEGACY_COMPLETE = {"documents_complete", "characteristics_complete", "parties_complete"}
 
@@ -42,7 +43,8 @@ def run_status(checkpoint_path, payload=None, client=None):
         "stage": checkpoint.get("stage"),
         "startedAt": checkpoint.get("startedAt"),
         "updatedAt": checkpoint.get("updatedAt"),
-        "error": checkpoint.get("error"),
+        # Recorded from an exception: it may name local paths or portal URLs, which the calling agent must not see.
+        "error": sanitize_diagnostics(checkpoint["error"]) if checkpoint.get("error") else None,
         "pid": checkpoint.get("pid"),
         **({"documentStates": checkpoint["documentStates"]} if checkpoint.get("documentStates") else {}),
         "recentSteps": [

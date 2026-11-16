@@ -538,10 +538,10 @@ class ServerResumeTests(unittest.TestCase):
         ):
             self.server._fill_job("run1", "fill")
             self.assertEqual(run.call_args.kwargs["session"], "pooled-session")
-            self.assertNotIn("run1", self.server.fill_errors)
+            self.assertNotIn(("", "run1"), self.server.fill_errors)
             seen["fail"] = True
             self.server._fill_job("run1", "fill")
-        self.assertIn("did not reach an authenticated", self.server.fill_errors["run1"])
+        self.assertIn("did not reach an authenticated", self.server.fill_errors[("", "run1")])
         with mock.patch.object(self.server, "_draft_stage", return_value={"result": {"state": "failed"}}):
             status = self.server.draft_status("run1")
         self.assertIn("authenticated", status["result"]["lastStartError"])

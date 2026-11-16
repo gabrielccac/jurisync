@@ -133,6 +133,169 @@ def test_check_control_accepts_the_read_only_shapes():
         assert inbox.check_control(kind, control) == control
 
 
+BRANCH = f"{TREE}:18::j_id182"
+EXPANDER = f"{TREE}:18::j_id183"
+INBOX = f"{TREE}:18:-1::j_id186:cxExItem"
+SCROLLER = "formExpedientes:tbExpedientes:scPendentes"
+CIENCIA = "formExpedientes:tbExpedientes:33547536:btnTomarCiencia"
+
+
+def test_check_parameters_accepts_the_control_pairs_the_panel_posts():
+    bucket = "formAbaExpediente:listaAgrSitExp:0:j_id178"
+    inbox.check_parameters("bucket", bucket, {bucket: bucket, "ajaxSingle": bucket})
+    inbox.check_parameters("branch", BRANCH, {"ajaxSingle": BRANCH, EXPANDER: EXPANDER})
+    inbox.check_parameters("inbox", INBOX, {INBOX: INBOX, "ajaxSingle": INBOX})
+    inbox.check_parameters("page", SCROLLER, {SCROLLER: "3", "ajaxSingle": SCROLLER})
+    inbox.check_parameters("search", "formExpedientes:btPesq", {"formExpedientes:btPesq": "formExpedientes:btPesq"})
+
+
+@pytest.mark.parametrize(
+    "kind,control,parameters",
+    [
+        # A safe ajaxSingle with the action's own id posted beside it: the id is what JSF runs.
+        ("inbox", INBOX, {INBOX: INBOX, "ajaxSingle": INBOX, CIENCIA: CIENCIA}),
+        ("inbox", INBOX, {INBOX: INBOX, "ajaxSingle": INBOX, "formExpedientes:j_id700": "formExpedientes:j_id700"}),
+        ("inbox", INBOX, {INBOX: INBOX, "ajaxSingle": BRANCH}),
+        ("inbox", INBOX, {INBOX: "tomarCiencia", "ajaxSingle": INBOX}),
+        ("inbox", INBOX, {INBOX: INBOX, "ajaxSingle": INBOX, "idProcessoParteExpediente": "33547536"}),
+        ("branch", BRANCH, {"ajaxSingle": BRANCH, f"{TREE}:6::j_id183": f"{TREE}:6::j_id183"}),
+        ("branch", BRANCH, {"ajaxSingle": BRANCH, EXPANDER: "true"}),
+        ("page", SCROLLER, {SCROLLER: "next", "ajaxSingle": SCROLLER}),
+        ("page", SCROLLER, {SCROLLER: "2", "ajaxSingle": SCROLLER, "formExpedientes:btResponder": "x"}),
+        ("search", "formExpedientes:btPesq", {"formExpedientes:btPesq": "formExpedientes:btPesq", "acao": "Assinar"}),
+    ],
+)
+def test_check_parameters_refuses_anything_beside_the_control_pair(kind, control, parameters):
+    with pytest.raises(RuntimeError, match="refused"):
+        inbox.check_parameters(kind, control, parameters)
+
+
+def test_check_request_allows_only_tree_and_filter_state_beside_the_control():
+    pair = {"ajaxSingle": BRANCH, EXPANDER: EXPANDER}
+    tree = [(f"{BRANCH}NodeExpanded", "true"), (f"{TREE}:input", "")]
+    inbox.check_request("branch", BRANCH, "formAbaExpediente", pair, tree)
+    page = {SCROLLER: "2", "ajaxSingle": SCROLLER}
+    fields = [("formExpedientes:itCL", "Mandado de Segurança"), ("javax.faces.ViewState", "j_id9")]
+    inbox.check_request("page", SCROLLER, "formExpedientes", page, fields)
+    for extra in (
+        [(CIENCIA, CIENCIA)],
+        [("formExpedientes:tomarCienciaTodos", "true")],
+        [(f"{BRANCH}NodeExpanded", "responder")],
+        [("idProcessoSelecionado", "1")],
+    ):
+        with pytest.raises(RuntimeError, match="refused"):
+            inbox.check_request("page", SCROLLER, "formExpedientes", page, extra)
+
+
+def test_panel_refuses_an_inbox_link_that_carries_an_action_and_posts_nothing():
+    from unittest.mock import patch
+
+    panel = inbox.Panel(object(), "trf5-1g")
+    node = {
+        "inbox": {"form": f"{TREE}:18:-1::j_id186", "params": {INBOX: INBOX, "ajaxSingle": INBOX, CIENCIA: CIENCIA}}
+    }
+    with patch.object(inbox.jsf, "post") as post:
+        with pytest.raises(RuntimeError, match="refused"):
+            panel.open_inbox(node)
+    post.assert_not_called()
+
+
+def test_tree_nodes_say_whether_their_counter_was_read():
+    html = branch("18", "AL / Santana", 0) + branch("6", "CE / Juazeiro", 4)
+    nodes = {n["label"]: n for n in inbox.parse_tree(html, 0)}
+    assert (nodes["AL / Santana"]["count"], nodes["AL / Santana"]["counted"]) == (0, True)
+    assert nodes["CE / Juazeiro"]["counted"] is True
+    bare = branch("7", "Vara sem contador", 3).replace('<span class="pull-right">3</span>', "")
+    assert inbox.parse_tree(bare, 0)[0]["counted"] is False
+
+
+class CountingTreePanel:
+    """A bucket with an empty region, a region with one empty and one full inbox, and a region without a counter."""
+
+    url = "https://pje1g.trf5.jus.br/pje/Painel/painel_usuario/advogado.seam"
+
+    def __init__(self):
+        self.expanded, self.opened = [], []
+
+    def open(self):
+        return [{"index": 0, "label": "Pendentes", "count": 4, "control": "c"}]
+
+    def open_bucket(self, bucket):
+        bare = branch("7", "Sem contador", 2).replace('<span class="pull-right">2</span>', "")
+        return inbox.parse_tree(branch("18", "AL / Vazia", 0) + branch("6", "CE / Juazeiro", 4) + bare, 0)
+
+    def expand(self, bucket, node):
+        self.expanded.append(node["label"])
+        key = node["id"].split(":trPend:")[1].split("::")[0]
+        second = leaf(key, 0).replace(f":{key}:-1::", f":{key}:-2::").replace(f":{key}:\\x2D1::", f":{key}:\\x2D2::")
+        children = leaf(key, node["count"] or 2) + (second if key == "6" else "")
+        return inbox.parse_tree(branch(key, node["label"], node["count"], "true", children), 0)
+
+    def open_inbox(self, node):
+        self.opened.append(node["id"])
+        return {"rows": [{"expedienteId": "1"}], "total": 1, "page": 1, "scroller": None}
+
+
+def test_empty_branches_and_inboxes_are_not_opened(monkeypatch):
+    panel = CountingTreePanel()
+
+    class Context:
+        def __init__(self, portal, session):
+            pass
+
+        def __enter__(self):
+            return panel
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(inbox, "_panel", Context)
+    result = inbox.read_inbox("trf5-1g", session=object())
+    # The region that reads 0 is not expanded; the one that shows no counter is (0 there would mean "unknown").
+    assert sorted(panel.expanded) == ["CE / Juazeiro", "Sem contador"]
+    assert len(panel.opened) == 2 and all(":-1::" in opened for opened in panel.opened)
+    assert [box["path"][0] for box in result["inboxes"]] == ["CE / Juazeiro", "Sem contador"]
+    counters = inbox.read_counters("trf5-1g", session=object(), tree=True)
+    assert ["AL / Vazia"] in [region["path"] for region in counters["buckets"][0]["regions"]]
+    assert all("counted" not in region for region in counters["buckets"][0]["regions"])
+
+
+def test_counters_expand_only_the_requested_bucket(monkeypatch):
+    walked = []
+
+    class TwoBuckets(CountingTreePanel):
+        def open(self):
+            return [
+                {"index": 0, "label": "Pendentes de ciência ou de resposta", "count": 4, "control": "c"},
+                {"index": 1, "label": "Sem prazo", "count": 2, "control": "d"},
+            ]
+
+        def open_bucket(self, bucket):
+            walked.append(bucket["index"])
+            return super().open_bucket(bucket)
+
+    class Context:
+        def __init__(self, portal, session):
+            pass
+
+        def __enter__(self):
+            return TwoBuckets()
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(inbox, "_panel", Context)
+    result = inbox.read_counters("trf5-1g", session=object(), bucket="sem prazo")
+    assert walked == [1]
+    assert "regions" in result["buckets"][1] and "regions" not in result["buckets"][0]
+    assert "regions" not in inbox.read_counters("trf5-1g", session=object())["buckets"][0]
+    walked.clear()
+    inbox.read_counters("trf5-1g", session=object(), tree=True)
+    assert walked == [0, 1]
+    with pytest.raises(ValueError, match="no bucket"):
+        inbox.read_counters("trf5-1g", session=object(), bucket="9")
+
+
 FIELDS = [
     ("formExpedientes:numeroProcesso:numeroSequencial", ""),
     ("formExpedientes:numeroProcesso:numeroDigitoVerificador", ""),

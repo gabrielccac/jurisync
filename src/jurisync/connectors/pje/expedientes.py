@@ -38,6 +38,8 @@ EXPEDIENTE_BOX = re.compile(
     r"(?: Data limite para (?:manifestação|ciência) (?P<limite>\d{2}/\d{2}/\d{4})(?: \d{2}:\d{2}:\d{2})?)? Fechado\? (?P<fechado>SIM|NÃO)"
 )
 LIMIT = re.compile(r"(\d{2}/\d{2}/\d{4})(?: (\d{2}:\d{2}:\d{2}))?")
+# A RichFaces datascroller renders the pages that are not the current one with this class.
+SCROLLER_OTHER_PAGE = "rich-datascr-inact"
 
 
 def _clean(node):
@@ -100,6 +102,23 @@ def parse_expedientes(html):
     return items
 
 
+def tab_complete(html, items):
+    """Whether ``items`` is provably every communication of the process, as far as this response can tell.
+
+    False when the table is missing, when a row could not be parsed, or when the response carries a RichFaces
+    datascroller with further pages (only the first page is ever requested). The ciência check then cannot vouch
+    for the process, so document reads are refused instead of assumed safe.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find(id=TABLE_ID)
+    if table is None:
+        return False
+    rows = [row for row in table.find_all("tr", recursive=False) if len(row.find_all("td", recursive=False)) >= 2]
+    if len(rows) != len(items):
+        return False
+    return not soup.find(class_=SCROLLER_OTHER_PAGE)
+
+
 def open_deadlines(items, today=None):
     """Communications with a deadline that has not passed and no response filed."""
     today = (today or date.today()).isoformat()
@@ -120,8 +139,11 @@ def tab_request(detail_html):
 
 
 def fetch_expedientes(session, detail_html, detail_url):
+    """(rows of the tab, whether they are provably all of them); see ``tab_complete``."""
     response = jsf.post(session, detail_url, tab_request(detail_html), label="PJe process expedientes")
-    return parse_expedientes(response_html(response))
+    html = response_html(response)
+    items = parse_expedientes(html)
+    return items, tab_complete(html, items)
 
 
 def ato_item(items, expediente_id):
@@ -163,10 +185,54 @@ class PendingNotice(ValueError):
     """Opening this would register the party's ciência, which starts the deadline."""
 
 
-def pending_notice(items, document_ids):
-    """Communications whose act is one of ``document_ids`` and whose ciência is not registered yet."""
+class NoticeUnchecked(PendingNotice):
+    """Whether a ciência is pending could not be determined, so the read is refused."""
+
+
+def _siblings(timeline):
+    """document id -> ids listed in the same timeline entry (an act and the documents attached to it)."""
+    groups = {}
+    for day in timeline:
+        for movement in day.get("movements", []):
+            ids = {str(document.get("id")) for document in movement.get("documents", [])}
+            for identifier in ids:
+                groups.setdefault(identifier, set()).update(ids)
+    return groups
+
+
+def pending_notice(items, document_ids, timeline=None):
+    """Communications without ciência that a read of ``document_ids`` could acknowledge.
+
+    That is every pending communication whose act is one of the documents, and also every one whose act cannot be
+    told apart from them: a pending communication with no document id (any document may be its act). With the
+    ``timeline`` it also covers the documents listed in the same timeline entry as a pending act (its
+    attachments), and a requested document the loaded timeline does not show (it cannot be placed, so it may be an
+    attachment of any pending act).
+    """
     wanted = {str(i) for i in document_ids}
-    return [item for item in items if item.get("documentId") in wanted and not item.get("ciencia")]
+    pending = [item for item in items if not item.get("ciencia")]
+    if timeline is None:
+        return [item for item in pending if not item.get("documentId") or item["documentId"] in wanted]
+    groups = _siblings(timeline)
+    if wanted - set(groups):
+        return pending
+    related = set().union(*(groups[i] for i in wanted))
+    return [item for item in pending if not item.get("documentId") or item["documentId"] in related]
+
+
+UNCHECKED = {
+    "unavailable": "the process' Expedientes list could not be read",
+    "incomplete": "the process' Expedientes list could not be read in full",
+}
+
+
+def unchecked_message(reason):
+    return (
+        f"ciência not checked: {UNCHECKED[reason]}, so it is unknown whether this document belongs to a communication "
+        "whose ciência is still pending. Nothing was opened. Try again later (pje_get_process shows the expedientes "
+        "when they can be read). Opening it anyway may register the party's ciência and start the deadline: only "
+        "with the user's explicit permission, repeat the call with acknowledgeCiencia=true."
+    )
 
 
 def ciencia_report(items):
@@ -185,10 +251,17 @@ def pending_message(items):
         f"{item['prazoDias'] if item.get('prazoDias') is not None else 'sem'} dias)"
         for item in items[:5]
     )
+    unlinked = (
+        " At least one of them has no document id, so any document of this process may be its act."
+        if any(not item.get("documentId") for item in items)
+        else ""
+    )
     return (
         "ciência not yet registered for: "
         + shown
-        + ". Opening the act or its document may register the party's ciência and start the deadline. "
+        + "."
+        + unlinked
+        + " Opening the act, its document or an attachment may register the party's ciência and start the deadline. "
         "Ask the user for explicit permission; if they agree, repeat the call with acknowledgeCiencia=true."
     )
 

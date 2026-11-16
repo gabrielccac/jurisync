@@ -11,7 +11,8 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje.parsers import response_html
+from jurisync.connectors.pje import kz
+from jurisync.connectors.pje.parsers import parse_process_number, response_html
 from jurisync.connectors.pje.process import login_portal
 from jurisync.core.http import IMPERSONATE, UnsafeUrlError, enable_request_logging, require_url
 from jurisync.core.redaction import url_shape
@@ -155,12 +156,50 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
     }
 
 
-def read_push(name, *, session=None):
+DEFAULT_LIMIT = 100
+MAX_LIMIT = 500
+
+
+def _window(result, limit, offset, process_number):
+    """One window of the registry: ``items[offset:offset + limit]`` of the rows that match ``process_number``.
+
+    ``total`` counts the matching rows (the portal's own count when nothing is filtered) and ``hasMore`` says
+    whether rows remain after this window. ``pagination`` keeps describing the portal's list, not the window.
+    """
+    items = result["items"]
+    if process_number:
+        wanted = re.sub(r"\D", "", process_number)
+        items = [item for item in items if re.sub(r"\D", "", item["process_number"]) == wanted]
+        total = len(items)
+    else:
+        total = max(result.get("results_count") or 0, len(items))
+    window = items[offset : offset + limit]
+    return {
+        **result,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "hasMore": offset + len(window) < total,
+        "rows_returned": len(window),
+        "items": window,
+    }
+
+
+def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_number=None):
+    """The Push registry, ``limit`` rows from ``offset``; ``process_number`` keeps only that process' rows."""
+    if not 1 <= limit <= MAX_LIMIT or offset < 0:
+        raise ValueError(f"limit must be 1 to {MAX_LIMIT} and offset 0 or more")
+    if process_number:
+        parse_process_number(process_number)
     config = portals.pje(name)
     owned_session = session is None
     try:
         if owned_session:
             session, _ = login_portal(name)
+        if config.kz:
+            # Without a filter the first offset + limit rows are enough; a filter has to see the whole list.
+            needed = None if process_number else offset + limit
+            return _window(kz.read_push(session, name, needed=needed), limit, offset, process_number)
         panel_url = _portal_url(name, f"{config.root}{PANEL_SUFFIX}")
         push_url = _portal_url(name, f"{config.root}{PUSH_SUFFIX}")
         push = session.get(
@@ -177,7 +216,7 @@ def read_push(name, *, session=None):
         html = response_html(push)
         items = parse_push_items(html)
         pagination = parse_push_page(html, len(items), base_url=push_url)
-        return {
+        result = {
             "success": True,
             "portal": name,
             "push_url": _safe_url(push_url, host=config.host, path_exact=f"{config.root}Push/listView.seam"),
@@ -188,6 +227,7 @@ def read_push(name, *, session=None):
             # Push stores watched processes; movement text arrives in the email.
             "content_note": "This page lists watched processes, not the individual movement email text.",
         }
+        return _window(result, limit, offset, process_number)
     finally:
         if owned_session and session is not None:
             session.close()
