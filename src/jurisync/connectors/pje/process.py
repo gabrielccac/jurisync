@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from contextlib import redirect_stdout
+from pathlib import Path
 
 from jurisync import portals
 from jurisync.connectors.pje import search
@@ -22,18 +23,23 @@ from jurisync.connectors.pje.expedientes import (
 from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core.http import enable_request_logging
 from jurisync.core.redaction import drop_keys
-from jurisync.core.totp import parse_accounts, portal_account
+from jurisync.core.totp import accounts_from_image, parse_accounts, portal_account
 
 
 def credentials(portal):
     """Return (username, password, TOTP account) from this portal's own variables."""
     portal = portals.pje(portal)
     values = {}
-    for field in ("USERNAME", "PASSWORD", "2FA_DATA"):
+    for field in ("USERNAME", "PASSWORD"):
         values[field] = portal.env(field)
         if not values[field]:
             raise RuntimeError(f"Set {portal.env_name(field)}")
-    account = portal_account(portal, parse_accounts(values["2FA_DATA"]))
+    if portal.env("2FA_DATA"):
+        account = portal_account(portal, parse_accounts(portal.env("2FA_DATA")))
+    elif portal.env("2FA_QR"):
+        account = portal_account(portal, accounts_from_image(Path(portal.env("2FA_QR"))))
+    else:
+        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')}")
     return values["USERNAME"], values["PASSWORD"], account
 
 
@@ -53,7 +59,7 @@ def login_portal(portal):
 
         session, response = cert_login(portal), None
     else:
-        session, response = login_session(*credentials(portal), config.login_url, config.host)
+        session, response = login_session(*credentials(portal), config.login_url, config.host, portal=portal)
     try:
         save_session(portal, session)
     except OSError:
