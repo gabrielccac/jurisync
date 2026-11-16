@@ -337,8 +337,9 @@ PORTALS = {
         Portal("tjrr-1g", "projudi", "TJRR", "1g", "projudi.tjrr.jus.br", "/projudi/", "password_totp", "TJRR_1G",
                legacy_env_prefixes=("TJRR_PROJUDI",), region="23", justice="8", wired=False, guess_by_number=False,
                flavor="legacy-keycloak", login_path="tjpr/autenticacao.do"),
+        # TJAM: validated live on 2026-11-16 (login + desk + search + process + files + one PDF).
         Portal("tjam-1g", "projudi", "TJAM", "1g", "projudi.tjam.jus.br", "/projudi/", "password", "TJAM_1G",
-               legacy_env_prefixes=("TJAM_PROJUDI",), region="04", justice="8", wired=False, guess_by_number=False,
+               legacy_env_prefixes=("TJAM_PROJUDI",), region="04", justice="8", guess_by_number=False,
                flavor="legacy-local"),
         Portal("tjpi-projudi-1g", "projudi", "TJPI", "1g", "projudi.tjpi.jus.br", "/projudi/", "password",
                "TJPI_PROJUDI_1G", region="18", justice="8", wired=False, guess_by_number=False,

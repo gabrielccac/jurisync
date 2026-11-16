@@ -78,6 +78,12 @@ def process_links(html, prefix):
     return list(dict.fromkeys(result))
 
 
+def not_found(html):
+    """The consultation's own answer that no process matches ("Não existem informações disponíveis ...")."""
+    text = " ".join(soup(html).get_text(" ", strip=True).split())
+    return "Não existem informações disponíveis para os parâmetros informados" in text
+
+
 def process(html, number):
     page = soup(html)
     displayed = page.select_one("#numeroProcesso, #nuProcessoUnificadoFormatado")
