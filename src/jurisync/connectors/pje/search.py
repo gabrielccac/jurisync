@@ -183,14 +183,14 @@ def search_process(
     response = post_ajax(session, second, search_url)
     decoded = unescape(response_html(response))
     process_id, search_results = matching_process_id(decoded, process_number)
-    if not process_id and acervo.captcha_refused(decoded):
-        # TJRN 1G: the search wants a reCAPTCHA token only a browser can produce. The lawyer panel's Acervo
-        # opens the same detail page with its own access key, so the process is looked up there instead.
+    if not process_id and (acervo.captcha_refused(decoded) or acervo.captcha_guarded(page_html)):
+        # TJRN 1G (reCAPTCHA) and TJBA 1G (Tencent captcha): the search wants a token only a browser can produce.
+        # The lawyer panel's Acervo opens the same detail page with its own access key, so look the process up there.
         found = acervo.find_process(session, process_number, portal=portal)
         if not found:
             return {
                 "success": False,
-                "error": "The process search asks for reCAPTCHA and the process is not in the lawyer's Acervo",
+                "error": "The process search asks for a CAPTCHA and the process is not in the lawyer's Acervo",
                 "search_results": search_results,
                 "timeline": [],
             }

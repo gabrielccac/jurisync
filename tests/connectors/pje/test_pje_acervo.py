@@ -137,8 +137,15 @@ class AcervoFallback(unittest.TestCase):
         ]
         result = search.search_process(session, NUMBER, portal="tjrn-1g")
         self.assertFalse(result["success"])
-        self.assertIn("reCAPTCHA", result["error"])
+        self.assertIn("CAPTCHA", result["error"])
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TencentGuard(unittest.TestCase):
+    def test_tencent_search_page_is_guarded(self):
+        page = '<input id="fPP:searchProcessos" onclick="return executarTencentCaptcha();;A4J.AJAX.Submit()">'
+        self.assertTrue(acervo.captcha_guarded(page))
+        self.assertFalse(acervo.captcha_guarded(SEARCH_PAGE))

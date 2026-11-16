@@ -37,7 +37,16 @@ AUTOS = re.compile(
     r"window\.open\('[^']*/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado\.seam\?id=(\d+)&(?:amp;)?ca=([0-9a-fA-F]{32,})"
 )
 CAPTCHA_REFUSED = re.compile(r"verifica[çc][ãa]o\s+de\s+captcha\s+n[ãa]o\s+est[áa]\s+correta", re.I)
+TENCENT = re.compile(r"executarTencentCaptcha\s*\(|tencentCaptchaTicket")
 MAX_NODES = 60
+
+
+def captcha_guarded(html):
+    """Whether the search page's Pesquisar runs a CAPTCHA widget whose token cannot be produced without a browser.
+
+    TJBA 1G calls a Tencent captcha before searching and, without its ticket, answers an empty table with no message.
+    """
+    return bool(TENCENT.search(html or ""))
 
 
 def captcha_refused(html):

@@ -432,3 +432,46 @@ def test_server_default_follows_the_customer_setting_and_an_explicit_value_wins(
     assert server._allow_ciencia(None) is True and server._allow_ciencia(False) is False
     monkeypatch.setattr(server, "ciencia_on_read", lambda: "ask")
     assert server._allow_ciencia(None) is False and server._allow_ciencia(True) is True
+
+
+def tab_header(name, active, pend="true"):
+    state = "active" if active else "inactive"
+    return (
+        f'<td id="{name}_cell" class="rich-tabhdr-cell-{state}"><table id="{name}_shifted" onclick="if '
+        f"(RichFaces.isTabActive('{name}_lbl')) return false;A4J.AJAX.Submit(null,event,{{'similarityGroupingId':"
+        f"'{name}','actionUrl':'/pje/Painel/painel_usuario/advogado.seam','parameters':{{'{name}':'{name}',"
+        f"'selectedTab':'{name}','pend':'{pend}'}} }} ); return false;\"></table></td>"
+    )
+
+
+def test_expedientes_tab_is_selected_only_when_inactive_and_plain():
+    inactive = tab_header("tabPeticionar", True) + tab_header("tabExpedientes", False)
+    assert inbox.expedientes_tab(inactive) == {
+        "tabExpedientes": "tabExpedientes",
+        "selectedTab": "tabExpedientes",
+        "pend": "true",
+    }
+    assert inbox.expedientes_tab(tab_header("tabExpedientes", True)) is None
+    assert inbox.expedientes_tab("<html></html>") is None
+    odd = tab_header("tabExpedientes", False).replace("'pend':'true'", "'pend':'true','darCiencia':'1'")
+    assert inbox.expedientes_tab(odd) is None
+
+
+def test_panel_opened_on_another_tab_selects_expedientes_first(monkeypatch):
+    page = '<input name="javax.faces.ViewState" value="v0">' + tab_header("tabPeticionar", True)
+    page += tab_header("tabExpedientes", False)
+    tab = '<input name="javax.faces.ViewState" value="v1">' + BUCKET_ROW.format(n=0, label="Pendentes", count=3)
+    posts = []
+    monkeypatch.setattr(inbox.jsf, "get", lambda *a, **k: _response(page))
+    monkeypatch.setattr(inbox.jsf, "post", lambda session, url, body, **k: posts.append(body) or _response(tab))
+    panel = inbox.Panel(object(), "tjba-1g")
+    buckets = panel.open()
+    assert [b["count"] for b in buckets] == [3]
+    assert dict(posts[0])["selectedTab"] == "tabExpedientes"
+    assert panel.state == "v1"
+
+
+def _response(html):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(status_code=200, headers={"Content-Type": "text/html"}, content=html.encode(), text=html)
