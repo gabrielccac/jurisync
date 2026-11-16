@@ -122,7 +122,7 @@ class ServerGuardsTest(unittest.TestCase):
         self.directory.cleanup()
 
     def test_only_tenant_aware_connectors_mount(self):
-        self.assertEqual(set(TENANT_READY), {"pje", "eproc", "djen", "advbox", "juridiq"})
+        self.assertEqual(set(TENANT_READY), {"pje", "eproc", "esaj", "projudi", "djen", "advbox", "juridiq"})
         with self.assertRaises(ValueError):
             build_app("https://mcp.test", self.store, self.vault, ["filing"])
         app, closers = build_app("https://mcp.test", self.store, self.vault, list(TENANT_READY))

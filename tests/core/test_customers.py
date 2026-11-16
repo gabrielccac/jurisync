@@ -41,9 +41,8 @@ def test_customer_env_loads_before_shared_and_env_wins(root, monkeypatch, tmp_pa
     load_env_file(shared)
     assert os.environ["ACME_USER"] == "from-customer"
     assert os.environ["ACME_PASS"] == "from-process"
-    assert os.environ["ACME_2FA"] == "shared-2fa"
-    for name in ("ACME_USER", "ACME_2FA"):
-        monkeypatch.delenv(name)
+    assert "ACME_2FA" not in os.environ  # with a customer selected, the shared file gives machine settings only
+    monkeypatch.delenv("ACME_USER")
 
 
 def test_pinned_values_beat_the_shared_file_but_not_the_environment(root, monkeypatch, tmp_path):

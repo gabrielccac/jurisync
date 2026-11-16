@@ -55,6 +55,26 @@ class CollectTest(unittest.TestCase):
         self.assertEqual(updates["TRF4_1G_SC_PASSWORD"], "p2")
         self.assertEqual(updates["TRF4_1G_RS_2FA_DATA"], updates["TRF4_1G_SC_2FA_DATA"])
 
+    def test_several_profiles_store_the_issuer_match_not_an_index(self):
+        accounts = [
+            {"name": "lawyer", "issuer": f"Eproc/{court}", "secret": "JBSWY3DPEHPK3PXP", "type": "totp"}
+            for court in ("TRF6", "TRF4")
+        ]
+        with mock.patch.object(setup, "parse_accounts", return_value=accounts):
+            updates = self.run_collect(["trf4-1g-rs"], {}, ["u1"], ["p1"])
+        self.assertEqual(updates["TRF4_1G_RS_OTP_PROFILE_MATCH"], "Eproc/TRF4")
+        self.assertNotIn("TRF4_1G_RS_OTP_PROFILE_INDEX", updates)
+
+    def test_unmapped_profile_is_asked_and_stored_as_its_issuer(self):
+        accounts = [
+            {"name": "lawyer", "issuer": issuer, "secret": "JBSWY3DPEHPK3PXP", "type": "totp"}
+            for issuer in ("Google", "Authenticator X")
+        ]
+        with mock.patch.object(setup, "parse_accounts", return_value=accounts):
+            updates = self.run_collect(["trf4-1g-rs"], {}, ["u1", "2"], ["p1"])
+        self.assertEqual(updates["TRF4_1G_RS_OTP_PROFILE_MATCH"], "Authenticator X")
+        self.assertNotIn("TRF4_1G_RS_OTP_PROFILE_INDEX", updates)
+
 
 class LegacyNamesTest(unittest.TestCase):
     def test_earlier_variable_names_in_the_file_are_not_asked_again(self):

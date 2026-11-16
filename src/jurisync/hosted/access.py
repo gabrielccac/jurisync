@@ -22,7 +22,16 @@ PASSWORD = "password"
 CERTIFICATE = "certificate"
 A1_FILE = "PJE_A1_P12"
 A1_PIN = "PJE_A1_PIN"
-PORTAL_FIELDS = ("USERNAME", "PASSWORD", "CERT", "2FA_DATA", "2FA_QR", "OTP_PROFILE_MATCH", "OTP_PROFILE_INDEX")
+PORTAL_FIELDS = (
+    "USERNAME",
+    "PASSWORD",
+    "CERT",
+    "2FA_DATA",
+    "2FA_QR",
+    "OTP_PROFILE_MATCH",
+    "OTP_PROFILE_INDEX",
+    "USER_PROFILE",
+)
 
 
 def pje_portals():
@@ -108,10 +117,6 @@ def authenticator_accounts(text="", image=b""):
         raise ValueError("O código do autenticador não foi reconhecido") from None
 
 
-def account_label(account):
-    return " · ".join(part for part in (account.get("issuer"), account.get("name")) if part) or "conta sem nome"
-
-
 def single_account_uri(accounts, choice=None):
     """One otpauth://totp URI for the chosen account, so every login path reads it the same way."""
     if not accounts:
@@ -193,20 +198,33 @@ def without_portal(values, config):
 # Login check
 
 
-def check_login(portal):
-    """Log in to the portal with the current credential scope and close the session. Raises on failure."""
-    from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
+def pool_login(pool, portal, login):
+    """``login(portal)`` under the pool's rules, outside its pooled sessions: nothing is sent during the cool-down
+    after rejected credentials, the login takes one of the process's login slots, and a rejection starts the cool-down
+    for this office and portal. ``forget`` (credentials changed) ends it."""
+    return pool.fresh_login(portal, login)
 
-    config = portals.pje(portal)
+
+def fresh_pje_login(portal):
+    from jurisync.connectors.pje.auth.sessions import auth_method
+
     if auth_method(portal) == "certificate_totp":
         from jurisync.connectors.pje.auth.certificate import cert_login
 
-        session = cert_login(portal)
-    else:
-        from jurisync.connectors.pje.auth.sso import login_session
-        from jurisync.connectors.pje.process import credentials as password_credentials
+        return cert_login(portal)
+    from jurisync.connectors.pje.auth.sso import login_session
+    from jurisync.connectors.pje.process import credentials as password_credentials
 
-        session, _ = login_session(*password_credentials(portal), config.login_url, config.host)
+    config = portals.pje(portal)
+    return login_session(*password_credentials(portal), config.login_url, config.host)[0]
+
+
+def check_login(portal):
+    """Log in to the portal with the current credential scope and close the session. Raises on failure."""
+    from jurisync.connectors.pje.auth.sessions import is_authenticated
+    from jurisync.connectors.pje.server import sessions
+
+    session = pool_login(sessions, portal, fresh_pje_login)
     try:
         if not is_authenticated(session, portal):
             raise RuntimeError("o login terminou mas a consulta de processos não abriu")
@@ -231,9 +249,9 @@ def check(target):
         return check_login(target)
     if target in portals.keys("eproc"):
         from jurisync.connectors.eproc.client import authenticate
+        from jurisync.connectors.eproc.server import sessions
 
-        session = authenticate(target)[0]
-        session.close()
+        pool_login(sessions, target, authenticate)[0].close()
         return None
     if target == "advbox":
         from jurisync.connectors.advbox.client import AdvboxClient

@@ -6,6 +6,7 @@
     jurisync-hosted secrets list escritorio-teste                # names only, never values
     jurisync-hosted user add pessoa@escritorio.com.br --tenant escritorio-teste
     jurisync-hosted serve --base-url https://mcp.exemplo.com.br --port 8080
+    jurisync-hosted calls escritorio-teste --limit 50           # tool calls: who, which tool, result; no arguments
 
 State lives in JURISYNC_HOSTED_DIR (default ~/.local/share/jurisync/hosted): ``store.sqlite`` and ``vault/``. The vault
 key is read from JURISYNC_VAULT_KEY and is never written there. Portal credentials come in only as an encrypted bundle
@@ -22,10 +23,8 @@ from jurisync import customers, portals
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key, require_tenant_id
 from jurisync.install import credentials_bundle
+from jurisync.install.setup import is_file_variable  # a file on the importing machine; its bytes go into the vault
 from jurisync.paths import user_data
-
-# Variables whose value is a file on the importing machine; their bytes go into the vault.
-FILE_VARIABLES = {"PJE_A1_P12"}
 
 
 def data_dir():
@@ -76,18 +75,23 @@ def wanted_names(portal_keys, customer):
     return names
 
 
+# Per-portal settings that go with the secrets: login method, the TOTP profile chosen at setup, the cache identity,
+# the eproc user profile (OAB registration) picked after login.
+SETTING_SUFFIXES = ("_CERT", "_OTP_PROFILE_MATCH", "_OTP_PROFILE_INDEX", "_SESSION_ACCOUNT", "_USER_PROFILE")
+
+
 def normalize(values, files, wanted=None):
     """Turn a local env (values + files) into vault content: QR images become TOTP text, file paths become bytes."""
     out_values, out_files = {}, {}
     for name, value in values.items():
-        if wanted is not None and name not in wanted and not name.endswith("_CERT"):
+        if wanted is not None and name not in wanted and not name.endswith(SETTING_SUFFIXES):
             continue
         if name.endswith("_2FA_QR"):
             raw = files.get(name)
             if raw is None:
                 raw = Path(value).expanduser().read_bytes()
             out_values[name.removesuffix("_QR") + "_DATA"] = qr_text(raw)
-        elif name in FILE_VARIABLES:
+        elif is_file_variable(name):
             out_files[name] = files[name] if name in files else Path(value.strip('"')).expanduser().read_bytes()
         else:
             out_values[name] = value
@@ -255,6 +259,17 @@ def history(args, say):
         say(f"{moment}  {row['actor']:<10} {row['action']}" + (f": {row['detail']}" if row["detail"] else ""))
 
 
+def calls(args, say):
+    store = open_store()
+    tenant = require_existing(store, args.tenant)["id"]
+    import datetime
+
+    for row in store.calls(tenant, args.limit):
+        moment = datetime.datetime.fromtimestamp(row["at"]).strftime("%d/%m/%Y %H:%M:%S")
+        result = "ok" if row["ok"] else f"erro {row['error']}"
+        say(f"{moment}  {row['user'] or '-'}  {row['tool']}  {result}  {row['duration_ms']} ms")
+
+
 def require_existing(store, tenant_id):
     tenant = store.tenant(tenant_id)
     if tenant is None:
@@ -266,7 +281,7 @@ def serve(args):
     import uvicorn
 
     from jurisync.core.http import enable_request_logging
-    from jurisync.hosted.app import build_app
+    from jurisync.hosted.app import TENANT_READY, build_app
 
     store, vault = open_store(), open_vault()
     enable_request_logging()
@@ -275,7 +290,7 @@ def serve(args):
             f"ATENÇÃO: modo de teste sem login. Quem tiver o endereço usa as credenciais de {args.open_tenant}.",
             file=sys.stderr,
         )
-    app, closers = build_app(args.base_url, store, vault, args.connectors, open_tenant=args.open_tenant)
+    app, closers = build_app(args.base_url, store, vault, args.connectors or TENANT_READY, open_tenant=args.open_tenant)
     try:
         uvicorn.run(app, host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="127.0.0.1")
     finally:
@@ -330,6 +345,10 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     log.add_argument("tenant")
     log.add_argument("--limit", type=int, default=30)
 
+    calls_parser = commands.add_parser("calls", help="chamadas de ferramentas do escritório, sem argumentos")
+    calls_parser.add_argument("tenant")
+    calls_parser.add_argument("--limit", type=int, default=30)
+
     user = commands.add_parser("user", help="usuários que entram pelo OAuth").add_subparsers(
         dest="action", required=True
     )
@@ -346,7 +365,7 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     run.add_argument("--base-url", required=True, help="endereço público, ex. https://mcp.exemplo.com.br")
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", type=int, default=8080)
-    run.add_argument("--connectors", nargs="+", default=["pje"])
+    run.add_argument("--connectors", nargs="+", help="default: every connector ready for several offices")
     run.add_argument(
         "--open-tenant", help="SÓ PARA TESTE: dispensa o login e atende como este escritório quem tiver o endereço"
     )
@@ -406,6 +425,8 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         portal_remove(args, say)
     elif args.command == "history":
         history(args, say)
+    elif args.command == "calls":
+        calls(args, say)
     elif args.command == "serve":
         serve(args)
     return 0

@@ -5,13 +5,22 @@ login apart (``credentials.tenant()``), a local install has the single tenant ""
 same tenant and key are serialized because JSF/PHP view state is not safe to share concurrently.
 A session idle longer than ``revalidate_after`` seconds is checked with
 ``refresh`` before reuse; a failed check or a failed call triggers a new login.
+
+Logins are the expensive, risky step: at most ``JURISYNC_MAX_LOGINS`` run at once in the process, and
+credentials a portal rejected are not sent again for ``login_cooldown`` seconds (a few wrong passwords lock
+the account). Sessions unused for ``idle_ttl`` seconds are closed the next time the pool is used.
 """
 
+import os
 import threading
 import time
 from contextlib import contextmanager
 
 from jurisync.core import credentials
+
+DEFAULT_LOGIN_COOLDOWN = 15 * 60
+DEFAULT_IDLE_TTL = 30 * 60
+DEFAULT_MAX_LOGINS = 2
 
 
 class SessionExpired(RuntimeError):
@@ -21,34 +30,163 @@ class SessionExpired(RuntimeError):
     """
 
 
+class LoginRejected(RuntimeError):
+    """Raised by a connector's login when the portal refused the credentials (wrong password, OTP or certificate).
+
+    Network and page errors are not this. The pool never retries it and blocks further logins for the same
+    tenant and portal until the cool-down passes or ``forget`` reports that the credentials changed.
+    """
+
+
+def _env_number(name, default, convert=float):
+    try:
+        return convert(os.environ.get(name) or default)
+    except ValueError:
+        return default
+
+
+_login_slots = None
+_login_slots_guard = threading.Lock()
+
+
+def login_slots():
+    """The process-wide bound on concurrent logins, shared by every pool."""
+    global _login_slots
+    with _login_slots_guard:
+        if _login_slots is None:
+            _login_slots = threading.BoundedSemaphore(
+                max(1, _env_number("JURISYNC_MAX_LOGINS", DEFAULT_MAX_LOGINS, int))
+            )
+        return _login_slots
+
+
 class SessionPool:
-    def __init__(self, login, refresh, close, *, revalidate_after=120):
+    def __init__(
+        self,
+        login,
+        refresh,
+        close,
+        *,
+        revalidate_after=120,
+        login_cooldown=None,
+        idle_ttl=DEFAULT_IDLE_TTL,
+        clock=time.monotonic,
+        wall_clock=time.time,
+    ):
         self._login = login
         self._refresh = refresh
         self._close = close
         self._revalidate_after = revalidate_after
-        self._entries = {}
+        self._login_cooldown = login_cooldown
+        self._idle_ttl = idle_ttl
+        self._clock = clock
+        self._wall_clock = wall_clock
+        self._entries = {}  # key -> (session, last successful use; -inf after a failed call)
+        self._used = {}  # key -> last use of any kind, for idle eviction
+        self._rejected = {}  # key -> (clock time, wall time) of the last LoginRejected
         self._locks = {}
         self._guard = threading.Lock()
+
+    def _cooldown(self):
+        if self._login_cooldown is not None:
+            return self._login_cooldown
+        return _env_number("JURISYNC_LOGIN_COOLDOWN_SECONDS", DEFAULT_LOGIN_COOLDOWN)
 
     def _lock(self, key):
         with self._guard:
             return self._locks.setdefault(key, threading.Lock())
 
+    @contextmanager
+    def _held(self, key):
+        """Hold the key's lock. Eviction may drop an idle lock between lookup and acquire: then take the new one."""
+        while True:
+            lock = self._lock(key)
+            lock.acquire()
+            with self._guard:
+                current = self._locks.get(key) is lock
+            if current:
+                break
+            lock.release()
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def _touch(self, key):
+        with self._guard:
+            self._used[key] = self._clock()
+
     def _discard(self, key):
-        entry = self._entries.pop(key, None)
+        with self._guard:
+            self._used.pop(key, None)
+            entry = self._entries.pop(key, None)
         if entry is not None:
             try:
                 self._close(entry[0])
             except Exception:
                 pass  # Closing a stale session must not block a fresh login.
 
+    def _evict_idle(self, keep=None):
+        """Close sessions unused for ``idle_ttl`` and drop their locks. A key whose lock is held is in use: skipped."""
+        if self._idle_ttl is None:
+            return
+        now = self._clock()
+        with self._guard:
+            idle = [key for key, used in self._used.items() if key != keep and now - used > self._idle_ttl]
+            expired = [key for key, (at, _) in self._rejected.items() if now - at >= self._cooldown()]
+            for key in expired:
+                del self._rejected[key]
+        for key in idle:
+            with self._guard:
+                lock = self._locks.get(key)
+                if lock is None or not lock.acquire(blocking=False):
+                    continue
+            try:
+                with self._guard:
+                    still_idle = key in self._used and self._clock() - self._used[key] > self._idle_ttl
+                if still_idle:
+                    self._discard(key)
+                    with self._guard:
+                        self._locks.pop(key, None)
+            finally:
+                lock.release()
+
+    def _check_cooldown(self, key):
+        with self._guard:
+            rejected = self._rejected.get(key)
+        if rejected is None:
+            return
+        remaining = self._cooldown() - (self._clock() - rejected[0])
+        if remaining <= 0:
+            return
+        at = time.strftime("%H:%M", time.localtime(rejected[1]))
+        raise LoginRejected(
+            f"{key[1]}: the portal rejected these credentials at {at}. Correct them, or wait "
+            f"{max(1, round(remaining / 60))} min before trying again; no new login was attempted"
+        )
+
+    def _new_login(self, key, portal, login=None):
+        self._check_cooldown(key)
+        with login_slots():
+            try:
+                return (login or self._login)(portal)
+            except LoginRejected:
+                with self._guard:
+                    self._rejected[key] = (self._clock(), self._wall_clock())
+                raise
+
+    def fresh_login(self, portal, login=None):
+        """A new login under the pool's rules (cool-down, login slots) that the pool does not keep; the caller closes it."""
+        return self._new_login((credentials.tenant(), portal), portal, login)
+
     @contextmanager
     def session(self, portal):
         key = (credentials.tenant(), portal)
-        with self._lock(key):
+        self._evict_idle(keep=key)
+        with self._held(key):
+            self._touch(key)
             entry = self._entries.get(key)
-            if entry is not None and time.monotonic() - entry[1] > self._revalidate_after:
+            if entry is not None and self._clock() - entry[1] > self._revalidate_after:
                 try:
                     value = self._refresh(portal, entry[0])
                 except Exception:
@@ -56,42 +194,56 @@ class SessionPool:
                 if value is None:
                     self._discard(key)
                 else:
-                    self._entries[key] = entry = (value, time.monotonic())
+                    self._entries[key] = entry = (value, self._clock())
             if key not in self._entries:
-                self._entries[key] = (self._login(portal), time.monotonic())
+                self._entries[key] = (self._new_login(key, portal), self._clock())
             value = self._entries[key][0]
             try:
                 yield value
+            except ValueError:
+                raise  # Refused input says nothing about the session: keep it as it was.
             except BaseException:
                 # The failure may be an expired session: verify before next reuse.
                 self._entries[key] = (value, float("-inf"))
                 raise
-            self._entries[key] = (value, time.monotonic())
+            finally:
+                self._touch(key)
+            self._entries[key] = (value, self._clock())
 
     def run(self, portal, read):
         """``read(session)`` on the pooled session; if it raises ``SessionExpired``, log in again once and repeat.
 
-        Reads must be safe to repeat (every connector read is). A second expiry is reported to the caller.
+        Reads must be safe to repeat (every connector read is). A second expiry is reported to the caller, and
+        ``LoginRejected`` always is: rejected credentials are never sent twice.
         """
         for attempt in (1, 2):
             try:
                 with self.session(portal) as session:
                     return read(session)
             except SessionExpired:
-                self.forget(portal)
+                self._drop(portal)
                 if attempt == 2:
                     raise
         raise AssertionError("unreachable")  # pragma: no cover
 
-    def forget(self, portal):
-        """Drop the current tenant's login for this portal, e.g. after its credentials changed."""
+    def _drop(self, portal):
         key = (credentials.tenant(), portal)
-        with self._lock(key):
+        with self._held(key):
             self._discard(key)
+        return key
+
+    def forget(self, portal):
+        """Drop the current tenant's login for this portal, e.g. after its credentials changed.
+
+        This also ends the cool-down that follows rejected credentials.
+        """
+        key = self._drop(portal)
+        with self._guard:
+            self._rejected.pop(key, None)
 
     def close(self):
         with self._guard:
             keys = list(self._entries)
         for key in keys:
-            with self._lock(key):
+            with self._held(key):
                 self._discard(key)

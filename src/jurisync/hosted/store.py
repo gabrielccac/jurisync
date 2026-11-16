@@ -41,13 +41,7 @@ create table if not exists codes (
     record text not null,
     expires real not null
 );
-create table if not exists web_sessions (
-    digest text primary key,
-    email text not null,
-    tenant text not null,
-    csrf text not null,
-    expires integer not null
-);
+drop table if exists web_sessions;
 create table if not exists audit (
     id integer primary key autoincrement,
     at integer not null,
@@ -56,6 +50,18 @@ create table if not exists audit (
     action text not null,
     detail text not null default ''
 );
+create table if not exists calls (
+    id integer primary key autoincrement,
+    at integer not null,
+    tenant text not null,
+    user text not null,
+    connector text not null,
+    tool text not null,
+    ok integer not null,
+    error text not null default '',
+    duration_ms integer not null
+);
+create index if not exists calls_by_tenant on calls (tenant, id);
 create table if not exists portal_checks (
     tenant text not null,
     portal text not null,
@@ -77,6 +83,8 @@ create table if not exists tokens (
 );
 """
 
+# Tool calls are kept this long, then dropped by ``purge``.
+CALLS_KEPT = 90 * 24 * 3600
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 
 
@@ -141,8 +149,8 @@ class Store:
         return [self.tenant(row["id"]) for row in self._run("select id from tenants order by id")]
 
     def remove_tenant(self, tenant):
-        self._run("delete from web_sessions where tenant = ?", tenant)
         self._run("delete from portal_checks where tenant = ?", tenant)
+        self._run("delete from calls where tenant = ?", tenant)
         self._run("delete from tokens where tenant = ?", tenant)
         self._run("delete from codes where tenant = ?", tenant)
         self._run("delete from tenants where id = ?", tenant)
@@ -181,11 +189,9 @@ class Store:
         email = email.strip().lower()
         self._run("update users set password = ? where email = ?", hash_password(password), email)
         self._run("delete from tokens where subject = ?", email)
-        self._run("delete from web_sessions where email = ?", email)
 
     def remove_user(self, email):
         email = email.strip().lower()
-        self._run("delete from web_sessions where email = ?", email)
         self._run("delete from tokens where subject = ?", email)
         self._run("delete from users where email = ?", email)
 
@@ -203,6 +209,22 @@ class Store:
     def client(self, client_id):
         rows = self._run("select info from clients where client_id = ?", client_id)
         return rows[0]["info"] if rows else None
+
+    def prune_clients(self, cap):
+        """Past ``cap`` registered clients, forget the oldest ones that hold no live token. Returns how many went."""
+        excess = self._run("select count(*) as total from clients")[0]["total"] - cap
+        if excess <= 0:
+            return 0
+        idle = self._run(
+            "select client_id from clients where not exists ("
+            "select 1 from tokens where tokens.client_id = clients.client_id and tokens.expires >= ?"
+            ") order by created, rowid limit ?",
+            int(time.time()),
+            excess,
+        )
+        for row in idle:
+            self._run("delete from clients where client_id = ?", row["client_id"])
+        return len(idle)
 
     def save_code(self, code, tenant, record, expires):
         self._run(
@@ -251,28 +273,7 @@ class Store:
         if rows:
             self._run("delete from tokens where pair = ?", rows[0]["pair"])
 
-    # Office web sessions, audit trail and portal checks
-
-    def open_web_session(self, email, tenant, ttl):
-        token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
-        self._run(
-            "insert into web_sessions (digest, email, tenant, csrf, expires) values (?, ?, ?, ?, ?)",
-            digest(token),
-            email,
-            tenant,
-            csrf,
-            int(time.time()) + ttl,
-        )
-        return token
-
-    def web_session(self, token):
-        rows = self._run("select email, tenant, csrf, expires from web_sessions where digest = ?", digest(token or ""))
-        if not rows or rows[0]["expires"] < time.time():
-            return None
-        return dict(rows[0])
-
-    def close_web_session(self, token):
-        self._run("delete from web_sessions where digest = ?", digest(token or ""))
+    # Audit trail and portal checks
 
     def log(self, tenant, actor, action, detail=""):
         self._run(
@@ -286,6 +287,25 @@ class Store:
 
     def history(self, tenant, limit=30):
         rows = self._run("select * from audit where tenant = ? order by id desc limit ?", tenant, limit)
+        return [dict(row) for row in rows]
+
+    def log_call(self, tenant, user, connector, tool, error, duration_ms):
+        """One line per tool call: who, which tool, how it ended. Arguments and results are never stored."""
+        self._run(
+            "insert into calls (at, tenant, user, connector, tool, ok, error, duration_ms) "
+            "values (?, ?, ?, ?, ?, ?, ?, ?)",
+            int(time.time()),
+            tenant,
+            user,
+            connector,
+            tool,
+            int(not error),
+            error,
+            duration_ms,
+        )
+
+    def calls(self, tenant, limit=30):
+        rows = self._run("select * from calls where tenant = ? order by id desc limit ?", tenant, limit)
         return [dict(row) for row in rows]
 
     def save_check(self, tenant, portal, ok, message):
@@ -308,6 +328,6 @@ class Store:
 
     def purge(self):
         now = time.time()
-        self._run("delete from web_sessions where expires < ?", int(now))
         self._run("delete from codes where expires < ?", now)
         self._run("delete from tokens where expires < ?", int(now))
+        self._run("delete from calls where at < ?", int(now) - CALLS_KEPT)

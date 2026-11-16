@@ -299,11 +299,20 @@ class ImportTest(unittest.TestCase):
                 "PJE_TRF5_2FA_DATA": "otp",
                 "ADVBOX_PASSWORD": "x",
                 "PJE_1G_CERT": "true",
+                "PJE_TRF5_1G_OTP_PROFILE_MATCH": "PDPJ/PJE",
             }
             wanted = cli.wanted_names(["trf5-1g"], "victor")
             out_values, out_files = cli.normalize(values, {}, wanted)
         self.assertEqual(out_files, {"PJE_A1_P12": b"cert-bytes"})
-        self.assertEqual(out_values, {"PJE_A1_PIN": "1234", "PJE_TRF5_2FA_DATA": "otp", "PJE_1G_CERT": "true"})
+        self.assertEqual(
+            out_values,
+            {
+                "PJE_A1_PIN": "1234",
+                "PJE_TRF5_2FA_DATA": "otp",
+                "PJE_1G_CERT": "true",
+                "PJE_TRF5_1G_OTP_PROFILE_MATCH": "PDPJ/PJE",
+            },
+        )
 
     def test_qr_images_become_totp_text(self):
         with mock.patch.object(cli, "qr_text", return_value="otpauth://totp/x?secret=ABC") as decode:

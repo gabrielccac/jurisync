@@ -12,6 +12,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.env.bak*
+*.env.bak*
 .claude/settings.local.json
 
 # Certificates, keys, and authenticator QR codes
@@ -22,14 +24,20 @@ __pycache__/
 *[Qq][Rr]*.png
 *[Qq][Rr]*.jpeg
 *[Qq][Rr]*.jpg
+*[Qq][Rr]*.webp
+*[Qq][Rr]*.heic
+*[Qq][Rr]*.heif
+*[Qq][Rr]*.gif
+*[Qq][Rr]*.bmp
+*[Qq][Rr]*.pdf
 qr_code_*
+/QRs/
 
 # Private runtime data: portal captures, sessions, downloads, workflow state
 data/*
 !data/README.md
 downloaded_files/
 conversions/
-gerid
 *-session.json
 *_session.json
 *.har

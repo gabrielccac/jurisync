@@ -165,8 +165,18 @@ class CertificateCustomerTest(unittest.TestCase):
             setup.write_env(shared, {"ADVBOX_EMAIL": "v@x", "ADVBOX_PASSWORD": "pw", "UNRELATED": "no"})
             out, messages = root / "vic.jurisync", []
             env = {"JURISYNC_CUSTOMERS_DIR": str(root / "customers"), "JURISYNC_ENV_FILE": str(shared)}
+            command = ["export", "--customer", "vic", "--out", str(out)]
+            allow = ["--allow-shared", "ADVBOX_EMAIL", "--allow-shared", "ADVBOX_PASSWORD"]
             with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(setup, "qr_text", return_value=URI):
-                self.assertEqual(setup.main(["export", "--customer", "vic", "--out", str(out)], say=messages.append), 0)
+                # A declared secret found only in the shared file is refused until the operator names it.
+                with self.assertRaises(SystemExit) as refusal:
+                    setup.main(command, say=messages.append)
+                self.assertIn("--allow-shared ADVBOX_EMAIL --allow-shared ADVBOX_PASSWORD", str(refusal.exception))
+                self.assertNotIn("v@x", str(refusal.exception))
+                self.assertFalse(out.exists())
+                with self.assertRaises(SystemExit):
+                    setup.main([*command, "--allow-shared", "UNRELATED"], say=messages.append)
+                self.assertEqual(setup.main([*command, *allow], say=messages.append), 0)
             joined = "\n".join(messages)
             self.assertIn("a1.p12", joined)
             self.assertIn("ADVBOX_EMAIL", joined)
@@ -233,6 +243,142 @@ class CertificateCustomerTest(unittest.TestCase):
             self.assertNotIn("PJE_1G_USERNAME", joined)
             self.assertNotIn("PJE_1G_PASSWORD", joined)
             self.assertIn("PJE_1G_CERT=true", joined)
+
+    def test_portals_limits_the_bundle_to_those_portals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            customer = root / "customers" / "vic"
+            customer.mkdir(parents=True)
+            (customer / "portals.toml").write_text(
+                '[tjrs-1g]\nmethod = "browser_totp"\nsecrets = ["TJRS_1G_USERNAME", "TJRS_1G_2FA_DATA"]\n'
+                '[tjsc-1g]\nmethod = "browser_totp"\nsecrets = ["TJSC_1G_USERNAME", "TJSC_1G_2FA_DATA"]\n',
+                encoding="utf-8",
+            )
+            setup.write_env(
+                customer / ".env",
+                {"TJRS_1G_USERNAME": "rs", "TJRS_1G_2FA_DATA": URI, "TJSC_1G_USERNAME": "sc", "TJSC_1G_2FA_DATA": URI},
+            )
+            out, messages = root / "vic.jurisync", []
+            env = {"JURISYNC_CUSTOMERS_DIR": str(root / "customers"), "JURISYNC_ENV_FILE": str(root / "none.env")}
+            command = ["export", "--customer", "vic", "--out", str(out)]
+            with mock.patch.dict(os.environ, env, clear=True):
+                with self.assertRaises(SystemExit):
+                    setup.main([*command, "--portals", "tjrs-1g,trf5-1g"], say=messages.append)
+                self.assertEqual(setup.main([*command, "--portals", "tjrs-1g"], say=messages.append), 0)
+            joined = "\n".join(messages)
+            self.assertIn("variáveis (2): TJRS_1G_2FA_DATA, TJRS_1G_USERNAME", joined)
+            self.assertIn("verificações: eproc:tjrs-1g |", joined)
+            self.assertNotIn("TJSC", joined)
+
+    def test_an_optional_name_in_the_shared_file_is_left_out_with_a_notice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            customer = root / "customers" / "vic"
+            customer.mkdir(parents=True)
+            (customer / "portals.toml").write_text(
+                '[tjrs-1g]\nmethod = "browser_totp"\nsecrets = ["TJRS_1G_USERNAME", "TJRS_1G_2FA_DATA|TJRS_1G_2FA_QR"]\n'
+                '[env]\noptional = ["OPENROUTER_API_KEY"]\n',
+                encoding="utf-8",
+            )
+            setup.write_env(customer / ".env", {"TJRS_1G_USERNAME": "user-1", "TJRS_1G_2FA_DATA": URI})
+            shared = root / "shared.env"
+            setup.write_env(shared, {"OPENROUTER_API_KEY": "someone-elses", "TJRS_1G_2FA_QR": "/other/qr.png"})
+            out, messages = root / "vic.jurisync", []
+            env = {"JURISYNC_CUSTOMERS_DIR": str(root / "customers"), "JURISYNC_ENV_FILE": str(shared)}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(setup.main(["export", "--customer", "vic", "--out", str(out)], say=messages.append), 0)
+            joined = "\n".join(messages)
+            self.assertIn("ignoradas do .env da raiz", joined)
+            self.assertIn("variáveis (2): TJRS_1G_2FA_DATA, TJRS_1G_USERNAME", joined)
+            self.assertNotIn("someone-elses", joined)
+
+
+class ImportValidationTest(unittest.TestCase):
+    def run_import(self, env, *, file_vars=None, files=None, customer=""):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        out, self.messages = self.root / "x.jurisync", []
+        out.write_text(
+            bundle.seal(env, "a long passphrase", customer=customer, files=files, file_vars=file_vars), encoding="utf-8"
+        )
+        self.target = self.root / "home" / ".env"
+        command = ["import", str(out), "--passphrase-stdin", "--env-file", str(self.target)]
+        with (
+            mock.patch.dict(os.environ, {"JURISYNC_CUSTOMERS_DIR": str(self.root / "customers")}, clear=True),
+            mock.patch("sys.stdin", io.StringIO("a long passphrase\n")),
+        ):
+            return setup.main([*command, "--no-login", "--register", "none"], say=self.messages.append)
+
+    def test_only_portal_and_system_names_are_written(self):
+        env = {
+            "TJRS_1G_USERNAME": "user-1",
+            "PJE_TRF5_2FA_DATA": URI,
+            "ADVBOX_EMAIL": "v@x",
+            "PROJUDI_A1_PIN": "1234",
+            "JURISYNC_ENV_FILE": "/elsewhere/.env",
+            "JURISYNC_CHROME_PATH": "/tmp/evil",
+            "LIBREOFFICE_BIN": "/tmp/evil",
+            "JURIDIQ_LOGIN_URL": "https://evil.example/login",
+            "TJRS_1G_LOGIN_URL": "https://evil.example/login",
+            "PATH": "/tmp",
+            "LD_PRELOAD": "/tmp/x.so",
+            "A=B": "x",
+            "lower_case": "x",
+        }
+        self.assertEqual(self.run_import(env), 0)
+        self.assertEqual(
+            set(setup.read_env(self.target)),
+            {"TJRS_1G_USERNAME", "PJE_TRF5_2FA_DATA", "ADVBOX_EMAIL", "PROJUDI_A1_PIN"},
+        )
+        notice = next(m for m in self.messages if m.startswith("Variáveis do pacote ignoradas"))
+        for name in ("JURISYNC_ENV_FILE", "TJRS_1G_LOGIN_URL", "LD_PRELOAD", "PATH", "'A=B'"):
+            self.assertIn(name, notice)
+        self.assertNotIn("evil", notice)
+
+    def test_names_the_customer_declares_are_accepted_when_its_setup_is_present(self):
+        env = {"TJRS_1G_USERNAME": "user-1", "ACME_ATTORNEY_CPF": "000", "OTHER_CPF": "111"}
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / "acme").mkdir()
+        (root / "acme" / "portals.toml").write_text(
+            '[tjrs-1g]\nmethod = "browser_totp"\nsecrets = ["TJRS_1G_USERNAME"]\n'
+            '[env]\nsecrets = ["ACME_ATTORNEY_CPF"]\n',
+            encoding="utf-8",
+        )
+        with mock.patch.dict(os.environ, {"JURISYNC_CUSTOMERS_DIR": str(root)}):
+            self.assertEqual(setup.bundle_names("acme"), {"TJRS_1G_USERNAME", "ACME_ATTORNEY_CPF"})
+            accepted = setup.accepted_values(env, "acme", lambda _m: None)
+        self.assertEqual(set(accepted), {"TJRS_1G_USERNAME", "ACME_ATTORNEY_CPF"})
+
+    def test_a_value_with_a_line_break_or_control_character_fails_and_writes_nothing(self):
+        for value in ("pw\nJURISYNC_ENV_FILE=/elsewhere", "pw\rX=1", "pw\x00", "pw\x1b[0m"):
+            with self.subTest(value=value):
+                self.assertEqual(self.run_import({"TJRS_1G_USERNAME": "user-1", "TJRS_1G_PASSWORD": value}), 2)
+                self.assertFalse(self.target.exists())
+                self.assertNotIn("pw", "\n".join(self.messages))
+
+    def test_a_file_variable_must_be_a_certificate_name_with_its_file_in_the_bundle(self):
+        self.assertEqual(self.run_import({}, file_vars={"TJRS_1G_USERNAME": "a1.p12"}, files={"a1.p12": b"x"}), 2)
+        self.assertEqual(self.run_import({}, file_vars={"PJE_A1_P12": "missing.p12"}, files={"a1.p12": b"x"}), 2)
+        code = self.run_import(
+            {"PJE_A1_PIN": "1"},
+            file_vars={"PROJUDI_A1_P12": "../../a1.p12"},
+            files={"../../a1.p12": b"CERT", "stray.bin": b"x"},
+        )
+        self.assertEqual(code, 0)
+        stored = setup.read_env(self.target)
+        self.assertEqual(Path(stored["PROJUDI_A1_P12"]), self.target.parent / "files" / "a1.p12")
+        self.assertEqual(sorted(p.name for p in (self.target.parent / "files").iterdir()), ["a1.p12"])
+
+
+class FileVariableTest(unittest.TestCase):
+    def test_the_local_and_hosted_imports_share_one_certificate_rule(self):
+        from jurisync.hosted import cli
+
+        for name in ("PJE_A1_P12", "PROJUDI_A1_P12", "TJSP_1G_A1_P12", "ESAJ_A1_PFX"):
+            self.assertTrue(setup.is_file_variable(name), name)
+        for name in ("PJE_A1_PIN", "PJE_1G_CERT", "PJE_TRF5_2FA_QR"):
+            self.assertFalse(setup.is_file_variable(name), name)
+        values, files = cli.normalize({"PROJUDI_A1_P12": "a1.p12", "PJE_A1_PIN": "1"}, {"PROJUDI_A1_P12": b"CERT"})
+        self.assertEqual((values, files), ({"PJE_A1_PIN": "1"}, {"PROJUDI_A1_P12": b"CERT"}))
 
 
 if __name__ == "__main__":

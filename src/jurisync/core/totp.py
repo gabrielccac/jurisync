@@ -135,7 +135,8 @@ def accounts_from_image(path):
 
 
 def select_account(accounts, *, match="", index=None, label="OTP"):
-    """Pick one TOTP account by name/issuer substring or zero-based index."""
+    """Pick one TOTP account: by name/issuer substring (an exact name/issuer breaks a tie) or zero-based index when
+    configured, else the only one."""
     selected = None
     if match:
         needle = match.strip().casefold()
@@ -144,6 +145,13 @@ def select_account(accounts, *, match="", index=None, label="OTP"):
             for account in accounts
             if needle in account.get("name", "").casefold() or needle in account.get("issuer", "").casefold()
         ]
+        exact = [
+            account
+            for account in found
+            if needle in (account.get("name", "").casefold(), account.get("issuer", "").casefold())
+        ]
+        if len(found) > 1 and len(exact) == 1:  # "Eproc/TRF1" is a substring of "Eproc/TRF10": the exact one wins
+            found = exact
         if len(found) > 1:
             raise ValueError(f"{label} profile match is ambiguous")
         selected = found[0] if found else None
@@ -158,6 +166,43 @@ def select_account(accounts, *, match="", index=None, label="OTP"):
     if selected["type"] != "totp":
         raise ValueError(f"{label} selected authenticator profile is not TOTP")
     return selected
+
+
+def portal_account(portal, accounts):
+    """This portal's account, as configured: OTP_PROFILE_MATCH (written at setup) or OTP_PROFILE_INDEX.
+    Login never guesses; an export with several accounts and neither set is an error."""
+    return select_account(
+        accounts,
+        match=portal.env("OTP_PROFILE_MATCH"),
+        index=parse_index(portal.env("OTP_PROFILE_INDEX"), portal.env_name("OTP_PROFILE_INDEX")),
+        label=portal.env_prefix,
+    )
+
+
+def match_for_tribunal(accounts, tribunal):
+    """The OTP_PROFILE_MATCH to store for a tribunal at setup time: the issuer (or name) of the single account
+    whose issuer/name names the tribunal as a whole token ("Eproc/TRF4" for TRF4; TRF1 never matches TRF10).
+    None when no account or more than one account names it."""
+    if not tribunal:
+        return None
+    pattern = re.compile(rf"(?<![a-z0-9]){re.escape(tribunal)}(?![a-z0-9])", re.IGNORECASE)
+    found = [
+        account for account in accounts if pattern.search(f"{account.get('issuer', '')} {account.get('name', '')}")
+    ]
+    return unique_match(accounts, found[0]) if len(found) == 1 else None
+
+
+def unique_match(accounts, account):
+    """The account's issuer, else its name, when that value (used as OTP_PROFILE_MATCH) selects only this account."""
+    for value in (account.get("issuer"), account.get("name")):
+        if not value:
+            continue
+        try:
+            if select_account(accounts, match=value) is account:
+                return value
+        except ValueError:
+            continue
+    return None
 
 
 def parse_index(value, name):

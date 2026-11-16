@@ -1,8 +1,17 @@
 import base64
 import unittest
+from unittest import mock
 from urllib.parse import quote
 
-from jurisync.core.totp import next_code, parse_accounts, parse_index, select_account, totp
+from jurisync.core.totp import (
+    match_for_tribunal,
+    next_code,
+    parse_accounts,
+    parse_index,
+    portal_account,
+    select_account,
+    totp,
+)
 
 SECRET = "JBSWY3DPEHPK3PXP"
 
@@ -44,6 +53,36 @@ class TotpTest(unittest.TestCase):
             select_account(accounts, index=2)
         with self.assertRaisesRegex(ValueError, "not TOTP"):
             select_account([{**accounts[0], "type": "hotp"}])
+
+    def test_match_for_tribunal_maps_the_issuer_once(self):
+        accounts = [
+            {"name": "lawyer", "issuer": f"Eproc/{court}", "secret": SECRET, "type": "totp"}
+            for court in ("TRF4", "TRF6", "TRF2", "TRF1", "TRF10")
+        ]
+        self.assertEqual(match_for_tribunal(accounts, "TRF4"), "Eproc/TRF4")
+        self.assertEqual(match_for_tribunal(accounts, "trf1"), "Eproc/TRF1")  # not TRF10
+        self.assertEqual(match_for_tribunal(accounts, "TRF10"), "Eproc/TRF10")
+        self.assertIsNone(match_for_tribunal(accounts, "TJRS"))
+        self.assertIsNone(match_for_tribunal(accounts, ""))
+        self.assertIsNone(match_for_tribunal(accounts + [dict(accounts[0])], "TRF4"))
+        # The stored value selects the same account at login.
+        self.assertEqual(select_account(accounts, match="Eproc/TRF1")["issuer"], "Eproc/TRF1")
+        by_name = [
+            {"name": f"user {court}", "issuer": "", "secret": SECRET, "type": "totp"} for court in ("TJRS", "TJSC")
+        ]
+        self.assertEqual(match_for_tribunal(by_name, "TJSC"), "user TJSC")
+
+    def test_login_never_guesses_by_tribunal(self):
+        accounts = [
+            {"name": "lawyer", "issuer": f"Eproc/{c}", "secret": SECRET, "type": "totp"} for c in ("TRF4", "TRF6")
+        ]
+        portal = mock.Mock(tribunal="TRF4", env_prefix="TRF4_1G_RS")
+        portal.env.return_value = ""
+        portal.env_name.side_effect = lambda name: f"TRF4_1G_RS_{name}"
+        with self.assertRaisesRegex(ValueError, "match or zero-based index"):
+            portal_account(portal, accounts)
+        portal.env.side_effect = lambda name: "Eproc/TRF6" if name == "OTP_PROFILE_MATCH" else ""
+        self.assertEqual(portal_account(portal, accounts)["issuer"], "Eproc/TRF6")
 
     def test_parse_index(self):
         self.assertIsNone(parse_index("", "X"))

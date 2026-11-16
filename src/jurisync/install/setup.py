@@ -12,9 +12,11 @@ and are never printed. Servers read that file at startup, so Claude Desktop and 
 """
 
 import argparse
+import fnmatch
 import getpass
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,7 +24,7 @@ import time
 from pathlib import Path
 
 from jurisync import customers, portals
-from jurisync.core.totp import parse_accounts, select_account
+from jurisync.core.totp import match_for_tribunal, parse_accounts, select_account, unique_match
 from jurisync.install import credentials_bundle
 from jurisync.paths import USER_ENV_FILE
 
@@ -35,6 +37,59 @@ SERVERS = {
     "djen": "jurisync-djen",
 }
 FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
+# Settings of the computer a bundle is installed on: a bundle never sets them.
+MACHINE_NAMES = ("JURISYNC_ENV_FILE", "JURISYNC_CHROME_PATH", "LIBREOFFICE_BIN", "*_LOGIN_URL")
+# Variables outside the portal registry that a bundle may carry: the other systems' logins and per-office settings.
+SYSTEM_NAMES = (
+    "PJE_A1_P12", "PJE_A1_PIN", "PROJUDI_A1_P12", "PROJUDI_A1_PIN", "ESAJ_A1_P12", "ESAJ_A1_PIN",
+    "PJE_ALLOW_DRAFT_WRITES", "ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID", "ADVBOX_UPLOAD_FOLDER",
+    "ADVBOX_ALLOW_WRITES", "JURIDIQ_EMAIL", "JURIDIQ_PASSWORD", "JURIDIQ_ALLOW_WRITES", "DJEN_SEARCHES",
+    "JURISYNC_CUSTOMER",
+)  # fmt: skip
+VARIABLE_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def is_file_variable(name):
+    """Whether a variable holds a certificate file: ``PJE_A1_P12``, ``PROJUDI_A1_P12``, any ``<PREFIX>_A1_P12``."""
+    return name.endswith(FILE_SUFFIXES)
+
+
+def is_machine_name(name):
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in MACHINE_NAMES)
+
+
+def portal_prefixes(keys=None):
+    """``PREFIX_`` of each registered portal (current and earlier names), for every portal or the given keys."""
+    found = []
+    for key in keys if keys is not None else portals.PORTALS:
+        portal = portals.get(key) if keys is not None else portals.PORTALS[key]
+        found += [f"{prefix}_" for prefix in (portal.env_prefix, *portal.legacy_env_prefixes) if prefix]
+    return tuple(found)
+
+
+def bundle_names(customer):
+    """Extra names a bundle for this customer may set: what its portals.toml declares, when this machine has it."""
+    try:
+        names, optional = declared_names(customer)
+        return {*names, *optional, *customers.fixed_variables(customer)}
+    except (ValueError, OSError):
+        return set()
+
+
+def accepted_values(values, customer, say):
+    """The bundle variables that may be written: registry, system or declared names, with single-line values."""
+    declared, prefixes, refused = bundle_names(customer), portal_prefixes(), []
+    for name, value in values.items():
+        known = name in SYSTEM_NAMES or name in declared or name.startswith(prefixes)
+        if not VARIABLE_NAME.match(name) or is_machine_name(name) or not known:
+            refused.append(name)
+        elif CONTROL_CHARACTERS.search(str(value)):
+            raise ValueError(f"O pacote tem um valor inválido (quebra de linha ou caractere de controle) em {name}")
+    if refused:
+        shown = ", ".join(sorted(repr(name) if not VARIABLE_NAME.match(name) else name for name in refused))
+        say(f"Variáveis do pacote ignoradas (não são credenciais de portal deste cliente): {shown}")
+    return {name: str(value) for name, value in values.items() if name not in refused}
 
 
 def qr_text(path):
@@ -134,14 +189,23 @@ def collect(keys, current, *, qr, ask, ask_secret, say):
             accounts = parse_accounts(text)
             say("Perfis no autenticador:\n  " + "\n  ".join(describe(accounts)))
         updates[portal.env_name("2FA_DATA")] = text
-        if len(accounts) > 1:
+        if len(accounts) == 1:
+            select_account(accounts, label=key)
+            continue
+        # Several profiles: decide now, once, and store the issuer; login only reads OTP_PROFILE_MATCH.
+        match = match_for_tribunal(accounts, portal.tribunal)
+        if match:
+            say(f"Perfil do {key}: {match}")
+        else:
             answer = ask(f"Qual perfil é do {key}? [número{', Enter = ' + str(chosen) if chosen else ''}]: ").strip()
             chosen = int(answer) if answer else chosen
             if not chosen or not 1 <= chosen <= len(accounts):
                 raise ValueError("Escolha um número de perfil da lista")
-            updates[portal.env_name("OTP_PROFILE_INDEX")] = str(chosen - 1)
-        else:
-            select_account(accounts, label=key)
+            match = unique_match(accounts, select_account(accounts, index=chosen - 1, label=key))
+            if not match:  # issuer and name repeat across profiles: only the position identifies it
+                updates[portal.env_name("OTP_PROFILE_INDEX")] = str(chosen - 1)
+                continue
+        updates[portal.env_name("OTP_PROFILE_MATCH")] = match
     return updates
 
 
@@ -339,15 +403,18 @@ def setup_main(argv, *, ask, ask_secret, say):
     return 1 if verify_and_register([f"eproc:{key}" for key in keys], args, say) else 0
 
 
-def declared_names(customer):
-    """Every variable a customer's portals.toml declares: portal secrets (all alternatives) and [env]."""
+def declared_names(customer, keys=None):
+    """Every variable a customer's portals.toml declares: portal secrets (all alternatives) and [env].
+
+    ``keys`` limits the portal secrets to those portals; [env] is always included.
+    """
     names, optional = [], []
     path = customers.customer_dir(customer) / "portals.toml"
     import tomllib
 
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     for key, entry in data.items():
-        if key == customers.RESERVED_TABLE:
+        if key == customers.RESERVED_TABLE or (keys is not None and key not in keys):
             continue
         for group in entry.get("secrets", []):
             names += [name.strip() for name in group.split("|")]
@@ -355,6 +422,13 @@ def declared_names(customer):
     names += required
     optional += extra_optional
     return names, optional
+
+
+def missing_groups(setups, required, selected):
+    """Required secret groups (``A|B``, as lists of names) with no member selected."""
+    groups = [group for setup in setups.values() for group in setup.secrets] + list(required)
+    names = [[name.strip() for name in group.split("|")] for group in groups]
+    return [group for group in names if not any(name in selected for name in group)]
 
 
 def customer_values(customer):
@@ -370,37 +444,61 @@ def export_main(argv, *, ask_secret, say):
     parser.add_argument("--customer", required=True)
     parser.add_argument("--out", required=True, help="arquivo do pacote (.jurisync)")
     parser.add_argument("--ask-passphrase", action="store_true", help="digitar a senha em vez de gerar uma")
+    parser.add_argument(
+        "--allow-shared",
+        action="append",
+        default=[],
+        metavar="NOME",
+        help="aceitar esta variável do .env da raiz quando o .env do cliente não a tem (repita para cada uma)",
+    )
+    parser.add_argument(
+        "--portals",
+        help="somente estes portais do portals.toml, separados por vírgula (padrão: todos os do cliente)",
+    )
     args = parser.parse_args(argv)
 
     setups = customers.load_setup(args.customer)
+    if args.portals:
+        keys = [key.strip() for key in args.portals.split(",") if key.strip()]
+        unknown = [key for key in keys if key not in setups]
+        if unknown:
+            raise SystemExit(f"--portals: {', '.join(unknown)} não está no portals.toml de {args.customer}")
+        setups = {key: setups[key] for key in keys}
     own, fallback = customer_values(args.customer)
-    names, optional = declared_names(args.customer)
-    prefixes = []
-    for key in setups:
-        portal = portals.get(key)
-        prefixes += [f"{prefix}_" for prefix in (portal.env_prefix, *portal.legacy_env_prefixes) if prefix]
+    names, optional = declared_names(args.customer, list(setups) if args.portals else None)
+    prefixes = portal_prefixes(list(setups))
     wanted = set(names) | set(optional)
-    selected, from_shared = {}, []
-    for source, is_shared in ((own, False), (fallback, True)):
-        for name, value in source.items():
-            if not value or name in selected:
-                continue
-            # The shared .env serves several customers (it holds Jean's TRF1 password login under PJE_1G_*):
-            # only names the customer declares come from it; a portal prefix sweeps the customer's own .env alone.
-            if name in wanted or (not is_shared and name.startswith(tuple(prefixes))):
-                selected[name] = value
-                if is_shared:
-                    from_shared.append(name)
+    # The customer's own .env: every declared name plus anything under its portals' prefixes.
+    selected = {name: value for name, value in own.items() if value and (name in wanted or name.startswith(prefixes))}
+    # The shared .env serves several customers (it holds Jean's TRF1 password login under PJE_1G_*): a declared
+    # name comes from it only when the operator names it, so one office's login never travels in another's bundle.
+    in_shared = {name for name, value in fallback.items() if value and name in wanted and name not in selected}
+    unknown = sorted(set(args.allow_shared) - in_shared)
+    if unknown:
+        raise SystemExit(
+            f"--allow-shared: {', '.join(unknown)} não está no .env da raiz ou o cliente já a tem/não a declara"
+        )
+    from_shared = sorted(in_shared & set(args.allow_shared))
+    selected.update({name: fallback[name] for name in from_shared})
+    refused = sorted(in_shared - set(from_shared))
     fixed = customers.fixed_variables(args.customer)
     selected.update(fixed)
+    lacking = missing_groups(setups, customers.extra_variables(args.customer)[0], selected)
+    needed = sorted(name for name in refused if any(name in group for group in lacking))
+    if needed:
+        raise SystemExit(
+            f"{args.customer}: {', '.join(needed)} só existe no .env da raiz, que serve vários clientes. Mova para "
+            f"customers/{args.customer}/.env ou, se for mesmo deste cliente, repita o comando com "
+            + " ".join(f"--allow-shared {name}" for name in needed)
+        )
     if not selected:
-        raise SystemExit(f"Nenhuma credencial de {args.customer} encontrada (.env do cliente ou .env da raiz)")
+        raise SystemExit(f"Nenhuma credencial de {args.customer} encontrada no .env do cliente")
 
     # File variables (A1 certificate): embed the bytes; authenticator QR images become their text export.
     files, file_vars = {}, {}
     for name in list(selected):
         path = Path(selected[name].strip().strip("\"'")).expanduser()
-        if name.endswith(FILE_SUFFIXES) and path.is_file():
+        if is_file_variable(name) and path.is_file():
             files[path.name] = path.read_bytes()
             file_vars[name] = path.name
             selected[name] = path.name
@@ -439,7 +537,9 @@ def export_main(argv, *, ask_secret, say):
     if files:
         say(f"  arquivos: {', '.join(sorted(files))}")
     if from_shared:
-        say(f"  vindas do .env da raiz (confira se são deste cliente): {', '.join(sorted(from_shared))}")
+        say(f"  vindas do .env da raiz (--allow-shared): {', '.join(from_shared)}")
+    if refused:
+        say(f"  ignoradas do .env da raiz (use --allow-shared NOME se forem deste cliente): {', '.join(refused)}")
     if fixed:
         say(f"  valores fixos do cliente (portals.toml): {', '.join(f'{k}={v}' for k, v in sorted(fixed.items()))}")
     say(f"  verificações: {', '.join(checks) or '-'} | servidores: {', '.join(servers)}")
@@ -465,18 +565,24 @@ def import_main(argv, *, ask_secret, say, stdin=None):
         passphrase = credentials_bundle.passphrase_from_page(say)
     opened = credentials_bundle.unseal(text, passphrase)
     env_file = target_env_file(args)
+    directory = env_file.parent / "files"
     values = dict(opened["env"])
-    if opened["files"]:
-        directory = env_file.parent / "files"
+    for variable, name in opened["file_vars"].items():
+        if not is_file_variable(variable) or name not in opened["files"]:
+            raise ValueError(f"O pacote aponta {variable!r} para um arquivo que não é um certificado dele")
+        values[variable] = str(directory / Path(name).name)  # never trust a path from the bundle
+    values = accepted_values(values, opened["customer"], say)
+    wanted_files = {Path(name).name for variable, name in opened["file_vars"].items() if variable in values}
+    if wanted_files:
         directory.mkdir(parents=True, exist_ok=True)
         os.chmod(directory, 0o700)
         for name, raw in opened["files"].items():
-            target = directory / Path(name).name  # never trust a path from the bundle
+            if Path(name).name not in wanted_files:
+                continue
+            target = directory / Path(name).name
             descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(descriptor, "wb") as output:
                 output.write(raw)
-        for variable, name in opened["file_vars"].items():
-            values[variable] = str(directory / Path(name).name)
     write_env(env_file, values)
     os.environ.update(values)
     say(f"Credenciais instaladas em {env_file} (somente o seu usuário lê esse arquivo).")
