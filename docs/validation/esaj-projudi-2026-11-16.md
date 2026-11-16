@@ -8,11 +8,11 @@ Nenhum `.env`/`portals.toml` alterado. Nenhum segredo, cookie ou token nos arqui
 | Portal | Cliente | Login | Utils | Status | Logins nesta rodada |
 |---|---|---|---|---|---|
 | e-SAJ `tjam-esaj` | Hérica | ✅ A1 (CAS) | sessão ✅, intimações ✅ (0), audiências ✅ (0), petições ✅ (0), caixa postal ✅ (1), get_process ⚠ (ver abaixo), documentos não exercitados | ✅ login + utils | 1 |
-| Projudi `tjam-1g` | Thaile | ✅ CPF + senha (sem 2FA) | mesa ✅, busca ✅, processo ✅ (133 movimentos), partes ✅, arquivos da movimentação ✅, 1 PDF ✅ (texto extraído) | ✅ ligado (`wired=True`) | **2** (ver incidente) |
+| Projudi `tjam-1g` | Thaile | ✅ CPF + senha (sem 2FA) | 4 tools MCP ✅ (get_process, list_documents, read_documents, download_document) | ✅ login + utils, ligado | **2** + 1 na parte 2 |
 | Projudi `tjpr-projudi-1g` | Hérica | ⛔ A1 recusado por política (só A3); falta senha do Projudi PR | — | ⛔ falta senha | 0 |
 | Projudi `tjrr-1g` | — | ⛔ ninguém tem senha | — | ⛔ falta senha | 0 |
 | Projudi `tjpi-projudi-1g` | — | ⛔ ninguém tem login/senha | — | ⛔ falta login e senha | 0 |
-| Projudi `tjgo-1g` (bônus) | Hérica | não tentado | — | pendente (seleção de serventia) | 0 |
+| Projudi `tjgo-1g` | Hérica | ✅ A1 + serventia `TJGO_1G_USER_PROFILE` | get_process ✅, list_documents ✅, read_documents ✅ | ✅ login + utils | 1 |
 
 ## e-SAJ TJAM (`tjam-esaj`)
 
@@ -100,11 +100,38 @@ credencial nesta rodada: o único caminho ainda não testado (senha) não tem se
   **Falta:** `TJPI_PROJUDI_1G_USERNAME` e `TJPI_PROJUDI_1G_PASSWORD` de quem atua no Projudi PI; o adaptador
   `tjpi-publico` ainda não existe.
 
-## Bônus TJGO
+## Parte 2 (mesmo dia)
 
-Não feito por tempo. O adaptador exige `LoginPronto=S` e para na tela "Serventias Disponíveis" (`/Usuario`,
-21 perfis). Proposta: `TJGO_1G_USER_PROFILE` na setup escolhendo a serventia (ex. `OAB GO - GO`), sem "definir como
-padrão"; precisa de 1 login para salvar a tela e montar o seletor.
+### `tjam-1g` — tools MCP de ponta a ponta (Thaile, 1 login, 2º login bloqueado no script)
+
+Processo da conta, sem intimação pendente na agenda:
+
+| Tool | Resultado |
+|---|---|
+| `projudi_get_process` (com documentos) | ✅ 3 campos, 4 partes, 133 movimentos, 153 arquivos (~9 s: 1 POST por movimentação com arquivo) |
+| `projudi_list_documents` (todas / `movement_id=130`) | ✅ 92 movimentações, 153 arquivos / `130001` (`130.1`) |
+| `projudi_read_documents` (`130001`) | ✅ PDF 55 KB, `extracted` |
+| `projudi_download_document` (`130001`) | ✅ salvo (arquivo removido depois) |
+
+Nenhuma falsa expiração; sem relogin. Diferença em relação ao TJGO: o índice é montado por movimentação (sem JSON único),
+então `list_documents` com `movement_id` também carrega o índice inteiro (~8 s).
+
+### `tjgo-1g` — seleção de serventia (Hérica, 1 login)
+
+O A1 é aceito e cai em `/Usuario?PaginaAtual=9&hashFluxo=...` "Serventias Disponíveis": 21 serventias, uma por
+seccional (`Ordem dos Advogados do Brasil XX - XX / Advogados - OAB/Matrícula: <n>-<N|S>-XX`), cada uma um link
+`Usuario?PaginaAtual=7&a1=...`. Não há opção de "padrão" na tela (só o diálogo de senha do assinador). Seguido o link
+de `GO22729` → painel (`Usuario?PaginaAtual=7...`, sem `LoginPronto=S`, sem a lista).
+
+Correção (commit `9f1325e`): `TJGO_1G_USER_PROFILE` = OAB (`GO22729`, `go 22.729`, `22729GO`) ou palavra do rótulo,
+como no eproc; sem ela, uma única serventia de advogado é usada; várias → `LoginRejected` com a lista de rótulos.
+Com 21 serventias, **a Hérica precisa de `TJGO_1G_USER_PROFILE=GO22729`** no `.env` (a OAB principal, `-N-`; as
+outras são suplementares `-S-`). Nesta validação o valor foi passado só no processo; nenhum arquivo do cliente foi
+alterado.
+
+Utils (processo achado no DJEN, OAB GO 22.729, TJGO): `projudi_get_process` ✅ (62 movimentos, 2 partes, 44 arquivos),
+`projudi_list_documents` ✅ (21 movimentações com arquivo), `projudi_read_documents` ✅ (uma petição juntada, HTML,
+`extracted_unnumbered`). Comportamento igual ao TJGO já validado, exceto o passo da serventia.
 
 ## Verificação
 
