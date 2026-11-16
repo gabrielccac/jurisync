@@ -6,14 +6,13 @@ import re
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
-from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import MAX_DOCUMENT_BYTES, read_limited, validate_document_ids
 from jurisync.core.documents_dir import save_document
 from jurisync.core.html_pdf import html_to_pdf
-from jurisync.core.http import UnsafeUrlError, require_url
+from jurisync.core.http import REDIRECTS, UnsafeUrlError, require_url
 
 
 def _read_response(response):
@@ -78,9 +77,18 @@ def _item(document):
     }
 
 
-def read_selected_documents(process, document_ids, *, session, portal, save=False):
+def read_selected_documents(process, document_ids, *, session, portal, save=False, ciencia_checked=False):
+    """Read 1-5 IDs already present in the freshly parsed process inventory.
+
+    Opening the document of a pending intimação may register its ciência, so the caller must have read the pending
+    queues to tell the user (``client.fetch_process`` does) and say so with ``ciencia_checked``; without it nothing is
+    opened.
+    """
+    from jurisync.connectors.eproc.client import send  # the client imports this module
+
+    if ciencia_checked is not True:
+        raise ValueError("eproc documents are opened only after the ciência check; read them through fetch_process")
     portal = portals.eproc(portal).key
-    """Read 1-5 IDs already present in the freshly parsed process inventory."""
     if process.get("success") is False:
         raise ValueError("A successful eproc process result is required")
     base_url = portals.eproc(portal).base_url
@@ -106,11 +114,11 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
         response = None
         implementation_response = None
         try:
-            response = session.get(
-                wrapper_url, allow_redirects=False, timeout=30, stream=True, headers={"Accept": "text/html,*/*"}
+            response = send(
+                session, "GET", wrapper_url, portal=portal, headers={"Accept": "text/html,*/*"}, stream=True
             )
             result["status"] = response.status_code
-            if response.status_code in (301, 302, 303, 307, 308):
+            if response.status_code in REDIRECTS:
                 result["extractionStatus"] = "redirected"
                 results.append(result)
                 continue
@@ -134,15 +142,16 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
                 results.append(result)
                 continue
             _validate_url(implementation_url, "acessar_documento_implementacao", document["id"], portal=portal)
-            implementation_response = session.get(
+            implementation_response = send(
+                session,
+                "GET",
                 implementation_url,
-                allow_redirects=False,
-                timeout=30,
-                stream=True,
+                portal=portal,
                 headers={"Accept": "application/pdf,text/html,*/*", "Referer": wrapper_url},
+                stream=True,
             )
             result["status"] = implementation_response.status_code
-            if implementation_response.status_code in (301, 302, 303, 307, 308):
+            if implementation_response.status_code in REDIRECTS:
                 result["extractionStatus"] = "redirected"
                 results.append(result)
                 continue
@@ -162,13 +171,13 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
             result["bytes"] = len(body)
             result["sha256"] = hashlib.sha256(body).hexdigest()
             result["extractionStatus"], result["text"] = extract_document_text(body, result["content_type"], number)
-            if save and result["extractionStatus"] == "extracted":
+            # A scanned PDF has no text layer but is still the original the user asked to keep.
+            scanned = result["format"] == "pdf" and result["extractionStatus"] in ("ocr_needed", "empty")
+            if save and (result["extractionStatus"] == "extracted" or scanned):
                 result["savedAs"] = _save(number, document["id"], body, result)
-        except (RequestException, OSError):
-            result["extractionStatus"] = "request_failed"
         except ValueError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - one unreadable document must not hide the others
             result["extractionStatus"] = "request_failed"
         finally:
             for reply in (implementation_response, response):

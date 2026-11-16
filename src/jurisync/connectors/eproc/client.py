@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
+from jurisync.connectors.eproc import ciencia
 from jurisync.connectors.eproc.auth import login, portal_totp_account
 from jurisync.connectors.eproc.certificate import cert_login
 from jurisync.connectors.eproc.documents import read_selected_documents
@@ -27,7 +28,7 @@ from jurisync.connectors.eproc.parsers import (
     parse_process_list_page,
 )
 from jurisync.core import credentials
-from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, require_url
+from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
 
@@ -44,10 +45,22 @@ QUEUE_KINDS = {
     "hearing_notice": "intimacao_de_pauta_listar",
 }
 QUEUE_ACTIONS = set(QUEUE_KINDS.values())
+# Where the queue links sit in the panel's "citacao/intimacao" state payload (TJSP and other multi-context panels
+# draw the counters through an ajax call instead of static links).
+STATE_LINKS = {
+    "open_deadlines": "intimacaoAberto",
+    "pending": "intimacaoPendente",
+    "pending_urgent": "intimacaoPendenteUrgente",
+    "pending_agreement": "intimacaoPendenteAcordo",
+    "art334": "citacaoArt334",
+    "expired_deadline": "decursoPrazo",
+    "hearing_notice": "intimacaoPauta",
+}
 PROCESS_REPORT_ACTION = "relatorio_processo_procurador_listar"
 READ_ACTIONS = QUEUE_ACTIONS | {
     PROCESS_REPORT_ACTION,
     "painel_adv_listar",
+    "painel_advogado_listar",  # TNU names its lawyer panel this way (auth.PANEL_MARKERS)
     "processo_pesquisa_rapida",
     "processo_selecionar",
     "processo_consulta_listar",
@@ -56,7 +69,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "processo_selecionar_pagina",  # TJRS pages the event table through the process page instead of ajax
 }
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
-MAX_EVENT_PAGES = 5
+MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit
 
 
 def controller_path(config, *, ajax=False):
@@ -131,22 +144,29 @@ def _response_error(response, body=""):
     return None
 
 
-def request(session, method, url, *, data=None, ajax=False, portal):
+def send(session, method, url, *, data=None, ajax=False, portal, headers=None, stream=False):
+    """The one guarded request to the portal: allowlisted route, no redirects, shared fingerprint and timeout."""
     require_route(url, AJAX_ACTIONS if ajax else READ_ACTIONS, ajax=ajax, portal=portal)
     try:
         response = session.request(
             method,
             url,
             data=data,
-            headers={"Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"},
+            headers={"Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8", **(headers or {})},
             allow_redirects=False,
             impersonate=IMPERSONATE,
             timeout=TIMEOUT,
+            **({"stream": True} if stream else {}),
         )
     except RequestException:
         raise RuntimeError("eproc request failed") from None
-    body = _decode(response)
-    return response, body
+    log_request(method, url, getattr(response, "status_code", None))
+    return response
+
+
+def request(session, method, url, *, data=None, ajax=False, portal):
+    response = send(session, method, url, data=data, ajax=ajax, portal=portal)
+    return response, _decode(response)
 
 
 def _credentials(portal):
@@ -217,6 +237,40 @@ def _panel_endpoint(panel, queue):
     raise RuntimeError(f"Authenticated panel did not expose the {queue} queue")
 
 
+def _state_endpoint(session, panel, queue, *, panel_url, portal):
+    """The queue link the panel's own state payload advertises for the logged-in user, or None.
+
+    Some panels (TJSP) show the queue counters through ``retornar_citacao_intimacao_estado`` (JSON) and keep only a
+    "deadlines expiring today" link in the page. The first state tab is the user's own context.
+    """
+    return _state_link(_state_links(session, panel, panel_url=panel_url, portal=portal), queue, portal)
+
+
+def _state_links(session, panel, *, panel_url, portal):
+    """The queue links of the user's own context in the panel's state payload, or None when it has none."""
+    endpoint = panel.get("stateEndpoint") if isinstance(panel, dict) else None
+    if not endpoint:
+        return None
+    target = urljoin(panel_url or portals.eproc(portal).base_url, endpoint)
+    require_route(target, AJAX_ACTIONS, ajax=True, portal=portal)
+    response, body = request(session, "GET", target, ajax=True, portal=portal)
+    if _response_error(response, body):
+        return None
+    try:
+        users = json.loads(body).get("usuarios") or []
+        links = (users[0] if users else {}).get("links")
+    except (ValueError, AttributeError):
+        return None
+    return links if isinstance(links, dict) else None
+
+
+def _state_link(links, queue, portal):
+    link = (links or {}).get(STATE_LINKS[queue])
+    if not isinstance(link, str) or _route_action(urljoin(portals.eproc(portal).base_url, link)) != QUEUE_KINDS[queue]:
+        return None
+    return link
+
+
 def _route_action(url, *, ajax=False):
     query = parse_qs(urlsplit(url).query)
     return query.get("acao_ajax" if ajax else "acao", [""])[0]
@@ -257,7 +311,15 @@ def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal
     try:
         base_url = portals.eproc(portal).base_url
         panel = parse_panel(panel_html, base_url)
-        endpoint = _panel_endpoint(panel, queue)
+        try:
+            endpoint = _panel_endpoint(panel, queue)
+        except RuntimeError:
+            endpoint = None
+        # A static "vence_hoje=S" link lists only the deadlines expiring today; prefer the panel's full queue link.
+        if endpoint is None or "vence_hoje" in endpoint:
+            endpoint = _state_endpoint(session, panel, queue, panel_url=panel_url, portal=portal) or endpoint
+        if endpoint is None:
+            raise RuntimeError(f"Authenticated panel did not expose the {queue} queue")
         require_route(urljoin(panel_url or base_url, endpoint), portal=portal)
         response, body = request(session, "GET", urljoin(panel_url or base_url, endpoint), portal=portal)
         error = _response_error(response, body)
@@ -284,6 +346,45 @@ def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal
     finally:
         if owned:
             session.close()
+
+
+def pending_notices(session, panel, process_number, *, panel_url, portal):
+    """``(rows, problem)``: this process' rows in the lawyer's pending citação/intimação queues.
+
+    ``problem`` is set when a queue could not be read to its end, so an empty ``rows`` does not prove that nothing is
+    pending. The main pending queue must be advertised by the panel; the other kinds are read when it shows them.
+    """
+    base_url = portals.eproc(portal).base_url
+    wanted = re.sub(r"\D", "", process_number)
+    rows, problem, state = [], None, False
+    for queue in ciencia.PENDING_QUEUES:
+        try:
+            try:
+                endpoint = _panel_endpoint(panel, queue)
+            except RuntimeError:
+                if state is False:
+                    state = _state_links(session, panel, panel_url=panel_url, portal=portal)
+                endpoint = _state_link(state, queue, portal)
+            if endpoint is None:
+                if queue == "pending":
+                    problem = problem or "the panel did not expose the pending queue"
+                continue
+            url = urljoin(panel_url or base_url, endpoint)
+            require_route(url, {QUEUE_KINDS[queue]}, portal=portal)
+            response, body = request(session, "GET", url, portal=portal)
+        except RuntimeError:
+            problem = problem or f"the {queue} queue request failed"
+            continue
+        error = _response_error(response, body)
+        if error:
+            problem = problem or f"the {queue} queue answered {error}"
+            continue
+        parsed = parse_process_list_page(body, base_url)
+        found = [item for item in parsed.get("items", []) if re.sub(r"\D", "", item.get("number") or "") == wanted]
+        rows.extend({**item, "queue": queue} for item in found)
+        if not found and not (parsed.get("pagination") or {}).get("complete"):
+            problem = problem or f"the {queue} queue was not read to its end"
+    return rows, problem
 
 
 def list_processes(*, session=None, panel_html=None, panel_url=None, portal):
@@ -418,6 +519,12 @@ def fetch_process(
     portal,
     save=False,
 ):
+    """Read one process; with ``document_ids`` also the text of those documents.
+
+    The documents are always read. When the process had a citação/intimação waiting for ciência (or that could not be
+    checked) the result carries a ``ciencia`` notice (``ciencia.notice``), which the caller must relay to the user:
+    opening the documents may have registered the ciência and started the deadline.
+    """
     portal = portals.eproc(portal).key  # aliases in, current key out
     if not isinstance(process_number, str) or not portals.CNJ.fullmatch(process_number):
         raise ValueError("process_number must be a formatted CNJ number")
@@ -489,17 +596,28 @@ def fetch_process(
         document_inventory = list(documents.values())
         internal = {**detail, "events": selected_events, "documents": document_inventory}
         attachments = []
+        notice = {}
         if document_ids is not None:
-            if read_selected_documents is None:
-                raise RuntimeError("eproc document adapter is unavailable")
-            attachments = read_selected_documents(internal, document_ids, session=session, portal=portal, save=save)
+            # Read the pending queues before opening anything: afterwards the intimação may no longer be pending.
+            notices, problem = pending_notices(session, panel, process_number, panel_url=panel_url, portal=portal)
+            notice = ciencia.notice(
+                process_number,
+                document_ids,
+                notices=notices,
+                problem=problem,
+                events=events,
+                events_complete=bool(pagination.get("complete")) and not event_diagnostics,
+            )
+            attachments = read_selected_documents(
+                internal, document_ids, session=session, portal=portal, save=save, ciencia_checked=True
+            )
         result = {
             "success": True,
             "source": "eproc",
             "portal": portal,
             "processNumber": process_number,
             "scope": scope,
-            "scopeSemantics": "latest_date_bucket" if scope == "latest" else "first_timeline_page",
+            "scopeSemantics": "latest_date_bucket" if scope == "latest" else "timeline_pages",
             "metadata": {
                 **{
                     key: value
@@ -516,6 +634,7 @@ def fetch_process(
             "attachments": attachments,
             "pagination": pagination,
             "diagnostics": event_diagnostics,
+            **notice,
         }
         return _redact(result)
     finally:
@@ -528,7 +647,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
     queue = subparsers.add_parser("queue")
     queue.add_argument("--portal", choices=portals.keys("eproc"), required=True)
-    queue.add_argument("--queue", choices=("open_deadlines", "pending"), required=True)
+    queue.add_argument("--queue", choices=tuple(QUEUE_KINDS), required=True)
     processes = subparsers.add_parser("processes", help="List the first Relação de Processos page with default filters")
     processes.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     process = subparsers.add_parser("process")
@@ -545,7 +664,12 @@ def main():
         elif args.command == "processes":
             result = list_processes(portal=args.portal)
         else:
-            result = fetch_process(args.process_number, args.scope, args.document_id, portal=args.portal)
+            result = fetch_process(
+                args.process_number,
+                args.scope,
+                args.document_id,
+                portal=args.portal,
+            )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result.get("success"):
         raise SystemExit(1)

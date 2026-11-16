@@ -151,6 +151,18 @@ def parse_lawyer_process_report(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
     table = soup.select_one("table.infraTable")
     headers = [text(node) for node in table.select("th")] if table else []
+    if (
+        table is None
+        and soup.select_one("form#frmProcessoLista")
+        and "nenhum registro encontrado" in text(soup).lower()
+    ):
+        # TJSP 2G shows the filter form with this message and no table when the lawyer has no process there.
+        return {
+            "items": [],
+            "pagination": {"page": 0, "totalItems": 0, "itemCount": 0, "complete": True},
+            "filters": {"includeClosed": None, "status": None},
+            "diagnostics": [],
+        }
     expected = [
         "Número Processo",
         "Classe",

@@ -1,17 +1,19 @@
-"""Eproc MCP server for every configured Eproc portal. Read-only.
+"""Eproc MCP server for every configured Eproc portal. Read-only toward the portal, except that opening the document
+of a pending intimação may register its ciência (the result then carries a ``ciencia`` notice for the user).
 
 Each portal keeps its own session: the Selenium login runs once per portal;
 later calls reuse the authenticated cookies and re-read the panel.
 """
 
+import sys
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import ToolAnnotations
 from pydantic import Field
-from selenium.common.exceptions import WebDriverException
 
 from jurisync import portals
-from jurisync.connectors.eproc.auth import PANEL_MARKER
+from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
     QUEUE_KINDS,
     _response_error,
@@ -25,14 +27,25 @@ from jurisync.connectors.eproc.client import (
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
 
-# Selenium raises WebDriverException for browser/network failures during login.
-ERRORS = (ValueError, RuntimeError, OSError, KeyError, WebDriverException)
+ERRORS = (ValueError, RuntimeError, OSError, KeyError)
+# eproc_get_process can store a file in the shared folder and, by opening a document, register a ciência.
+READS_AND_SAVES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+
+
+def anticipated_errors():
+    """ERRORS plus Selenium's WebDriverException (browser/network failures during login).
+
+    Selenium is imported only when a browser login runs, so the class is looked up instead of imported: while the
+    module is not loaded no such exception can have been raised.
+    """
+    selenium = sys.modules.get("selenium.common.exceptions")
+    return (*ERRORS, selenium.WebDriverException) if selenium else ERRORS
 
 
 def refresh_panel(portal, value):
     session, _, panel_url = value
     response, body = request(session, "GET", panel_url, portal=portal)
-    if _response_error(response, body) or PANEL_MARKER not in body:
+    if _response_error(response, body) or not is_panel(body):
         return None
     return session, body, panel_url
 
@@ -63,7 +76,10 @@ def create_server(keys=None):
     server = MCPServer("eproc", version="1.0.0")
 
     def call(portal, read):
-        with tool_errors("Eproc", *ERRORS), sessions.session(portal) as (session, panel_html, panel_url):
+        with (
+            tool_errors("Eproc", *anticipated_errors()),
+            sessions.session(portal) as (session, panel_html, panel_url),
+        ):
             return require_success(
                 "Eproc", read(session=session, panel_html=panel_html, panel_url=panel_url, portal=portal)
             )
@@ -110,8 +126,18 @@ def create_server(keys=None):
     @server.tool(
         name="eproc_get_process",
         title="Get Eproc process context",
-        description=f"Read an Eproc process, parties, events, document inventory and up to five selected document texts. With save=true each read document is stored in the shared documents folder (HTML acts are rendered to PDF) and reported as savedAs, so a task can attach it by file name. Portals: {describe(keys)}. Read-only toward eproc.",
-        annotations=READ_ONLY,
+        description=(
+            "Read an Eproc process, parties, events, document inventory and up to five selected document texts. "
+            "Without documentIds it is a pure read. With documentIds the documents are always opened. When the process "
+            "had a citação/intimação waiting for ciência, the response carries a top-level ciencia block "
+            "(pendente, intimacoes, aviso); when that could not be checked, ciencia.verificada=false with an aviso. "
+            "Opening the documents may have registered the lawyer's ciência and started the deadline: always relay "
+            "ciencia.aviso to the user and note it in the task. With save=true each read document is stored in the "
+            "shared documents folder (HTML acts are rendered to PDF) and reported as savedAs, so a task can attach it "
+            "by file name. Not annotated read-only because of the save and ciência effects. "
+            f"Portals: {describe(keys)}."
+        ),
+        annotations=READS_AND_SAVES,
     )
     def eproc_get_process(
         portal: Annotated[Portal, Field(description="Portal key from the list above.")],
@@ -121,7 +147,9 @@ def create_server(keys=None):
         ],
         scope: Annotated[
             Literal["latest", "page"],
-            Field(description="'page' (default): first page of the timeline. 'latest': newest date only."),
+            Field(
+                description="'page' (default): the timeline, up to 5 event pages (see pagination). 'latest': newest date only."
+            ),
         ] = "page",
         documentIds: Annotated[
             list[Annotated[str, Field(min_length=1)]],
@@ -138,7 +166,14 @@ def create_server(keys=None):
         ] = False,
     ) -> dict[str, Any]:
         return call(
-            portal, lambda **context: fetch_process(processNumber, scope, documentIds or None, save=save, **context)
+            portal,
+            lambda **context: fetch_process(
+                processNumber,
+                scope,
+                documentIds or None,
+                save=save,
+                **context,
+            ),
         )
 
     return server

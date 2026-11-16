@@ -1,17 +1,34 @@
 """eproc browser login and PHP session extraction."""
 
+import html as html_lib
 import time
+import urllib.parse
 from http.cookiejar import Cookie
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from curl_cffi import requests
-from selenium.common.exceptions import StaleElementReferenceException, UnexpectedAlertPresentException
-from seleniumbase import Driver
 
 from jurisync import portals
-from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, parse_index, select_account, totp
+from jurisync.core.session_pool import LoginRejected
+from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, portal_account, totp
 
 PANEL_MARKER = "acao=painel_adv_listar"
+PANEL_MARKERS = (PANEL_MARKER, "acao=painel_advogado_listar")  # TNU names its panel the second way
+
+
+def is_panel(value):
+    return any(marker in (value or "") for marker in PANEL_MARKERS)
+
+
+def _selenium_errors():
+    """Selenium's exception classes, imported only once a browser login runs (the import is slow)."""
+    from selenium.common import exceptions
+
+    return exceptions
+
+
+CAPTCHA_INPUT = "#txtInfraCaptcha"
 PANEL_READY = 'a[aria-describedby="processoscomprazoemaberto"]'
 # TJMG's panel builds the deadline table in JS without that aria attribute; its panel form is always present.
 PANEL_READY_ALT = ("#frmPainelAdvogado",)
@@ -30,12 +47,7 @@ def portal_totp_account(portal):
     data, qr_path = portal.env("2FA_DATA"), portal.env("2FA_QR")
     if not data and not qr_path:
         raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')} in .env")
-    return select_account(
-        parse_accounts(data) if data else accounts_from_image(Path(qr_path)),
-        match=portal.env("OTP_PROFILE_MATCH"),
-        index=parse_index(portal.env("OTP_PROFILE_INDEX"), portal.env_name("OTP_PROFILE_INDEX")),
-        label=portal.env_prefix,
-    )
+    return portal_account(portal, parse_accounts(data) if data else accounts_from_image(Path(qr_path)))
 
 
 def dismiss_alert(driver):
@@ -58,7 +70,7 @@ def dismiss_alert(driver):
 def has(driver, selector, timeout=0.5):
     try:
         return driver.wait_for_element(selector, timeout=timeout) is not None
-    except UnexpectedAlertPresentException:
+    except _selenium_errors().UnexpectedAlertPresentException:
         dismiss_alert(driver)
         try:
             return driver.wait_for_element(selector, timeout=timeout) is not None
@@ -86,27 +98,54 @@ def wait_for_step(driver, timeout=25):
     while time.time() < deadline:
         try:
             url = driver.get_current_url() or ""
-        except UnexpectedAlertPresentException:
+        except _selenium_errors().UnexpectedAlertPresentException:
             text = dismiss_alert(driver)
             if "confirma" in text.lower():
                 raise RuntimeError(
-                    "eproc asks for a confirmation code (new device/email check); "
-                    "fetch the code and continue the login with it"
+                    "eproc asks for a confirmation code (image CAPTCHA or new-device/email check); "
+                    "it cannot be filled automatically"
                 ) from None
             continue
         if any(has(driver, selector) for selector in LOGIN_FIELDS["otp"]):
             return "otp"
+        if has(driver, CAPTCHA_INPUT):
+            # An image/audio CAPTCHA (old-style Eproc such as TJTO) needs a person; clicking Enviar only raises a JS alert.
+            raise RuntimeError(
+                "eproc asks for an image CAPTCHA (code typed from a picture); it cannot be solved automatically"
+            )
         if has(driver, "button:contains('Enviar')"):
             return "captcha"
-        if PANEL_MARKER in url and any(has(driver, selector) for selector in (PANEL_READY, *PANEL_READY_ALT)):
+        if is_panel(url) and any(has(driver, selector) for selector in (PANEL_READY, *PANEL_READY_ALT)):
             return "panel"
+        if "/controlador.php" in url and not is_panel(url) and panel_link(driver.page_source, url):
+            return "home"  # logged in, but landed on another page (e.g. TNU's contact-data notice)
         if has(driver, "#username") and any(
             has(driver, selector) for selector in ("#input-error", ".alert-error", "#kc-error-message")
         ):
             return "login"
+        if "externo_controlador.php" in url and "msg=" in url and has(driver, "#txtUsuario"):
+            return "login"  # local eproc login (TRF6) redirects back to its form with an error message
         time.sleep(0.25)
     hint = page_hint(driver)
     raise RuntimeError("Timed out waiting for the next eproc login step" + (f" (page: {hint})" if hint else ""))
+
+
+def panel_link(html, page_url):
+    """The lawyer panel link of a logged-in eproc page, wherever the login landed."""
+    for name in ("painel_adv_listar", "painel_advogado_listar"):
+        link = BeautifulSoup(html, "html.parser").select_one(f'a[href*="acao={name}"]')
+        if link:
+            return urllib.parse.urljoin(page_url, html_lib.unescape(link["href"]))
+    return None
+
+
+def open_panel(driver):
+    """Leave a post-login landing page for the lawyer panel (plain navigation, nothing is saved or submitted)."""
+    link = panel_link(driver.page_source, driver.get_current_url())
+    if link is None:
+        raise RuntimeError("eproc login landed outside the panel and the page has no panel link")
+    driver.get(link)
+    return wait_for_step(driver)
 
 
 def submit_captcha(driver):
@@ -115,7 +154,7 @@ def submit_captcha(driver):
         try:
             driver.click("button:contains('Enviar')")
             return
-        except UnexpectedAlertPresentException:
+        except _selenium_errors().UnexpectedAlertPresentException:
             try:
                 driver.switch_to.alert.accept()
             except Exception:
@@ -185,7 +224,7 @@ def _fill_field(driver, selectors, value, *, timeout=10, attempts=4):
             field.clear()
             field.send_keys(value)
             return field
-        except StaleElementReferenceException:
+        except _selenium_errors().StaleElementReferenceException:
             if attempt == attempts - 1:
                 raise
             time.sleep(0.5)
@@ -202,13 +241,15 @@ def _submit_otp(driver, code):
     else:
         try:
             otp_field.send_keys("\n")
-        except StaleElementReferenceException:
+        except _selenium_errors().StaleElementReferenceException:
             pass  # the page already moved on after the code was typed
     time.sleep(1)
     step = wait_for_step(driver, timeout=30)
     while step == "captcha":
         submit_captcha(driver)
         step = wait_for_step(driver, timeout=30)
+    if step == "home":
+        step = open_panel(driver)
     return step
 
 
@@ -259,6 +300,8 @@ def login(username, password, account, *, portal):
     if account["type"] != "totp":
         raise ValueError("Selected authenticator account is not TOTP")
 
+    from seleniumbase import Driver  # imported here: server start and certificate-only tenants never pay for it
+
     config = portals.eproc(portal)
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
@@ -299,16 +342,18 @@ def login(username, password, account, *, portal):
         while step == "captcha":
             submit_captcha(driver)
             step = wait_for_step(driver)
+        if step == "home":
+            step = open_panel(driver)
         if step == "login":
             hint = page_hint(driver)
-            raise RuntimeError("eproc rejected the username/password" + (f" (page: {hint})" if hint else ""))
+            raise LoginRejected("eproc rejected the username/password" + (f" (page: {hint})" if hint else ""))
         if step == "otp":
             step = _submit_otp(driver, totp(account).now())
             if step == "otp":
                 # Usually a code already used in this window by a recent login.
                 step = _submit_otp(driver, next_code(account))
             if step == "otp":
-                raise RuntimeError("eproc rejected the OTP")
+                raise LoginRejected("eproc rejected the OTP")
             if step == "login":
                 raise RuntimeError("eproc returned to login after OTP submission")
 

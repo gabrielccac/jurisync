@@ -5,7 +5,8 @@ from unittest.mock import Mock
 from curl_cffi.requests.exceptions import RequestException
 from pypdf import PdfWriter
 
-from jurisync.connectors.eproc.documents import read_selected_documents
+from jurisync.connectors.eproc import documents
+from jurisync.core.http import IMPERSONATE, TIMEOUT
 
 NUMBER = "5000001-23.2026.4.04.7207"
 WRAPPER = "https://eproc.jfsc.jus.br/eprocV2/controlador.php?acao=acessar_documento&doc=9&hash=h"
@@ -16,6 +17,11 @@ def reply(body, status=200, content_type="text/html"):
     result = Mock(status_code=status, headers={"Content-Type": content_type})
     result.iter_content.return_value = iter([body])
     return result
+
+
+def read_selected_documents(*args, **kwargs):
+    """The reader as ``client.fetch_process`` calls it, after its ciência gate."""
+    return documents.read_selected_documents(*args, ciencia_checked=True, **kwargs)
 
 
 def process(url=WRAPPER):
@@ -30,12 +36,39 @@ class EprocDocumentTests(unittest.TestCase):
             f'<script>var u="{IMPLEMENTATION}";</script>'.encode(),
         ):
             session = Mock()
-            session.get.side_effect = [reply(wrapper), reply(implementation)]
+            session.request.side_effect = [reply(wrapper), reply(implementation)]
             result = read_selected_documents(process(), ["9"], session=session, portal="jfsc")[0]
             self.assertEqual(result["extractionStatus"], "extracted")
             self.assertIn("decisão", result["text"])
             self.assertNotIn("url", result)
-            self.assertEqual(session.get.call_count, 2)
+            self.assertEqual(session.request.call_count, 2)
+            session.get.assert_not_called()
+
+    def test_document_requests_go_through_the_guarded_client_request(self):
+        """Same fingerprint, timeout, no redirects and route allowlist as every other eproc request."""
+        session = Mock()
+        session.request.side_effect = [
+            reply(f'<iframe id="conteudoIframe" src="{IMPLEMENTATION}"></iframe>'.encode()),
+            reply(f"<html><p>{NUMBER}</p></html>".encode()),
+        ]
+        with self.assertLogs("jurisync.http", level="INFO") as logs:
+            read_selected_documents(process(), ["9"], session=session, portal="jfsc")
+        self.assertEqual(len(logs.output), 2)
+        self.assertNotIn("hash=h", "".join(logs.output))
+        for call, url in zip(session.request.call_args_list, (WRAPPER, IMPLEMENTATION), strict=True):
+            self.assertEqual(call.args, ("GET", url))
+            self.assertEqual(
+                {key: call.kwargs[key] for key in ("allow_redirects", "impersonate", "timeout", "stream")},
+                {"allow_redirects": False, "impersonate": IMPERSONATE, "timeout": TIMEOUT, "stream": True},
+            )
+        self.assertEqual(session.request.call_args.kwargs["headers"]["Referer"], WRAPPER)
+
+    def test_nothing_is_opened_without_the_ciencia_check(self):
+        session = Mock()
+        for kwargs in ({}, {"ciencia_checked": False}, {"ciencia_checked": "yes"}):
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, "ciência check"):
+                documents.read_selected_documents(process(), ["9"], session=session, portal="jfsc", **kwargs)
+        session.request.assert_not_called()
 
     def test_selection_and_routes_are_validated_before_requests(self):
         session = Mock()
@@ -51,7 +84,7 @@ class EprocDocumentTests(unittest.TestCase):
         ):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 read_selected_documents(process(url), ["9"], session=session, portal="jfsc")
-        session.get.assert_not_called()
+        session.request.assert_not_called()
 
     def test_denial_redirect_oversize_and_network_failures_are_safe(self):
         for wrapper, status, expected in (
@@ -61,11 +94,11 @@ class EprocDocumentTests(unittest.TestCase):
         ):
             session = Mock()
             response = reply(wrapper, status)
-            session.get.return_value = response
+            session.request.return_value = response
             result = read_selected_documents(process(), ["9"], session=session, portal="jfsc")[0]
             self.assertEqual(result["extractionStatus"], expected)
         session = Mock()
-        session.get.side_effect = RequestException("secret URL")
+        session.request.side_effect = RequestException("secret URL")
         result = read_selected_documents(process(), ["9"], session=session, portal="jfsc")[0]
         self.assertEqual(result["extractionStatus"], "request_failed")
         self.assertNotIn("secret", str(result))
@@ -77,7 +110,7 @@ class EprocDocumentTests(unittest.TestCase):
         writer.write(buffer)
         body = buffer.getvalue()
         session = Mock()
-        session.get.side_effect = [
+        session.request.side_effect = [
             reply(f'<iframe id="conteudoIframe" src="{IMPLEMENTATION}"></iframe>'.encode()),
             reply(body, content_type="application/pdf"),
         ]
