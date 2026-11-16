@@ -358,7 +358,11 @@ PORTALS = {
         # on that host. Same A1 certificate-challenge login. Current cases are in Projudi/PJe, so no guessing by number.
         Portal("tjam-esaj", "esaj", "TJAM", "1g", "consultasaj.tjam.jus.br", "/", "certificate_challenge", "TJAM_ESAJ",
                region="04", justice="8", guess_by_number=False, flavor="esaj-cas"),
-        Portal("stj", "stj", "STJ", "2g", "processo.stj.jus.br", "/", "none", wired=False),
+        # STJ: the lawyer's area is the CPE (cpe.web.stj.jus.br, REST under /api/). The A1 logs in over mutual TLS at
+        # cpe-auth.web.stj.jus.br/api/auth/cert with no authenticator; password logins add TOTP/e-mail MFA and gov.br is
+        # OAuth. The parent domain as host claims every STJ link (processo., ww2., cpe.web.). CNJ J=3, TR=00.
+        # The connector (connectors/stj) calls the CPE hosts directly.
+        Portal("stj", "stj", "STJ", "2g", "stj.jus.br", "/", "certificate_mtls", "STJ", region="00", justice="3"),
     )
 }  # fmt: skip
 
@@ -387,6 +391,10 @@ def eproc(key):
 
 def projudi(key):
     return get(key, "projudi")
+
+
+def stj(key):
+    return get(key, "stj")
 
 
 def get(key, system=None):

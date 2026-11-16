@@ -35,6 +35,7 @@ SERVERS = {
     "advbox": "jurisync-advbox",
     "juridiq": "jurisync-juridiq",
     "djen": "jurisync-djen",
+    "stj": "jurisync-stj",
 }
 FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
 # Settings of the computer a bundle is installed on: a bundle never sets them.
