@@ -80,6 +80,42 @@ class EprocParserTests(unittest.TestCase):
         self.assertEqual(parsed["pagination"]["totalPages"], 3)
         self.assertFalse(parsed["pagination"]["complete"])
 
+    def test_hearing_notice_queue_reads_session_columns(self):
+        # Shape of TJSC 2G "Intimações de Pauta" (16/11/2026), names and numbers replaced.
+        html = """<table class="infraTable"><caption>Lista de Intimações de Pauta (1 registro):</caption>
+          <tr><th>Processo</th><th>Assunto</th><th>Evento</th><th>Data Sessão</th><th>Sequencial</th>
+          <th>Composição prevista do Julgamento</th><th>Visualizado</th></tr>
+          <tr class="infraTrClara"><td><div><a href="controlador.php?acao=processo_selecionar&amp;num_processo=1&amp;hash=h">0000001-23.2026.8.24.0001</a></div>
+          <br/><b>Juízo: </b>GCIV0202<br/><a href="javascript:exibirSubFrm('controlador.php?acao=processo_lembrete_externo_cadastrar')">Cadastrar Lembrete</a>
+          <br/><b>Colegiado: </b>2ª Câmara de Direito Civil<br/><b></b><br/>FULANO DE TAL<br/>(00000000000) - <b>APELANTE</b>
+          <br/><b></b><br/>EMPRESA X LTDA<br/>(00000000000100) - <b>APELADO</b></td>
+          <td>Assunto civil</td>
+          <td>Intimação Eletrônica - Expedida/Certificada - Pauta<br/><b>Sessão Virtual</b><br/>(23/10/2026 18:56:23)</td>
+          <td>12/11/2026 00:00:00<br/>a<br/>19/11/2026 23:59:00</td><td>129</td><td>DES. A (GCIV0204)</td>
+          <td><button class="infraButton" onclick="confirma('1','2');">Visualizar</button></td></tr></table>"""
+        parsed = parse_process_list_page(html, BASE)
+        self.assertEqual(parsed["pagination"]["totalItems"], 1)
+        self.assertTrue(parsed["pagination"]["complete"])
+        item = parsed["items"][0]
+        self.assertEqual(item["number"], "0000001-23.2026.8.24.0001")
+        self.assertEqual((item["court"], item["collegiate"]), ("GCIV0202", "2ª Câmara de Direito Civil"))
+        self.assertEqual(
+            item["parties"],
+            [{"role": "APELANTE", "name": "FULANO DE TAL"}, {"role": "APELADO", "name": "EMPRESA X LTDA"}],
+        )
+        self.assertEqual(item["subject"], "Assunto civil")
+        self.assertEqual(item["deadlineEvent"], "Intimação Eletrônica - Expedida/Certificada - Pauta")
+        self.assertEqual(item["requestedAt"], "23/10/2026 18:56:23")
+        self.assertEqual((item["sessionStart"], item["sessionEnd"]), ("12/11/2026 00:00:00", "19/11/2026 23:59:00"))
+        self.assertEqual(item["sessionSequence"], "129")
+        self.assertEqual((item["deadlineStart"], item["deadlineEnd"]), ("", ""))
+
+    def test_detail_title_skips_screen_reader_menu_heading(self):
+        html = (
+            '<h2 id="menu-title" class="sr-only">Menu lateral</h2><h1>Consulta Processual - Detalhes do Processo</h1>'
+        )
+        self.assertEqual(parse_process_detail(html, BASE)["title"], "Consulta Processual - Detalhes do Processo")
+
     def test_expired_queue_uses_seven_columns_and_caption_total(self):
         caption = "<caption>Lista de Citações e Intimações com Decurso de Prazo (1 registro):</caption>"
         html = f"""<input name="hdnInfraNroItens" value="0"><table class="infraTable">{caption}

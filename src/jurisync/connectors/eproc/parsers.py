@@ -69,9 +69,63 @@ def parse_panel(html, base_url):
     }
 
 
+_SESSION_PERIOD = re.compile(r"(\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}(?::\d{2})?)?)")
+_EVENT_STAMP = re.compile(r"\((\d{2}/\d{2}/\d{4} \d{2}:\d{2}(?::\d{2})?)\)")
+
+
+def _plain_parties(cell):
+    """Parties drawn as plain text (name, then "(document) - ROLE"); the document number is left out."""
+    lines = [line.strip() for line in cell.get_text("\n", strip=True).split("\n") if line.strip()]
+    parties = []
+    for index, line in enumerate(lines):
+        if index and index + 1 < len(lines) and re.fullmatch(r"\([^)]*\)\s*-", line):
+            name, role = lines[index - 1], lines[index + 1]
+            if name not in {party["name"] for party in parties}:
+                parties.append({"role": role, "name": name})
+    return parties
+
+
+def _hearing_row(row, cells, base_url):
+    """A row of "Intimações de Pauta" (TJSC 2G, 16/11/2026): Processo, Assunto, Evento, Data Sessão, Sequencial,
+    Composição prevista, Visualizado. It has no class or deadline columns; the session period takes their place."""
+    process_cell = cells[0]
+    link = process_cell.select_one('a[href*="acao=processo_selecionar"]')
+    if not link:
+        return None
+    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
+    lines = [line.strip() for line in process_cell.get_text("\n", strip=True).split("\n") if line.strip()]
+    collegiate = next(
+        (lines[i + 1] for i, line in enumerate(lines[:-1]) if line.casefold().rstrip(": ") == "colegiado"), ""
+    )
+    session = _SESSION_PERIOD.findall(text(cells[3]))
+    stamp = _EVENT_STAMP.search(text(cells[2]))
+    event_lines = [line.strip() for line in cells[2].get_text("\n", strip=True).split("\n") if line.strip()]
+    return {
+        "id": None,
+        "number": text(link),
+        "url": _href(link.get("href"), base_url),
+        "court": court.group(1) if court else "",
+        "collegiate": collegiate,
+        "parties": _plain_parties(process_cell),
+        "caseClass": "",
+        "subject": text(cells[1]),
+        "deadlineEvent": event_lines[0] if event_lines else "",
+        "requestedAt": stamp.group(1) if stamp else "",
+        "deadlineStart": "",
+        "deadlineEnd": "",
+        "sessionStart": session[0] if session else "",
+        "sessionEnd": session[1] if len(session) > 1 else "",
+        "sessionSequence": text(cells[4]),
+        "caseClassCode": row.get("data-classe"),
+        "competence": row.get("data-competencia"),
+    }
+
+
 def _process_row(row, base_url):
     cells = row.find_all("td", recursive=False)
     headers = row.find_parent("table").find_all("th")
+    if len(cells) >= 5 and len(headers) >= 4 and "sess" in text(headers[3]).casefold():
+        return _hearing_row(row, cells, base_url)
     expired = len(cells) == 7 and bool(headers) and "conferido" in text(headers[-1]).casefold()
     if len(cells) < 8 and not expired:
         return None
@@ -383,7 +437,8 @@ def parse_process_detail(html, base_url):
         "additionalInformation": text(soup.select_one("#fldInformacoesAdicionais_content")),
         "pagination": {"page": 0, "totalPages": None, "complete": True},
     }
-    result["title"] = text(soup.select_one("h1, h2, .infraLegendObrigatorio"))
+    # Newer eproc layouts put a screen-reader-only "Menu lateral" h2 before the page h1.
+    result["title"] = text(soup.select_one("h1") or soup.select_one("h2:not(.sr-only), .infraLegendObrigatorio"))
     result["number"] = text(soup.select_one("#txtNumProcesso")) or next(
         iter(_PROCESS_NUMBER.findall(soup.get_text(" ", strip=True))), None
     )
