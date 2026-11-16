@@ -16,6 +16,7 @@ CAPTCHA (``txtInfraCaptcha``) before the password is checked; a wrong code only 
 the portal check the password (``msg=Senha ou usuário Inválidos`` back on the login form) and go on to the code screen.
 """
 
+import re
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
@@ -33,6 +34,8 @@ INFRA_CAPTCHA = "infra-captcha"
 CAPTCHA_FIELD = "txtInfraCaptcha"
 MAX_CAPTCHA_ANSWERS = 3  # wrong codes sent in one login; a wrong code only redraws the picture
 MAX_CAPTCHA_PICTURES = 6  # pictures looked at in one login, counting the unreadable ones
+# Usernames a portal's login page states it accepts; anything else is refused there, so it is not sent.
+USERNAME_FORMATS = {"TJTO": (re.compile(r"[A-Z]{2}[0-9]{6}"), "UF + OAB number with 6 digits, e.g. TO001234")}
 
 
 class NotClassicLogin(Exception):
@@ -141,6 +144,13 @@ def login(username, password, account, *, portal, signer=None):
             raise NotClassicLogin(f"{config.key}: no classic eproc login form")
         if "captcha" in page.text.lower():
             raise NotClassicLogin(f"{config.key}: login page shows a CAPTCHA")
+
+        expected = USERNAME_FORMATS.get(config.tribunal)
+        if expected and not expected[0].fullmatch(username.strip().upper()):
+            raise RuntimeError(
+                f"{config.key}: the username must be {expected[1]}; "
+                f"fix {config.env_name('USERNAME')} (nothing was sent)"
+            )
 
         # From here on the credentials are sent: never fall back to another login after this point.
         trail.append("login")

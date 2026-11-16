@@ -145,7 +145,7 @@ class InfraCaptchaFlow(unittest.TestCase):
             patch.object(http_login.requests, "Session", return_value=session),
             patch.object(http_login.image_captcha, "solve", solve),
         ):
-            return http_login.login("u", "p", ACCOUNT, portal="tjto-1g"), solve
+            return http_login.login("TO001234", "p", ACCOUNT, portal="tjto-1g"), solve
 
     def test_password_to_index_then_captcha_redraw_and_answer_then_totp(self):
         session = tjto_session(
@@ -206,6 +206,15 @@ class InfraCaptchaFlow(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not accepted after 3 answers"):
             self.login(session, [("aaaa", "local"), ("bbbb", "model"), ("cccc", "model")])
         self.assertEqual(session.post.call_count, 4)  # the password and three codes
+
+    def test_a_username_outside_the_stated_format_is_not_sent(self):
+        session = tjto_session(gets=[reply(TJTO, text=LOGIN_FORM)], posts=[])
+        with (
+            patch.object(http_login.requests, "Session", return_value=session),
+            self.assertRaisesRegex(RuntimeError, "UF \\+ OAB.*TJTO_1G_USERNAME.*nothing was sent"),
+        ):
+            http_login.login("12345678901", "p", ACCOUNT, portal="tjto-1g")
+        session.post.assert_not_called()
 
     def test_other_classic_portals_still_post_to_login_cert(self):
         self.assertEqual(portals.eproc("tjmg-1g").flavor, "")
