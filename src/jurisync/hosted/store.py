@@ -145,6 +145,13 @@ class Store:
         row["connectors"] = [name for name in row["connectors"].split(",") if name]
         return row
 
+    def update_tenant(self, tenant, *, name=None, connectors=None):
+        """Change an office's display name or the connectors it has; its users, tokens and vault stay."""
+        if name is not None:
+            self._run("update tenants set name = ? where id = ?", name, tenant)
+        if connectors is not None:
+            self._run("update tenants set connectors = ? where id = ?", ",".join(connectors), tenant)
+
     def tenants(self):
         return [self.tenant(row["id"]) for row in self._run("select id from tenants order by id")]
 

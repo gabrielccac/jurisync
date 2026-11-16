@@ -1,0 +1,10 @@
+[Unit]
+Description=Jurisync: daily backup of the hosted store, vault and customer profiles
+After=jurisync-hosted.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/jurisync/jurisync.env
+EnvironmentFile=-/etc/jurisync/backup.env
+ExecStart=/opt/jurisync/app/deploy/backup.sh
+UMask=0077

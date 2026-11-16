@@ -1,0 +1,30 @@
+# /etc/caddy/Caddyfile: HTTPS with an automatic certificate for the domain (ports 80 and 443 open).
+# install.sh replaces mcp.example.com.br with --domain.
+mcp.example.com.br {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080 {
+		# MCP answers stream (text/event-stream): send each event as it comes.
+		flush_interval -1
+		transport http {
+			read_timeout 15m
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	log {
+		output file /var/log/caddy/jurisync.log
+		# No query strings: OAuth codes and states travel there.
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete code
+					delete state
+					delete code_challenge
+				}
+			}
+		}
+	}
+}

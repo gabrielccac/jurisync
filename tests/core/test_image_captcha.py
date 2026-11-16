@@ -1,4 +1,5 @@
 import io
+import os
 import unittest
 from unittest import mock
 
@@ -73,17 +74,18 @@ class Solving(unittest.TestCase):
             self.assertIsNone(image_captcha.read_locally(png([(0, 0, 0)])))
 
     def test_machine_wide_key_comes_first_and_one_is_required(self):
-        env = {"JURISYNC_CAPTCHA_API_KEY": "shared", "OPENROUTER_API_KEY": "customer"}
-        with mock.patch.object(image_captcha.credentials, "env", side_effect=lambda name: env.get(name, "")):
+        from jurisync.core import credentials
+
+        with mock.patch.dict(os.environ, {"JURISYNC_CAPTCHA_API_KEY": "shared"}):
             self.assertEqual(image_captcha.captcha_api_key(), "shared")
-        env = {"OPENROUTER_API_KEY": "customer"}
-        with mock.patch.object(image_captcha.credentials, "env", side_effect=lambda name: env.get(name, "")):
-            self.assertEqual(image_captcha.captcha_api_key(), "customer")
-        with (
-            mock.patch.object(image_captcha.credentials, "env", return_value=""),
-            self.assertRaisesRegex(RuntimeError, "JURISYNC_CAPTCHA_API_KEY"),
-        ):
-            image_captcha.read_with_model(b"img")
+            # Hosted: the server's key serves every office; an office's vault entry cannot replace it.
+            with credentials.scope("office-a", {"OPENROUTER_API_KEY": "customer", "JURISYNC_CAPTCHA_API_KEY": "x"}):
+                self.assertEqual(image_captcha.captcha_api_key(), "shared")
+        with mock.patch.dict(os.environ, {"JURISYNC_CAPTCHA_API_KEY": ""}):
+            with credentials.scope("office-a", {"OPENROUTER_API_KEY": "customer"}):
+                self.assertEqual(image_captcha.captcha_api_key(), "customer")
+            with credentials.scope("office-b"), self.assertRaisesRegex(RuntimeError, "JURISYNC_CAPTCHA_API_KEY"):
+                image_captcha.read_with_model(b"img")
 
     def test_model_request_carries_the_picture_and_reads_the_code(self):
         answer = mock.Mock()

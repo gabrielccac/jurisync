@@ -24,7 +24,14 @@ def generate_key():
 
 
 def load_key(value=None):
-    raw = value if value is not None else os.environ.get("JURISYNC_VAULT_KEY", "")
+    """The master key: ``value``, else ``JURISYNC_VAULT_KEY``, else the service's systemd credential of that name."""
+    from jurisync.core.credentials import service_credential
+
+    raw = (
+        value
+        if value is not None
+        else (os.environ.get("JURISYNC_VAULT_KEY") or service_credential("JURISYNC_VAULT_KEY"))
+    )
     try:
         key = base64.b64decode(raw.strip(), validate=True)
     except ValueError:

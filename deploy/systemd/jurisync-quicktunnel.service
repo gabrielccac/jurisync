@@ -1,0 +1,16 @@
+[Unit]
+Description=Jurisync: temporary Cloudflare quick tunnel (trycloudflare.com) until the domain exists
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root to rewrite /etc/jurisync/base-url.env and restart the server; cloudflared itself runs as jurisync.
+# quick-tunnel.sh starts cloudflared, reads the https://<random>.trycloudflare.com address it gets, writes it as
+# JURISYNC_BASE_URL and restarts jurisync-hosted. The address changes on every start: offices re-add the connector.
+ExecStart=/opt/jurisync/app/deploy/quick-tunnel.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

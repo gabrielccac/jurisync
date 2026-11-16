@@ -63,6 +63,7 @@ Onda 3 = A3, que depende de uma decisão (abaixo).
 2. Servidor de produção: uma VM Linux (Chrome headless, LibreOffice, `uv sync --extra captcha-ocr`), domínio
    próprio com HTTPS (Cloudflare Tunnel ou Caddy), `jurisync-hosted init`, `JURISYNC_VAULT_KEY` num cofre de
    segredos (systemd credential no mínimo), `JURISYNC_CAPTCHA_API_KEY`, backup diário do store + cofre.
+   Tudo isso é script: `deploy/push.sh` + `deploy/install.sh` (ver `deploy/README.md`).
 3. Teste de IP: um login por sistema (PJe SSO, Eproc TRF4, e-SAJ TJSP, Projudi TJGO, STJ) a partir da VM, para
    ver se algum portal desafia IP de datacenter. Se algum desafiar, saída por IP brasileiro para esse portal.
 4. Ligar `JURISYNC_REQUIRE_TOKEN_RESOURCE=1` depois de testar o login OAuth no Claude e no ChatGPT.
@@ -103,7 +104,8 @@ Começa quando houver uns 5 escritórios no servidor: reduz logins e requisiçõ
 
 1. **Antes**: `uv run python -m jurisync.customers <nome>` com todos os portais `ready`; relatório de validação do escritório
    atualizado; acordo de custódia do A1 e das senhas assinado (LGPD).
-2. **Cofre**: `jurisync-setup export` na nossa máquina → `secrets import-bundle <nome> <arquivo> --portal <p> --check`
+2. **Cofre**: `jurisync-hosted provision export` na nossa máquina (plano + pacote por escritório) → `provision apply`
+   no servidor → `deploy/check-office.sh <nome>` (um login por portal). Forma manual: `jurisync-setup export` na nossa máquina → `secrets import-bundle <nome> <arquivo> --portal <p> --check`
    para cada portal (um login por portal, nada é gravado se falhar) → `portal list <nome>`.
 3. **Acesso**: `user add` para cada advogado; cada um adiciona `https://<host>/mcp` no Claude e entra.
 4. **Prova**: uma leitura por sistema com a conta do escritório (contadores PJe, processo Eproc, DJEN pela OAB,

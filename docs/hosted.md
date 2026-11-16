@@ -4,8 +4,12 @@ One remote MCP server for several offices. A caller (Claude, ChatGPT) signs in w
 (tenant); every tool call then runs with that office's portal credentials, read from an encrypted vault on the server.
 Local installs are unchanged: without a tenant, connectors read `os.environ` as before.
 
-Connectors served to offices: PJe, Eproc, DJEN, ADVBOX and Juridiq (`TENANT_READY` in `hosted/app.py`). PJe draft
-writes stay off; ADVBOX and Juridiq writes answer only for an office whose credentials allow them.
+Connectors served to offices: PJe, Eproc, e-SAJ, Projudi, STJ, DJEN, ADVBOX and Juridiq (`TENANT_READY` in
+`hosted/app.py`). PJe draft writes stay off; ADVBOX and Juridiq write tools are listed and answer only for an office
+whose own grant (`ADVBOX_ALLOW_WRITES`/`JURIDIQ_ALLOW_WRITES` in its vault entry or `[env].set` of its profile) is
+`true` (`GRANTED_WRITES`); the server's environment never grants them.
+
+Deployment (VPS install, systemd, HTTPS, backups, smoke test): `deploy/README.md`.
 
 The office adds one URL in Claude or ChatGPT: `https://<host>/mcp`. It serves the tools of every connector enabled for
 that office (tool names start with their system, so `advbox_*` is absent for an office without ADVBOX). The
@@ -22,6 +26,7 @@ per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
 | OAuth | `src/jurisync/hosted/oauth.py` | The SDK's `OAuthAuthorizationServerProvider`: dynamic client registration, PKCE, a sign-in page, rotating refresh tokens. |
 | App | `src/jurisync/hosted/app.py` | OAuth endpoints at the root; `/mcp` and `/<connector>/mcp` behind a bearer token; `TenantGate` opens the tenant's credential scope per request; `Office` lists and calls only the office's connectors and records each call. |
 | CLI | `src/jurisync/hosted/cli.py` | `jurisync-hosted`: init, tenants, vault import, users, call log, serve. |
+| Provisioning | `src/jurisync/hosted/provision.py` | `provision export` (our machine: plan + sealed bundle per office from `customers/`), `provision apply` (server: tenants, vault, profiles, users), `provision plugin` (office plugin pointing at `/mcp`). |
 
 ## Request flow
 
@@ -48,9 +53,39 @@ per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
 - MCP sessions are bound to the token's principal by the SDK, so one office cannot resume another's session.
 - The vault decrypts per request; the A1 certificate is never written to disk on the server.
 - Write tools (`pje_draft_write`, `pje_draft_delete`) are removed from the hosted server, on every URL.
+- Server-wide settings (`JURISYNC_CAPTCHA_API_KEY`, `JURISYNC_CAPTCHA_MODEL`) are read from the process environment
+  or the service's systemd credentials (`credentials.machine`), also inside an office's scope; an office's vault
+  cannot set them. The vault key is also read from `$CREDENTIALS_DIRECTORY/JURISYNC_VAULT_KEY`.
+- A3 tokens (`*_A3_PIN`, `PJE_AUTH`/`EPROC_AUTH`/`<PREFIX>_AUTH`) and `PJE_ALLOW_DRAFT_WRITES` are dropped on every
+  import: they never reach a vault entry.
+- `serve` refuses to start while an office's customer profile (`portals.toml`) is missing from
+  `JURISYNC_CUSTOMERS_DIR`: the profile pins per-portal methods and settings, and without it the server would try
+  another login.
 - Every login, including the operator's `portal check`, goes through the session pool: at most
   `JURISYNC_MAX_LOGINS` at once, and credentials a portal rejected are not sent again for the cool-down
   (`JURISYNC_LOGIN_COOLDOWN_SECONDS`, 15 min) unless the access is changed.
+
+## Provisioning every office
+
+`customers/<name>/portals.toml` is the source of each office's portals. On our machine:
+
+```bash
+uv run jurisync-hosted provision export --out ~/rollout --passphrase-file ~/.config/jurisync/rollout.passphrase \
+  --customers-dir ~/orca/jurisync/customers --customer victor fernanda
+```
+
+Per office it keeps the portals the server can log in to and says why the others stay out: A3 portals (`*_A3_PIN`),
+portals with a declared secret missing in the office's own `.env` (the shared root `.env` is never read), systems not
+served. Legacy names (`*_USUARIO`, `*_SENHA`, `*_EXPORT_DATA`) are stored under the standard names; QR images become
+`*_2FA_DATA`; the A1 file becomes bytes; pinned values and the office's own write grants go along. Connectors follow
+from the kept portals (+ `advbox`/`juridiq` when their login is set, + `djen`). Output: `plan.json` (names, reasons,
+users; no values), `<office>.jurisync` sealed with the rollout passphrase (a 0600 file kept apart from the folder,
+never printed) and `profiles/<customer>/` (five customer folders are not in the repository).
+
+On the server, `jurisync-admin provision apply <folder> --passphrase-file <file>` creates or updates the tenants,
+installs the profiles in `JURISYNC_CUSTOMERS_DIR`, stores each bundle without a login and adds the plan's users with
+random passwords written to a 0600 file. The first login of each portal is `deploy/check-office.sh <office>`, from the
+server, one portal at a time.
 
 ## Pilot runbook
 
@@ -127,7 +162,8 @@ Run for every office before it uses the server for real. Each step names what pr
 
 ## Known limits of the pilot
 
-- Pending sign-in requests live in memory: run one process. Move them to the store before running several workers.
+- Pending sign-in requests live in memory: run one process (the systemd unit does). Move them to the store before
+  running several workers.
 - PJe draft writes stay off; ADVBOX and Juridiq writes follow the office's `*_ALLOW_WRITES`.
 - The master key encrypts every tenant. A KMS or Vault transit key (per-tenant data keys) replaces it in production.
 - Portal access comes from the server's IP. GOV.BR and some PJe deployments may challenge datacenter IPs.

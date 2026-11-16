@@ -52,6 +52,24 @@ TENANT_READY = ("pje", "eproc", "esaj", "projudi", "stj", "djen", "advbox", "jur
 # writes stay mounted but answer only for an office whose credentials allow them (ADVBOX_ALLOW_WRITES and
 # JURIDIQ_ALLOW_WRITES, from its vault entry or its customer profile).
 WRITE_TOOLS = {"pje": {"pje_draft_write", "pje_draft_delete"}}
+# Writes an office gets only with its own grant (vault entry or customer profile, never the server's environment):
+# connector -> (grant variable, tools). Without the grant the office does not see them and a call is refused before
+# the connector runs; the connector checks the same grant again. Juridiq's write tools are the ones it registers only
+# with writes allowed, so ``hosted_load`` finds them by comparing both builds.
+GRANTED_WRITES = {
+    "advbox": (
+        "ADVBOX_ALLOW_WRITES",
+        {
+            "advbox_create_folder",
+            "advbox_upload_files",
+            "advbox_create_task",
+            "advbox_update_task",
+            "advbox_complete_task",
+            "advbox_delete_task",
+        },
+    ),
+    "juridiq": ("JURIDIQ_ALLOW_WRITES", set()),
+}
 DEV_FLAG = "JURISYNC_HOSTED_DEV"
 # Off by default: a token issued without a resource (RFC 8707) is accepted on every connector the office has. Set to 1
 # once the log shows that the clients in use send the resource; a token without one then gets a 401.
@@ -59,13 +77,45 @@ REQUIRE_RESOURCE_FLAG = "JURISYNC_REQUIRE_TOKEN_RESOURCE"
 METADATA_PATH = "/.well-known/oauth-authorization-server"
 # Keep "https://host" as written: OAuth clients compare the issuer as an exact string.
 EXACT_URL = TypeAdapter(AnyHttpUrl, config=ConfigDict(url_preserve_empty_path=True))
-SYSTEMS = {"pje": "PJe", "eproc": "Eproc", "djen": "DJEN", "advbox": "ADVBOX", "juridiq": "Juridiq"}
+SYSTEMS = {
+    "pje": "PJe",
+    "eproc": "Eproc",
+    "esaj": "e-SAJ",
+    "projudi": "Projudi",
+    "stj": "STJ",
+    "djen": "DJEN",
+    "advbox": "ADVBOX",
+    "juridiq": "Juridiq",
+}
 # (tenant row, user e-mail) of the request, set by TenantGate.
 caller = contextvars.ContextVar("jurisync_caller", default=None)
 
 
 class NotEnabled(ToolError):
     pass
+
+
+def granted(connector, tool):
+    """Whether the current office may call this tool: always, unless it is a write that needs the office's grant."""
+    grant, tools = GRANTED_WRITES.get(connector, ("", ()))
+    return tool not in tools or credentials.env(grant).strip().lower() == "true"
+
+
+def hosted_load(name):
+    """``serve.load``, except Juridiq registers its write tools: each office's grant decides who sees and calls them."""
+    from jurisync.install.serve import load
+
+    if name != "juridiq":
+        return load(name)
+    from jurisync.connectors.juridiq.server import create_server
+
+    server = create_server(allow_writes=True)
+    reads = {tool.name for tool in create_server(allow_writes=False)._tool_manager.list_tools()}
+    GRANTED_WRITES["juridiq"] = (
+        GRANTED_WRITES["juridiq"][0],
+        {tool.name for tool in server._tool_manager.list_tools()} - reads,
+    )
+    return server, None
 
 
 class Office(MCPServer):
@@ -93,6 +143,7 @@ class Office(MCPServer):
             for connector, server in self.servers.items()
             if connector in tenant["connectors"]
             for tool in await server.list_tools()
+            if granted(connector, tool.name)
         ]
 
     async def call_tool(self, name, arguments, context=None):
@@ -104,6 +155,10 @@ class Office(MCPServer):
         try:
             if connector not in tenant["connectors"]:
                 raise NotEnabled(f"{name} is a {SYSTEMS.get(connector, connector)} tool, not enabled for this office")
+            if not granted(connector, name):
+                raise NotEnabled(
+                    f"{name} changes {SYSTEMS.get(connector, connector)}: writes are not enabled for this office"
+                )
             result = await self.servers[connector].call_tool(name, arguments, context)
             if getattr(result, "is_error", False):
                 error = "ToolResult"
@@ -223,7 +278,7 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
     if refused:
         raise ValueError(f"Not ready for several offices yet: {', '.join(refused)}")
     if load is None:
-        from jurisync.install.serve import load
+        load = hosted_load
     base_url = base_url.rstrip("/")
     issuer = EXACT_URL.validate_python(base_url)
     provider = Provider(store, base_url, issuer=str(issuer))
