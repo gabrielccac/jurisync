@@ -1,7 +1,10 @@
 """DJEN MCP server: public communication search, certidão text, and deadlines."""
 
+import contextvars
 import json
+import re
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Annotated, Any, Literal
 
@@ -10,13 +13,13 @@ from pydantic import BeforeValidator, Field
 
 from jurisync import customers
 from jurisync.connectors.djen import render
-from jurisync.connectors.djen.client import DjenError, fetch_certidao, search_page
-from jurisync.connectors.djen.deadlines import calculate_deadline
+from jurisync.connectors.djen.client import OAB_VARIANTS, DjenError, _check_window, fetch_certidao, search_page
+from jurisync.connectors.djen.deadlines import DEFAULT_COURT, calculate_deadline
 from jurisync.connectors.djen.documents import resolve_portal
 from jurisync.connectors.djen.normalize import compact_item, normalize_item
 from jurisync.core import credentials
 from jurisync.core.document_text import extract_document_text
-from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, sanitize_diagnostics, serve, tool_errors
 
 REQUEST_ERRORS = (DjenError, ValueError, urllib.error.URLError, TimeoutError)
 
@@ -29,10 +32,12 @@ FORMAT_HELP = (
 )
 
 
-def as_text(items, declared, pages, complete, formato, text_limit):
-    """The 'linhas'/'resumo' view: result checks plus rendered text instead of item objects."""
+def as_text(items, declared, pages, complete, formato, text_limit, merged=0):
+    """The 'linhas'/'resumo' view: result checks plus rendered text instead of item objects.
+
+    ``merged`` is how many repeated items the search already dropped (the same id under two OAB variants)."""
     items, removed = render.dedupe(items)
-    check = render.checks(int(declared or 0), items, removed, pages, complete)
+    check = render.checks(int(declared or 0), items, removed + merged, pages, complete)
     limit = text_limit or 140
     body = (
         render.summary(items, min(limit, 110), hint="djen_get_certidao_text")
@@ -40,6 +45,53 @@ def as_text(items, declared, pages, complete, formato, text_limit):
         else render.lines(items, limit)
     )
     return {"checagem": check, "texto": render.checks_line(check) + "\n" + body}
+
+
+OAB_VARIANTS_HELP = (
+    "The API matches numeroOab exactly, so by default the search runs once per registration suffix (none, -A, -B, -E, "
+    "-N, -O, -S) and merges the results by communication id; oabVariants lists each suffix's count. false sends "
+    "numeroOab exactly as given."
+)
+MAX_SAVED_WINDOW_DAYS = 31
+MAX_PARALLEL_SEARCHES = 4
+
+
+def run_search(params, pagina, itens, variants=True):
+    """One page of one search. With an OAB and ``variants``, one page per registration suffix, merged by id.
+
+    Returns ``count`` (sum of the variants' totals), ``returned`` (items read before merging), ``more`` and, when
+    the variants ran, ``oabVariants`` with each suffix's numbers.
+    """
+    number = params.get("numeroOab")
+    if not (number and variants):
+        result = search_page(params, pagina, itens)
+        count = int(result.get("count") or 0)
+        return {**result, "count": count, "returned": len(result["items"]), "more": pagina * itens < count}
+    base = re.sub(r"(?i)-[ABENOS]$", "", str(number))
+    items, seen, report = [], set(), []
+    for suffix in OAB_VARIANTS:
+        page = search_page({**params, "numeroOab": base + suffix}, pagina, itens)
+        count = int(page.get("count") or 0)
+        for item in page["items"]:
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                items.append(item)
+        report.append(
+            {
+                "numeroOab": base + suffix,
+                "count": count,
+                "returned": len(page["items"]),
+                "more": pagina * itens < count,
+            }
+        )
+    return {
+        "status": "success",
+        "count": sum(r["count"] for r in report),
+        "items": items,
+        "returned": sum(r["returned"] for r in report),
+        "more": any(r["more"] for r in report),
+        "oabVariants": report,
+    }
 
 
 # Clients send digit-only strings such as '61216' as JSON numbers; take them back as text.
@@ -121,6 +173,7 @@ def search_communications(
         Literal["json", "linhas", "resumo"],
         Field(description=FORMAT_HELP),
     ] = "json",
+    oabVariants: Annotated[bool, Field(description=OAB_VARIANTS_HELP)] = True,
 ) -> dict[str, Any]:
     params = {
         "dataDisponibilizacaoInicio": inicio.isoformat(),
@@ -140,13 +193,19 @@ def search_communications(
     with tool_errors("DJEN", *REQUEST_ERRORS):
         if numeroOab and not ufOab:
             raise ValueError("numeroOab requires ufOab")
-        result = search_page(params, pagina, itens)
+        _check_window(inicio.isoformat(), fim.isoformat())
+        result = run_search(params, pagina, itens, oabVariants)
+    more = result.pop("more")
+    merged = result.pop("returned") - len(result["items"])
     items = [normalize_item(item) for item in result["items"]]
     for item in items:
         item["portal"] = resolve_portal(item)
     if formato != "json":
-        complete = pagina == 1 and itens >= int(result.get("count") or 0)
-        return as_text([compact_item(item, 0) for item in items], result.get("count"), 1, complete, formato, textLimit)
+        complete = pagina == 1 and not more
+        pages = len(result.get("oabVariants") or [1])
+        return as_text(
+            [compact_item(item, 0) for item in items], result.get("count"), pages, complete, formato, textLimit, merged
+        )
     result["items"] = [compact_item(item, textLimit) for item in items] if compact else items
     return result
 
@@ -184,7 +243,7 @@ def get_certidao_text(
 @server.tool(
     name="djen_calculate_deadline",
     title="Calculate DJEN judicial deadline",
-    description="Count a verified number of procedural business days from DJEN availability using the sourced JFPE court calendar. Returns publication, first counted day, counted dates, and the fatal date (ISO and DD/MM/AAAA). Only covers the calendar's declared period and court; does not infer a period from notice text.",
+    description="Count a verified number of procedural business days (CPC art. 219) from DJEN availability. Returns publication, first counted day, counted dates, and the fatal date (ISO and DD/MM/AAAA). The base calendar covers any year: weekends, national holidays, the CPC art. 220 suspension (20/12 to 20/01, not counted) and, for Federal Justice courts, Lei 5.010/66 art. 62 (recess 20/12-06/01, Carnival, Holy Week, 11/08, 01/11, 02/11, 08/12) and Corpus Christi. A court's sourced local calendar adds its own closures for the period it covers; outside it, or for a court without one, calendarComplete is false and warnings says which local holidays must still be checked before fixing the date. Does not infer a period from notice text and does not count calendar-day (criminal) terms.",
     annotations=READ_ONLY,
 )
 def deadline(
@@ -198,14 +257,26 @@ def deadline(
         int, Field(ge=1, le=365, description="Number of business days in the procedural term, 1 to 365, e.g. 5.")
     ],
     calendar: Annotated[
-        Literal["jfpe-2026-q4"],
+        Literal["jfpe-2026-q4"] | None,
         Field(
-            description="Court calendar id. Only 'jfpe-2026-q4' exists (JFPE, Q4 2026); dates outside that period are not covered."
+            description="Legacy local calendar id; 'jfpe-2026-q4' means court JFPE. Prefer court. Dates past the local calendar are computed with the base calendar and flagged."
         ),
-    ] = "jfpe-2026-q4",
+    ] = None,
+    court: Annotated[
+        Annotated[str, Field(pattern=r"^[A-Za-z0-9]{2,12}$")] | None,
+        Field(
+            description="Court acronym whose calendar applies, e.g. 'JFPE', 'JFPB', 'TRF5', 'TJSP'. Default: the office's [djen] court setting, else JFPE. Only JFPE has a local calendar today; other courts use the base calendar with calendarComplete=false."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     with tool_errors("DJEN deadline", ValueError, KeyError, OSError, json.JSONDecodeError):
-        return calculate_deadline(availableOn.isoformat(), days, calendar)
+        configured = None if court or calendar else str(customers.settings().get("djen", {}).get("court") or "").strip()
+        result = calculate_deadline(availableOn.isoformat(), days, calendar, court or configured or None)
+        if configured:  # the office's own court is not an assumption
+            result["warnings"] = [w for w in result["warnings"] if not w.startswith("Nenhum tribunal informado")]
+        elif not court and not calendar:
+            result["courtSource"] = f"default ({DEFAULT_COURT})"
+        return result
 
 
 SEARCH_KEYS = ("numeroOab", "ufOab", "nomeAdvogado", "nomeParte", "texto", "tribunal")
@@ -246,7 +317,7 @@ def list_saved_searches() -> dict[str, Any]:
 @server.tool(
     name="djen_search_saved",
     title="Run the office's saved DJEN searches",
-    description="Run every saved DJEN search of this office for one date window and one page, and merge the communications without duplicates (same id). Each search reports its count and whether more pages exist; call again with pagina+1 while any search has more. tribunal narrows every search to one court (e.g. 'TRF5'). compact and textLimit work as in djen_search_communications. Read-only.",
+    description="Run every saved DJEN search of this office for one date window (at most 31 days) and one page, and merge the communications without duplicates (same id). Each search reports its count and whether more pages exist; call again with pagina+1 while any search has more. An OAB search runs once per registration suffix (oabVariants, default true) and reports each suffix's count. A search that fails does not discard the others: it reports error, and complete is false, so its communications are missing from this result. tribunal narrows every search to one court (e.g. 'TRF5'). compact and textLimit work as in djen_search_communications. Read-only.",
     annotations=READ_ONLY,
 )
 def search_saved(
@@ -262,24 +333,44 @@ def search_saved(
     compact: Annotated[bool, Field(description="true keeps one copy of the text plus the routing fields.")] = True,
     textLimit: Annotated[int, Field(ge=0, le=100_000, description="Max characters per text when compact.")] = 1500,
     formato: Annotated[Literal["json", "linhas", "resumo"], Field(description=FORMAT_HELP)] = "json",
+    oabVariants: Annotated[bool, Field(description=OAB_VARIANTS_HELP)] = True,
 ) -> dict[str, Any]:
     text_view = formato != "json"
     with tool_errors("DJEN", *REQUEST_ERRORS, json.JSONDecodeError):
+        _check_window(inicio.isoformat(), fim.isoformat(), MAX_SAVED_WINDOW_DAYS)
         searches = saved_searches()
         if not searches:
             raise ValueError("This office has no saved DJEN searches")
-        report, items, seen = [], [], set()
-        for search in searches:
+
+        def run(search):
             params = {"dataDisponibilizacaoInicio": inicio.isoformat(), "dataDisponibilizacaoFim": fim.isoformat()}
-            court = tribunal or search.get("tribunal")
             for key, value in (
                 *((k, search.get(k)) for k in SEARCH_KEYS if k != "tribunal"),
-                ("siglaTribunal", court),
+                ("siglaTribunal", tribunal or search.get("tribunal")),
                 ("meio", meio),
             ):
                 if value:
                     params[key] = value
-            result = search_page(params, pagina, itens)
+            try:
+                return run_search(params, pagina, itens, oabVariants)
+            except REQUEST_ERRORS as error:
+                return error
+
+        # Each search runs in a copy of this call's context, so the office's credentials reach the worker threads.
+        with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_SEARCHES, len(searches))) as pool:
+            futures = [pool.submit(contextvars.copy_context().run, run, search) for search in searches]
+            results = [future.result() for future in futures]
+        failures = [result for result in results if isinstance(result, Exception)]
+        if len(failures) == len(results):
+            raise failures[0]
+        report, items, seen = [], [], set()
+        for search, result in zip(searches, results, strict=True):
+            entry = {"label": search["label"], "tribunal": tribunal or search.get("tribunal")}
+            if isinstance(result, Exception):
+                entry.update(count=0, pagina=pagina, returned=0, new=0, more=False)
+                entry["error"] = sanitize_diagnostics(result) or "unknown"
+                report.append(entry)
+                continue
             fresh = 0
             for raw in result["items"]:
                 item = normalize_item(raw)
@@ -291,18 +382,13 @@ def search_saved(
                 item["portal"] = resolve_portal(item)
                 item["savedSearch"] = search["label"]
                 items.append(compact_item(item, 0) if text_view else compact_item(item, textLimit) if compact else item)
-            count = int(result.get("count") or 0)
-            report.append(
-                {
-                    "label": search["label"],
-                    "tribunal": court,
-                    "count": count,
-                    "pagina": pagina,
-                    "returned": len(result["items"]),
-                    "new": fresh,
-                    "more": pagina * itens < count,
-                }
+            entry.update(
+                count=result["count"], pagina=pagina, returned=result["returned"], new=fresh, more=result["more"]
             )
+            if "oabVariants" in result:
+                entry["oabVariants"] = result["oabVariants"]
+            report.append(entry)
+        complete = not failures
         if text_view:
             returned = sum(r["returned"] for r in report)
             check = render.checks(
@@ -310,18 +396,34 @@ def search_saved(
                 items,
                 returned - len(items),
                 len(report),
-                not any(r["more"] for r in report),
+                complete and not any(r["more"] for r in report),
             )
-            searches_line = " ; ".join(f"{r['label']}={r['count']}{'+' if r['more'] else ''}" for r in report)
+            searches_line = " ; ".join(
+                f"{r['label']}=ERRO" if "error" in r else f"{r['label']}={r['count']}{'+' if r['more'] else ''}"
+                for r in report
+            )
             limit = textLimit if textLimit != 1500 else 140
             body = (
                 render.summary(items, min(limit, 110), hint="djen_get_certidao_text")
                 if formato == "resumo"
                 else render.lines(items, limit)
             )
-            text = "\n".join([render.checks_line(check), f"# buscas: {searches_line}", body])
-            return {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "checagem": check, "texto": text}
-        return {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "searches": report, "items": items}
+            lines = [render.checks_line(check), f"# buscas: {searches_line}"]
+            lines += [f"# ERRO {r['label']}: {r['error']} (resultado incompleto)" for r in report if "error" in r]
+            return {
+                "inicio": inicio.isoformat(),
+                "fim": fim.isoformat(),
+                "complete": complete,
+                "checagem": check,
+                "texto": "\n".join([*lines, body]),
+            }
+        return {
+            "inicio": inicio.isoformat(),
+            "fim": fim.isoformat(),
+            "complete": complete,
+            "searches": report,
+            "items": items,
+        }
 
 
 def main():

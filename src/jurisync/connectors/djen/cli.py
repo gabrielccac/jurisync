@@ -314,8 +314,11 @@ def cmd_prazo(a):
     else:
         print(
             f"disponibilizacao={r['availableOn']} publicacao={r['publicationOn']} inicio={r['startsOn']} "
-            f"dias_uteis={r['days']} data_fatal={r['dueOnBr']} calendario={r['calendar']['id']}"
+            f"dias_uteis={r['days']} data_fatal={r['dueOnBr']} calendario={r['calendar']['id']} "
+            f"calendario_completo={'sim' if r['calendarComplete'] else 'nao'}"
         )
+        for warning in r["warnings"]:
+            print(f"aviso: {warning}")
     return EXIT_OK
 
 

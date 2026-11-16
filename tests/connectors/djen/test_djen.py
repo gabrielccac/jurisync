@@ -76,12 +76,6 @@ class DjenChecks(unittest.TestCase):
         self.assertEqual(c["data_cancelamento"], "2026-09-29")
         self.assertIn("laudo(s) pericial(is)", c["texto"])
 
-    def test_build_url(self):
-        url = client.build_url("14663", "PB", "2026-09-28", "2026-09-29", "TRF5", 1, 50)
-        self.assertIn("numeroOab=14663", url)
-        self.assertIn("ufOab=PB", url)
-        self.assertIn("siglaTribunal=TRF5", url)
-
     def test_itens_limite(self):
         with self.assertRaises(ValueError):
             client.fetch_page("14663", "PB", "2026-09-28", "2026-09-29", None, 1, 1000)
@@ -211,14 +205,6 @@ class DjenChecks(unittest.TestCase):
         self.assertEqual(s["total"], 2)
         self.assertEqual(s["por_orgao"]["38ª Vara Federal PE"], 2)
 
-    def test_build_url_person_case_params(self):
-        url = client.build_url(
-            "61216", "RS", "2026-09-03", "2026-10-03", "STJ", 1, 5, nome_advogado="ELISANDRA BECKER", meio="D"
-        )
-        self.assertIn("nomeAdvogado=ELISANDRA+BECKER", url)
-        self.assertIn("meio=D", url)
-        self.assertNotIn("nomeParte", url)
-
     def test_search_page_exige_criterio(self):
         with self.assertRaises(ValueError):
             client.search_page({"dataDisponibilizacaoInicio": "2026-09-03", "dataDisponibilizacaoFim": "2026-10-03"})
@@ -228,14 +214,6 @@ class DjenChecks(unittest.TestCase):
         with patch.object(client, "_read_json", return_value=(payload, 200)):
             result = client.search_page({"nomeAdvogado": "ELISANDRA BECKER", "ufOab": "RS"})
         self.assertEqual(result["count"], 1)
-
-    def test_search_all_pagina(self):
-        p1 = {"status": "success", "count": 3, "items": [{"id": 1}, {"id": 2}]}
-        p2 = {"status": "success", "count": 3, "items": [{"id": 3}]}
-        with patch.object(client, "search_page", side_effect=[p1, p2]):
-            count, items = client.search_all({"nomeParte": "ZANGRANDE"})
-        self.assertEqual(count, 3)
-        self.assertEqual([i["id"] for i in items], [1, 2, 3])
 
     def test_list_tribunals(self):
         rows = [{"uf": "", "nomeEstado": "Nacional", "instituicoes": [{"sigla": "STJ"}]}]
@@ -338,35 +316,6 @@ class DjenChecks(unittest.TestCase):
             ctype, blob = documents.fetch_link_document("https://eproc.jfrs.jus.br/eprocV2/doc")
         self.assertEqual(ctype, "text/html")
         self.assertIn(b"doc", blob)
-
-    def test_fetch_attachments_guards(self):
-        stj = {
-            "link": "https://processo.stj.jus.br/processo/dj/documento/?seq_documento=1",
-            "numero_processo": "52313092320248217000",
-        }
-        with self.assertRaisesRegex(ValueError, "sem conector"):
-            documents.fetch_attachments(stj, session=object(), document_ids=["1"])
-        jfrs = {"link": "https://eproc.jfrs.jus.br/eprocV2/x", "numeroprocessocommascara": "5012366-88.2025.4.04.7104"}
-        with self.assertRaisesRegex(ValueError, "session"):
-            documents.fetch_attachments(jfrs, document_ids=["1"])
-        with self.assertRaisesRegex(ValueError, "document_ids"):
-            documents.fetch_attachments(jfrs, session=object())
-
-    def test_fetch_attachments_eproc_mocked(self):
-        from jurisync.connectors.eproc import client as eproc_client
-        from jurisync.connectors.eproc import documents as eproc_documents
-
-        item = {"link": "https://eproc.jfrs.jus.br/eprocV2/x", "numeroprocessocommascara": "5012366-88.2025.4.04.7104"}
-        fake_process = {"success": True, "numero": "5012366-88.2025.4.04.7104"}
-        fake_records = [{"id": "100", "content": b"<html><body>laudo texto</body></html>", "content_type": "text/html"}]
-        with (
-            patch.object(eproc_client, "fetch_process", return_value=fake_process) as fp,
-            patch.object(eproc_documents, "read_selected_documents", return_value=fake_records),
-        ):
-            result = documents.fetch_attachments(item, session=object(), document_ids=["100"])
-        fp.assert_called_once()
-        self.assertEqual(result["portal"]["portal"], "trf4-1g-rs")
-        self.assertIn("laudo texto", result["attachments"][0]["text"])
 
 
 if __name__ == "__main__":

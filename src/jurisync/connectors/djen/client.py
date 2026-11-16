@@ -42,48 +42,6 @@ class DjenError(RuntimeError):
     """A public DJEN request failed; callers decide how to queue a retry."""
 
 
-def build_url(
-    numero_oab,
-    uf_oab,
-    data_inicio,
-    data_fim,
-    sigla_tribunal=None,
-    pagina=1,
-    itens_por_pagina=DEFAULT_PAGE_SIZE,
-    *,
-    texto=None,
-    nome_advogado=None,
-    nome_parte=None,
-    numero_processo=None,
-    numero_comunicacao=None,
-    orgao_id=None,
-    meio=None,
-):
-    params = {
-        "numeroOab": str(numero_oab),
-        "ufOab": uf_oab,
-        "dataDisponibilizacaoInicio": data_inicio,
-        "dataDisponibilizacaoFim": data_fim,
-        "pagina": int(pagina),
-        "itensPorPagina": int(itens_por_pagina),
-    }
-    if sigla_tribunal:
-        params["siglaTribunal"] = sigla_tribunal
-    extra = {
-        "texto": texto,
-        "nomeAdvogado": nome_advogado,
-        "nomeParte": nome_parte,
-        "numeroProcesso": numero_processo,
-        "numeroComunicacao": numero_comunicacao,
-        "orgaoId": orgao_id,
-        "meio": meio,
-    }
-    for key, value in extra.items():
-        if value is not None and str(value) != "":
-            params[key] = value
-    return BASE_URL + "?" + urllib.parse.urlencode(params)
-
-
 def _read_json(url, timeout=REQUEST_TIMEOUT):
     req = bridge.request(url, {"Accept": "application/json"})
     try:
@@ -94,13 +52,23 @@ def _read_json(url, timeout=REQUEST_TIMEOUT):
         return None, exc.code
 
 
-def _check_window(data_inicio, data_fim):
+def _check_window(data_inicio, data_fim, max_days=None):
     try:
         start, end = date.fromisoformat(data_inicio), date.fromisoformat(data_fim)
     except (TypeError, ValueError) as exc:
         raise ValueError("datas devem ser YYYY-MM-DD") from exc
     if start > end:
         raise ValueError("data_inicio não pode ser posterior a data_fim")
+    if max_days is not None and (end - start).days + 1 > max_days:
+        raise ValueError(f"janela de {(end - start).days + 1} dias: o máximo é {max_days} dias por consulta")
+
+
+def _api_error(data):
+    """The message of a ``status: "error"`` body, which the API can send with HTTP 200."""
+    for key in ("message", "mensagem", "error", "erro"):
+        if isinstance(data.get(key), str) and data[key].strip():
+            return data[key].strip()[:300]
+    return "sem mensagem"
 
 
 def search_page(params, pagina=1, itens_por_pagina=DEFAULT_PAGE_SIZE, timeout=REQUEST_TIMEOUT):
@@ -141,6 +109,9 @@ def search_page(params, pagina=1, itens_por_pagina=DEFAULT_PAGE_SIZE, timeout=RE
                     raise DjenError("DJEN response has invalid items")
                 data["count"] = count
                 return data
+            if status == 200 and isinstance(data, dict) and data.get("status") == "error":
+                last = f"API error: {_api_error(data)}"
+                break
             last = f"HTTP {status}"
             if status != 429 and not 500 <= status <= 599:
                 break
@@ -185,28 +156,6 @@ def fetch_page(
         if extra.get(local) not in (None, ""):
             params[remote] = extra[local]
     return search_page(params, pagina, itens_por_pagina, timeout)
-
-
-def search_all(params, itens_por_pagina=DEFAULT_PAGE_SIZE, timeout=REQUEST_TIMEOUT):
-    """Todas as páginas de uma busca genérica. Retorna (count, items)."""
-    first = search_page(params, 1, itens_por_pagina, timeout)
-    count = int(first.get("count", 0))
-    items = list(first["items"])
-    seen = {item["id"] for item in items}
-    if len(seen) != len(items):
-        raise DjenError("DJEN first page contains duplicate IDs")
-    pagina = 2
-    while len(items) < count:
-        page = search_page(params, pagina, itens_por_pagina, timeout)
-        batch = page["items"]
-        if not batch or page["count"] != count or any(item["id"] in seen for item in batch):
-            raise DjenError(f"DJEN pagination incomplete at page {pagina}")
-        items.extend(batch)
-        seen.update(item["id"] for item in batch)
-        pagina += 1
-    if len(items) != count:
-        raise DjenError("DJEN pagination count changed during fetch")
-    return count, items
 
 
 def fetch_all(
