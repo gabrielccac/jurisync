@@ -231,6 +231,8 @@ PORTALS = {
                region="19", justice="8"),
         Portal("tjpr-1g", "eproc", "TJPR", "1g", "eproc1g.tjpr.jus.br", "/eproc/", "browser_totp", "TJPR_1G",
                region="16", justice="8"),
+        Portal("tjpr-2g", "eproc", "TJPR", "2g", "eproc2g.tjpr.jus.br", "/eproc/", "certificate_totp", "TJPR_2G",
+               region="16", justice="8"),
         Portal("tjrj-1g", "pje", "TJRJ", "1g", "tjrj.pje.jus.br", "/1g/", "certificate_totp", "TJRJ_PJE_1G",
                region="19", justice="8"),
         Portal("tjrj-2g", "pje", "TJRJ", "2g", "tjrj.pje.jus.br", "/2g/", "certificate_totp", "TJRJ_PJE_2G",

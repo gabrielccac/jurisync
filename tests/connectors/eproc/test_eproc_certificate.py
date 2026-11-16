@@ -240,6 +240,31 @@ class ProfileChoiceTest(unittest.TestCase):
             certificate._choose_profile(session, self.config, response)
         self.assertTrue(session.calls[0][1].endswith("id_usuario=111"))
 
+    def test_tjpr_profiles_match_the_exact_oab_and_never_send_the_default_or_device_choice(self):
+        config = portals.eproc("tjpr-1g")
+        tjpr = (
+            '<form id="frmEscolherUsuario" action="controlador.php?acao=&acao_origem=entrar_sso">'
+            '<input type="hidden" name="lista_processos" value="">'
+            '<input type="checkbox" name="usuarioPadrao" checked>'
+            '<input type="hidden" name="chkLiberarDispositivo" value="1">'
+            '<button onclick="acaoLogar(41);">ADVOGADO GO000123</button>'
+            '<button onclick="acaoLogar(43);">ADVOGADO GO0001234</button>'
+            '<button onclick="acaoLogar(42);">ADVOGADO TITULAR SP000456</button></form>'
+        )
+        landed = "https://eproc1g.tjpr.jus.br/eproc/externo_controlador.php?acao=entrar_sso"
+        panel = "https://eproc1g.tjpr.jus.br/eproc/controlador.php?acao=painel_adv_listar"
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            self.assertRaisesRegex(certificate.LoginRejected, "TJPR_1G_USER_PROFILE"),
+        ):
+            certificate._choose_profile(FakeSession([]), config, page(landed, tjpr))
+        session = FakeSession([("POST", "https://eproc1g.tjpr.jus.br/eproc/controlador.php", page(panel))])
+        with mock.patch.dict("os.environ", {"TJPR_1G_USER_PROFILE": "GO123"}, clear=True):
+            certificate._choose_profile(session, config, page(landed, tjpr))
+        _, url, data, _ = session.calls[0]
+        self.assertTrue(url.endswith("acao=pessoa_usuario_logar&id_usuario=41"), url)
+        self.assertEqual(data, {"lista_processos": ""})
+
     def test_a_page_without_the_selection_is_returned_as_is(self):
         response = page(PANEL, "<html></html>")
         self.assertIs(certificate._choose_profile(FakeSession([]), self.config, response), response)

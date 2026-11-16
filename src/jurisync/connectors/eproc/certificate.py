@@ -33,8 +33,10 @@ BROKER_HOST = "sso.cloud.pje.jus.br"
 CLASSIC_CERT_FIELD = "destino_v2_cert"
 CLASSIC_CODE_FIELD = "txtAcessoCodigo"
 PROFILE_FORM = "frmEscolherUsuario"
-PROFILE_BUTTON = re.compile(r"acaoLogar\('([^']+)'\)")
+PROFILE_BUTTON = re.compile(r"acaoLogar\(\s*['\"]?([^'\")\s]+)['\"]?\s*\)")
 PROFILE_ACTION = re.compile(r"\.action\s*=\s*'([^']*pessoa_usuario_logar[^']*)'")
+OAB = re.compile(r"\b[A-Z]{2}[\s./-]*[0-9][0-9.]*(?:-[A-Z])?\b")
+PERSISTENT_CHOICE = re.compile(r"padr[aã]o|liberar|remember|trust|device", re.I)
 
 
 # Sections whose single sign-on lives under their tribunal's domain instead of their own.
@@ -188,16 +190,30 @@ def profiles(html):
     return found
 
 
+def _oab(value):
+    """``GO051632``, ``go 51.632`` and ``GO-51632`` all read as ``GO51632``."""
+    compact = re.sub(r"[^A-Z0-9]", "", value.upper())
+    return re.sub(r"^([A-Z]{2})0+(?=[0-9])", r"\1", compact)
+
+
 def _choose_profile(session, config, response):
-    """Pick the configured profile on "Seleção de perfil" (navigation only: never "Definir como padrão")."""
+    """Pick the configured profile on "Seleção de perfil" (navigation only: never "Definir como padrão").
+
+    ``<PREFIX>_USER_PROFILE`` names the profile by its OAB (``GO051632``) or by a word of its label; without it the
+    single lawyer profile is taken. Several matches stop the login with the choices instead of guessing.
+    """
     options = profiles(response.text)
     if not options:
         return response
-    wanted = config.env("USER_PROFILE").upper()
+    lawyers = [option for option in options if "ADVOGADO" in option[1].upper() and "TITULAR" not in option[1].upper()]
+    wanted = config.env("USER_PROFILE").strip()
     if wanted:
-        chosen = [option for option in options if wanted in option[1].upper()]
+        oabs = {option: {_oab(found) for found in OAB.findall(option[1].upper())} for option in options}
+        chosen = [option for option in options if _oab(wanted) in oabs[option]]
+        if not chosen:
+            chosen = [option for option in options if wanted.upper() in option[1].upper()]
     else:
-        chosen = [option for option in options if "ADVOGADO" in option[1].upper()]
+        chosen = lawyers
     if len(chosen) != 1:
         names = ", ".join(label for _, label in options)
         raise LoginRejected(
@@ -207,6 +223,8 @@ def _choose_profile(session, config, response):
     path = action.group(1) if action else "controlador.php?acao=pessoa_usuario_logar"
     url = urllib.parse.urljoin(response.url, f"{path}&id_usuario={chosen[0][0]}")
     _, fields = _form(response.text, response.url, config, PROFILE_FORM)
+    # Only the navigation: never "use as default" or "trust this device", even when the page pre-checks them.
+    fields = {name: value for name, value in fields.items() if not PERSISTENT_CHOICE.search(name)}
     return _follow(session, config, _post(session, require_login_url(config, url), fields, response.url))
 
 
