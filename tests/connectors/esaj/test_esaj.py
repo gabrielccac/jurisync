@@ -496,3 +496,89 @@ def test_a_number_the_consultation_does_not_know_is_reported_as_not_found(monkey
         base.load_process(None, "tjam-esaj", "0000001-00.2026.8.04.0001")
     assert error.value.reason == "not_found"
     assert not parsers.not_found("<div>Processo 1</div>")
+
+
+TJAM_LOGIN = "https://consultasaj.tjam.jus.br/sajcas/login?service=x"
+PASSWORD_PAGE = (
+    '<form id="formCertificado" action="/sajcas/login;jsessionid=s?service=x">'
+    + "".join(f'<input type="hidden" name="{name}" value="v-{name}">' for name in base.FORM_FIELDS)
+    + '<input type="text" name="username"><input type="password" name="password">'
+    + '<input type="submit" name="pbEntrar" value="Entrar"><input type="hidden" name="signature">'
+    + '<input type="hidden" name="certificadoSelecionado"><input type="button" name="pbEntrar" value="Entrar"></form>'
+    + "<script>$.saj.cas.DuploFatorHabilitado = false || false;</script>"
+)
+
+
+def password_session(after, cookie=None):
+    session = Mock()
+    session.cookies.jar = [SimpleNamespace(name=cookie)] if cookie else []
+    session.post.return_value = response(after, url=TJAM_LOGIN)
+    return session
+
+
+def test_password_form_posts_what_the_login_tab_sends():
+    config = portals.esaj("tjam-esaj")
+    action, fields = base.password_form(PASSWORD_PAGE, TJAM_LOGIN, config, "000.000.000-00", "secret")
+    assert action == "https://consultasaj.tjam.jus.br/sajcas/login?service=x"
+    assert fields == {
+        **{name: f"v-{name}" for name in base.FORM_FIELDS},
+        "username": "000.000.000-00",
+        "password": "secret",
+        "signature": "",
+        "certificadoSelecionado": "",
+        "pbEntrar": "Entrar",
+    }
+
+
+@pytest.mark.parametrize(
+    ("after", "cookie", "raised"),
+    [
+        ("<p>ok</p>", "CASTGC", None),
+        (PASSWORD_PAGE.replace("false || false", "true || false"), None, base.EsajTwoFactorRequired),
+        (
+            PASSWORD_PAGE.replace("<form", '<div id="mensagemRetorno">Usuário e/ou senha inválidos</div><form'),
+            None,
+            None,
+        ),
+    ],
+)
+def test_password_login_success_two_factor_and_refusal(monkeypatch, after, cookie, raised):
+    monkeypatch.setenv("TJAM_ESAJ_USERNAME", "000.000.000-00")
+    monkeypatch.setenv("TJAM_ESAJ_PASSWORD", "secret")
+    monkeypatch.setattr(base.credentials, "has", lambda name: False)
+    monkeypatch.setattr(base, "login_page", lambda s, c: response(PASSWORD_PAGE, url=TJAM_LOGIN))
+    monkeypatch.setattr(base, "load_certificate", lambda **k: pytest.fail("no certificate on a password login"))
+    session = password_session(after, cookie)
+    if cookie:
+        assert base.login("tjam-esaj", session=session) is session
+    elif raised:
+        with pytest.raises(raised, match="e-mail"):
+            base.login("tjam-esaj", session=session)
+    else:
+        with pytest.raises(base.LoginRejected, match="inválidos") as error:
+            base.login("tjam-esaj", session=session)
+        assert not isinstance(error.value, base.EsajTwoFactorRequired)
+    assert session.post.call_count == 1
+    assert session.post.call_args.kwargs["data"]["password"] == "secret"
+
+
+def test_the_certificate_wins_when_the_account_has_one(monkeypatch):
+    monkeypatch.setenv("TJAM_ESAJ_USERNAME", "000.000.000-00")
+    monkeypatch.setenv("TJAM_ESAJ_PASSWORD", "secret")
+    monkeypatch.setattr(base.credentials, "has", lambda name: name == "PJE_A1_P12")
+    assert not base.uses_password(portals.esaj("tjam-esaj"))
+    monkeypatch.setattr(base.credentials, "has", lambda name: False)
+    assert base.uses_password(portals.esaj("tjam-esaj"))
+    monkeypatch.delenv("TJAM_ESAJ_PASSWORD")
+    assert not base.uses_password(portals.esaj("tjam-esaj"))
+
+
+def test_the_last_movements_table_does_not_repeat_the_full_table():
+    # TJAM 2026-11-16: the detail page carries both tables; reading both doubled the first five movements.
+    row = '<tr class="containerMovimentacao"><td>0{n}/11/2026</td><td></td><td>Movimento {n}</td></tr>'
+    last = "".join(row.format(n=n) for n in (3, 2))
+    full = "".join(row.format(n=n) for n in (3, 2, 1))
+    html = f'<table id="tabelaUltimasMovimentacoes">{last}</table><table id="tabelaTodasMovimentacoes">{full}</table>'
+    assert [m["text"] for m in parsers.movements(html)] == ["Movimento 3", "Movimento 2", "Movimento 1"]
+    assert len(parsers.movements(f'<table id="tabelaUltimasMovimentacoes">{last}</table>')) == 2
+    assert len(parsers.movements(f"<table>{full}</table>")) == 3

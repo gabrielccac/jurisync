@@ -163,26 +163,84 @@ def login_page(session, config):
     return page
 
 
+class EsajTwoFactorRequired(LoginRejected):
+    """The CAS accepted the password and e-mailed a validation code: only a person with that mailbox can go on.
+
+    A ``LoginRejected`` so the pool waits out its cool-down instead of having the portal send another e-mail on the
+    next call.
+    """
+
+
+TWO_FACTOR_ON = re.compile(r"\$\.saj\.cas\.DuploFatorHabilitado\s*=\s*true\b")
+PASSWORD_BUTTON = "pbEntrar"
+
+
+def password_credentials(config):
+    """``(username, password)`` from ``<PREFIX>_USERNAME``/``_PASSWORD``, or None when the account has none."""
+    username, password = config.env("USERNAME").strip(), config.env("PASSWORD")
+    return (username, password) if username and password else None
+
+
+def uses_password(config):
+    """Password login when the account has no A1 certificate and sets ``<PREFIX>_USERNAME``/``_PASSWORD``."""
+    file_name, _pin = _a1_names()
+    return not credentials.has(file_name) and password_credentials(config) is not None
+
+
+def password_form(html, page_url, config, username, password):
+    """``(action_url, fields)``: the fields a browser posts when "Entrar" is clicked on the login/password tab."""
+    action, fields = login_form(html, page_url, config)
+    button = BeautifulSoup(html, "html.parser").find("input", attrs={"name": PASSWORD_BUTTON, "type": "submit"})
+    fields.update(username=username, password=password, signature="", certificadoSelecionado="")
+    if button is not None:
+        fields[PASSWORD_BUTTON] = button.get("value", "")
+    return action, fields
+
+
+def login_refusal(html):
+    """The CAS's own message for a refused login, redacted, or a generic one."""
+    from jurisync.connectors.esaj.parsers import redact_text
+
+    page = BeautifulSoup(html or "", "html.parser")
+    for node in page.select("#mensagemRetorno, .mensagemRetorno, .alert, .erro, .msgErro, span.error"):
+        text = " ".join(node.get_text(" ").split())
+        if text:
+            return redact_text(text)[:200]
+    return "e-SAJ did not accept the login and password"
+
+
 def login(portal, *, pin=None, p12_path=None, session=None):
-    """An authenticated ``requests.Session`` for the portal, logged in with the A1 certificate."""
+    """An authenticated ``requests.Session``: the A1 certificate when the account has one, else login and password."""
     config = portals.esaj(portal)
-    key, cert, _chain = load_certificate(pin=pin, p12_path=p12_path)
+    password_login = uses_password(config)
+    if not password_login:
+        key, cert, _chain = load_certificate(pin=pin, p12_path=p12_path)
     session = session or requests.Session()
     page = login_page(session, config)
-    action, fields = login_form(page.text, page.url, config)
-    fields["certificadoSelecionado"] = certificate_der_b64(cert)
-    fields["signature"] = sign_challenge(key, challenge_from(page.text))
+    if password_login:
+        action, fields = password_form(page.text, page.url, config, *password_credentials(config))
+    else:
+        action, fields = login_form(page.text, page.url, config)
+        fields["certificadoSelecionado"] = certificate_der_b64(cert)
+        fields["signature"] = sign_challenge(key, challenge_from(page.text))
     response = session.post(action, data=fields, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT)
     log_request("POST", action, response.status_code)
-    follow_redirects(
+    response = follow_redirects(
         session,
         response,
         check=lambda url: require_portal_url(config, url, "e-SAJ login redirect"),
         rewrite=upgrade_scheme(config),
     )
-    if not any(cookie.name == "CASTGC" for cookie in session.cookies.jar):
+    if any(cookie.name == "CASTGC" for cookie in session.cookies.jar):
+        return session
+    if not password_login:
         raise LoginRejected("e-SAJ did not accept the A1 certificate")
-    return session
+    if TWO_FACTOR_ON.search(response.text or ""):
+        raise EsajTwoFactorRequired(
+            "e-SAJ accepted the password and sent a validation code to the account's e-mail: the connector cannot "
+            "read it. Use the A1 certificate (no code) or have a person log in"
+        )
+    raise LoginRejected(login_refusal(response.text))
 
 
 # --- Requests --------------------------------------------------------------------------------------------------------

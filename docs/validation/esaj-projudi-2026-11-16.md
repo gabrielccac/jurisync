@@ -139,3 +139,35 @@ Utils (processo achado no DJEN, OAB GO 22.729, TJGO): `projudi_get_process` ✅ 
 - Testes novos: e-SAJ (serviço do painel, fallback, `;jsessionid`, sessão via CAS, get_process TJAM, `not_found`);
   Projudi TJAM (busca por dígitos, movimentos, partes sem documento, índice/arquivo, bloqueio por intimação pendente,
   script de timeout não é expiração) — páginas sintéticas com a estrutura real.
+
+## Parte 3 — `tjam-esaj` com a Thaile (login e senha)
+
+O CAS do TJAM tem a aba login/senha no mesmo `formCertificado` (`username`, `password`, `pbEntrar`) e um passo de
+"Validação de login" **por código enviado ao e-mail** (`$.saj.cas.DuploFatorHabilitado`), não por autenticador. O
+conector passou a aceitar login e senha quando a conta não tem A1 (commit `9fee50f`); se o CAS pedir o código por
+e-mail, para com `EsajTwoFactorRequired` (com cool-down, para não disparar outro e-mail). `TJAM_ESAJ_2FA_DATA` da
+Thaile está vazia e não é usada: o e-SAJ não usa TOTP.
+
+DJEN (OAB 356257/SP, TJAM, 26 semanas): nenhuma comunicação. Busca pública no e-SAJ por OAB/nome: nada. Mas o processo
+da Thaile no Projudi (`0711074-24.2020.8.04.0001`) existe no e-SAJ: foi transferido ao Projudi em 11/10/2025.
+
+Um login (o código por e-mail **não** foi pedido), pelas tools MCP:
+
+| Tool | Resultado |
+|---|---|
+| `esaj_get_session` | ✅ `usuarioLogado` via `sajcas` |
+| `esaj_list_tasks` intimações / audiências / petições | ✅ 0 / 0 / 0 |
+| `esaj_list_messages` | ✅ 3 itens |
+| `esaj_get_process` | ✅ campos, 2 partes, movimentos (consulta `http`). Os 5 últimos vinham **duplicados** (a página traz as tabelas "últimas" e "todas"): corrigido offline (commit seguinte, com teste) |
+| `esaj_list_documents` / `esaj_read_document` | não exercitados nesta sessão (não chamados antes de fechar; sem 2º login). O processo foi transferido ao Projudi, onde os documentos já foram lidos (parte 2) |
+
+Status `tjam-esaj`: ✅ login (A1 da Hérica ou senha da Thaile) + utils; documentos pendentes de um processo ativo no
+e-SAJ.
+
+Variáveis para o setup (não editei `.env`/`portals.toml`): `tjam-esaj` da Thaile com `method = "password"` e
+`secrets = ["TJAM_ESAJ_USERNAME", "TJAM_ESAJ_PASSWORD"]` (o `TJAM_ESAJ_2FA_DATA` pode sair). Da Hérica:
+`TJGO_1G_USER_PROFILE=GO22729`.
+
+Credenciais de Projudi PR/RR/PI em todos os `customers/*/.env` e `portals.toml` (só nomes): nenhuma de PR
+(`TJPR_PROJUDI_*`) nem PI (`TJPI_PROJUDI_*`); de RR só `TJRR_PROJUDI_2FA_QR` e `TJRR_PROJUDI_OTP_PROFILE_MATCH` da
+Hérica, sem usuário/senha. Confirmado.
