@@ -68,7 +68,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "acessar_documento_implementacao",
     "processo_selecionar_pagina",  # TJRS pages the event table through the process page instead of ajax
 }
-# Where the quick search sends a number the instance does not hold (TJMG 2G, 16/11/2026); never requested.
+# Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
 MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit

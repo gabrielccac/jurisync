@@ -175,7 +175,9 @@ class EprocClientTests(unittest.TestCase):
             result = client.fetch_process(NUMBER, session=session, panel_html="", panel_url=BASE, portal="jfsc")
         self.assertFalse(result["success"])
         self.assertEqual(result["diagnostics"], ["process_not_found"])
-        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(len(session.calls), 1)  # the search form itself is never opened
+        with self.assertRaises(RuntimeError):
+            client.require_route(BASE + "controlador.php?acao=processo_consultar", portal="jfsc")
 
     def test_queue_uses_parser_pagination_and_does_not_claim_complete(self):
         session = Session([Response(200, "queue")])
