@@ -50,6 +50,14 @@ def credential_failure(html):
     return "The portal returned no OTP form; credentials may be rejected or the login page changed"
 
 
+def _https_pje(url):
+    """PJe-JT SSO bounces back over plain http; the same PJe path serves https."""
+    parts = urlsplit(url)
+    if parts.scheme == "http" and (parts.hostname or "") in portals.hosts("pje"):
+        return "https://" + url.split("://", 1)[1]
+    return url
+
+
 def get_with_log(session, url):
     require_allowed_url(url)
     response = session.get(url, allow_redirects=False, impersonate=IMPERSONATE, timeout=TIMEOUT)
@@ -57,18 +65,38 @@ def get_with_log(session, url):
     return response
 
 
-def login_session(username, password, account, app_url=None, expected_app_host=None):
-    config = portals.pje("trf1-2g")
+REDIRECTS = {301, 302, 303, 307, 308}
+
+
+def _sso_page(session, app_url):
+    """The SSO login page: TRF1-style portals redirect their login page to it; PJe-JT portals (TST) serve a page
+    that only offers the PDPJ button, which enters the SSO through ``authenticateSSO.seam``."""
+    response = get_with_log(session, app_url)
+    if response.status_code in REDIRECTS:
+        return get_with_log(session, urljoin(response.url, response.headers["Location"]))
+    if response.status_code != 200:
+        raise RuntimeError(f"Initial PJe page did not redirect (HTTP {response.status_code})")
+    response = get_with_log(session, urljoin(app_url, "authenticateSSO.seam"))
+    for _ in range(6):
+        if response.status_code not in REDIRECTS:
+            break
+        response = get_with_log(session, urljoin(response.url, response.headers["Location"]))
+    return response
+
+
+def _login_form(html, page_url):
+    soup = BeautifulSoup(html, "html.parser")
+    form_id = "loginForm" if soup.find("form", id="loginForm") else "kc-form-login"
+    return form_action(html, page_url, form_id)
+
+
+def login_session(username, password, account, app_url=None, expected_app_host=None, portal=None):
+    config = portals.pje(portal or "trf1-2g")
     app_url = app_url or config.login_url
     expected_app_host = expected_app_host or config.host
     session = requests.Session()
-    response = get_with_log(session, app_url)
-    if response.status_code not in {301, 302, 303, 307, 308}:
-        raise RuntimeError(f"Initial PJe page did not redirect (HTTP {response.status_code})")
-
-    sso_url = urljoin(response.url, response.headers["Location"])
-    response = get_with_log(session, sso_url)
-    login_url = form_action(response.text, response.url, "loginForm")
+    response = _sso_page(session, app_url)
+    login_url = _login_form(response.text, response.url)
     response = session.post(
         login_url,
         data={"username": username, "password": password, "pjeoffice-code": "", "phrase": ""},
@@ -98,7 +126,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
         location = response.headers.get("Location")
         if response.status_code not in {301, 302, 303, 307, 308} or not location:
             break
-        response = get_with_log(session, urljoin(response.url, location))
+        response = get_with_log(session, _https_pje(urljoin(response.url, location)))
 
     soup = BeautifulSoup(response.text, "html.parser")
     authenticated = (
@@ -108,6 +136,19 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
         and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
         and not soup.find("form", id="kc-otp-login-form")
     )
+    if not authenticated and config.kz:
+        # PJe-JT (TST/TRT) lands on the /pjekz/ loader; the app shell answers an app page when the session holds,
+        # exactly as after the certificate login.
+        from jurisync.connectors.pje.auth import certificate
+
+        certificate._require_registered(response, config)
+        if not certificate._authenticated(response, config.host, config.root):
+            response = certificate._follow(
+                session, session.get(config.search_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
+            )
+            log_request("GET", config.search_url, response.status_code)
+        certificate._require_registered(response, config)
+        authenticated = certificate._authenticated(response, config.host, config.root)
     if not authenticated:
         raise RuntimeError(f"Login did not reach an authenticated PJe page (HTTP {response.status_code})")
     return session, response

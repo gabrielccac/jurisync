@@ -31,7 +31,9 @@ def auth_method(portal):
     if (config.env("AUTH") or credentials.env("PJE_AUTH")).strip().lower() == "a3":
         return "a3_totp"
     certificate = credentials.has("PJE_A1_P12")
-    password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD", "2FA_DATA"))
+    password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD")) and bool(
+        config.env("2FA_DATA") or config.env("2FA_QR")
+    )
     if config.auth == "certificate_totp":
         return "password_totp" if password_ready and not certificate else "certificate_totp"
     if config.uses_certificate():
