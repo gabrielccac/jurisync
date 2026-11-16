@@ -571,3 +571,14 @@ def test_the_certificate_wins_when_the_account_has_one(monkeypatch):
     assert base.uses_password(portals.esaj("tjam-esaj"))
     monkeypatch.delenv("TJAM_ESAJ_PASSWORD")
     assert not base.uses_password(portals.esaj("tjam-esaj"))
+
+
+def test_the_last_movements_table_does_not_repeat_the_full_table():
+    # TJAM 2026-11-16: the detail page carries both tables; reading both doubled the first five movements.
+    row = '<tr class="containerMovimentacao"><td>0{n}/11/2026</td><td></td><td>Movimento {n}</td></tr>'
+    last = "".join(row.format(n=n) for n in (3, 2))
+    full = "".join(row.format(n=n) for n in (3, 2, 1))
+    html = f'<table id="tabelaUltimasMovimentacoes">{last}</table><table id="tabelaTodasMovimentacoes">{full}</table>'
+    assert [m["text"] for m in parsers.movements(html)] == ["Movimento 3", "Movimento 2", "Movimento 1"]
+    assert len(parsers.movements(f'<table id="tabelaUltimasMovimentacoes">{last}</table>')) == 2
+    assert len(parsers.movements(f"<table>{full}</table>")) == 3

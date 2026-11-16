@@ -111,10 +111,12 @@ def process(html, number):
 
 
 def movements(html):
+    """Movements of the full table; the "last movements" table repeats its first rows, so it is read only alone."""
+    page = soup(html)
+    table = page.find(id="tabelaTodasMovimentacoes") or page.find(id="tabelaUltimasMovimentacoes")
+    rows = table.select("tr") if table is not None else page.select("tr.containerMovimentacao")
     result = []
-    for row in soup(html).select(
-        "#tabelaTodasMovimentacoes tr, #tabelaUltimasMovimentacoes tr, tr.containerMovimentacao"
-    ):
+    for row in rows:
         cells = row.find_all("td", recursive=False)
         if len(cells) < 2:
             continue
