@@ -192,7 +192,7 @@ class PjeChecks(unittest.TestCase):
         """TJPI's result table has 8 columns: the process number is the first cell, not the second."""
         html = (
             '<table id="fPP:processosTable"><tr><td><a onclick="idProcessoSelecionado:2748118">'
-            "1020340-18.2025.8.18.0051</a></td><td><i title=\"Liminar\"></i></td><td>Vara Unica</td>"
+            '1020340-18.2025.8.18.0051</a></td><td><i title="Liminar"></i></td><td>Vara Unica</td>'
             "<td>15/09/2026</td><td>PROCEDIMENTO COMUM</td><td>AUTOR</td><td>REU</td><td>Concluso</td></tr></table>"
         )
         item = parsers.parse_search_results(html)["items"][0]

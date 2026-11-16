@@ -454,7 +454,12 @@ def test_trt_portals_use_the_national_pattern():
     for key in TRT_PORTALS:
         number, grade = key.removeprefix("trt").split("-")
         config = portals.pje(key)
-        assert (config.host, config.region, config.justice, config.kz) == (f"pje.trt{number}.jus.br", f"{int(number):02d}", "5", True)
+        assert (config.host, config.region, config.justice, config.kz) == (
+            f"pje.trt{number}.jus.br",
+            f"{int(number):02d}",
+            "5",
+            True,
+        )
         assert config.root == ("/primeirograu/" if grade == "1g" else "/segundograu/")
         assert config.env_prefix == f"TRT{number}_{grade.upper()}"
         assert portals.pje(key).auth == "certificate_totp"
