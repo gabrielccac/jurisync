@@ -62,6 +62,30 @@ def certificate_chain64(cert, chain):
     return base64.b64encode(pkipath_encode(blobs)).decode("ascii")
 
 
+def issuer_path(cert, chain):
+    """``cert`` followed by its issuers from ``chain``, up to the root: the order a Java KeyStore keeps a chain in.
+
+    A .p12 may store the CA certificates in any order; certificates that are not issuers of the path are dropped.
+    """
+    by_subject = {c.subject: c for c in chain}
+    path, current = [cert], cert
+    while current.issuer != current.subject and current.issuer in by_subject and len(path) <= len(chain):
+        current = by_subject.pop(current.issuer)
+        path.append(current)
+    return path
+
+
+def java_pkipath64(path):
+    """Base64 of Java's ``CertPath.getEncoded("PkiPath")`` for a holder-first path: Java writes it root first.
+
+    This is what PJeOffice sends as ``cadeiaCertificado``. A server decoding it with ``generateCertPath(.., "PkiPath")``
+    gets the holder back at index 0; a holder-first encoding would give it the root CA instead.
+    """
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    return base64.b64encode(pkipath_encode([c.public_bytes(Encoding.DER) for c in reversed(path)])).decode("ascii")
+
+
 class A1Signer:
     """The A1 key in memory, with the same interface as the A3 token signer."""
 
@@ -73,6 +97,9 @@ class A1Signer:
 
     def chain64(self):
         return certificate_chain64(self.cert, self.chain)
+
+    def pkipath64(self):
+        return java_pkipath64(issuer_path(self.cert, self.chain))
 
 
 def build_payload(token, mensagem, signature, chain64):

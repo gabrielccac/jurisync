@@ -34,6 +34,13 @@ class CertificateLoginChecks(unittest.TestCase):
             cert_login._follow(session, redirect)
         session.get.assert_not_called()
 
+    def test_legacy_login_names_an_unknown_certificate(self):
+        config, page, signer, session, _ = self._legacy(
+            "Erro:Não foi possível realizar a autenticação: Certificado não encont"
+        )
+        with self.assertRaisesRegex(RuntimeError, "found no user for this certificate"):
+            cert_login._legacy_login(session, config, page, signer)
+
         html = '<a href="/pje/logout.seam">Sair</a><input name="javax.faces.ViewState">'
         response = SimpleNamespace(status_code=200, url="https://pje1g.trf1.jus.br/pje/home", text=html)
         self.assertFalse(cert_login._authenticated(response, "pje1g.trf5.jus.br"))
@@ -80,8 +87,45 @@ class CertificateLoginChecks(unittest.TestCase):
             '<script>ASSINATURA_MENSAGEM = "abc123"; CONVERSATION_ID = "15881";</script>'
             '<form id="assinaturaForm" action="/2g/logarSC.seam">'
         )
-        self.assertEqual(cert_login._legacy_challenge(html), ("abc123", "/logarPJeOffice.seam?cid=15881"))
+        self.assertEqual(cert_login._legacy_challenge(html), ("abc123", "15881"))
         self.assertIsNone(cert_login._legacy_challenge("<html></html>"))
+
+    def _legacy(self, answer, landing_text=""):
+        from jurisync import portals
+
+        config = portals.pje("tjrj-2g")
+        page = SimpleNamespace(
+            text='<script>var ASSINATURA_MENSAGEM = "abc123"; var CONVERSATION_ID = "15881";</script>'
+        )
+        signer = Mock()
+        signer.sign.return_value = b"sig"
+        signer.pkipath64.return_value = "CHAIN"
+        session = Mock()
+        session.post.return_value = SimpleNamespace(status_code=200, text=answer, headers={}, url="")
+        landing = SimpleNamespace(
+            status_code=200,
+            url="https://tjrj.pje.jus.br/2g/Painel/painel_usuario/advogado.seam",
+            text=landing_text,
+            headers={},
+        )
+        session.get.return_value = landing
+        return config, page, signer, session, landing
+
+    def test_legacy_login_posts_the_pjeoffice_form_and_opens_its_home(self):
+        config, page, signer, session, landing = self._legacy("Sucesso")
+        self.assertIs(cert_login._legacy_login(session, config, page, signer), landing)
+        url = session.post.call_args.args[0]
+        self.assertEqual(url, "https://tjrj.pje.jus.br/2g/logarPJeOffice.seam?cid=15881")
+        self.assertEqual(session.post.call_args.kwargs["data"], {"assinatura": "c2ln", "cadeiaCertificado": "CHAIN"})
+        self.assertIn("versao", session.post.call_args.kwargs["headers"])
+        signer.sign.assert_called_once_with("abc123")
+        self.assertEqual(session.get.call_args.args[0], "https://tjrj.pje.jus.br/2g/homePJeOffice.seam?cid=15881")
+
+    def test_legacy_login_reports_the_callback_refusal_and_stops(self):
+        config, page, signer, session, _ = self._legacy("Erro:Não foi possível realizar a autenticação")
+        with self.assertRaisesRegex(RuntimeError, "refused the certificate login: Não foi possível"):
+            cert_login._legacy_login(session, config, page, signer)
+        session.get.assert_not_called()
 
 
 if __name__ == "__main__":

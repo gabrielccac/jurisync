@@ -22,11 +22,11 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.pje import jsf, kz
+from jurisync.connectors.pje.acervo import PANEL_SUFFIX
 from jurisync.connectors.pje.expedientes import NOTICE, PRAZO
 from jurisync.connectors.pje.parsers import response_html
 from jurisync.connectors.pje.process import login_portal
 
-PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
 CONTAINER = "conteudoAbaExpedientes"
 BUCKET_ROW = re.compile(r"formAbaExpediente:listaAgrSitExp:(\d+):linhaN1$")
 NODE_ID = re.compile(
@@ -139,14 +139,7 @@ def check_request(kind, control, form, parameters, extra=()):
 
 def a4j_submit(javascript):
     """(form id, container id, parameters) of the ``A4J.AJAX.Submit`` call in an attribute."""
-    javascript = re.sub(r"\\x([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), javascript)
-    call = re.search(r"A4J\.AJAX\.Submit\(\s*'([^']+)'", javascript)
-    if not call:
-        raise RuntimeError("PJe did not render the panel's Ajax action")
-    container = re.search(r"'containerId':'([^']+)'", javascript)
-    parameters = re.search(r"'parameters':\{([^}]*)\}", javascript)
-    values = dict(re.findall(r"'([^']+)':'([^']*)'", parameters.group(1))) if parameters else {}
-    return call.group(1), container.group(1) if container else CONTAINER, values
+    return jsf.a4j_submit(javascript, CONTAINER)
 
 
 # -- parsing -------------------------------------------------------------------
@@ -394,6 +387,28 @@ def apply_filters(fields, filters):
     return [(name, values.get(name, value)) for name, value in fields]
 
 
+EXPEDIENTES_TAB = {"tabExpedientes": "tabExpedientes", "selectedTab": "tabExpedientes"}
+
+
+def expedientes_tab(html):
+    """The A4J parameters of the panel's inactive Expedientes tab header, or None when it is active or absent."""
+    soup = BeautifulSoup(html, "html.parser")
+    cell = soup.find(id="tabExpedientes_cell")
+    header = soup.find(id="tabExpedientes_shifted")
+    if not cell or not header or "rich-tabhdr-cell-active" in (cell.get("class") or []):
+        return None
+    found = re.search(r"A4J\.AJAX\.Submit\(null,event,\{.*?'parameters':\{([^}]*)\}", header.get("onclick", ""))
+    if not found:
+        return None
+    parameters = dict(re.findall(r"'([^']+)':'([^']*)'", found.group(1)))
+    if {key: parameters.get(key) for key in EXPEDIENTES_TAB} != EXPEDIENTES_TAB or set(parameters) - {
+        *EXPEDIENTES_TAB,
+        "pend",
+    }:
+        return None
+    return parameters
+
+
 # -- navigation ----------------------------------------------------------------
 
 
@@ -416,7 +431,20 @@ class Panel:
         response = jsf.get(self.session, self.url, label="PJe panel")
         self.html = response_html(response)
         self.state = jsf.view_state(self.html, "PJe panel")
-        return parse_buckets(self.html)
+        buckets = parse_buckets(self.html)
+        if not buckets and expedientes_tab(self.html):
+            # TJBA (PJe 2.10) opens the panel on another tab: select Expedientes as its tab header does.
+            body = [
+                ("AJAXREQUEST", "_viewRoot"),
+                *expedientes_tab(self.html).items(),
+                ("javax.faces.ViewState", self.state),
+                ("AJAX:EVENTS_COUNT", "1"),
+            ]
+            self.html = response_html(jsf.post(self.session, self.url, body, label="PJe panel"))
+            match = re.search(r'name="javax\.faces\.ViewState"[^>]*value="([^"]*)"', self.html)
+            self.state = match.group(1) if match else self.state
+            buckets = parse_buckets(self.html)
+        return buckets
 
     def _post(self, kind, control, form, container, parameters, extra=()):
         check_request(kind, control, form, parameters, extra)
