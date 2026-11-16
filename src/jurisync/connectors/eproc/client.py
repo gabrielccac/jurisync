@@ -68,6 +68,8 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "acessar_documento_implementacao",
     "processo_selecionar_pagina",  # TJRS pages the event table through the process page instead of ajax
 }
+# Where the quick search sends a number the instance does not hold (TJMG 2G, 16/11/2026); never requested.
+NOT_FOUND_ACTION = "processo_consultar"
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
 MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit
 
@@ -562,7 +564,16 @@ def fetch_process(
         if not location:
             raise RuntimeError("eproc process search redirect had no location")
         detail_url = urljoin(search_response.url or search_url, location)
-        require_route(detail_url, portal=portal)
+        require_route(detail_url, READ_ACTIONS | {NOT_FOUND_ACTION}, portal=portal)
+        if _route_action(detail_url) == NOT_FOUND_ACTION:
+            # A number this instance does not hold sends the quick search to the Consulta Processual form.
+            return {
+                "success": False,
+                "source": "eproc",
+                "portal": portal,
+                "processNumber": process_number,
+                "diagnostics": ["process_not_found"],
+            }
         if _route_action(detail_url) != "processo_selecionar":
             raise RuntimeError("Unexpected eproc process search redirect action")
         detail_response, detail_body = request(session, "GET", detail_url, portal=portal)
