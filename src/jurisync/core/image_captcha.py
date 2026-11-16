@@ -24,7 +24,7 @@ import logging
 import re
 
 from jurisync.core import credentials
-from jurisync.core.awswaf import API, DEFAULT_MODEL
+from jurisync.core.awswaf import API, DEFAULT_MODEL, captcha_api_key
 
 log = logging.getLogger("jurisync.image_captcha")
 
@@ -37,11 +37,6 @@ PROMPT = (
 DARK, GRAY = 150, 130
 
 _local_reader = None
-
-
-def captcha_api_key():
-    """The OpenRouter key for CAPTCHA models: the machine-wide one first, then a customer's own."""
-    return credentials.env("JURISYNC_CAPTCHA_API_KEY") or credentials.env("OPENROUTER_API_KEY")
 
 
 class UnreadableCaptcha(RuntimeError):
