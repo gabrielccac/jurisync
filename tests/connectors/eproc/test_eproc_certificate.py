@@ -392,3 +392,101 @@ class TjacTests(unittest.TestCase):
         self.assertEqual(certificate.rooted(config, already), already)
         other = "https://elsewhere.example/controlador.php"
         self.assertEqual(certificate.rooted(config, other), other)
+
+
+# TJTO (16/11/2026): the page's certificate address stays on the portal, which answers 302 to a separate mTLS host.
+TJTO_ROOT = "https://eproc1.tjto.jus.br/eprocV2_prod_1grau/"
+TJTO_MTLS = "https://mtls.tjto.jus.br/eprocV2_prod_1grau/"
+TJTO_LOGIN = TJMG_LOGIN.replace("https://eproc1g.tjmg.jus.br/eproc/", TJTO_ROOT)
+
+
+def redirect(url, location):
+    response = page(url, status=302)
+    response.headers = {"Location": location}
+    return response
+
+
+class TjtoCertificateHostTest(unittest.TestCase):
+    def test_mtls_host_is_bound_to_the_portal_root_login_pages(self):
+        config = portals.eproc("tjto-1g")
+        for url in (
+            TJTO_MTLS + "externo_controlador.php?acao=login_cert&host=eproc1.tjto.jus.br",
+            TJTO_MTLS + "priv/login_cert.php",
+        ):
+            certificate.require_login_url(config, url)
+        for url in (
+            TJTO_MTLS.replace("https:", "http:") + "priv/login_cert.php",
+            TJTO_MTLS + "controlador.php?acao=painel_adv_listar",
+            "https://mtls.tjto.jus.br/eprocV2_prod_2grau/priv/login_cert.php",  # the other instance's root
+            "https://mtls.tjto.jus.br/priv/login_cert.php",
+        ):
+            with self.subTest(url=url), self.assertRaises(UnsafeUrlError):
+                certificate.require_login_url(config, url)
+        for other in ("tjmg-1g", "trf4-2g"):
+            with self.subTest(portal=other), self.assertRaises(UnsafeUrlError):
+                certificate.require_login_url(portals.eproc(other), TJTO_MTLS + "priv/login_cert.php")
+
+    def test_classic_login_follows_the_mtls_host_with_the_certificate(self):
+        panel = TJTO_ROOT + "controlador.php?acao=painel_adv_listar&hash=x"
+        session, result = LoginFlowTest.run_login(
+            LoginFlowTest(),
+            "tjto-1g",
+            [
+                ("GET", TJTO_ROOT, page(TJTO_ROOT, TJTO_LOGIN)),
+                (
+                    "POST",
+                    TJTO_ROOT + "externo_controlador.php?acao=login_cert",
+                    redirect(
+                        TJTO_ROOT + "externo_controlador.php?acao=login_cert",
+                        TJTO_MTLS + "externo_controlador.php?acao=login_cert&host=eproc1.tjto.jus.br",
+                    ),
+                ),
+                (
+                    "GET",
+                    TJTO_MTLS + "externo_controlador.php",
+                    redirect(TJTO_MTLS + "externo_controlador.php", TJTO_MTLS + "priv/login_cert.php"),
+                ),
+                (
+                    "GET",
+                    TJTO_MTLS + "priv/login_cert.php",
+                    redirect(TJTO_MTLS + "priv/login_cert.php", TJTO_ROOT + "index.php?acao=principal"),
+                ),
+                ("GET", TJTO_ROOT + "index.php", page(TJTO_ROOT + "index.php?acao=principal", TJMG_CODE)),
+                ("POST", TJTO_ROOT + "index.php", page(panel)),
+            ],
+            {},
+        )
+        self.assertEqual(result[2], panel)
+        self.assertEqual([call[3] for call in session.calls[1:4]], ["/tmp/a1.pem"] * 3)
+        self.assertIsNone(session.calls[5][3])
+
+    def test_unpublished_mtls_host_is_reported_plainly(self):
+        from curl_cffi.requests.exceptions import DNSError
+
+        class Unresolved(FakeSession):
+            def get(self, url, **options):
+                if url.startswith(TJTO_MTLS):
+                    raise DNSError("Failed to perform, curl: (6) Could not resolve host: mtls.tjto.jus.br")
+                return super().get(url, **options)
+
+        steps = [
+            ("GET", TJTO_ROOT, page(TJTO_ROOT, TJTO_LOGIN)),
+            (
+                "POST",
+                TJTO_ROOT + "externo_controlador.php?acao=login_cert",
+                redirect(
+                    TJTO_ROOT + "externo_controlador.php?acao=login_cert",
+                    TJTO_MTLS + "externo_controlador.php?acao=login_cert&host=eproc1.tjto.jus.br",
+                ),
+            ),
+        ]
+        with (
+            mock.patch.object(certificate.requests, "Session", return_value=Unresolved(steps)),
+            mock.patch.dict("os.environ", {"PJE_A1_PIN": "pin"}, clear=True),
+            mock.patch.object(certificate, "portal_totp_account", return_value={}),
+            mock.patch.object(certificate.native_signer, "load_a1", return_value=("key", "cert", [])),
+            mock.patch.object(certificate, "client_certificate") as pem,
+            self.assertRaisesRegex(RuntimeError, "mtls.tjto.jus.br does not resolve"),
+        ):
+            pem.return_value.__enter__.return_value = "/tmp/a1.pem"
+            certificate.cert_login("tjto-1g")
