@@ -50,5 +50,9 @@ secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA
 method = "password_totp"
 secrets = ["TJAM_1G_USERNAME|TJAM_PROJUDI_USERNAME", "TJAM_1G_PASSWORD|TJAM_PROJUDI_PASSWORD"]
 
+[tjam-esaj]
+method = "password_totp"
+secrets = ["TJAM_ESAJ_USERNAME", "TJAM_ESAJ_PASSWORD"]
+
 [env]
 secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]

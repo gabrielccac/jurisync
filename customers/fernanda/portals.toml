@@ -145,7 +145,6 @@ method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT3_2G_2FA_DATA|TRT3_2G_2FA_QR"]
 
 # Validados em 13/11 pelo Jurandir (branch feat/trt-4-9-2-tjms).
-
 [trt4-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT4_1G_2FA_DATA|TRT4_1G_2FA_QR"]
@@ -165,3 +164,7 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT2_2G_2FA_DATA|TRT2_2G_2FA_QR"]
 [tjms-eproc-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMS_1G_2FA_DATA|TJMS_1G_2FA_QR"]
+
+[tst]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TST_2FA_DATA|TST_2FA_QR"]

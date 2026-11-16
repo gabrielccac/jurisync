@@ -208,8 +208,12 @@ secrets = ["PJE_TRF3_2G_USERNAME", "PJE_TRF3_2G_PASSWORD", "PJE_TRF3_2G_2FA_DATA
 method = "password_totp"
 secrets = ["TJPE_1G_USERNAME", "TJPE_1G_PASSWORD", "TJPE_1G_2FA_DATA|TJPE_1G_2FA_QR"]
 
+[tnu]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TNU_2FA_DATA|TNU_2FA_QR"]
+
 [env]
 # The TJES 1G AWS WAF CAPTCHA is solved by a vision model on OpenRouter (core/awswaf.py).
 optional = ["OPENROUTER_API_KEY"]
 # Pinned values: A1 opt-ins and the OAB profile picked where the portal lists several.
-set = { TRF2_1G_RJ_CERT = "true", TRF2_1G_ES_CERT = "true", TRF2_2G_CERT = "true", TRF4_1G_RS_CERT = "true", TRF4_1G_SC_CERT = "true", TRF4_1G_PR_CERT = "true", TRF4_2G_CERT = "true", TJPR_2G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJAP_1G_CERT = "true", TJPR_2G_USER_PROFILE = "GO022729", TJGO_1G_USER_PROFILE = "GO22729" }
+set = { TRF2_1G_RJ_CERT = "true", TRF2_1G_ES_CERT = "true", TRF2_2G_CERT = "true", TRF4_1G_RS_CERT = "true", TRF4_1G_SC_CERT = "true", TRF4_1G_PR_CERT = "true", TRF4_2G_CERT = "true", TJPR_2G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJAP_1G_CERT = "true", TJPR_2G_USER_PROFILE = "GO022729", TJGO_1G_USER_PROFILE = "GO22729" , TNU_CERT = "true" }
