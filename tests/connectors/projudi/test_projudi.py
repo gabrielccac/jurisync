@@ -12,7 +12,7 @@ from jurisync import portals
 from jurisync.connectors.projudi import base, parsers, server, tjgo
 from jurisync.core.documents import MAX_DOCUMENT_BYTES
 from jurisync.core.http import UnsafeUrlError
-from jurisync.core.session_pool import SessionExpired, SessionPool
+from jurisync.core.session_pool import LoginRejected, SessionExpired, SessionPool
 
 NUMBER = "0000001-23.2026.8.09.0001"
 HASH = "a" * 40
@@ -513,3 +513,75 @@ class UnwiredGenerationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# "Serventias Disponíveis" as TJGO served it on 2026-11-16 (markup kept; OABs and ids synthetic).
+SERVENTIAS_HTML = """<div id="divCorpo" class="divCorpo"><div class="area"><h2>&raquo; Serventias Disponíveis</h2></div>
+<fieldset class="fieldEdicaoEscuro"><legend class="formEdicaoLegenda"> Ordem dos Advogados do Brasil AL - AL</legend>
+<label><a  href="Usuario?PaginaAtual=7&a1=1001&a2=2&a3=&a4=&a5=">
+ Advogados - OAB/Matrícula: 11111-S-AL</a></label/><br /></fieldset>
+<fieldset class="fieldEdicaoEscuro"><legend class="formEdicaoLegenda"> Ordem dos Advogados do Brasil GO - GO</legend>
+<label><a  href="Usuario?PaginaAtual=7&a1=1002&a2=2&a3=&a4=&a5=">
+ Advogados - OAB/Matrícula: 2222-N-GO</a></label/><br /></fieldset></div>
+<input type="password" name="senhaCertificado"><input type="checkbox" name="memorizarSenha">"""
+
+
+class ServentiaTest(unittest.TestCase):
+    def config(self, profile=""):
+        patcher = mock.patch.dict(os.environ, {"TJGO_1G_USER_PROFILE": profile})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return portals.projudi("tjgo-1g")
+
+    def test_the_page_lists_each_serventia_with_its_section(self):
+        self.assertEqual(
+            tjgo.serventias(SERVENTIAS_HTML),
+            [
+                (
+                    "Usuario?PaginaAtual=7&a1=1001&a2=2&a3=&a4=&a5=",
+                    "Ordem dos Advogados do Brasil AL - AL / Advogados - OAB/Matrícula: 11111-S-AL",
+                ),
+                (
+                    "Usuario?PaginaAtual=7&a1=1002&a2=2&a3=&a4=&a5=",
+                    "Ordem dos Advogados do Brasil GO - GO / Advogados - OAB/Matrícula: 2222-N-GO",
+                ),
+            ],
+        )
+        self.assertEqual(tjgo.serventias(PROCESS_HTML), [])
+
+    def test_the_profile_picks_by_oab_in_any_spelling_or_by_a_word(self):
+        options = tjgo.serventias(SERVENTIAS_HTML)
+        for profile in ("GO2222", "go 2.222", "GO-02222", "2222GO", "GO - GO"):
+            with self.subTest(profile=profile):
+                self.assertIn("a1=1002", tjgo.choose_serventia(self.config(profile), options))
+
+    def test_without_a_profile_several_lawyer_serventias_stop_with_the_choices(self):
+        options = tjgo.serventias(SERVENTIAS_HTML)
+        with self.assertRaisesRegex(LoginRejected, "TJGO_1G_USER_PROFILE.*") as error:
+            tjgo.choose_serventia(self.config(), options)
+        self.assertIn("11111-S-AL", str(error.exception))
+        self.assertIn("a1=1001", tjgo.choose_serventia(self.config(), options[:1]))
+        with self.assertRaises(LoginRejected):
+            tjgo.choose_serventia(self.config("SP9"), options)
+
+    def test_login_follows_only_the_chosen_link_and_never_a_default_choice(self):
+        self.config("GO2222")
+        app = "https://projudi.tjgo.jus.br/"
+        page = mock.Mock(
+            status_code=200, url=app + "Usuario?PaginaAtual=9&hashFluxo=1", text=SERVENTIAS_HTML, headers={}
+        )
+        panel = mock.Mock(status_code=200, url=app + "Usuario?PaginaAtual=7&a1=1002", text="<p>Painel</p>", headers={})
+        session = mock.Mock()
+        session.cookies.jar = [mock.Mock(name="cookie")]
+        session.cookies.jar[0].name = "JSESSIONID"
+        start = mock.Mock(status_code=200, url=app, headers={})
+        session.get.side_effect = [start, page, panel]
+        session.post.return_value = mock.Mock(
+            status_code=302, url=app + "LogOn", headers={"Location": "/certificado?hashFluxo=1"}
+        )
+        with mock.patch.object(base, "client_certificate") as cert:
+            cert.return_value.__enter__.return_value = ("c", "k")
+            self.assertIs(tjgo.ADAPTER.login("tjgo-1g", session=session), session)
+        self.assertEqual(session.get.call_args.args[0], app + "Usuario?PaginaAtual=7&a1=1002&a2=2&a3=&a4=&a5=")
+        self.assertEqual(session.post.call_count, 1)
+        self.assertFalse(any("memorizar" in str(call).lower() for call in session.mock_calls))

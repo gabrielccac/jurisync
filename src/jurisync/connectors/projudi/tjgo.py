@@ -2,8 +2,10 @@
 
 Login is the A1 certificate over mutual TLS: ``POST /LogOn`` (PaginaAtual=6) answers a redirect to
 ``/certificado?hashFluxo=...``, which asks the client certificate in the TLS handshake and redirects to ``/Usuario``;
-the last hop (``LoginPronto=S``) is the authenticated panel. Later requests need only the session cookie, and an
-expired session is redirected to ``/LogOn``.
+the last hop (``LoginPronto=S``) is the authenticated panel. An account with several serventias (a lawyer enrolled in
+several OAB sections) stops instead on ``/Usuario`` "Serventias Disponíveis", one ``Usuario?PaginaAtual=7&a1=...`` link
+per serventia: ``TJGO_1G_USER_PROFILE`` picks one (see ``choose_serventia``). Later requests need only the session
+cookie, and an expired session is redirected to ``/LogOn``.
 
 A process is opened by CNJ number (``POST /BuscaProcesso``); its document index (``PaginaAtual=9``) exists only for the
 process opened in the session, and a file downloads with its ``id_movi_arq`` and ``hash``. The search covers only active
@@ -13,6 +15,7 @@ processes unless told otherwise, so an archived one takes a second search with i
 import re
 import urllib.parse
 
+from bs4 import BeautifulSoup
 from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
 
@@ -28,6 +31,56 @@ XHR = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json, text/j
 LOGIN_FIELDS = re.compile(r"""name\s*=\s*["']?(?:Senha|Usuario)["']?[\s>/]""", re.I)
 NOT_FOUND = "Nenhum Processo foi localizado"
 ARCHIVED = {"ProcessoStatus": "", "ProcessoStatusCodigo": "1"}
+SERVENTIA_LINK = re.compile(r"^Usuario\?PaginaAtual=7&")
+SERVENTIA_OAB = re.compile(r"(\d+)-[A-Z]-([A-Z]{2})\b")
+
+
+def serventias(html):
+    """``[(href, label)]`` of the "Serventias Disponíveis" page, e.g. ``("Usuario?PaginaAtual=7&a1=...",
+    "Ordem dos Advogados do Brasil GO - GO / Advogados - OAB/Matrícula: 1234-N-GO")``; [] on any other page."""
+    page = BeautifulSoup(html or "", "html.parser")
+    found = []
+    for fieldset in page.find_all("fieldset"):
+        legend = fieldset.find("legend")
+        for link in fieldset.find_all("a", href=SERVENTIA_LINK):
+            label = " ".join(link.get_text(" ").split())
+            group = " ".join(legend.get_text(" ").split()) if legend else ""
+            found.append((link["href"].strip(), f"{group} / {label}" if group else label))
+    return found
+
+
+def _oab(value):
+    """``GO22729`` from ``GO 22.729``, ``go-022729`` or ``22729GO``."""
+    compact = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+    swapped = re.fullmatch(r"(\d+)([A-Z]{2})", compact)
+    if swapped:
+        compact = swapped.group(2) + swapped.group(1)
+    return re.sub(r"^([A-Z]{2})0+(?=[0-9])", r"\1", compact)
+
+
+def choose_serventia(config, options):
+    """The serventia link to follow (navigation only: the page has no "default" choice and none is ever set).
+
+    ``<PREFIX>_USER_PROFILE`` names it by OAB (``GO22729``) or by a word of its label, as on the eproc; without it the
+    single lawyer serventia is taken. No match or several stop the login with the choices instead of guessing.
+    """
+    wanted = config.env("USER_PROFILE").strip()
+    if wanted:
+        by_oab = [
+            option
+            for option in options
+            if any(f"{uf}{int(n)}" == _oab(wanted) for n, uf in SERVENTIA_OAB.findall(option[1]))
+        ]
+        chosen = by_oab or [option for option in options if wanted.casefold() in option[1].casefold()]
+    else:
+        chosen = [option for option in options if "advogad" in option[1].casefold()]
+    if len(chosen) != 1:
+        names = "; ".join(label for _, label in options)
+        raise LoginRejected(
+            f"Projudi asks which serventia to use ({names}); set {config.env_name('USER_PROFILE')} to one of them "
+            "(OAB such as GO12345, or a word of the label)"
+        )
+    return chosen[0][0]
 
 
 def is_authenticated_panel(response):
@@ -86,6 +139,18 @@ class TjgoAdapter(base.Adapter):
                 url, impersonate=impersonate_for(config), cert=pem, allow_redirects=False, timeout=TIMEOUT
             )
             response = _follow(session, config, response, cert=pem)
+        options = [] if LOGIN_READY in (response.url or "") else serventias(response.text)
+        if options:
+            url = urllib.parse.urljoin(response.url, choose_serventia(config, options))
+            base.require_portal_url(config, url, "Projudi serventia")
+            response = _follow(
+                session,
+                config,
+                session.get(url, impersonate=impersonate_for(config), allow_redirects=False, timeout=TIMEOUT),
+            )
+            if not is_authenticated_panel(response) or serventias(response.text):
+                raise RuntimeError("Projudi did not open the panel of the chosen serventia")
+            return session
         if LOGIN_READY not in (response.url or "") or not is_authenticated_panel(response):
             raise LoginRejected("Projudi did not accept the A1 certificate")
         return session
