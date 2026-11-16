@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlsplit
@@ -113,6 +114,9 @@ class AdvboxSession:
         self.csrf = None
         self.cooldown_until = 0.0
         self.lock = threading.RLock()
+        # Waiting on this condition releases every level of the re-entrant lock, which a plain sleep would keep.
+        self._cooldown = threading.Condition(self.lock)
+        self._exclusive = 0
         self.http = requests.Session()
 
     @property
@@ -205,14 +209,37 @@ class AdvboxSession:
                 self._obtain(force_login=True)
                 return handler(self)
 
+    @contextmanager
+    def exclusive(self):
+        """Hold the office lock across several requests that must not interleave with another call of this office:
+        a composite write (check, stage, post). Re-entrant, like ``using``. A 429 cool-down inside it keeps the lock,
+        because letting another call in would undo the point of holding it."""
+        with self.lock:
+            self._exclusive += 1
+            try:
+                yield self
+            finally:
+                self._exclusive -= 1
+
     # -- requests ------------------------------------------------------------
+
+    def _cool_down(self, seconds):
+        """Wait out a 429 cool-down without keeping the office lock, so the wait of one call does not queue the
+        others behind it (each of them waits for the same cool-down on its own)."""
+        if self._exclusive:
+            time.sleep(seconds)
+            return
+        try:
+            self._cooldown.wait(seconds)
+        except RuntimeError:  # called without the lock: there is nothing to release
+            time.sleep(seconds)
 
     def _read(self, method, url, label, **kwargs):
         """Retry one read after a 429; replaying a write could duplicate it."""
         for attempt in range(2):
             remaining = self.cooldown_until - time.time()
             if remaining > 0:
-                time.sleep(remaining)
+                self._cool_down(remaining)
             response = self._send(method, url, **kwargs)
             if response.status_code != 429:
                 return response
@@ -295,9 +322,9 @@ class AdvboxSession:
     def csrf_token(self, force=False):
         if self.csrf and not force:
             return self.csrf
-        response = self._send("GET", f"{BASE_URL}/posts")
-        if response.status_code == 401 or 300 <= response.status_code < 400:
-            raise SessionExpiredError("ADVBOX session expired while fetching the CSRF token")
+        label = "ADVBOX GET /posts"
+        response = self._read("GET", f"{BASE_URL}/posts", label)
+        self._check(response, label)
         token = parse_csrf_token(response.text)
         if not token:
             raise RuntimeError("ADVBOX page did not expose a csrf-token meta tag")
@@ -354,27 +381,6 @@ class AdvboxSession:
             finally:
                 form.close()
             self._check(response, _label("POST", request_path), csrf=True, detail_chars=500)
-            return response.text
-
-        return self.using(lambda session: session.with_csrf(build))
-
-    def delete(self, request_path, params=None):
-        require_writes()
-        request_path = _path(request_path)
-
-        def build(token):
-            response = self._send(
-                "DELETE",
-                f"{BASE_URL}{request_path}",
-                data=urlencode(params or {}),
-                headers={
-                    "Accept": "*/*",
-                    "X-CSRF-TOKEN": token,
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                },
-            )
-            self._check(response, _label("DELETE", request_path), csrf=True, detail_chars=300)
             return response.text
 
         return self.using(lambda session: session.with_csrf(build))

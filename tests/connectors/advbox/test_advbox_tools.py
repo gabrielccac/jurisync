@@ -72,7 +72,7 @@ class CompactReportTest(unittest.TestCase):
         self.assertEqual(result["compact"]["tasksReturned"], 2)
 
 
-class FindTasksTest(unittest.TestCase):
+class SearchTasksTest(unittest.TestCase):
     def client(self):
         client = AdvboxClient(session=mock.Mock(spec=AdvboxSession))
         client.list_members = mock.Mock(return_value={"users": [{"id": 1}, {"id": 2}]})
@@ -94,19 +94,35 @@ class FindTasksTest(unittest.TestCase):
         )
         return client
 
-    def test_every_member_is_asked_when_no_responsible_is_given(self):
+    def test_a_text_search_asks_every_member(self):
         client = self.client()
-        result = client.find_tasks("PROPOSTA")
+        result = client.search_tasks("PROPOSTA")
         self.assertEqual(client.list_activities.call_args.kwargs["responsibleIds"], [1, 2])
         self.assertEqual(client.list_activities.call_args.kwargs["search"], "PROPOSTA")
-        self.assertEqual(result["tasks"][0]["postId"], "9")
-        self.assertEqual(result["tasks"][0]["prazo"], "15/10/2026")
-        self.assertNotIn("estado", result["tasks"][0])
+        (task,) = result["tasks"]
+        self.assertEqual((task["postId"], task["deadline"], task["responsible"]), ("9", "15/10/2026", ["EMILLY"]))
+        self.assertEqual((result["scope"], result["total"], result["hasMore"]), ("everyone", 1, False))
+
+    def test_a_listing_without_text_is_the_logged_in_users_unless_asked(self):
+        client = self.client()
+        self.assertEqual(client.search_tasks()["scope"], "logged-in user")
+        self.assertEqual(client.list_activities.call_args.kwargs["responsibleIds"], [])
+        client.search_tasks(allResponsibles=True)
+        self.assertEqual(client.list_activities.call_args.kwargs["responsibleIds"], [1, 2])
 
     def test_explicit_responsible_skips_the_member_lookup(self):
         client = self.client()
-        client.find_tasks("PROPOSTA", responsible=[49187])
+        client.search_tasks("PROPOSTA", responsible=[49187])
         client.list_members.assert_not_called()
+
+    def test_completed_tasks_need_a_date_range_and_details_are_cut(self):
+        client = self.client()
+        with self.assertRaises(ValueError):
+            client.search_tasks(completed="concluidas")
+        client.list_activities.return_value["records"][0]["detail"] = "y" * 50
+        task = client.search_tasks("x", detailChars=10)["tasks"][0]
+        self.assertEqual(task["detail"], "y" * 10 + "…")
+        self.assertEqual(client.list_activities.call_args.kwargs["priorities"], (1, 2, 3))
 
 
 class UploadFolderTest(unittest.TestCase):

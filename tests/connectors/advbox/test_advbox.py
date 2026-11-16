@@ -20,6 +20,7 @@ from jurisync.connectors.advbox.parsers import (
     parse_hidden_inputs,
     parse_lawsuit_report,
     parse_members,
+    parse_task_filters,
     parse_workflow_steps,
     parse_workflows,
 )
@@ -38,7 +39,6 @@ class WriteGuardTest(unittest.TestCase):
                     lambda: client.delete_task("1"),
                     lambda: client.complete_task("1"),
                     lambda: client.stage_files([{"filename": "file.pdf", "bytes": b"x"}]),
-                    lambda: session.delete("/posts/1"),
                     lambda: session.post_multipart("/s3", {}),
                 ):
                     with self.assertRaisesRegex(PermissionError, "writes are disabled"):
@@ -92,6 +92,49 @@ class RequestShapeTest(unittest.TestCase):
         lawsuits = parse_qs(urlsplit(table_path("lawsuits")).query, keep_blank_values=True)
         self.assertEqual(lawsuits["steps_id[]"], ["9", "1", "6", "2", "3", "4", "5", "7"])
         self.assertEqual(lawsuits["date_from"], [""])
+
+    def test_activities_body_sends_the_screen_filters(self):
+        body = parse_qs(
+            build_activities_body(
+                "tok3n",
+                completed="concluidas",
+                responsibleIds=[1, 2],
+                dateFrom="01/11/2026",
+                dateTo="30/11/2026",
+                priorities=[3],
+                taskTypeId="publications",
+                stepId="5",
+                groupIds=[98377],
+                lawsuitTypeIds=[241724],
+            ),
+            keep_blank_values=True,
+        )
+        self.assertEqual(body["completed"], ["finalizados"])
+        self.assertEqual((body["tasks_id"], body["steps_id"]), (["publications"], ["5"]))
+        self.assertEqual((body["groups_id[]"], body["type_lawsuits_id[]"]), (["98377"], ["241724"]))
+        self.assertEqual((body["priority[]"], body["enable_multiple"]), (["3"], ["1"]))
+        self.assertEqual((body["start_from"], body["start_until"]), (["01/11/2026"], ["30/11/2026"]))
+        with self.assertRaises(ValueError):
+            build_activities_body("tok3n", completed="finalizadas")
+
+    def test_activity_flags_are_unknown_on_other_users_rows(self):
+        row = ['<span class="styles hidden">late</span>', "&nbsp;", "&nbsp;", "&nbsp;"] + [""] * 5
+        activity = parse_activity_row(row)
+        self.assertEqual((activity["important"], activity["urgent"], activity["viewed"]), (None, None, None))
+
+    def test_task_filters_read_the_screen_selects(self):
+        html = (
+            '<select name="tasks_id"><option value="">Selecione</option><option value="publications">Intimações'
+            '</option><option value="572240">ABRIR INTIMAÇÃO</option></select>'
+            '<select name="steps_id"><option value="5">Execução/cobrança</option></select>'
+            '<select name="groups_id[]" multiple><option value="98377">ATENDIMENTO</option></select>'
+            '<select name="type_lawsuits_id[]"><option value="241724">AÇÃO DE GUARDA</option></select>'
+        )
+        filters = parse_task_filters(html)
+        self.assertEqual([t["id"] for t in filters["taskTypes"]], ["publications", "572240"])
+        self.assertEqual(filters["stages"], [{"id": "5", "label": "Execução/cobrança"}])
+        self.assertEqual(filters["groups"][0]["label"], "ATENDIMENTO")
+        self.assertEqual(filters["lawsuitTypes"][0]["id"], "241724")
 
     def test_activities_body_mirrors_captured_request(self):
         body = parse_qs(
@@ -157,8 +200,26 @@ class ParserTest(unittest.TestCase):
             ["parties", "type"],
         )
         self.assertEqual(
-            result["records"], [{"parties": "Maria & João", "type": "Cível", "links": ["/lawsuits/42/edit"]}]
+            result["records"],
+            [{"parties": "Maria & João", "type": "Cível", "links": ["/lawsuits/42/edit"], "lawsuitId": "42"}],
         )
+
+    def test_table_total_is_the_matching_count_and_icons_are_not_text(self):
+        result = normalize_table(
+            {
+                "iTotalRecords": 2,
+                "iTotalDisplayRecords": 15799,
+                "iTotalPage": "2",
+                "data": [
+                    ["A", 'N/A <i class="material-icons">mode_edit</i><i class="material-icons">delete</i>'],
+                    ["B", '<a href="customers/7/edit">x</a>'],
+                ],
+            },
+            ["parties", "movementDate"],
+        )
+        self.assertEqual((result["total"], result["totalPages"]), (15799, 7900))
+        self.assertEqual(result["records"][0]["movementDate"], "N/A")
+        self.assertEqual(result["records"][1]["customerId"], "7")
 
     def test_hidden_fields_are_extracted_and_decoded(self):
         fields = parse_hidden_inputs(
@@ -170,9 +231,9 @@ class ParserTest(unittest.TestCase):
     def test_activity_row(self):
         row = [
             '<span class="styles hidden">late</span> <a href="posts/status/167516185" data-field="completed" data-value="1" data-id="162717821" data-lawsuit="11176564" data-task="6886198" data-post="167516185"></a>',
-            '<a data-field="important" data-value="1" data-id="162717821"></a>',
-            '<a data-field="urgent" data-value="0" data-id="162717821"></a>',
-            '<a data-field="viewed" data-value="0" data-id="162717821"></a>',
+            '<a data-field="important" data-value="1" data-id="162717821"> <b>1</b> <i>star</i></a>',
+            '<a data-field="urgent" data-value="1" data-id="162717821"> <b>0</b> <i>priority_high</i></a>',
+            '<a data-field="viewed" data-value="1" data-id="162717821"><i>lens</i></a>',
             '<a href="posts/167516185/edit" class="link" title="fazer novo beneficio">ENTRAR COM BENEFÍCIO: Fazer novo beneficio</a>',
             '<a href="customers/10463652/edit" class="link popup">CLIENTE EXEMPLO</a>',
             '<span class="red">08/12/2025 10:00</span>',
@@ -235,7 +296,15 @@ class ParserTest(unittest.TestCase):
         tree = parse_file_tree(html)
         self.assertEqual(
             tree["folders"],
-            [{"path": "Anexado em tarefas", "name": "Anexado em tarefas", "itemCount": 14, "size": "17.1 MB"}],
+            [
+                {
+                    "path": "Anexado em tarefas",
+                    "name": "Anexado em tarefas",
+                    "itemCount": 14,
+                    "size": "17.1 MB",
+                    "uploadable": False,
+                }
+            ],
         )
         first, second = tree["files"]
         self.assertEqual((first["name"], first["fileId"], first["sourcePostId"]), ("0-PA_3489.pdf", "38591366", None))

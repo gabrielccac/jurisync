@@ -3,9 +3,10 @@
 import json
 import os
 import re
-from datetime import UTC, datetime
+from datetime import date, datetime
 from html import unescape
 from urllib.parse import parse_qs, urljoin, urlsplit
+from zoneinfo import ZoneInfo
 
 BASE_URL = os.environ.get("ADVBOX_BASE_URL", "https://app.advbox.com.br")
 _ENTITIES = (
@@ -27,6 +28,7 @@ def _group(pattern, text, index=1, flags=0):
 
 def decode_cell(value):
     text = re.sub(r"<br\s*/?>", "\n", str(value if value is not None else ""), flags=re.I)
+    text = re.sub(r"<i\b[^>]*material-icons[^>]*>[\s\S]*?</i>", " ", text, flags=re.I)  # icon names, not text
     text = re.sub(r"<[^>]*>", " ", text)
     for pattern, replacement in _ENTITIES:
         text = re.sub(pattern, replacement, text, flags=re.I)
@@ -37,18 +39,41 @@ def _data_attribute(html, name):
     return _group(rf'data-{name}="([^"]*)"', html)
 
 
+OFFICE_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
+
 def _brazilian_date(value):
     match = re.search(r"(\d{2})/(\d{2})/(\d{4})", str(value or ""))
     if not match:
         return None
     try:
-        return datetime(int(match[3]), int(match[2]), int(match[1]), tzinfo=UTC)
+        return date(int(match[3]), int(match[2]), int(match[1]))
     except ValueError:
         return None
 
 
+def _today():
+    """Today's date where the office works: a task due today is not overdue, whatever the server's clock zone."""
+    return datetime.now(OFFICE_TIMEZONE).date()
+
+
 def _cell(row, index):
     return row[index] if index < len(row) and row[index] is not None else ""
+
+
+def _flag(html):
+    """The important/urgent state of a row: the ``<b>`` counter of its toggle (``data-value`` is the value a click
+    would set, always 1). Rows of other users carry no toggle, so their state is unknown (None)."""
+    count = _group(r"<b>\s*(\d+)\s*</b>", html)
+    return None if count is None else count != "0"
+
+
+def _viewed(state_html, toggle_html):
+    """Read state from the row's hidden state classes (``late viewed``); unknown when the row has no toggle."""
+    if "data-field" not in str(toggle_html or ""):
+        return None
+    classes = _group(r'class="styles hidden">([^<]*)<', state_html) or ""
+    return "viewed" in classes.split()
 
 
 def parse_activity_row(row):
@@ -74,15 +99,15 @@ def parse_activity_row(row):
         "taskTemplateId": _data_attribute(_cell(row, 0), "task"),
         "task": decode_cell(task[3] if task else _cell(row, 4)),
         "detail": task[2] if task else "",
-        "important": _data_attribute(_cell(row, 1), "value") == "1",
-        "urgent": _data_attribute(_cell(row, 2), "value") == "1",
-        "viewed": _data_attribute(_cell(row, 3), "value") == "1",
+        "important": _flag(_cell(row, 1)),
+        "urgent": _flag(_cell(row, 2)),
+        "viewed": _viewed(_cell(row, 0), _cell(row, 3)),
         "customer": {"id": customer[1], "name": decode_cell(customer[2])} if customer else None,
         "start": start,
         "startLabel": start_label,
         "deadline": deadline,
         "deadlineLabel": deadline_label,
-        "overdue": bool(deadline_date and deadline_date < datetime.now(UTC)),
+        "overdue": bool(deadline_date and deadline_date < _today()),
         "responsible": responsible,
     }
 
@@ -145,6 +170,32 @@ def normalize_publications(payload, page_size, page=1):
     }
 
 
+TASK_FILTER_SELECTS = {
+    "taskTypes": "tasks_id",
+    "stages": "steps_id",
+    "groups": "groups_id",
+    "lawsuitTypes": "type_lawsuits_id",
+}
+
+
+def parse_task_filters(html):
+    """Options of the Tarefas filter selects as ``{"taskTypes": [{"id", "label"}], "stages", "groups", ...}``."""
+    result = {}
+    for key, name in TASK_FILTER_SELECTS.items():
+        select = _group(rf'<select[^>]*name="{name}(?:\[\])?"[^>]*>([\s\S]*?)</select>', html) or ""
+        result[key] = [
+            {"id": match[1], "label": decode_cell(match[2])}
+            for match in re.finditer(r'<option[^>]*value="([^"]+)"[^>]*>([^<]*)</option>', select)
+        ]
+    result["situations"] = [{"id": "pendentes", "label": "Pendentes"}, {"id": "concluidas", "label": "Concluídas"}]
+    result["priorities"] = [
+        {"id": "normal", "label": "Normal"},
+        {"id": "urgente", "label": "Urgente"},
+        {"id": "importante", "label": "Importante"},
+    ]
+    return result
+
+
 def parse_publication_courts(html):
     """Court filter options of the Intimações page: ``[{"id", "code", "label"}]`` (``code`` is the sigla)."""
     select = _group(r'<select[^>]*name="courts_id"[^>]*>([\s\S]*?)</select>', html)
@@ -167,13 +218,16 @@ def normalize_table(payload, names):
         )
         if links:
             record["links"] = links
+            for key, pattern in (("customerId", r"customers/(\d+)/edit"), ("lawsuitId", r"lawsuits/(\d+)/edit")):
+                found = next((m[1] for link in links if (m := re.search(pattern, link))), None)
+                if found:
+                    record[key] = found
         records.append(record)
-    return {
-        "total": _number(payload.get("iTotalRecords", 0)),
-        "filteredTotal": _number(payload.get("iTotalDisplayRecords", 0)),
-        "totalPages": _number(payload.get("iTotalPage", 0)),
-        "records": records,
-    }
+    # The listing reports the page's row count as iTotalRecords, the page size as iTotalPage and the number of
+    # matching rows as iTotalDisplayRecords.
+    total = _number(payload.get("iTotalDisplayRecords", 0))
+    size = _number(payload.get("iTotalPage", 0)) or len(records) or 1
+    return {"total": total, "filteredTotal": total, "totalPages": -(-total // size) or 1, "records": records}
 
 
 def _table_rows(table_html, headers):
@@ -225,17 +279,19 @@ def parse_lawsuit_report(html):
 def parse_file_tree(html):
     folders, files = [], []
     for chunk in re.split(r"<li\b", str(html))[1:]:
-        folder = re.search(r'class="item folder open-folder[^"]*"[^>]*data-path="([^"]*)"', chunk)
+        folder = re.search(r'class="item folder open-folder([^"]*)"[^>]*data-path="([^"]*)"', chunk)
         meta = decode_cell(_group(r'<p class="datetime">([\s\S]*?)</p>', chunk) or "")
         name = _group(r'<p class="name">\s*([^<]*?)\s*</p>', chunk)
         if folder:
             size = _group(r"itens?\s*•\s*([^•]+)$", meta)
             folders.append(
                 {
-                    "path": folder[1],
-                    "name": decode_cell(name if name is not None else folder[1]),
+                    "path": unescape(folder[2]),
+                    "name": decode_cell(name if name is not None else folder[2]),
                     "itemCount": int(_group(r"(\d+)\s*itens?", meta) or 0),
                     "size": size.strip() if size else "",
+                    # The screen hides the upload button inside system folders (e.g. the task files one).
+                    "uploadable": "hide-upload" not in folder[1].split(),
                 }
             )
             continue
@@ -258,6 +314,14 @@ def parse_file_tree(html):
                 }
             )
     return {"folders": folders, "files": files}
+
+
+def parse_uploaded_file(html):
+    """The file entry ADVBOX answers an upload into a customer folder with (one ``<li>`` of the file manager, the
+    same markup as a listing), or None when the answer does not name a stored file. ADVBOX stores the file under
+    its own name (``<stem>_<number>.<ext>``), so the entry's name is not the uploaded one."""
+    files = [file for file in parse_file_tree(html)["files"] if file.get("fileId")]
+    return files[0] if len(files) == 1 else None
 
 
 def parse_activity_details(html):
