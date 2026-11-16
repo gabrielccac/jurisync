@@ -24,9 +24,9 @@ Complementa `docs/rollout-plan.md` (fases A–E), que segue valendo para cofre/p
 | Forma (`method`) | No servidor | Escritórios |
 |---|---|---|
 | `certificate_totp`, `certificate_mtls`, `certificate_challenge` (A1 + PIN, + TOTP) | Funciona por HTTP; o A1 fica em memória, vindo do cofre | allan, anaflavia, denis, fernanda, herica, patricia, victor, wesley (+ portais A1 de outros) |
-| `password_totp` (usuário + senha + TOTP, PJe/SSO) | Funciona por HTTP | allan, cinthia, eliane, jean, joao, kirlia, natalia, navarro, thaile |
+| `password_totp` (usuário + senha + TOTP, PJe/SSO) | Funciona por HTTP | allan, eliane, jean, joao, kirlia, natalia, navarro, thaile |
 | `browser_totp` (Eproc por senha no Chrome) | Precisa de Chrome headless no servidor (já é como o conector faz); limitar navegadores simultâneos pelo semáforo de logins | 14 escritórios têm ao menos um |
-| A3 (token físico; `EPROC_AUTH=a3`, `PJE_AUTH=a3`) | **Não funciona remoto**: o token tem de estar plugado na máquina que faz o login | barbara, cinthia |
+| A3 (token físico; `EPROC_AUTH=a3`, `PJE_AUTH=a3`) | **Não funciona remoto**: o token tem de estar plugado na máquina que faz o login | barbara, cinthia: ficam na instalação local (decisão de 16/11) |
 | CAPTCHA (TJES 1G: AWS WAF; TJTO: imagem) | `JURISYNC_CAPTCHA_API_KEY` no ambiente do servidor; TJTO com o extra `captcha-ocr` (ddddocr) instalado | herica (TJES), denis (TJTO, pendente de usuário) |
 
 ## Inventário (portais declarados em `customers/<nome>/portals.toml`)
@@ -50,11 +50,13 @@ Complementa `docs/rollout-plan.md` (fases A–E), que segue valendo para cofre/p
 | navarro | 3 | PJe 3 | — | — | 2 |
 | elisandra | 3 | Eproc 3 | — | — | 2 (renomear variáveis `*_USUARIO/_SENHA`) |
 | priscila | 2 | Eproc 2 | — | Juridiq | 2 |
-| barbara | 17 | PJe 7, Eproc 10 | A3 | — | 3 |
-| cinthia | 9 | PJe 5, Eproc 3, e-SAJ | A3 | ADVBOX | 3 |
+| barbara | 17 | PJe 7, Eproc 10 | A3 | — | local |
+| cinthia | 9 | PJe 5, Eproc 3, e-SAJ | A3 | ADVBOX | local |
 
 Onda 1 = A1 (login sem navegador na maioria dos portais). Onda 2 = senha + TOTP (usa mais o Chrome do Eproc).
-Onda 3 = A3, que depende de uma decisão (abaixo).
+Onda 3 = A3: barbara e cinthia ficam na instalação local (`settings.toml` `[hosted] mode = "local"`); no
+servidor existem só como registro, sem credenciais, usuários nem ferramentas (`docs/hosted.md`, "Local-only offices").
+Isso vale também para os 6 portais por senha + autenticador da cinthia: o escritório inteiro fica local.
 
 ## Fases
 
@@ -87,11 +89,16 @@ Mesmo checklist. Antes: renomear as variáveis da elisandra para os nomes padrã
 (kirlia, thaile em 13/11) com o escritório.
 
 ### Fase 4 — Onda 3 (A3)
-Decidir uma de três saídas, por escritório:
+Decidido em 16/11: barbara e cinthia **ficam locais**, como hoje (A3 nas máquinas delas). Saídas para rever depois,
+por escritório:
 - **A1 para o servidor** (recomendado): o escritório emite um A1 (e-CPF) para a automação.
 - **Ponte local**: um processo pequeno na máquina do escritório com o token, que só assina o desafio de login
   quando o servidor pede (exige construir e manter; o login cai quando a máquina está desligada).
-- **Ficar local**: o escritório mantém a instalação local só para os portais A3.
+- **Ficar local** (escolhido): o escritório mantém a instalação local; o servidor só guarda o registro.
+- **Ponte por Tailscale** (ideia, não validada, nada construído): o notebook do escritório entra numa tailnet com o
+  servidor e expõe o token A3 (assinatura do desafio de login, ou o leitor via PKCS#11 remoto) só para o servidor.
+  Falta provar que os SSOs aceitam a assinatura feita assim, a latência no login, o PIN sem digitação e o que acontece
+  com o notebook desligado ou fora da rede; e o termo de custódia muda (o servidor passaria a usar o token).
 
 ### Fase 5 — Página do escritório e modelo de contas (rollout-plan fase B)
 Construir a tela de cadastro (login, senha, QR/A1, teste e grava), para que trocas de senha e certificado novo
@@ -125,5 +132,5 @@ Começa quando houver uns 5 escritórios no servidor: reduz logins e requisiçõ
 
 1. Onde roda a instância atual do Victor (e do Fabrício), e se o servidor novo fica no mesmo provedor.
 2. Domínio e provedor da VM de produção (e se usamos Cloudflare Tunnel como no `tema324`).
-3. Saída para os escritórios com A3 (barbara, cinthia).
+3. ~~Saída para os escritórios com A3 (barbara, cinthia)~~: ficam locais (16/11).
 4. Texto do termo de custódia do A1/senhas antes da onda 1.

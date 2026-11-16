@@ -87,6 +87,24 @@ installs the profiles in `JURISYNC_CUSTOMERS_DIR`, stores each bundle without a 
 random passwords written to a 0600 file. The first login of each portal is `deploy/check-office.sh <office>`, from the
 server, one portal at a time.
 
+### Local-only offices
+
+An office that keeps its own install (today barbara and cinthia: their logins use an A3 token on the office's
+computer) says so in its committed `customers/<name>/settings.toml`:
+
+```toml
+[hosted]
+mode = "local"
+reason = "A3 — instalação local"
+```
+
+`provision export` then plans it with no portal, connector, user or bundle (every portal is listed as skipped with the
+reason), and `provision apply` keeps only a record: the tenant exists with `mode = local` and the reason, its vault
+entry and users are deleted if an earlier hosted setup left any, and no credentials are imported. `tenant list` and
+`portal list` show "só local: <reason>"; `tools/list` is empty for it and any call answers that the office uses its
+local install. `user add`, `secrets import-bundle` and `tenant connectors` refuse it. `tenant add <id> --local
+"<reason>"` creates one by hand. Removing the `[hosted]` table and running export/apply again makes it hosted.
+
 ## Pilot runbook
 
 ```bash

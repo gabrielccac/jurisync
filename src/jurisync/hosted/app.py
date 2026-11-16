@@ -153,6 +153,11 @@ class Office(MCPServer):
         tenant, user = caller.get() or ({"id": "", "connectors": []}, "")
         started, error = time.monotonic(), ""
         try:
+            if tenant.get("mode") == "local":
+                raise NotEnabled(
+                    f"This office uses its local Jurisync install ({tenant.get('reason') or 'local'}); "
+                    "nothing is served for it here"
+                )
             if connector not in tenant["connectors"]:
                 raise NotEnabled(f"{name} is a {SYSTEMS.get(connector, connector)} tool, not enabled for this office")
             if not granted(connector, name):

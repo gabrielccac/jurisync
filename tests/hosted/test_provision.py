@@ -19,7 +19,7 @@ from jurisync.hosted.vault import Vault, generate_key, load_key
 
 from .test_hosted import make_p12_bytes
 from .test_office_endpoint import OfficeCase
-from .test_signin_security import BASE, PASSWORD
+from .test_signin_security import BASE, PASSWORD, ping
 
 SECRET = "JBSWY3DPEHPK3PXP"
 
@@ -90,7 +90,26 @@ secrets = ["PJE_AUTH", "PJE_A3_PIN"]
             "PJE_A3_PIN": "pin-token",
         },
     ),
+    "delta": (
+        """
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA"]
+
+[tjsp-1g]
+method = "certificate_totp"
+secrets = ["PJE_A3_PIN", "TJSP_1G_2FA_DATA"]
+""",
+        {
+            "PJE_1G_USERNAME": "456",
+            "PJE_1G_PASSWORD": "senha-delta",
+            "PJE_1G_2FA_DATA": SECRET,
+            "PJE_A3_PIN": "delta-pin",
+        },
+    ),
 }
+# delta keeps its local install (settings.toml [hosted] mode = "local").
+LOCAL_SETTINGS = '[hosted]\nmode = "local"\nreason = "A3 — instalação local"\n'
 VALUES = [value for _, env in PROFILES.values() for value in env.values() if len(value) > 4 and value != "true"]
 
 
@@ -105,6 +124,7 @@ class ProvisionCase(unittest.TestCase):
             folder.mkdir(parents=True)
             (folder / "portals.toml").write_text(profile, encoding="utf-8")
             (folder / ".env").write_text("".join(f"{key}={value}\n" for key, value in env.items()), encoding="utf-8")
+        (self.ours / "delta" / "settings.toml").write_text(LOCAL_SETTINGS, encoding="utf-8")
         self.p12, self.pin = make_p12_bytes("Advogada Alfa", "pin-alfa")
         (self.ours / "alfa" / "cert.pfx").write_bytes(self.p12)
         self.out = self.root / "rollout"
@@ -165,7 +185,52 @@ class PlanTest(ProvisionCase):
             office["tenant"]: office for office in json.loads((self.out / provision.PLAN).read_text())["offices"]
         }
         self.assertEqual(offices["alfa"]["users"], ["pessoa@alfa.test"])
-        self.assertEqual(set(offices), {"alfa", "beta", "gama"})
+        self.assertEqual(set(offices), {"alfa", "beta", "gama", "delta"})
+
+
+class LocalOfficeTest(ProvisionCase):
+    def test_a_local_office_is_planned_with_nothing_for_the_server(self):
+        offices = {plan.tenant: plan for plan in self.export()}
+        delta = offices["delta"]
+        self.assertEqual((delta.mode, delta.reason), ("local", "A3 — instalação local"))
+        self.assertEqual((delta.portals, delta.connectors, delta.checks), ([], [], []))
+        self.assertEqual(set(delta.skipped), {"trf1-1g", "tjsp-1g"})
+        self.assertFalse((self.out / "delta.jurisync").exists())
+        self.assertTrue((self.out / "profiles" / "delta" / "settings.toml").is_file())
+        self.assertTrue(any("só local" in line for line in self.said))
+
+    def test_apply_keeps_only_a_record_and_drops_what_an_earlier_hosted_setup_left(self):
+        self.export()
+        environment = {**ProvisionCase.server(self), "JURISYNC_CUSTOMERS_DIR": str(self.ours)}
+        with mock.patch.dict(os.environ, environment):
+            store, vault = cli.open_store(), cli.open_vault()
+            # delta was hosted before the switch: connectors, vault and a user.
+            store.add_tenant("delta", "Delta", customer="delta", connectors=["pje", "djen"])
+            store.add_user("antiga@delta.test", "delta", PASSWORD)
+            vault.put("delta", {"PJE_1G_PASSWORD": "senha-delta"})
+            plan = json.loads((self.out / provision.PLAN).read_text())
+            for office in plan["offices"]:
+                office["users"] = [f"advogada@{office['tenant']}.test"]
+            (self.out / provision.PLAN).write_text(json.dumps(plan))
+            provision.apply(self.out, self.passphrase, say=self.said.append)
+            office = store.tenant("delta")
+            self.assertEqual((office["mode"], office["connectors"]), ("local", []))
+            self.assertEqual(vault.names("delta"), ([], []))
+            self.assertEqual(store.users("delta"), [])
+            with self.assertRaises(ValueError):
+                store.add_user("nova@delta.test", "delta", PASSWORD)
+            said = []
+            cli.main(["tenant", "list"], say=said.append)
+            self.assertIn("delta\tDelta\tperfil=delta\tsó local: A3 — instalação local", said)
+            said.clear()
+            cli.main(["portal", "list", "delta"], say=said.append)
+            self.assertEqual(said, ["delta: só local (A3 — instalação local); nenhum portal no servidor"])
+            with self.assertRaises(SystemExit):
+                cli.main(["secrets", "import-bundle", "delta", str(self.out / "alfa.jurisync")], say=said.append)
+            with self.assertRaises(SystemExit):
+                cli.main(["tenant", "connectors", "delta", "pje"], say=said.append)
+        for value in VALUES:
+            self.assertNotIn(value, "\n".join(self.said))
 
 
 class ApplyTest(ProvisionCase):
@@ -304,6 +369,21 @@ class WriteGrantTest(OfficeCase):
             self.assertEqual(self.data(self.call(office_b, "advbox_create_task")), {"created": "office-b"})
             per_connector = self.mcp(client, self.token(client, resource=f"{BASE}/advbox/mcp"), "/advbox/mcp")
             self.assertEqual(self.names(per_connector), {"advbox_list_tasks"})
+
+
+class LocalOfficeEndpointTest(OfficeCase):
+    def test_a_local_office_gets_no_tools_and_every_call_says_why(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            token = self.token(client, resource=f"{BASE}/mcp")
+            self.store.update_tenant("office-a", mode="local", reason="A3 — instalação local")
+            office_a = self.mcp(client, token)
+            self.assertEqual(self.names(office_a), set())
+            refused = self.call(office_a, "alpha_whoami")
+            self.assertTrue(refused["isError"])
+            self.assertIn("uses its local Jurisync install (A3 — instalação local)", refused["content"][0]["text"])
+            self.assertEqual(ping(client, token, "/alpha/mcp").status_code, 401)  # token was for /mcp only
+            office_b = self.mcp(client, self.token(client, "user@office-b.test", resource=f"{BASE}/mcp"))
+            self.assertEqual(self.names(office_b), {"alpha_whoami", "alpha_fail", "beta_whoami"})
 
 
 class JuridiqWritesTest(unittest.TestCase):

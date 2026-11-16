@@ -61,6 +61,8 @@ class OfficePlan:
     notes: list = field(default_factory=list)
     renamed: dict = field(default_factory=dict)  # legacy name -> canonical name
     users: list = field(default_factory=list)
+    mode: str = "hosted"  # "local": settings.toml [hosted] mode; remembered on the server, nothing served
+    reason: str = ""
 
 
 def is_a3(setup):
@@ -134,6 +136,13 @@ def plan_office(customer, values, *, name=None, ready=None):
 
     ready = TENANT_READY if ready is None else ready
     setups = customers.load_setup(customer)
+    mode, reason = customers.hosted_mode(customer)
+    if mode == "local":
+        # The office keeps its own install: no portal, credential, connector or user on the server.
+        reason = reason or "instalação local"
+        plan = OfficePlan(tenant=customer, name=name or customer.title(), customer=customer, mode=mode, reason=reason)
+        plan.skipped = {key: reason for key in setups}
+        return plan
     # The profile's pinned values ([env].set, e.g. TJSP_1G_CERT=true) count as set, as they do on every call.
     values = {**values, **customers.fixed_variables(customer)}
     values, renamed = canonical_names(values, list(setups))
@@ -277,8 +286,19 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
             say(f"{customer}: perfil inválido, fora do plano ({error})")
             continue
         if customer in previous:
-            plan.users = list(previous[customer].get("users", []))
+            plan.users = list(previous[customer].get("users", [])) if plan.mode == "hosted" else []
             plan.name = (names or {}).get(customer) or previous[customer].get("name", plan.name)
+        profile = out / "profiles" / customer
+        profile.mkdir(parents=True, exist_ok=True)
+        for file_name in PROFILE_FILES:
+            source = customers.customer_dir(customer) / file_name
+            if source.is_file():
+                shutil.copyfile(source, profile / file_name)
+        offices.append(plan)
+        if plan.mode == "local":
+            (out / f"{plan.tenant}.jurisync").unlink(missing_ok=True)  # a bundle from before the switch
+            say(summary(plan))
+            continue
         content_values, content_files = vault_content(plan, values)
         bundle = credentials_bundle.seal(
             content_values,
@@ -290,13 +310,6 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
             servers=plan.connectors,
         )
         write_private(out / f"{plan.tenant}.jurisync", bundle + "\n")
-        profile = out / "profiles" / customer
-        profile.mkdir(parents=True, exist_ok=True)
-        for file_name in PROFILE_FILES:
-            source = customers.customer_dir(customer) / file_name
-            if source.is_file():
-                shutil.copyfile(source, profile / file_name)
-        offices.append(plan)
         say(summary(plan, len(content_values), len(content_files)))
     # Offices not exported this time stay in the plan as they were.
     merged = {**previous, **{plan.tenant: asdict(plan) for plan in offices}}
@@ -307,6 +320,10 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
 
 
 def summary(plan, values=None, files=None):
+    if plan.mode == "local":
+        return (
+            f"{plan.tenant}: só local ({plan.reason}): {len(plan.skipped)} portal(is) ficam na instalação do escritório"
+        )
     pieces = [f"{plan.tenant}: {len([key for key in plan.portals if key not in SERVICES])} portal(is)"]
     services = [key for key in plan.portals if key in SERVICES]
     if services:
@@ -355,11 +372,14 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=pri
         tenant, customer = office["tenant"], office["customer"]
         if install_profile(directory / "profiles" / customer, customer):
             say(f"{tenant}: perfil instalado em {customers.customer_dir(customer)}")
+        if office.get("mode", "hosted") == "local":
+            apply_local(store, vault, office, say)
+            continue
         if store.tenant(tenant) is None:
             store.add_tenant(tenant, office["name"], customer=customer, connectors=office["connectors"])
             say(f"{tenant}: escritório criado ({', '.join(office['connectors'])})")
         else:
-            store.update_tenant(tenant, name=office["name"], connectors=office["connectors"])
+            store.update_tenant(tenant, name=office["name"], connectors=office["connectors"], mode="hosted", reason="")
             say(f"{tenant}: conectores atualizados ({', '.join(office['connectors'])})")
         opened = credentials_bundle.unseal((directory / f"{tenant}.jurisync").read_text(encoding="utf-8"), passphrase)
         if opened["customer"] != customer:
@@ -386,6 +406,26 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=pri
         write_private(user_passwords, previous + "\n".join(created_users) + "\n")
         say(f"Senhas iniciais dos {len(created_users)} usuário(s) novos em {user_passwords} (0600, não impressas)")
     say("Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)")
+
+
+def apply_local(store, vault, office, say):
+    """A local-only office: the tenant is kept as a record, with no connectors, credentials or users."""
+    tenant, reason = office["tenant"], office.get("reason", "")
+    if store.tenant(tenant) is None:
+        store.add_tenant(
+            tenant, office["name"], customer=office["customer"], connectors=(), mode="local", reason=reason
+        )
+        say(f"{tenant}: registrado como só local ({reason}); nada é servido")
+    else:
+        store.update_tenant(tenant, name=office["name"], connectors=(), mode="local", reason=reason)
+        say(f"{tenant}: agora só local ({reason}); conectores removidos")
+    if vault.names(tenant) != ([], []):
+        vault.delete(tenant)
+        say(f"{tenant}: credenciais apagadas do cofre")
+    for row in store.users(tenant):
+        store.remove_user(row["email"])
+        say(f"{tenant}: usuário {row['email']} removido")
+    store.log(tenant, "operador", "escritório só local", reason)
 
 
 # Tools an office plugin may name that the hosted server does not serve: filing runs on the office's machine and PJe

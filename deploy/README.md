@@ -54,7 +54,9 @@ uv run jurisync-hosted provision export --out ~/rollout --passphrase-file ~/.con
 ```
 
 It prints, per office, the portals going to the server, the connectors, and what is left out and why (A3 token,
-missing secrets, portals not served). `~/rollout/plan.json` has no values: add each office's lawyers to its `users`
+missing secrets, portals not served). An office whose `customers/<name>/settings.toml` has `[hosted] mode = "local"`
+(barbara, cinthia: A3 on their own computers) gets no bundle, connectors or users; `apply` only records it, and
+`check-office.sh` has nothing to test for it. `~/rollout/plan.json` has no values: add each office's lawyers to its `users`
 list, then export again (users are kept). The passphrase file is created once (0600) and is never printed.
 
 ```bash

@@ -141,6 +141,8 @@ def missing_groups(portal_keys, customer, values, files):
 def import_bundle(args, say):
     store, vault = open_store(), open_vault()
     tenant = require_existing(store, args.tenant)
+    if tenant["mode"] == "local":
+        raise SystemExit(f"{tenant['id']} usa a instalação local ({tenant['reason']}): nada vai para o cofre")
     if args.passphrase_file:
         passphrase = Path(args.passphrase_file).expanduser().read_text(encoding="utf-8").strip()
     else:
@@ -237,6 +239,9 @@ def portal_list(args, say):
     store, vault = open_store(), open_vault()
     office = require_existing(store, args.tenant)
     tenant = office["id"]
+    if office["mode"] == "local":
+        say(f"{tenant}: só local ({office['reason'] or 'instalação local'}); nenhum portal no servidor")
+        return
     values, files = vault.get(tenant)
     if office["customer"]:
         # The server applies the profile's pinned values on every call; show the same state.
@@ -310,7 +315,9 @@ def missing_profiles(store):
     return [
         row["id"]
         for row in store.tenants()
-        if row["customer"] and not (customers.customer_dir(row["customer"]) / "portals.toml").is_file()
+        if row["customer"]
+        and row["mode"] == "hosted"
+        and not (customers.customer_dir(row["customer"]) / "portals.toml").is_file()
     ]
 
 
@@ -352,6 +359,7 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     add.add_argument("--name", required=True)
     add.add_argument("--customer", default="", help="perfil em customers/ (portals.toml, settings.toml)")
     add.add_argument("--connectors", nargs="+", default=["pje"])
+    add.add_argument("--local", metavar="MOTIVO", help="escritório só local (ex. A3): registrado, sem nada servido")
     tenant.add_parser("list")
     set_connectors = tenant.add_parser("connectors", help="troca os conectores do escritório")
     set_connectors.add_argument("tenant")
@@ -446,17 +454,25 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         if args.customer and not customers.customer_dir(args.customer).is_dir():
             raise SystemExit(f"Perfil customers/{args.customer} não existe")
         open_store().add_tenant(
-            require_tenant_id(args.tenant), args.name, customer=args.customer, connectors=args.connectors
+            require_tenant_id(args.tenant),
+            args.name,
+            customer=args.customer,
+            connectors=args.connectors,
+            mode="local" if args.local else "hosted",
+            reason=args.local or "",
         )
-        say(f"Escritório {args.tenant} criado ({', '.join(args.connectors)}).")
+        served = f"só local: {args.local}" if args.local else ", ".join(args.connectors)
+        say(f"Escritório {args.tenant} criado ({served}).")
     elif args.command == "tenant" and args.action == "connectors":
         store = open_store()
-        require_existing(store, args.tenant)
+        if require_existing(store, args.tenant)["mode"] == "local":
+            raise SystemExit(f"{args.tenant} usa a instalação local: não recebe conectores")
         store.update_tenant(args.tenant, connectors=args.connectors)
         say(f"Escritório {args.tenant}: {', '.join(args.connectors)}.")
     elif args.command == "tenant" and args.action == "list":
         for row in open_store().tenants():
-            say(f"{row['id']}\t{row['name']}\tperfil={row['customer'] or '-'}\t{','.join(row['connectors'])}")
+            served = ",".join(row["connectors"]) if row["mode"] == "hosted" else f"só local: {row['reason'] or '-'}"
+            say(f"{row['id']}\t{row['name']}\tperfil={row['customer'] or '-'}\t{served}")
     elif args.command == "tenant" and args.action == "remove":
         open_store().remove_tenant(args.tenant)
         open_vault().delete(args.tenant)
