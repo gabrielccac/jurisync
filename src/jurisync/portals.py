@@ -49,6 +49,16 @@ class Portal:
         """PJe-JT 2.x: the lawyer panel and process pages are the Angular app (PJe-KZ) over REST, not JSF."""
         return self.system == "pje" and self.flavor == "kz"
 
+    def owns_number(self, parts):
+        """Whether a parsed CNJ number (``parse_process_number``) can be in this portal.
+
+        A superior court (region ``00``, e.g. TST) keeps the number of the court of origin, so any region of its
+        branch of justice is accepted there; every other portal needs its own region.
+        """
+        if self.region == "00":
+            return parts[3] == self.justice
+        return parts[4] == self.region
+
     @property
     def id(self):
         return f"{self.system}-{self.key}"

@@ -37,13 +37,13 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     if process.get("success") is not True:
         raise ValueError("A successful supported PJe process result is required")
     number = process.get("numero_processo")
-    region = None
+    parts = None
     if isinstance(number, str):
         try:
-            region = parse_process_number(number)[4]
+            parts = parse_process_number(number)
         except (ValueError, IndexError):
-            region = None
-    if region is None or region != config.region:
+            parts = None
+    if parts is None or not config.owns_number(parts):
         raise ValueError("Process number tribunal does not match the portal")
     validate_document_ids(document_ids)
     if config.kz:

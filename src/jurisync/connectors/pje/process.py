@@ -91,7 +91,7 @@ def fetch_process(
     if scope not in ("latest", "page", "all"):
         raise ValueError("scope must be latest, page or all")
     number_parts = parse_process_number(process_number)
-    if number_parts[4] != config.region:
+    if not config.owns_number(number_parts):
         raise ValueError(f"Process number does not belong to {config.tribunal}")
     if download_dir and not fetch_documents:
         raise ValueError("download_dir requires fetch_documents=True")
@@ -169,7 +169,7 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
 
     config = portals.pje(portal)
     number_parts = parse_process_number(process_number)
-    if number_parts[4] != config.region:
+    if not config.owns_number(number_parts):
         raise ValueError(f"Process number does not belong to {config.tribunal}")
     validate_document_ids(document_ids)
     owned_session = session is None

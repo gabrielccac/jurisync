@@ -690,7 +690,7 @@ def read_documents(process, document_ids, *, session, save=False):
     if (
         process.get("success") is not True
         or not isinstance(number, str)
-        or parse_process_number(number)[4] != config.region
+        or not config.owns_number(parse_process_number(number))
     ):
         raise ValueError("A successful supported PJe process result is required")
     validate_document_ids(document_ids)

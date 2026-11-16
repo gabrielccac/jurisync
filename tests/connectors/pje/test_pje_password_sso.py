@@ -39,3 +39,14 @@ def test_login_form_accepts_the_keycloak_form_id():
 def test_plain_http_bounce_to_a_pje_host_is_upgraded_only_there():
     assert sso._https_pje("http://pje.tst.jus.br/pjekz/") == "https://pje.tst.jus.br/pjekz/"
     assert sso._https_pje("http://example.com/") == "http://example.com/"
+
+
+def test_superior_court_accepts_origin_numbers_of_its_branch_only():
+    from jurisync import portals
+    from jurisync.connectors.pje.parsers import parse_process_number
+
+    tst, trt12 = portals.pje("tst"), portals.pje("trt12-1g")
+    origin = parse_process_number("0001514-43.2024.5.12.0048")
+    assert tst.owns_number(origin) and trt12.owns_number(origin)
+    assert not tst.owns_number(parse_process_number("0815689-46.2025.8.19.0042"))
+    assert not trt12.owns_number(parse_process_number("0000371-73.2026.5.18.0018"))
