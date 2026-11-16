@@ -24,7 +24,8 @@ from jurisync.connectors.eproc.auth import is_panel, panel_link, portal_totp_acc
 from jurisync.connectors.pje.auth import signer as native_signer
 from jurisync.core import credentials
 from jurisync.core.certificate import client_certificate
-from jurisync.core.http import IMPERSONATE, TIMEOUT, follow_redirects, require_url
+from jurisync.core.http import IMPERSONATE, TIMEOUT, UnsafeUrlError, follow_redirects, require_url
+from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginRejected
 from jurisync.core.totp import next_code, totp
 
@@ -48,6 +49,12 @@ SSO_PARENTS = {
     "jfes.jus.br": "trf2.jus.br",
 }
 SSO_WORDS = {"sso", "keycloak"}
+
+# Courts whose certificate button moves to a separate mutual-TLS host that is not an SSO. TJTO's
+# ``acao=login_cert`` answers 302 to ``mtls.tjto.jus.br<root>externo_controlador.php?acao=login_cert&host=...``;
+# only that page and ``priv/login_cert.php`` under the portal root are accepted there.
+MTLS_HOSTS = {"tjto-1g": "mtls.tjto.jus.br", "tjto-2g": "mtls.tjto.jus.br"}
+MTLS_PAGES = ("externo_controlador.php", "priv/login_cert.php")
 
 
 def is_sso_host(config, host):
@@ -78,6 +85,11 @@ def require_login_url(config, value):
     host = (urllib.parse.urlsplit(value or "").hostname or "").lower()
     if config.key == "tjms-eproc-1g" and host == "mtls.tjms.jus.br":
         return require_url(value, hosts={host}, path="/priv/login_cert.php", label="TJMS certificate login")
+    if host and host == MTLS_HOSTS.get(config.key):
+        path = urllib.parse.urlsplit(value).path
+        if path not in {config.root + page for page in MTLS_PAGES}:
+            raise UnsafeUrlError(f"Unexpected {config.tribunal} certificate login URL path: {url_shape(value)}")
+        return require_url(value, hosts={host}, label=f"{config.tribunal} certificate login")
     if is_sso_host(config, host):
         hosts.add(host)
     return require_url(value, hosts=hosts, label="eproc login redirect")
@@ -147,9 +159,22 @@ def _post(session, url, data, referer, **options):
 def _classic_login(session, config, page, pem):
     """Post the local login form to its certificate address (what ``SubmitCert()`` does), without a password."""
     _, fields = _form(page.text, page.url, config, "frmLogin")
-    response = _follow(
-        session, config, _post(session, _classic_certificate_url(page, config), fields, page.url, cert=pem), cert=pem
-    )
+    try:
+        response = _follow(
+            session,
+            config,
+            _post(session, _classic_certificate_url(page, config), fields, page.url, cert=pem),
+            cert=pem,
+        )
+    except requests.exceptions.DNSError as error:
+        host = MTLS_HOSTS.get(config.key)
+        if not host or host not in str(error):
+            raise
+        # Seen 13-16/11/2026: the court sends the certificate login to a host it has not published in DNS.
+        raise RuntimeError(
+            f"{config.tribunal} certificate login host {host} does not resolve (not published in DNS by the court); "
+            "certificate login is unavailable until it is"
+        ) from None
     if "erro" in urllib.parse.parse_qs(urllib.parse.urlsplit(response.url).query):
         raise LoginRejected("eproc did not accept the A1 certificate")
     return response

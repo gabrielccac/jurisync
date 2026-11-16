@@ -41,7 +41,7 @@ class Portal:
     wired: bool = True  # False: recognized, but no connector yet
     guess_by_number: bool = True  # False: never suggested from a process number alone (only a link host picks it)
     login_path: str = ""  # Projudi: the page that starts the login when the flavor's default entry is not it
-    flavor: str = ""  # Projudi/e-SAJ generation (adapter): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST)
+    flavor: str = ""  # Projudi/e-SAJ generation (adapter), Eproc "infra-captcha" (TJTO): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST)
     impersonate: str = ""  # curl_cffi profile override; "" keeps the global default (see core.http.IMPERSONATE)
 
     @property
@@ -309,10 +309,12 @@ PORTALS = {
                legacy_env_prefixes=("TJAC_EPROC",), region="01", justice="8"),
         Portal("tjac-2g", "eproc", "TJAC", "2g", "eproc2g.tjac.jus.br", "/eproc/", "browser_totp", "TJAC_2G",
                legacy_env_prefixes=("TJAC_EPROC",), region="01", justice="8"),
+        # TJTO: local login form; the password is followed by an Infra image CAPTCHA (eproc.http_login answers it) and
+        # the certificate button by a separate mtls.tjto.jus.br host (eproc.certificate).
         Portal("tjto-1g", "eproc", "TJTO", "1g", "eproc1.tjto.jus.br", "/eprocV2_prod_1grau/", "browser_totp", "TJTO_1G",
-               region="27", justice="8"),
+               region="27", justice="8", flavor="infra-captcha"),
         Portal("tjto-2g", "eproc", "TJTO", "2g", "eproc2.tjto.jus.br", "/eprocV2_prod_2grau/", "browser_totp", "TJTO_2G",
-               region="27", justice="8"),
+               region="27", justice="8", flavor="infra-captcha"),
         Portal("tjsp-1g", "eproc", "TJSP", "1g", "eproc1g.tjsp.jus.br", "/eproc/", "browser_totp", "TJSP_1G",
                region="26", justice="8"),
         Portal("tjsp-2g", "eproc", "TJSP", "2g", "eproc2g.tjsp.jus.br", "/eproc/", "browser_totp", "TJSP_2G",

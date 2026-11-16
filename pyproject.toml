@@ -44,6 +44,8 @@ jurisync-hosted = "jurisync.hosted.cli:main"
 [project.optional-dependencies]
 # Local speech-to-text for audio documents. av is pinned: faster-whisper 1.1.1 needs av < 14.
 transcription = ["faster-whisper==1.1.1", "av==13.1.0"]
+# Local OCR tried first on short image CAPTCHAs (TJTO Eproc) before the vision model.
+captcha-ocr = ["ddddocr==1.6.1"]
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.10"]

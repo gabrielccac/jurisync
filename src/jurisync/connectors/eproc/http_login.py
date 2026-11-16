@@ -9,8 +9,14 @@ key kept in the token), as a browser does when the user picks the certificate.
 Flow (from a TJMG HAR): POST externo_controlador.php?acao=login_cert {txtUsuario, pwdSenha, hdnAcao=login}
 -> priv/login_cert.php (mTLS) -> entrar_cert -> principal (form with txtAcessoCodigo) -> POST index.php
 {txtAcessoCodigo, hdnAcao=2fa_validar} -> ... -> controlador.php?acao=painel_adv_listar.
+
+Infra CAPTCHA portals (TJTO, ``flavor="infra-captcha"``): the password goes to ``index.php`` (what ``Submit('login')``
+does; their ``acao=login_cert`` leaves for a separate mutual-TLS host). Every password post is answered with an image
+CAPTCHA (``txtInfraCaptcha``) before the password is checked; a wrong code only draws a new picture, a right one lets
+the portal check the password (``msg=Senha ou usuário Inválidos`` back on the login form) and go on to the code screen.
 """
 
+import re
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
@@ -19,10 +25,17 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.eproc.a3 import _cookies_for, _store_cookies, eproc_message
 from jurisync.connectors.eproc.auth import PANEL_MARKER
-from jurisync.core import mtls
+from jurisync.core import image_captcha, mtls
+from jurisync.core.session_pool import LoginRejected
 from jurisync.core.totp import next_code, totp
 
 MAX_HOPS = 10
+INFRA_CAPTCHA = "infra-captcha"
+CAPTCHA_FIELD = "txtInfraCaptcha"
+MAX_CAPTCHA_ANSWERS = 3  # wrong codes sent in one login; a wrong code only redraws the picture
+MAX_CAPTCHA_PICTURES = 6  # pictures looked at in one login, counting the unreadable ones
+# Usernames a portal's login page states it accepts; anything else is refused there, so it is not sent.
+USERNAME_FORMATS = {"TJTO": (re.compile(r"[A-Z]{2}[0-9]{6}"), "UF + OAB number with 6 digits, e.g. TO001234")}
 
 
 class NotClassicLogin(Exception):
@@ -78,6 +91,36 @@ def _follow(session, response, host, signer_factory, trail):
     raise RuntimeError("Too many eproc redirects: " + " > ".join(trail))
 
 
+def _captcha_step(session, response, config, signer_factory, trail):
+    """Answer the Infra image CAPTCHA until the portal moves on; returns the response after it."""
+    answers = 0
+    for _ in range(MAX_CAPTCHA_PICTURES):
+        soup = BeautifulSoup(response.text, "html.parser")
+        field = soup.find(attrs={"name": CAPTCHA_FIELD})
+        if field is None:
+            return response
+        if answers >= MAX_CAPTCHA_ANSWERS:
+            break
+        image = soup.select_one("#divInfraCaptcha img") or soup.select_one("#lblInfraCaptcha img")
+        try:
+            code, source = image_captcha.solve(
+                image_captcha.data_uri_bytes(image.get("src") if image else ""), attempt=answers
+            )
+        except image_captcha.UnreadableCaptcha:
+            trail.append("captcha(redraw)")
+            response = session.get(response.url, impersonate="chrome", timeout=60, allow_redirects=False)
+            response = _follow(session, response, config.host, signer_factory, trail)
+            continue
+        form = field.find_parent("form")
+        fields = {i["name"]: i.get("value", "") for i in form.find_all("input") if i.get("name")} if form else {}
+        fields.update({CAPTCHA_FIELD: code, "hdnInfraCaptcha": "1", "hdnAcao": fields.get("hdnAcao") or "login"})
+        answers += 1
+        trail.append(f"captcha({source})")
+        response = _post(session, config.url("index.php"), fields, response.url)
+        response = _follow(session, response, config.host, signer_factory, trail)
+    raise RuntimeError(f"{config.key}: the image CAPTCHA was not accepted after {answers} answers")
+
+
 def _post(session, url, data, referer):
     return session.post(
         url,
@@ -115,17 +158,33 @@ def login(username, password, account, *, portal, signer=None):
         if "captcha" in page.text.lower():
             raise NotClassicLogin(f"{config.key}: login page shows a CAPTCHA")
 
+        expected = USERNAME_FORMATS.get(config.tribunal)
+        if expected and not expected[0].fullmatch(username.strip().upper()):
+            raise RuntimeError(
+                f"{config.key}: the username must be {expected[1]}; "
+                f"fix {config.env_name('USERNAME')} (nothing was sent)"
+            )
+
         # From here on the credentials are sent: never fall back to another login after this point.
         trail.append("login")
+        captcha = config.flavor == INFRA_CAPTCHA
         response = _post(
             session,
-            config.url("externo_controlador.php?acao=login_cert"),
+            config.url("index.php" if captcha else "externo_controlador.php?acao=login_cert"),
             {"txtUsuario": username, "pwdSenha": password, "hdnAcao": "login", "hdnDebug": ""},
             page.url,
         )
         response = _follow(session, response, config.host, with_token, trail)
+        if captcha:
+            response = _captcha_step(session, response, config, with_token, trail)
         if _has_field(response.text, "pwdSenha"):
             reason = eproc_message(response.url, response.text)
+            if captcha:
+                # Past the CAPTCHA the form comes back only when the portal checked and refused the password: never
+                # send it again on its own (the session pool keeps a cool-down for LoginRejected).
+                raise LoginRejected(
+                    f"{config.key}: eproc refused the user or password" + (f" ({reason})" if reason else "")
+                )
             raise RuntimeError(
                 "eproc returned to the login form (" + " > ".join(trail) + ")" + (f": {reason}" if reason else "")
             )
