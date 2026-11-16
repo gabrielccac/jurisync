@@ -262,14 +262,14 @@ class DjenChecks(unittest.TestCase):
                 "numero_processo": "52313092320248217000",
             }
         )
-        self.assertEqual((stj["portal"], stj["wired"]), ("stj", False))
+        self.assertEqual((stj["portal"], stj["wired"]), ("stj", True))
         for link in (
             "https://ww2.stj.jus.br/processo/dj/documento/mediado/?seq_documento=1",
             "https://cpe.web.stj.jus.br/#/processo/202603934223",
         ):
             self.assertEqual(documents.resolve_portal({"link": link})["portal"], "stj")
         stj_number = documents.resolve_portal({"numero_processo": "00012345620263000000"})
-        self.assertEqual((stj_number["portal"], stj_number["wired"]), ("stj", False))
+        self.assertEqual((stj_number["portal"], stj_number["wired"]), ("stj", True))
 
     def test_resolve_portal_tells_the_two_tjpe_instances_apart_by_the_link_path(self):
         base = "https://pje.cloud.tjpe.jus.br"

@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 
 # Connectors whose accounts come from the office's credential scope. Anything else (filing) still reads the server's
 # own environment and would serve every office with one account, so it is refused.
-TENANT_READY = ("pje", "eproc", "esaj", "projudi", "djen", "advbox", "juridiq")
+TENANT_READY = ("pje", "eproc", "esaj", "projudi", "stj", "djen", "advbox", "juridiq")
 # Tools that change a portal stay off the hosted server until writes are designed per tenant. ADVBOX and Juridiq
 # writes stay mounted but answer only for an office whose credentials allow them (ADVBOX_ALLOW_WRITES and
 # JURIDIQ_ALLOW_WRITES, from its vault entry or its customer profile).
