@@ -54,8 +54,9 @@ The existing TRF1 spreadsheet watcher runs from the repository root with
 `python -m customers.victor.workflows.pje1g_watch --help`.
 
 `filing-profile.json` holds the office defaults the generic filing tools
-(`src/jurisync/workflows/filing`) use to prepare a TRF5 draft payload from an Advbox
-`00-PROTOCOLAR` folder. It downloads files, converts DOC/DOCX files to PDF,
+(`src/jurisync/workflows/filing`) use to prepare a TRF5 draft payload from a folder of documents. For Victor
+the folder is the customer's ADVBOX `00-PROTOCOLAR`, pulled first with `advbox_save_folder` (the filing tools do not
+fetch documents themselves). It converts DOC/DOCX files to PDF,
 classifies clear filenames, reads decision letters, and asks TypeSafe AI Jev
 about ambiguous readable documents. Uncertain supporting files fall back to
 `Outros Documentos` and appear in `review.json` under `fallbacks` with the
@@ -103,7 +104,7 @@ to add the address. The adapter rereads the selected address after saving.
 
 ```bash
 .venv/bin/python -m jurisync.workflows.filing prepare --profile victor \
-  --customer 6540591 --facts /private/case-facts.json --out /private/run
+  --source-dir /private/00-PROTOCOLAR --facts /private/case-facts.json --out /private/run
 ```
 
 Read `/private/run/review.json`, especially `fallbacks`: these files will be

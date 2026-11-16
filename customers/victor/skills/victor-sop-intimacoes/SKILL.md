@@ -87,7 +87,7 @@ de cada uma e as armadilhas que mudam a decisão.
   destinatário); `save=true` grava o original na pasta compartilhada para anexar.
 - **ADVBOX** (leitura): `advbox_list_lawsuits` (busca por CNJ); `advbox_lawsuit_report`
   com `taskSearch` acha o ID DJEN no histórico, concluídas incluídas (limite os
-  relatórios com `maxTasks`, `maxNotices`, `maxTextChars`); `advbox_find_tasks` vê só
+  relatórios com `maxTasks`, `maxNotices`, `maxTextChars`); `advbox_search_tasks` (texto, como o número do processo) vê
   tarefas **pendentes**; `advbox_list_publications` mostra as intimações que o ADVBOX
   recebeu e se já foram tratadas (o texto vem de `advbox_activity_details`).
 - **ADVBOX** (escrita, gate `ADVBOX_ALLOW_WRITES=true`): `advbox_create_task` (rode antes

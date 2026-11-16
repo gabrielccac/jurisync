@@ -68,6 +68,13 @@ PASSOS
    Windows: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
    O uv fica em ~/.local/bin/uv (Windows: %USERPROFILE%\.local\bin\uv.exe). Rode também
    uv tool update-shell para os próximos terminais.
+   No Windows, ANTES de instalar qualquer coisa com o uv, crie no meu usuário três variáveis de
+   ambiente permanentes (o app do Claude desvia o que é gravado em AppData e o uv quebra lá dentro):
+   UV_PYTHON_INSTALL_DIR = %USERPROFILE%\.local\share\uv\python
+   UV_TOOL_DIR = %USERPROFILE%\.local\share\uv\tools
+   UV_CACHE_DIR = %USERPROFILE%\.local\share\uv\cache
+   (por exemplo, [Environment]::SetEnvironmentVariable("UV_TOOL_DIR", "$env:USERPROFILE\.local\share\uv\tools", "User"))
+   e defina as três também na sessão atual do PowerShell.
 
 4. Google Chrome: confirme que está instalado. O eproc faz login pelo Chrome e os anexos em HTML
    viram PDF por ele. Se faltar, instale: Windows: winget install --id Google.Chrome -e;
@@ -83,7 +90,7 @@ PASSOS
    Windows: irm https://claude.ai/install.ps1 | iex
 
 6. Instale o Jurisync (o uv baixa o Python 3.12 e as dependências sozinho; leva alguns minutos):
-   uv tool install --force "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
+   uv tool install --force --python 3.12 "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
    Confirme que existem os comandos jurisync-setup, jurisync-eproc e jurisync-djen (ficam em
    ~/.local/bin; no Windows, %USERPROFILE%\.local\bin).
 
@@ -126,7 +133,7 @@ Depois que uma correção for enviada (push) para `feat/tjrs-eproc-setup`, ela c
 
 ```text
 Atualize o Jurisync da minha máquina. Pare no primeiro erro e me mostre a mensagem completa.
-1. Rode: uv tool install --force "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
+1. Rode: uv tool install --force --python 3.12 "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
 2. Rode: jurisync-setup skills --customer elisandra
    Se ele parar porque mudei a skill localmente, me mostre a mensagem e PARE.
    Se ele disser "Reenvie no Cowork", me lembre de enviar o zip de Downloads no app do Claude.

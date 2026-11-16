@@ -1,0 +1,57 @@
+# Eliane Abreu: portais do Relatório.pdf (12/10). Valores no .env (gitignored).
+# TRTs (2,3,4,5,6,9,11,14,15,21,24) ainda não existem em src/jurisync/portals.py.
+
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA"]
+
+[trf1-2g]
+method = "password_totp"
+secrets = ["PJE_2G_USERNAME", "PJE_2G_PASSWORD", "PJE_2G_2FA_DATA"]
+
+[trf3-1g]
+method = "password_totp"
+secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA"]
+
+[trf3-2g]
+method = "password_totp"
+secrets = ["PJE_TRF3_2G_USERNAME", "PJE_TRF3_2G_PASSWORD", "PJE_TRF3_2G_2FA_DATA"]
+
+[trf5-1g]
+method = "password_totp"
+secrets = ["PJE_TRF5_1G_USERNAME", "PJE_TRF5_1G_PASSWORD", "PJE_TRF5_1G_2FA_DATA"]
+
+[trf2-1g-rj]
+method = "browser_totp"
+secrets = ["TRF2_1G_RJ_USERNAME", "TRF2_1G_RJ_PASSWORD", "TRF2_1G_RJ_2FA_DATA"]
+
+[trf2-1g-es]
+method = "browser_totp"
+secrets = ["TRF2_1G_ES_USERNAME", "TRF2_1G_ES_PASSWORD", "TRF2_1G_ES_2FA_DATA"]
+
+[trf2-2g]
+method = "browser_totp"
+secrets = ["TRF2_2G_USERNAME", "TRF2_2G_PASSWORD", "TRF2_2G_2FA_DATA"]
+
+[trf4-1g-sc]
+method = "browser_totp"
+secrets = ["TRF4_1G_SC_USERNAME", "TRF4_1G_SC_PASSWORD", "TRF4_1G_SC_2FA_DATA"]
+
+[trf4-1g-rs]
+method = "browser_totp"
+secrets = ["TRF4_1G_RS_USERNAME", "TRF4_1G_RS_PASSWORD", "TRF4_1G_RS_2FA_DATA"]
+
+[trf4-1g-pr]
+method = "browser_totp"
+secrets = ["TRF4_1G_PR_USERNAME", "TRF4_1G_PR_PASSWORD", "TRF4_1G_PR_2FA_DATA"]
+
+[trf4-2g]
+method = "browser_totp"
+secrets = ["TRF4_2G_USERNAME", "TRF4_2G_PASSWORD", "TRF4_2G_2FA_DATA"]
+[trt7-1g]
+method = "password_totp"
+secrets = ["TRT7_1G_USERNAME", "TRT7_1G_PASSWORD", "TRT7_1G_2FA_DATA"]
+
+[trt7-2g]
+method = "password_totp"
+secrets = ["TRT7_2G_USERNAME", "TRT7_2G_PASSWORD", "TRT7_2G_2FA_DATA"]

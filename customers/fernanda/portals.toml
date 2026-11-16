@@ -1,0 +1,161 @@
+# Gonçalves Guimarães (contato Fernanda Bittencourt). A1 de José Gonçalves Guimarães Júnior (OAB/SC 35.675) + QRs de 13/11.
+# Todos por certificado A1 + perfil do QR do José (índice fixo por arquivo). Valores no .env (gitignored).
+
+[trf6-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF6_2FA_DATA|TRF6_2FA_QR"]
+
+[trf6-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF6_2FA_DATA|TRF6_2FA_QR"]
+
+[tjsp-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJSP_1G_2FA_DATA|TJSP_1G_2FA_QR"]
+
+[tjsp-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJSP_2G_2FA_DATA|TJSP_2G_2FA_QR"]
+
+[tjsc-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJSC_1G_2FA_DATA|TJSC_1G_2FA_QR"]
+
+[tjsc-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJSC_2G_2FA_DATA|TJSC_2G_2FA_QR"]
+
+[trf4-1g-sc]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_1G_SC_2FA_DATA|TRF4_1G_SC_2FA_QR"]
+
+[trf4-1g-rs]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_1G_RS_2FA_DATA|TRF4_1G_RS_2FA_QR"]
+
+[trf4-1g-pr]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_1G_PR_2FA_DATA|TRF4_1G_PR_2FA_QR"]
+
+[trf4-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_2G_2FA_DATA|TRF4_2G_2FA_QR"]
+
+[tjrs-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRS_1G_2FA_DATA|TJRS_1G_2FA_QR"]
+
+[tjrj-eproc-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRJ_1G_2FA_DATA|TJRJ_1G_2FA_QR"]
+
+[tjmg-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMG_1G_2FA_DATA|TJMG_1G_2FA_QR"]
+
+[trf2-1g-rj]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_1G_RJ_2FA_DATA|TRF2_1G_RJ_2FA_QR"]
+
+[trf2-1g-es]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_1G_ES_2FA_DATA|TRF2_1G_ES_2FA_QR"]
+
+[trf2-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_2G_2FA_DATA|TRF2_2G_2FA_QR"]
+
+[tjpr-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPR_1G_2FA_DATA|TJPR_1G_2FA_QR"]
+
+[trf1-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+
+[trf3-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF3_1G_2FA_DATA|PJE_TRF3_1G_2FA_QR"]
+
+[trf5-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_1G_2FA_DATA|PJE_TRF5_1G_2FA_QR"]
+
+[tjrj-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRJ_PJE_1G_2FA_DATA|TJRJ_PJE_1G_2FA_QR"]
+
+# Validados em 13/11 (PDPJ do José, QR 1 índice 7). TRT12/15/1/3 dependem da branch feat/trt-12-15-1-3.
+
+[trf3-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF3_2G_2FA_DATA|PJE_TRF3_2G_2FA_QR"]
+
+[trf5-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_2G_2FA_DATA|PJE_TRF5_2G_2FA_QR"]
+
+[trf5-tru]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF5_TRU_2FA_DATA|PJE_TRF5_TRU_2FA_QR"]
+
+[trt18-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT18_1G_2FA_DATA|TRT18_1G_2FA_QR"]
+
+[trt18-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT18_2G_2FA_DATA|TRT18_2G_2FA_QR"]
+
+[trt12-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT12_1G_2FA_DATA|TRT12_1G_2FA_QR"]
+
+[trt12-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT12_2G_2FA_DATA|TRT12_2G_2FA_QR"]
+
+[trt15-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT15_1G_2FA_DATA|TRT15_1G_2FA_QR"]
+
+[trt15-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT15_2G_2FA_DATA|TRT15_2G_2FA_QR"]
+
+[trt1-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT1_1G_2FA_DATA|TRT1_1G_2FA_QR"]
+
+[trt1-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT1_2G_2FA_DATA|TRT1_2G_2FA_QR"]
+
+[trt3-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT3_1G_2FA_DATA|TRT3_1G_2FA_QR"]
+
+[trt3-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT3_2G_2FA_DATA|TRT3_2G_2FA_QR"]
+
+# Validados em 13/11 pelo Jurandir (branch feat/trt-4-9-2-tjms).
+[trt4-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT4_1G_2FA_DATA|TRT4_1G_2FA_QR"]
+
+[trt9-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT9_1G_2FA_DATA|TRT9_1G_2FA_QR"]
+
+[trt2-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT2_1G_2FA_DATA|TRT2_1G_2FA_QR"]
+
+[trt2-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRT2_2G_2FA_DATA|TRT2_2G_2FA_QR"]
+
+[tjms-eproc-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMS_1G_2FA_DATA|TJMS_1G_2FA_QR"]

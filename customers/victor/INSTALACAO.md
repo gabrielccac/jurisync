@@ -57,6 +57,13 @@ PASSOS
    Windows: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
    O uv fica em ~/.local/bin/uv (Windows: %USERPROFILE%\.local\bin\uv.exe). Rode também
    uv tool update-shell para os próximos terminais.
+   No Windows, ANTES de instalar qualquer coisa com o uv, crie no meu usuário três variáveis de
+   ambiente permanentes (o app do Claude desvia o que é gravado em AppData e o uv quebra lá dentro):
+   UV_PYTHON_INSTALL_DIR = %USERPROFILE%\.local\share\uv\python
+   UV_TOOL_DIR = %USERPROFILE%\.local\share\uv\tools
+   UV_CACHE_DIR = %USERPROFILE%\.local\share\uv\cache
+   (por exemplo, [Environment]::SetEnvironmentVariable("UV_TOOL_DIR", "$env:USERPROFILE\.local\share\uv\tools", "User"))
+   e defina as três também na sessão atual do PowerShell.
 
 4. Claude Code (linha de comando): rode claude --version. Ele é necessário para registrar os
    servidores. Se faltar, instale pelo método oficial:
@@ -64,7 +71,7 @@ PASSOS
    Windows: irm https://claude.ai/install.ps1 | iex
 
 5. Instale o Jurisync (o uv baixa o Python 3.12 e as dependências sozinho; leva alguns minutos):
-   uv tool install --force "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
+   uv tool install --force --python 3.12 "git+https://github.com/gabrielccac/jurisync@feat/tjrs-eproc-setup"
    Confirme que existem os comandos jurisync-setup, jurisync-pje, jurisync-advbox e jurisync-djen
    (ficam em ~/.local/bin; no Windows, %USERPROFILE%\.local\bin).
 

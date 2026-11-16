@@ -80,8 +80,10 @@ por destinatário e é a ponte entre a comunicação DJEN e o PJe:
    resultado traz `ciencia.pendenteAoLer` (expedientes que estavam pendentes quando foram lidos):
    **avise no chat e registre na descrição da tarefa** a linha `Ciência possivelmente registrada
    na leitura em {data}: expediente {id}, prazo {limite}`.
-   Se o resultado trouxer `cienciaChecked: false`, a aba Expedientes não pôde ser lida e a
-   verificação foi pulada: diga isso na nota.
+   Se a aba Expedientes não puder ser lida (ou não por inteiro), a leitura também é recusada
+   sem abrir nada (erro começando por `ciência not checked`): tente de novo mais tarde ou
+   pergunte ao usuário como acima. Lido com `acknowledgeCiencia=true` nessa situação, o
+   resultado traz `cienciaChecked: false` (a verificação não pôde ser feita): diga isso na nota.
 
 Limites (verificados em 09/10/2026): a aba mostra só comunicações de 1º grau (Turma
 Recursal não aparece); processo sigiloso ou sem expediente gerado volta vazio
@@ -162,8 +164,11 @@ Suba de nível só quando o anterior deixar um campo obrigatório de `tarefas.md
 - Meio **Sistema** (INSS) = acompanhamento da cadeia, nunca vencimento da autora.
 - Quando o texto e a certidão divergirem, registre os dois valores (ex.: sentença
   fixa 30 dias para o INSS e a certidão mostra 0). Não escolha em silêncio.
-- Cálculo: `djen_calculate_deadline` com `data_disponibilizacao` (calendário JFPE,
-  cobertura até 2026-12-19). A certidão diz que a publicação é o primeiro dia útil
+- Cálculo: `djen_calculate_deadline` com `data_disponibilizacao` e `court="JFPE"`
+  (calendário local da JFPE até 2026-12-19; depois disso, e para outro tribunal, vale
+  o calendário-base com recesso e suspensão de 20/12 a 20/01, e a resposta traz
+  `calendarComplete=false` e `warnings`: confira os feriados locais antes de fixar a
+  data e registre o aviso na nota). A certidão diz que a publicação é o primeiro dia útil
   seguinte à disponibilização e que a contagem começa no dia útil seguinte à
   publicação; **confirme** que a ferramenta aplica essa regra. Dias úteis consideram
   feriados (12/10/2026 é feriado nacional). Conferência manual de 06/10:

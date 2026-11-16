@@ -197,7 +197,7 @@ resultado da checagem).
 1. **Liste as tarefas do processo** (pendentes e concluídas):
    - `advbox_lawsuit_report` do processo, com `maxTasks` suficiente para cobrir o
      histórico desde a data da comunicação (inclui concluídas e as de outros usuários);
-   - `advbox_find_tasks` do processo, para as **pendentes** e seu `postId`.
+   - `advbox_search_tasks` com o número do processo em `search`, para as **pendentes** e seu `postId`.
 2. **Busque o ID DJEN**: `taskSearch="{id DJEN}"` no relatório. Achou: é a mesma
    comunicação, já tratada.
 3. **Compare mesmo sem o ID**: para cada tarefa listada, confira átomo/tipo + ato

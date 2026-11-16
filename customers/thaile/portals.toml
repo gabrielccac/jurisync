@@ -1,0 +1,49 @@
+# Thaile Dantas: portais da lista de 02/11. Valores no .env (gitignored).
+
+# eSAJ: o portal aceita usuário+senha (+ código de 6 dígitos), mas o conector só implementa certificado A1. Login/senha guardados no .env para quando o login por senha existir.
+[tjsp-esaj]
+method = "certificate_challenge"
+secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
+
+[tjsp-1g]
+method = "browser_totp"
+secrets = ["TJSP_1G_USERNAME", "TJSP_1G_PASSWORD", "TJSP_1G_2FA_DATA"]
+
+[tjba-1g]
+method = "password_totp"
+secrets = ["TJBA_1G_USERNAME", "TJBA_1G_PASSWORD", "TJBA_1G_2FA_DATA"]
+
+[tjpb-1g]
+method = "password_totp"
+secrets = ["TJPB_1G_USERNAME", "TJPB_1G_PASSWORD", "TJPB_1G_2FA_DATA"]
+
+[tjrj-1g]
+method = "password_totp"
+secrets = ["TJRJ_PJE_1G_USERNAME", "TJRJ_PJE_1G_PASSWORD", "TJRJ_PJE_1G_2FA_DATA"]
+
+[tjmt-1g]
+method = "password_totp"
+secrets = ["TJMT_1G_USERNAME", "TJMT_1G_PASSWORD", "TJMT_1G_2FA_DATA"]
+
+[tjpe-1g]
+method = "password_totp"
+secrets = ["TJPE_1G_USERNAME", "TJPE_1G_PASSWORD", "TJPE_1G_2FA_DATA"]
+
+[tjsc-1g]
+method = "browser_totp"
+secrets = ["TJSC_1G_USERNAME", "TJSC_1G_PASSWORD", "TJSC_1G_2FA_DATA"]
+
+[tjsc-2g]
+method = "browser_totp"
+secrets = ["TJSC_2G_USERNAME", "TJSC_2G_PASSWORD", "TJSC_2G_2FA_DATA"]
+
+[tjrs-1g]
+method = "browser_totp"
+secrets = ["TJRS_1G_USERNAME", "TJRS_1G_PASSWORD", "TJRS_1G_2FA_DATA"]
+
+[trf3-1g]
+method = "password_totp"
+secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA"]
+
+[env]
+secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]

@@ -1,26 +1,46 @@
-# Cinthia's portal access. Method and secret names only; the values go in the
-# gitignored customers/cinthia/.env (see .env.example in this directory).
-# "A|B" means either variable is enough. Methods: password_totp, certificate_totp,
-# browser_totp. Sections are added as each portal is wired, for example:
-#
-# [trf6-1g]
-# method = "password_totp"
-# secrets = ["PJE_TRF6_1G_USERNAME", "PJE_TRF6_1G_PASSWORD", "PJE_TRF6_1G_2FA_DATA|PJE_TRF6_1G_2FA_QR"]
+# Cinthia's portal access. Method and secret names only; the values go in the gitignored customers/cinthia/.env.
+# Every PJe uses her PDPJ account (CPF, password, PDPJ authenticator); each Eproc uses UF + OAB, the same password and
+# that court's authenticator profile (from her Google Authenticator export).
 
 [trf1-1g]
 method = "password_totp"
-secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA"]
 
-# Eproc TRF6 serves 1G and 2G with one account (TRF6_*): CPF, password and the Eproc/TRF6 TOTP export.
+[trf5-1g]
+method = "password_totp"
+secrets = ["PJE_TRF5_1G_USERNAME", "PJE_TRF5_1G_PASSWORD", "PJE_TRF5_1G_2FA_DATA"]
+
+[trf3-1g]
+method = "password_totp"
+secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA"]
+
 [trf6-1g]
 method = "browser_totp"
-secrets = ["TRF6_USERNAME|TRF6_USUARIO", "TRF6_PASSWORD|TRF6_SENHA", "TRF6_2FA_DATA|TRF6_EXPORT_DATA"]
+secrets = ["TRF6_USERNAME", "TRF6_PASSWORD", "TRF6_2FA_DATA"]
 
 [trf6-2g]
 method = "browser_totp"
-secrets = ["TRF6_USERNAME|TRF6_USUARIO", "TRF6_PASSWORD|TRF6_SENHA", "TRF6_2FA_DATA|TRF6_EXPORT_DATA"]
+secrets = ["TRF6_USERNAME", "TRF6_PASSWORD", "TRF6_2FA_DATA"]
 
-# TRF5 accepts a certificate (Victor) or the PDPJ password + TOTP flow. Without PJE_A1_P12 this customer uses the password flow.
-[trf5-1g]
-method = "password_totp"
-secrets = ["PJE_TRF5_1G_USERNAME", "PJE_TRF5_1G_PASSWORD", "PJE_TRF5_1G_2FA_DATA|PJE_TRF5_1G_2FA_QR"]
+[tjmg-1g]
+method = "browser_totp"
+secrets = ["TJMG_1G_USERNAME", "TJMG_1G_PASSWORD", "TJMG_1G_2FA_DATA"]
+
+# PJe login with her A3 token (PJE_AUTH=a3 for every PJe portal); the PIN unlocks the token. The token and its
+# PKCS#11 driver must be on the machine where the servers run. Eproc keeps the password login.
+[env]
+secrets = ["PJE_AUTH", "PJE_A3_PIN", "ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]
+
+# A3 (12/11): PJE_AUTH=a3 / EPROC_AUTH=a3 no .env; PIN do token em PJE_A3_PIN. TOTP do PDPJ igual ao do TRF1.
+[tjpe-1g]
+method = "certificate_totp"
+secrets = ["PJE_A3_PIN", "TJPE_1G_2FA_DATA"]
+
+[tjba-1g]
+method = "certificate_totp"
+secrets = ["PJE_A3_PIN", "TJBA_1G_2FA_DATA"]
+
+# eSAJ TJSP com A3: suporte a conferir no conector eSAJ.
+[tjsp-esaj]
+method = "certificate_totp"
+secrets = ["PJE_A3_PIN"]

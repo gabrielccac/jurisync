@@ -33,7 +33,7 @@ Em validação (12/09/2026), o texto retornado por `pje_get_process` (tanto em c
    - documentos no mesmo dia e mesmo horário (ou horário muito próximo) do movimento identificado;
    - documentos imediatamente anteriores/posteriores na timeline, quando referenciarem o mesmo ato (confira pelo texto do movimento, ex. "ID do último ato proferido nos autos" dentro de uma Intimação aponta para o documento que ela está comunicando);
    - nunca presuma relação entre documentos de datas distantes só porque o tipo é parecido.
-4. Chamar novamente `pje_get_process` incluindo os `documentIds` relevantes (até 5 por chamada) para obter o texto extraído desses documentos.
+4. Chamar `pje_read_documents(processNumber, portal, documentIds)` com os `documentIds` relevantes (até 5 por chamada) para obter o texto extraído desses documentos. `pje_get_process` não lê mais textos (não aceita `documentIds`). `pje_read_documents` recusa, sem abrir nada, o documento de uma comunicação com ciência pendente (o ato, seus anexos, ou qualquer documento quando não dá para verificar os expedientes — erro começando por `ciência not checked`): nesse caso **não** use `acknowledgeCiencia=true`; mantenha a tarefa provisória e reporte, conforme a regra acima.
 5. Se a informação buscada ainda não aparecer em nenhum dos documentos do cluster, e não houver mais candidatos plausíveis no mesmo dia, trate como `insufficient` — não invente o dado. Mantenha a tarefa provisória e registre no resumo o que faltou.
 
 ## O que extrair, por tipo de ato

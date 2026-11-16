@@ -1,0 +1,16 @@
+# Grupo Navarro (Giovanny e Bettania Navarro, OAB/PA 12.479; sociedade OAB/PA 4004).
+# Method and secret names only; values in the gitignored customers/navarro/.env.
+# Etapa 3 (PJe/DJEN) ainda nao foi contratada; credenciais guardadas para quando for.
+# QR recebido 13/11 (perfil PDPJ). Falta definir o certificado (token A1 ou A3).
+
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+
+[trf1-2g]
+method = "password_totp"
+secrets = ["PJE_2G_USERNAME", "PJE_2G_PASSWORD", "PJE_2G_2FA_DATA|PJE_2G_2FA_QR"]
+
+[tjpa-1g]
+method = "password_totp"
+secrets = ["TJPA_1G_USERNAME", "TJPA_1G_PASSWORD", "TJPA_1G_2FA_DATA|TJPA_1G_2FA_QR"]

@@ -38,7 +38,11 @@ resultado é o rascunho abaixo, para a Elisandra aprovar.
    e `pending`). Veja `references/enriquecimento-eproc.md`.
 4. **Rascunho**: `references/rascunhos.md` (tipos de ato, descrição, prazo, anexos).
 5. **Anexos**: `eproc_get_process` com `documentIds` e `save=true` guarda o documento na
-   pasta compartilhada (HTML do eproc vira PDF) e devolve `savedAs`.
+   pasta compartilhada (HTML do eproc vira PDF) e devolve `savedAs`. Os documentos são
+   sempre abertos. Se o processo tinha citação/intimação aguardando ciência (ou se isso não
+   pôde ser verificado), o resultado traz um bloco `ciencia` com um `aviso`: abrir os
+   documentos pode ter registrado a ciência e iniciado o prazo. Sempre que houver
+   `ciencia.aviso`, repasse-o ao usuário (a intimação, as datas e o prazo) e anote na tarefa.
 
 ## Referências
 

@@ -38,11 +38,11 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    do not assume the fallback `~/.local/share/jurisync/filings` is writable). Write
    reviewed facts to a private JSON file, then run
    `python -m jurisync.workflows.filing prepare --profile victor
-   --customer <id> --facts <facts.json> --out <run-directory>`
+   --source-dir <folder with the pulled 00-PROTOCOLAR files> --facts <facts.json> --out <run-directory>`
    (it loads the credentials file itself). Without a shell, use the `filing` tools in the
    next section instead.
-   Do not create a separate `documents.json`; this script downloads and
-   classifies the files, then writes `review.json` and, when ready, `payload.json`.
+   Do not create a separate `documents.json`; this script converts and
+   classifies the pulled files, then writes `review.json` and, when ready, `payload.json`.
    Treat both files as script outputs; do not write or replace them manually.
    `review.json` must contain a `files` array for the `finalize` command.
    Read `review.json`: inspect every file, suggested PJe type, fallback,
@@ -85,7 +85,10 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
 1. `filing_profiles` lists the available profiles (confirm `victor` is there). `filing_subjects` with
    `profile: "victor"` (and optionally the lawsuit ID or CNJ) returns the reference subject codes and the README record
    of what was filed for that exact case. They are candidates for the user to confirm, never defaults.
-2. `filing_prepare` with `profile: "victor"`, a new `runId`, the ADVBOX customer ID and the reviewed facts. Facts may
+2. Pull the documents first, with Victor's own system: `advbox_list_files` finds the customer's `00-PROTOCOLAR` folder
+   and `advbox_save_folder` saves it, unparsed, into a subfolder of the shared documents folder (use the `runId` as
+   the `into` name). Then `filing_prepare` with `profile: "victor"`, a new `runId`, `sourceFolder` (that subfolder)
+   and the reviewed facts. Facts may
    be partial: missing ones come back as review items, and `candidates` lists the claim values and CPFs the petition
    states. Document text is not sent to Jev unless `useJev` is true.
 3. Resolve every item in `review`: each file's `id` is the key for `overrides` (`{role, type}`, or `{role: "skip"}`
