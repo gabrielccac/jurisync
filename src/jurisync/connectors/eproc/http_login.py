@@ -25,6 +25,7 @@ from jurisync import portals
 from jurisync.connectors.eproc.a3 import _cookies_for, _store_cookies, eproc_message
 from jurisync.connectors.eproc.auth import PANEL_MARKER
 from jurisync.core import image_captcha, mtls
+from jurisync.core.session_pool import LoginRejected
 from jurisync.core.totp import next_code, totp
 
 MAX_HOPS = 10
@@ -155,6 +156,12 @@ def login(username, password, account, *, portal, signer=None):
             response = _captcha_step(session, response, config, with_token, trail)
         if _has_field(response.text, "pwdSenha"):
             reason = eproc_message(response.url, response.text)
+            if captcha:
+                # Past the CAPTCHA the form comes back only when the portal checked and refused the password: never
+                # send it again on its own (the session pool keeps a cool-down for LoginRejected).
+                raise LoginRejected(
+                    f"{config.key}: eproc refused the user or password" + (f" ({reason})" if reason else "")
+                )
             raise RuntimeError(
                 "eproc returned to the login form (" + " > ".join(trail) + ")" + (f": {reason}" if reason else "")
             )

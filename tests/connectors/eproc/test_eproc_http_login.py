@@ -192,7 +192,9 @@ class InfraCaptchaFlow(unittest.TestCase):
                 reply(TJTO + "index.php", 302, location=refused),
             ],
         )
-        with self.assertRaisesRegex(RuntimeError, "Senha ou usuário Inválidos"):
+        with self.assertRaisesRegex(
+            http_login.LoginRejected, "refused the user or password.*Senha ou usuário Inválidos"
+        ):
             self.login(session, [("aB3x", "local")])
         self.assertEqual(session.post.call_count, 2)
 
