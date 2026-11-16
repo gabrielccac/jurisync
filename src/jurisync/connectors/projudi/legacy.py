@@ -22,6 +22,10 @@ from jurisync.connectors.projudi import base, parsers
 from jurisync.core.http import REDIRECTS
 
 SESSION_EXPIRED_MARKERS = ("a sessao expirou", "a sessão expirou")
+# The page the portal serves for a dropped session says "A sessao expirou". Every logged-in TJAM page also carries
+# "Sua sessão expirou" inside a script (its timeout dialog), so only visible text counts and the phrase must start a word.
+SESSION_EXPIRED = re.compile(r"(?<![\w])a sess[aã]o expirou", re.I)
+SCRIPTS = re.compile(r"<(script|style)\b[^>]*>.*?</\1\s*>", re.I | re.S)
 INVALID_LINK_MARKER = "conteúdo inacessível"
 HUMAN_VERIFICATION = re.compile(
     r"captcha|human verification|verificação humana|confirmar que você é humano|request rejected|what code is in the image",
@@ -48,6 +52,12 @@ class HumanVerificationRequired(RuntimeError):
 
 class DocumentsBlocked(RuntimeError):
     """Reading a Projudi document is blocked until it is proven not to register ciência."""
+
+
+def session_expired(html):
+    """Whether a 200 page is the portal's "A sessao expirou" answer (visible text only, never script contents)."""
+    text = " ".join(BeautifulSoup(SCRIPTS.sub(" ", COMMENT.sub(" ", html)), "html.parser").get_text(" ").split())
+    return bool(SESSION_EXPIRED.search(text))
 
 
 def has_human_verification(html):
@@ -137,10 +147,10 @@ class LegacyAdapter(base.Adapter):
     def request(self, session, portal, method, path, **kwargs):
         response = super().request(session, portal, method, path, **kwargs)
         if response.status_code == 200:
-            html = parsers.decode(response.content).casefold()
-            if any(marker in html for marker in SESSION_EXPIRED_MARKERS):
+            html = parsers.decode(response.content)
+            if session_expired(html):
                 raise base.ProjudiSessionExpired("Projudi session expired")
-            if INVALID_LINK_MARKER in html:
+            if INVALID_LINK_MARKER in html.casefold():
                 raise base.ProjudiParseError("Projudi rejected a navigation link (_tj) for this session")
         return response
 

@@ -132,15 +132,15 @@ class FakeAdapter(base.Adapter):
 
 
 class PortalRegistryTest(unittest.TestCase):
-    def test_only_tjgo_is_wired(self):
-        self.assertEqual(portals.keys("projudi"), ("tjgo-1g",))
+    def test_tjgo_and_tjam_are_wired(self):
+        self.assertEqual(portals.keys("projudi"), ("tjgo-1g", "tjam-1g"))
         tjgo_portal = portals.projudi("tjgo-1g")
         self.assertEqual(
             (tjgo_portal.host, tjgo_portal.root, tjgo_portal.auth, tjgo_portal.region, tjgo_portal.justice),
             ("projudi.tjgo.jus.br", "/", "certificate_mtls", "09", "8"),
         )
         self.assertEqual(tjgo_portal.login_url, "https://projudi.tjgo.jus.br/LogOn")
-        for key in ("tjpr-projudi-1g", "tjam-1g", "tjrr-1g", "tjpi-projudi-1g"):
+        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjpi-projudi-1g"):
             with self.subTest(key=key):
                 self.assertFalse(portals.PORTALS[key].wired)
                 with self.assertRaisesRegex(ValueError, "portal must be one of"):
@@ -430,7 +430,7 @@ class ServerTest(unittest.TestCase):
                 self.assertFalse(tool.annotations.destructive_hint)
                 portal = tool.input_schema["properties"]["portal"]
                 self.assertEqual(portal.get("default"), "tjgo-1g")
-                self.assertEqual(portal.get("enum", [portal.get("const")]), ["tjgo-1g"])
+                self.assertEqual(portal.get("enum", [portal.get("const")]), ["tjgo-1g", "tjam-1g"])
                 self.assertNotIn("portal", tool.input_schema.get("required", []))
 
     def test_get_process_hides_hashes_and_attaches_files_to_movements(self):
@@ -489,12 +489,14 @@ class ServerTest(unittest.TestCase):
 
 
 class UnwiredGenerationTest(unittest.TestCase):
-    def test_only_tjgo_has_an_adapter_and_the_other_generations_say_not_implemented(self):
-        self.assertEqual(set(server.ADAPTERS), {"tjgo-servlet"})
+    def test_tjgo_and_tjam_have_adapters_and_the_other_generations_say_not_implemented(self):
+        self.assertEqual(set(server.ADAPTERS), {"tjgo-servlet", "legacy-local"})
         self.assertIs(server.adapter_for("tjgo-1g"), tjgo.ADAPTER)
-        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjam-1g", "tjpi-projudi-1g"):
+        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjpi-projudi-1g"):
             with self.subTest(key=key):
-                with self.assertRaisesRegex(NotImplementedError, f"{key}.*not implemented yet; wired: tjgo-1g"):
+                with self.assertRaisesRegex(
+                    NotImplementedError, f"{key}.*not implemented yet; wired: tjgo-1g, tjam-1g"
+                ):
                     server.adapter_for(key)
                 with self.assertRaisesRegex(ToolError, "not implemented yet"):
                     server.call(key, lambda adapter, session: self.fail("an unwired portal must not log in"))
