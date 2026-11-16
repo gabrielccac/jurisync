@@ -53,6 +53,11 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRJ_1G_2FA_DATA|TJRJ_1G_2FA_QR"]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMG_1G_2FA_DATA|TJMG_1G_2FA_QR"]
 
+# Validado em 16/11 com os valores do TJMG 1G (TJMG_2G_* no .env).
+[tjmg-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMG_2G_2FA_DATA|TJMG_2G_2FA_QR"]
+
 [trf2-1g-rj]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_1G_RJ_2FA_DATA|TRF2_1G_RJ_2FA_QR"]

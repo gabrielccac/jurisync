@@ -69,35 +69,85 @@ secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 method = "certificate_challenge"
 secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 
-# Abaixo: QR ok, FALTA usuário e senha (eproc) ou CPF e senha (PJe com login próprio).
+# Validados ao vivo com A1 + TOTP (eproc: <PREFIX>_CERT em [env].set; TJPR 2G e TJGO com o perfil GO22729).
 [trf2-1g-rj]
-method = "browser_totp"
-secrets = ["TRF2_1G_RJ_USERNAME", "TRF2_1G_RJ_PASSWORD", "TRF2_1G_RJ_2FA_DATA|TRF2_1G_RJ_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_1G_RJ_2FA_DATA|TRF2_1G_RJ_2FA_QR"]
 
 [trf2-1g-es]
-method = "browser_totp"
-secrets = ["TRF2_1G_ES_USERNAME", "TRF2_1G_ES_PASSWORD", "TRF2_1G_ES_2FA_DATA|TRF2_1G_ES_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_1G_ES_2FA_DATA|TRF2_1G_ES_2FA_QR"]
 
 [trf2-2g]
-method = "browser_totp"
-secrets = ["TRF2_2G_USERNAME", "TRF2_2G_PASSWORD", "TRF2_2G_2FA_DATA|TRF2_2G_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_2G_2FA_DATA|TRF2_2G_2FA_QR"]
 
 [trf4-1g-rs]
-method = "browser_totp"
-secrets = ["TRF4_1G_RS_USERNAME", "TRF4_1G_RS_PASSWORD", "TRF4_1G_RS_2FA_DATA|TRF4_1G_RS_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_1G_RS_2FA_DATA|TRF4_1G_RS_2FA_QR"]
 
 [trf4-1g-sc]
-method = "browser_totp"
-secrets = ["TRF4_1G_SC_USERNAME", "TRF4_1G_SC_PASSWORD", "TRF4_1G_SC_2FA_DATA|TRF4_1G_SC_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_1G_SC_2FA_DATA|TRF4_1G_SC_2FA_QR"]
 
 [trf4-1g-pr]
-method = "browser_totp"
-secrets = ["TRF4_1G_PR_USERNAME", "TRF4_1G_PR_PASSWORD", "TRF4_1G_PR_2FA_DATA|TRF4_1G_PR_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_1G_PR_2FA_DATA|TRF4_1G_PR_2FA_QR"]
 
 [trf4-2g]
-method = "browser_totp"
-secrets = ["TRF4_2G_USERNAME", "TRF4_2G_PASSWORD", "TRF4_2G_2FA_DATA|TRF4_2G_2FA_QR"]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_2G_2FA_DATA|TRF4_2G_2FA_QR"]
 
+[tjpr-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPR_2G_2FA_DATA|TJPR_2G_2FA_QR"]
+
+[tjac-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJAC_1G_2FA_DATA|TJAC_1G_2FA_QR|TJAC_EPROC_2FA_QR"]
+
+[tjac-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJAC_2G_2FA_DATA|TJAC_2G_2FA_QR|TJAC_EPROC_2FA_QR"]
+
+# PJe: TJAP com A1 (TJAP_1G_CERT); TJRN/TJRO/TJPI com o perfil PDPJ dos outros PJe estaduais.
+[tjap-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJAP_1G_2FA_DATA|TJAP_1G_2FA_QR"]
+
+[tjrn-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRN_1G_2FA_DATA|TJRN_1G_2FA_QR"]
+
+[tjrn-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRN_2G_2FA_DATA|TJRN_2G_2FA_QR"]
+
+[tjro-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRO_1G_2FA_DATA|TJRO_1G_2FA_QR"]
+
+[tjro-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRO_2G_2FA_DATA|TJRO_2G_2FA_QR"]
+
+[tjpi-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPI_1G_2FA_DATA|TJPI_1G_2FA_QR"]
+
+[tjpi-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPI_2G_2FA_DATA|TJPI_2G_2FA_QR"]
+
+[tjam-esaj]
+method = "certificate_challenge"
+secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
+
+[tjal-esaj]
+method = "certificate_challenge"
+secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
+
+# Abaixo: QR ok, FALTA usuário e senha (eproc) ou CPF e senha (PJe com login próprio).
 [trf6-1g]
 method = "browser_totp"
 secrets = ["TRF6_USERNAME", "TRF6_PASSWORD", "TRF6_2FA_DATA|TRF6_2FA_QR"]
@@ -158,11 +208,8 @@ secrets = ["PJE_TRF3_2G_USERNAME", "PJE_TRF3_2G_PASSWORD", "PJE_TRF3_2G_2FA_DATA
 method = "password_totp"
 secrets = ["TJPE_1G_USERNAME", "TJPE_1G_PASSWORD", "TJPE_1G_2FA_DATA|TJPE_1G_2FA_QR"]
 
-[tjap-1g]
-method = "password_totp"
-secrets = ["TJAP_1G_USERNAME", "TJAP_1G_PASSWORD", "TJAP_1G_2FA_DATA|TJAP_1G_2FA_QR"]
-
-
 [env]
 # The TJES 1G AWS WAF CAPTCHA is solved by a vision model on OpenRouter (core/awswaf.py).
 optional = ["OPENROUTER_API_KEY"]
+# Pinned values: A1 opt-ins and the OAB profile picked where the portal lists several.
+set = { TRF2_1G_RJ_CERT = "true", TRF2_1G_ES_CERT = "true", TRF2_2G_CERT = "true", TRF4_1G_RS_CERT = "true", TRF4_1G_SC_CERT = "true", TRF4_1G_PR_CERT = "true", TRF4_2G_CERT = "true", TJPR_2G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJAP_1G_CERT = "true", TJPR_2G_USER_PROFILE = "GO022729", TJGO_1G_USER_PROFILE = "GO22729" }

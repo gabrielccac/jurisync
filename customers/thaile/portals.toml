@@ -45,5 +45,10 @@ secrets = ["TJRS_1G_USERNAME", "TJRS_1G_PASSWORD", "TJRS_1G_2FA_DATA"]
 method = "password_totp"
 secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA"]
 
+# Projudi TJAM: CPF + senha, sem 2FA (validado em 16/11). O registro diz "password", que não é método de cliente: password_totp sem segredo de 2FA.
+[tjam-1g]
+method = "password_totp"
+secrets = ["TJAM_1G_USERNAME|TJAM_PROJUDI_USERNAME", "TJAM_1G_PASSWORD|TJAM_PROJUDI_PASSWORD"]
+
 [env]
 secrets = ["JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"]
