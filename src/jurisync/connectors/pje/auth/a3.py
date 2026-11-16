@@ -227,6 +227,11 @@ class A3Signer:
         blobs = [cert.public_bytes(Encoding.DER) for cert in self.chain]
         return base64.b64encode(pkipath_encode(blobs)).decode("ascii")
 
+    def pkipath64(self):
+        from jurisync.connectors.pje.auth.signer import java_pkipath64
+
+        return java_pkipath64(self.chain)
+
     def close(self):
         try:
             if self.logged_in:

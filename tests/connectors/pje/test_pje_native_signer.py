@@ -77,5 +77,51 @@ class NativeSignerChecks(unittest.TestCase):
         self.assertTrue(base64.b64decode(chain64).startswith(b"0\x82"))
 
 
+def _issued(subject, issuer_name, issuer_key, ca):
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)]))
+        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name or subject)]))
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+        .sign(issuer_key or key, hashes.SHA256())
+    )
+    return key, cert
+
+
+class JavaPkiPathChecks(unittest.TestCase):
+    """PJeOffice's ``cadeiaCertificado`` is Java's PkiPath: root first, so Java decodes the holder at index 0."""
+
+    @classmethod
+    def setUpClass(cls):
+        root_key, cls.root = _issued("Raiz", None, None, True)
+        mid_key, cls.mid = _issued("AC Intermediaria", "Raiz", root_key, True)
+        _, cls.leaf = _issued("Titular", "AC Intermediaria", mid_key, False)
+
+    def _decoded(self, value):
+        from cryptography.hazmat.primitives.serialization import Encoding
+
+        der = base64.b64decode(value)
+        body, certs = der[2 + (der[1] & 0x7F if der[1] & 0x80 else 0) :], []
+        for cert in (self.root, self.mid, self.leaf):
+            blob = cert.public_bytes(Encoding.DER)
+            certs.append((body.index(blob), cert))
+        return [cert for _, cert in sorted(certs, key=lambda item: item[0])]
+
+    def test_issuer_path_orders_a_shuffled_p12_chain_from_the_holder(self):
+        self.assertEqual(native_signer.issuer_path(self.leaf, [self.root, self.mid]), [self.leaf, self.mid, self.root])
+        unrelated = _issued("Outra", None, None, True)[1]
+        self.assertEqual(native_signer.issuer_path(self.leaf, [unrelated]), [self.leaf])
+
+    def test_java_pkipath_is_written_root_first(self):
+        value = native_signer.java_pkipath64([self.leaf, self.mid, self.root])
+        self.assertEqual(self._decoded(value), [self.root, self.mid, self.leaf])
+
+
 if __name__ == "__main__":
     unittest.main()

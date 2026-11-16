@@ -42,53 +42,59 @@ def _challenge(html, config):
 def _legacy_challenge(html):
     """PJe 1.x-style pages (TJRJ 2G): ASSINATURA_MENSAGEM signed like PJeOffice.
 
-    Returns (mensagem, enviarPara): the challenge and the PJeOffice callback path
-    (``/logarPJeOffice.seam?cid=...``), per the PJeOffice protocol (tarefa
-    ``cnj.autenticador`` posts ``{uuid, mensagem, assinatura, certChain}``).
+    Returns (mensagem, cid): the challenge and the conversation the PJeOffice callback
+    (``/logarPJeOffice.seam?cid=...``) and the landing page (``/homePJeOffice.seam?cid=...``) belong to.
     """
     match = re.search(r'ASSINATURA_MENSAGEM\s*=\s*"([^"]+)"', html)
     cid = re.search(r'CONVERSATION_ID\s*=\s*"([^"]+)"', html)
     if not match or not cid:
         return None
-    return match.group(1), "/logarPJeOffice.seam?cid=" + cid.group(1)
+    return match.group(1), cid.group(1)
+
+
+# The PJeOffice version string sent in the ``versao`` header, as PJeOffice Pro does.
+PJEOFFICE_VERSION = "2.5.16"
 
 
 def _legacy_login(session, config, page, signer):
-    """Sign the legacy challenge like PJeOffice and post to its callback."""
+    """Sign the legacy challenge and post it to the page's PJeOffice callback, as PJeOffice's ``cnj.autenticador`` does.
+
+    PJeOffice (``PjeWebClient``) posts a form, not JSON: ``assinatura`` (base64 MD5withRSA over the UTF-8 challenge)
+    and ``cadeiaCertificado`` (base64 Java PkiPath, root first), with the browser's cookies and a ``versao`` header.
+    The callback answers ``Sucesso`` or ``Erro:<motivo>``; on success the browser goes to ``homePJeOffice.seam``
+    of the same conversation.
+    """
     import base64
-    import json
 
     found = _legacy_challenge(page.text)
     if not found:
         return None
-    mensagem, enviar_para = found
-    # PJeOffice concatenates servidor (the app root) + enviarPara as plain strings.
-    action = config.base_url.rstrip("/") + "/" + enviar_para.lstrip("/")
+    mensagem, cid = found
+    root = config.base_url.rstrip("/")
+    action = f"{root}/logarPJeOffice.seam?cid={cid}"
     require_allowed_url(action)
-    token = str(uuid.uuid4())
-    body = json.dumps(
-        {
-            "uuid": token,
-            "mensagem": mensagem,
-            "assinatura": base64.b64encode(signer.sign(mensagem)).decode(),
-            "certChain": signer.chain64(),
-        }
-    )
     response = session.post(
         action,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "PJeOffice/2.5.16",
-            "versao": "2.5.16",
+        data={
+            "assinatura": base64.b64encode(signer.sign(mensagem)).decode("ascii"),
+            "cadeiaCertificado": signer.pkipath64(),
         },
+        headers={"versao": PJEOFFICE_VERSION},
         impersonate=IMPERSONATE,
         allow_redirects=False,
         timeout=60,
     )
     log_request("POST", action, response.status_code)
-    return _follow(session, response)
+    answer = (response.text or "").strip()
+    if not answer.startswith("Sucesso"):
+        reason = answer[len("Erro:") :] if answer.startswith("Erro:") else f"HTTP {response.status_code}"
+        reason = " ".join(BeautifulSoup(reason, "html.parser").get_text(" ").split())[:500]
+        raise RuntimeError(f"{config.key}: the PJeOffice callback refused the certificate login: {reason}")
+    home = f"{root}/homePJeOffice.seam?cid={cid}"
+    require_allowed_url(home)
+    landing = _follow(session, session.get(home, impersonate=IMPERSONATE, allow_redirects=False, timeout=60))
+    log_request("GET", home, landing.status_code)
+    return landing
 
 
 def _submit_code(sso_session, action, token):
@@ -246,7 +252,12 @@ def _login(session, config, account, signer):
     except RuntimeError:
         # PJe 1.x-style pages (TJRJ 2G): sign ASSINATURA_MENSAGEM like PJeOffice.
         legacy = _legacy_login(session, config, page, signer)
-        if legacy is not None and _authenticated(legacy, config.host, config.root):
+        if legacy is not None:
+            _require_registered(legacy, config)
+            if not _authenticated(legacy, config.host, config.root):
+                raise RuntimeError(
+                    f"{config.key}: the PJeOffice login was accepted but no authenticated page followed"
+                ) from None
             log.info("%s legacy certificate login complete -> %s", config.key, url_shape(legacy.url))
             return session
         # Portals like TRT7 serve no inline challenge: their login page only offers
