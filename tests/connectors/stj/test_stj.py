@@ -404,6 +404,16 @@ class ServerTest(unittest.TestCase):
         self.assertEqual([p["id"] for p in data["documents"]], ["1", "2"])
         self.assertEqual(data["phases"][0]["text"], "Conclusos para decisão")
 
+    def test_get_process_by_class_and_number_sends_the_class_upper_cased(self):
+        self.session.http.routes[("GET", "/api/processo/getNumeroRegistroBySiglaClasseNumero")] = FakeResponse(
+            payload=REGISTRO
+        )
+        data, error = self.call("stj_get_process", {"process": "AREsp 1234567", "include_documents": False})
+        self.assertFalse(error)
+        self.assertEqual(data["registro"], "2026/0000001-7")
+        lookup = [r for r in self.session.http.sent if r[1].endswith("BySiglaClasseNumero")][0]
+        self.assertEqual(lookup[2], {"siglaClasse": "ARESP", "numeroClasse": "1234567"})
+
     def test_read_documents_only_reads_pieces_of_the_index(self):
         data, error = self.call("stj_read_documents", {"process": "2026/0000001-7", "document_ids": ["1"]})
         self.assertFalse(error)

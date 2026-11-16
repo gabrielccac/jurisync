@@ -240,12 +240,16 @@ def records_by_cnj(session, digits):
 
 
 def records_by_class(session, sigla, numero):
-    return get_json(
+    """Registrations of a class and number. The CPE app sends the class upper-cased (``ARESP``) and gets back a
+    registration string or a list of them."""
+    found = get_json(
         session,
         "/api/processo/getNumeroRegistroBySiglaClasseNumero",
-        params={"siglaClasse": sigla, "numeroClasse": numero},
+        params={"siglaClasse": sigla.upper(), "numeroClasse": numero},
         empty=[],
     )
+    found = found if isinstance(found, list) else [found] if found else []
+    return [row if isinstance(row, dict) else {"numeroRegistro": str(row)} for row in found]
 
 
 def process(session, registro):
