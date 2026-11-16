@@ -1,0 +1,16 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": [
+  {
+   "codigo_tipo_notificacao": 1,
+   "descricao_tipo_notificacao": "INTIMAÇÃO",
+   "qtd": 1
+  },
+  {
+   "codigo_tipo_notificacao": 4,
+   "descricao_tipo_notificacao": "CITAÇÃO",
+   "qtd": 1
+  }
+ ]
+}

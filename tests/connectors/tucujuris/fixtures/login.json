@@ -1,0 +1,18 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": {
+  "token": "tok-synthetic-0123456789abcdef",
+  "situcao_segundo_fator": "verificacao_pendente",
+  "requer_trocar_senha": null,
+  "especialidade": {
+   "fk_tipo_especialidade": 2,
+   "login": "1234AP"
+  },
+  "pessoa": {
+   "id": 9001,
+   "nome": "ADVOGADO SINTÉTICO"
+  },
+  "lotacao": null
+ }
+}

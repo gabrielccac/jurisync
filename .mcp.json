@@ -59,6 +59,17 @@
         "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
       }
     },
+    "tucujuris": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": [
+        "-m",
+        "jurisync.connectors.tucujuris.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
+      }
+    },
     "advbox": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",

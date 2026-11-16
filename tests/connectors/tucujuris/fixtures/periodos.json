@@ -1,0 +1,9 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": {
+  "hoje": 0,
+  "ontem": 1,
+  "ultimos10dias": 2
+ }
+}

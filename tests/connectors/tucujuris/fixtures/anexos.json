@@ -1,0 +1,67 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": {
+  "requer_chave_consumo": false,
+  "total_anexos_suprimidos": 0,
+  "anexos": [
+   {
+    "id": 9001,
+    "id_movimento": 7001,
+    "nome_anexo": "PETIÇÃO INICIAL",
+    "nome_tabela": "tj_autos_anexo",
+    "id_tabela": 9001,
+    "nome_campo_anexo": "arquivo",
+    "chave_consumo": null,
+    "extensao_arquivo": "pdf",
+    "dt_movimento": "2026-11-10 14:22:00"
+   },
+   {
+    "id": 9002,
+    "id_movimento": 7001,
+    "nome_anexo": "PROCURAÇÃO",
+    "nome_tabela": "tj_autos_anexo",
+    "id_tabela": 9002,
+    "nome_campo_anexo": "arquivo",
+    "chave_consumo": null,
+    "extensao_arquivo": "pdf",
+    "dt_movimento": "2026-11-10 14:22:00"
+   },
+   {
+    "id": 9003,
+    "id_movimento": 7002,
+    "nome_anexo": "DECISÃO",
+    "nome_tabela": "tj_autos_anexo",
+    "id_tabela": 9003,
+    "nome_campo_anexo": "arquivo",
+    "chave_consumo": null,
+    "extensao_arquivo": "pdf",
+    "dt_movimento": "2026-11-10 14:22:00"
+   },
+   {
+    "id": 9004,
+    "id_movimento": 7003,
+    "nome_anexo": "INTIMAÇÃO",
+    "nome_tabela": "tj_autos_anexo",
+    "id_tabela": 9004,
+    "nome_campo_anexo": "arquivo",
+    "chave_consumo": null,
+    "extensao_arquivo": "pdf",
+    "dt_movimento": "2026-11-10 14:22:00"
+   },
+   {
+    "id": 9005,
+    "id_movimento": 7002,
+    "nome_anexo": "AUDIÊNCIA (VÍDEO)",
+    "nome_tabela": "tj_autos_anexo",
+    "id_tabela": 9005,
+    "nome_campo_anexo": "arquivo",
+    "chave_consumo": null,
+    "extensao_arquivo": "pdf",
+    "dt_movimento": "2026-11-10 14:22:00",
+    "midia_fora_do_tucujuris": true,
+    "url_arquivo": "https://midias.example.invalid/x"
+   }
+  ]
+ }
+}

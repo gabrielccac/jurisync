@@ -24,6 +24,7 @@ SERVERS = {
     "juridiq": ("jurisync.connectors.juridiq.server", "create_server()", None),
     "projudi": ("jurisync.connectors.projudi.server", "create_server()", "sessions.close"),
     "stj": ("jurisync.connectors.stj.server", "create_server()", "sessions.close"),
+    "tucujuris": ("jurisync.connectors.tucujuris.server", "create_server()", "sessions.close"),
 }
 DEFAULT_SERVERS = ("pje", "advbox")
 

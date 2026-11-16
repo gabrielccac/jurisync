@@ -1,0 +1,34 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": [
+  {
+   "autos_pessoa_intimacao_id": 1,
+   "descricao_tipo_notificacao": "INTIMAÇÃO",
+   "processo_id": 501,
+   "numero_cnj": "0000101-11.2025.8.03.0001",
+   "virtual": true,
+   "ordem_movimento_origem": 3,
+   "id_movimento_origem": 7003,
+   "qtd_anexos_movimento_origem": 1,
+   "dt_cad": "2026-11-10 14:22:00",
+   "dt_intimacao": null,
+   "dt_prazo_movimento_comunicacao": "2026-11-25 23:59:59",
+   "objeto_notificacao": "Intimação da parte autora para se manifestar (texto sintético)."
+  },
+  {
+   "autos_pessoa_intimacao_id": 3,
+   "descricao_tipo_notificacao": "CITAÇÃO",
+   "processo_id": 502,
+   "numero_cnj": "0000202-22.2024.8.03.0002",
+   "virtual": true,
+   "ordem_movimento_origem": 5,
+   "id_movimento_origem": 8001,
+   "qtd_anexos_movimento_origem": 1,
+   "dt_cad": "2026-11-10 14:22:00",
+   "dt_intimacao": null,
+   "dt_prazo_movimento_comunicacao": "2026-11-25 23:59:59",
+   "objeto_notificacao": "Intimação da parte autora para se manifestar (texto sintético)."
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+{
+ "ambiente": "producao",
+ "status": "ERRO",
+ "mensagem": "Essa conta de usuário não existe",
+ "detalhe": "{função anônima} << call_user_func"
+}

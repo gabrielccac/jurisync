@@ -1,0 +1,7 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": {
+  "requer_chave_consumo": true
+ }
+}

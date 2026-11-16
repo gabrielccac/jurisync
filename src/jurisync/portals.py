@@ -27,7 +27,7 @@ LEGACY_NAMES = {"USERNAME": ("USUARIO",), "PASSWORD": ("SENHA",), "2FA_DATA": ("
 @dataclass(frozen=True)
 class Portal:
     key: str  # unique within its system: "trf1-1g", "trf4-1g-sc"
-    system: str  # "pje" | "eproc" | "projudi" | "esaj" | "stj"
+    system: str  # "pje" | "eproc" | "projudi" | "esaj" | "stj" | "tucujuris"
     tribunal: str  # TRF1, TRF4, TRF5, TJRS, TJAP, STJ
     instance: str  # "1g" | "2g"
     host: str
@@ -76,6 +76,8 @@ class Portal:
         if self.system == "projudi":
             entry = {"tjgo-servlet": "LogOn", "legacy-keycloak": "autenticacao.do"}  # the Keycloak entry starts the SSO
             return self.url(self.login_path or entry.get(self.flavor, "usuario/logon.do?actionType=inicio"))
+        if self.system == "tucujuris":
+            return self.url("pages/login/login.html")  # a static page; the login itself is a JSON POST to /api/
         if self.system == "eproc":
             # The Eproc root redirects to the SSO login. The externo_controlador.php
             # path is 403-blocked on some deployments (e.g. TJRS behind Cloudflare).
@@ -370,6 +372,12 @@ PORTALS = {
         # on that host. Same A1 certificate-challenge login. Current cases are in Projudi/PJe, so no guessing by number.
         Portal("tjam-esaj", "esaj", "TJAM", "1g", "consultasaj.tjam.jus.br", "/", "certificate_challenge", "TJAM_ESAJ",
                region="04", justice="8", guess_by_number=False, flavor="esaj-cas"),
+        # Tucujuris: TJAP's own system (CNJ J=8, TR=03), a Knockout SPA over a JSON API at /api/ behind Cloudflare.
+        # Login is user + password, then the authenticator code; advogados log in with OAB number + seccional
+        # ("1234AP"), other profiles with CPF digits or e-mail. TJAP also runs a PJe (tjap-1g) whose numbers have the
+        # same shape, so a number alone never points here; only a tucujuris.tjap.jus.br link does.
+        Portal("tjap-tucujuris", "tucujuris", "TJAP", "1g", "tucujuris.tjap.jus.br", "/", "password_totp",
+               "TJAP_TUCUJURIS", region="03", justice="8", guess_by_number=False),
         # STJ: the lawyer's area is the CPE (cpe.web.stj.jus.br, REST under /api/). The A1 logs in over mutual TLS at
         # cpe-auth.web.stj.jus.br/api/auth/cert with no authenticator; password logins add TOTP/e-mail MFA and gov.br is
         # OAuth. The parent domain as host claims every STJ link (processo., ww2., cpe.web.). CNJ J=3, TR=00.
@@ -407,6 +415,10 @@ def projudi(key):
 
 def stj(key):
     return get(key, "stj")
+
+
+def tucujuris(key):
+    return get(key, "tucujuris")
 
 
 def get(key, system=None):

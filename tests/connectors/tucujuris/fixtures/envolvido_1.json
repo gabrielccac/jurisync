@@ -1,0 +1,39 @@
+{
+ "ambiente": "producao",
+ "status": "OK",
+ "dados": [
+  {
+   "id": 503,
+   "cabecalho": {
+    "id": 503,
+    "numero_cnj": "0000303-33.2020.8.03.0001",
+    "classe": "PROCEDIMENTO COMUM CÍVEL",
+    "rito": "ORDINÁRIO",
+    "comarca": "MACAPÁ",
+    "lotacao": "1ª VARA CÍVEL DE MACAPÁ",
+    "relator": null,
+    "arquivado": true,
+    "segredo_justica": false,
+    "virtual": true,
+    "autos_suspenso": null,
+    "perfil": [],
+    "partes": [
+     {
+      "nome": "PARTE AUTORA SINTÉTICA",
+      "desc_tipo_parte": "REQUERENTE",
+      "tipo_parte": 0,
+      "parteprincipal": true,
+      "documento": "000.000.000-00"
+     },
+     {
+      "nome": "EMPRESA RÉ SINTÉTICA LTDA",
+      "desc_tipo_parte": "REQUERIDO",
+      "tipo_parte": 1,
+      "parteprincipal": true
+     }
+    ]
+   },
+   "descricao_envolvimento": "ADVOGADO"
+  }
+ ]
+}

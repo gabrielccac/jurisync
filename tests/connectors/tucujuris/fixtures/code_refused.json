@@ -1,0 +1,6 @@
+{
+ "ambiente": "producao",
+ "status": "ERRO",
+ "mensagem": "Código inválido",
+ "detalhe": "{função anônima} << call_user_func"
+}
