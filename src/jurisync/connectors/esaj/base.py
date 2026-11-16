@@ -18,7 +18,7 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.core import certificate, credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, follow_redirects, log_request, require_url
-from jurisync.core.session_pool import SessionExpired
+from jurisync.core.session_pool import LoginRejected, SessionExpired
 
 SERVICE_PATH = "tarefas-adv/j_spring_cas_security_check"
 CHALLENGE = re.compile(r"hashDesafio\s*=\s*'([A-Za-z0-9+/=]+)'")
@@ -132,7 +132,7 @@ def login(portal, *, pin=None, p12_path=None, session=None):
     log_request("POST", action, response.status_code)
     follow_redirects(session, response, check=lambda url: require_portal_url(config, url, "e-SAJ login redirect"))
     if not any(cookie.name == "CASTGC" for cookie in session.cookies.jar):
-        raise RuntimeError("e-SAJ did not accept the A1 certificate")
+        raise LoginRejected("e-SAJ did not accept the A1 certificate")
     return session
 
 
@@ -254,21 +254,6 @@ def list_tasks(session, portal, kind, state="AGUARDANDO_ASSINATURA"):
     }
 
 
-def list_intimacoes(session, portal, received=False):
-    path = "AtosRecebidos" if received else "AtosNaoRecebidos"
-    try:
-        request(session, portal, "GET", f"intimacoesweb/abrirConsulta{path}.do")
-    except EsajBlocked:
-        # The dedicated intimações app is a separate Softplan application with its own CPF/password sign-in; the CAS
-        # session of the portal does not open it, and the connector never asks for that password.
-        raise EsajBlocked(
-            "The dedicated intimações app requires its own sign-in; use the dashboard intimacoes listing",
-            "login_required",
-        ) from None
-    # shortcut: the flow opened but its listing is not mapped, enable parsing after live validation.
-    raise EsajBlocked("Dedicated intimações flow is not mapped; use the dashboard intimacoes listing")
-
-
 def process_number(value, portal):
     config = portals.esaj(portal)
     if not isinstance(value, str) or not portals.CNJ.fullmatch(value):
@@ -334,6 +319,27 @@ def bridge_page(session, portal, url):
     return BridgeResponse(page["url"], page["html"])
 
 
+def captcha_uuid(session, config, application):
+    """The identifier the consultation page asks for before a token is accepted; "" when the portal gives none.
+
+    This POST sits outside ``request()`` (which allows only reads), so its redirects are followed by hand, host-checked.
+    """
+    url = config.url(f"{application}/captchaControleAcesso.do")
+    require_portal_url(config, url)
+    response = session.post(
+        url, data={"uuidCaptcha": ""}, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT
+    )
+    log_request("POST", url, response.status_code)
+    response = follow_redirects(
+        session, response, check=lambda target: require_portal_url(config, target, "e-SAJ redirect")
+    )
+    try:
+        identifier = response.json().get("uuidCaptcha", "")
+    except (ValueError, AttributeError):
+        identifier = ""
+    return identifier if isinstance(identifier, str) else ""
+
+
 def token_page(session, portal, url):
     """A consultation page fetched with an HTTP-minted v3 token appended: no browser, same exchange the page runs."""
     from jurisync.connectors.esaj import recaptcha
@@ -346,16 +352,7 @@ def token_page(session, portal, url):
         sitekey, action = recaptcha.sitekey_and_action(start.text)
     except recaptcha.RecaptchaError as error:
         raise EsajBlocked(f"Consultation requires CAPTCHA: {error}", "captcha_required") from None
-    uuid = session.post(
-        config.url(f"{parts.path.split('/')[1]}/captchaControleAcesso.do"),
-        data={"uuidCaptcha": ""},
-        impersonate=IMPERSONATE,
-        timeout=TIMEOUT,
-    )
-    try:
-        identifier = uuid.json().get("uuidCaptcha", "")
-    except ValueError:
-        identifier = ""
+    identifier = captcha_uuid(session, config, parts.path.split("/")[1])
     if not identifier:
         raise EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
     try:
@@ -376,16 +373,7 @@ def token_search(session, portal, adapter, number, open_page):
     except recaptcha.RecaptchaError as error:
         raise EsajBlocked(f"Consultation requires CAPTCHA: {error}", "captcha_required") from None
     config = portals.esaj(portal)
-    uuid = session.post(
-        config.url(f"{adapter.CONSULTATION}/captchaControleAcesso.do"),
-        data={"uuidCaptcha": ""},
-        impersonate=IMPERSONATE,
-        timeout=TIMEOUT,
-    )
-    try:
-        identifier = uuid.json().get("uuidCaptcha", "")
-    except ValueError:
-        identifier = ""
+    identifier = captcha_uuid(session, config, adapter.CONSULTATION)
     if not identifier:
         raise EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
     try:
@@ -558,6 +546,23 @@ def list_documents(session, portal, number):
     }
 
 
+def permission_refusal(response):
+    """Why the "intimação não recebida" check does not clear a document, or None when it does.
+
+    The portal answers 204 (or an empty 200) for a document that opens without a receipt. Any body means the page wants
+    something first (in the browser: the dialog that confirms receiving the intimação), so it is never treated as a yes.
+    """
+    body = getattr(response, "content", b"") or b""
+    if isinstance(body, str):
+        body = body.encode("utf-8", "replace")
+    if response.status_code == 204 or (response.status_code == 200 and not body.strip()):
+        return None
+    from jurisync.connectors.esaj.parsers import redact_text
+
+    text = " ".join(BeautifulSoup(body[:20000], "html.parser").get_text(" ", strip=True).split())
+    return f"HTTP {response.status_code}" + (f": {redact_text(text)[:200]}" if text else "")
+
+
 def document(session, portal, number, document_id, *, download=False):
     from jurisync.connectors.esaj.parsers import redact_text
     from jurisync.core.document_text import extract_document_text
@@ -571,7 +576,8 @@ def document(session, portal, number, document_id, *, download=False):
         raise ValueError("documentId is not in the current process inventory")
     if not entry.get("parameters"):
         raise EsajBlocked("Document requires a password or restricted access flow", "password_required")
-    # This POST only checks permission. Receipt/signature endpoints are never invoked.
+    # This POST only checks permission. Receipt/signature endpoints are never invoked, and there is no way to
+    # acknowledge a receipt through this connector: anything but a clean "yes" stops before the PDF is requested.
     permission = request(
         session,
         portal,
@@ -579,8 +585,14 @@ def document(session, portal, number, document_id, *, download=False):
         "pastadigital/validarAberturaIntimacaoNaoRecebida.do",
         data={"parametros": entry["parameters"]},
     )
-    if permission.status_code not in (200, 204):
-        raise EsajBlocked("Opening this document requires acknowledging an intimação; read-only connector stopped")
+    refusal = permission_refusal(permission)
+    if refusal:
+        raise EsajBlocked(
+            "Opening this document may register the receipt of an intimação and start its deadline; "
+            f"the connector stopped before opening it (portal answered {refusal}). Open it in the portal if the "
+            "user decides to receive it.",
+            "intimacao_pending",
+        )
     response = request(session, portal, "GET", "pastadigital/getPDF.do?" + entry["parameters"], stream=True)
     try:
         content = read_limited(response)

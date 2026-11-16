@@ -139,14 +139,16 @@ async def test_tools_and_registration():
     assert {t.name for t in tools} == {
         "esaj_get_session",
         "esaj_list_messages",
-        "esaj_list_intimacoes",
         "esaj_list_tasks",
         "esaj_get_process",
         "esaj_list_documents",
         "esaj_read_document",
         "esaj_download_document",
     }
-    assert all(t.annotations.read_only_hint and not t.annotations.destructive_hint for t in tools)
+    # Only the download writes a file (the shared documents folder); nothing is destructive.
+    assert {t.name for t in tools if not t.annotations.read_only_hint} == {"esaj_download_document"}
+    assert not any(t.annotations.destructive_hint for t in tools)
+    assert not hasattr(base, "list_intimacoes")
     assert "esaj" in SERVERS
     assert portals.esaj("tjsp-esaj").auth == "certificate_challenge"
     assert portals.eproc("tjsp-1g").system == "eproc"
@@ -193,14 +195,74 @@ def test_dashboard_context_uses_digits(monkeypatch):
     assert seen[1][1]["params"] == {"situacao": "AGUARDANDO_ASSINATURA"}
 
 
-def test_document_permission_denial_never_fetches_pdf(monkeypatch):
+@pytest.mark.parametrize(
+    ("status", "body", "shown"),
+    [
+        (409, "", "HTTP 409"),
+        (409, "<p>Intimação não recebida</p>", "HTTP 409: Intimação não recebida"),
+        # A 200 with a body is the page asking for something (the receipt dialog), never a yes.
+        (200, "<html><script>x()</script><b>Confirma o recebimento da intimação?</b></html>", "Confirma o recebimento"),
+        (200, '{"mensagem": "ato não recebido token=secret https://private/x"}', "ato não recebido"),
+        (200, "x" * 5000, "HTTP 200: " + "x" * 200 + " )"),
+        (500, "erro", "HTTP 500: erro"),
+    ],
+)
+def test_document_permission_denial_never_fetches_pdf(monkeypatch, status, body, shown):
     monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
-    request = Mock(return_value=response(status=409))
+    request = Mock(return_value=response(body, status=status))
     monkeypatch.setattr(base, "request", request)
-    with pytest.raises(base.EsajBlocked):
+    with pytest.raises(base.EsajBlocked) as error:
         base.document(None, "tjsp-esaj", NUMBER, "38")
+    assert error.value.reason == "intimacao_pending"
+    assert shown.removesuffix(" )") in str(error.value)
+    assert "x" * 201 not in str(error.value)
+    assert "secret" not in str(error.value) and "private" not in str(error.value)
     assert request.call_count == 1
     assert request.call_args.args[3] == "pastadigital/validarAberturaIntimacaoNaoRecebida.do"
+
+
+@pytest.mark.parametrize(("status", "body"), [(204, ""), (200, ""), (200, " \r\n ")])
+def test_document_permission_cleared_only_by_204_or_an_empty_200(monkeypatch, status, body):
+    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
+    pdf = Mock(status_code=200, headers={"content-type": "application/pdf"})
+    pdf.iter_content.return_value = iter([b"%PDF-fixture"])
+    request = Mock(side_effect=[response(body, status=status), pdf])
+    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr("jurisync.core.document_text.extract_document_text", lambda *a: ("extracted", "Example"))
+    assert base.document(None, "tjsp-esaj", NUMBER, "38")["text"] == "Example"
+    assert request.call_count == 2
+
+
+def test_document_has_no_acknowledgement_argument():
+    """e-SAJ exposes no way to accept a receipt through the connector, so a pending intimação always refuses."""
+    import inspect
+
+    assert set(inspect.signature(base.document).parameters) == {
+        "session",
+        "portal",
+        "number",
+        "document_id",
+        "download",
+    }
+
+
+def test_captcha_uuid_post_follows_redirects_only_on_the_portal():
+    config = portals.esaj("tjms-esaj")
+    session = Mock()
+    redirect = SimpleNamespace(
+        status_code=302,
+        url=config.url("cpopg5/captchaControleAcesso.do"),
+        headers={"Location": "https://evil.invalid/x"},
+    )
+    session.post.return_value = redirect
+    with pytest.raises(UnsafeUrlError):
+        base.captcha_uuid(session, config, "cpopg5")
+    assert session.post.call_args.kwargs["allow_redirects"] is False
+    session.get.assert_not_called()
+    session.post.return_value = SimpleNamespace(status_code=200, url="", headers={}, json=lambda: {"uuidCaptcha": "u1"})
+    assert base.captcha_uuid(session, config, "cpopg5") == "u1"
+    session.post.return_value = SimpleNamespace(status_code=200, url="", headers={}, json=lambda: ["unexpected"])
+    assert base.captcha_uuid(session, config, "cpopg5") == ""
 
 
 def test_document_bounded_pdf_and_close(monkeypatch):

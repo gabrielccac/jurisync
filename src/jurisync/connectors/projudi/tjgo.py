@@ -19,6 +19,7 @@ from curl_cffi.requests.exceptions import RequestException
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for
+from jurisync.core.session_pool import LoginRejected
 
 LOGIN_READY = "LoginPronto=S"
 SESSION_COOKIE = "JSESSIONID"
@@ -61,7 +62,11 @@ class TjgoAdapter(base.Adapter):
     def login(self, portal, *, pin=None, p12_path=None, session=None):
         config = portals.projudi(portal)
         session = session or requests.Session()
-        session.get(config.url(), impersonate=impersonate_for(config), timeout=TIMEOUT)
+        _follow(
+            session,
+            config,
+            session.get(config.url(), impersonate=impersonate_for(config), allow_redirects=False, timeout=TIMEOUT),
+        )
         if not any(cookie.name == SESSION_COOKIE for cookie in session.cookies.jar):
             raise RuntimeError("Projudi did not start a session")
         started = session.post(
@@ -82,7 +87,7 @@ class TjgoAdapter(base.Adapter):
             )
             response = _follow(session, config, response, cert=pem)
         if LOGIN_READY not in (response.url or "") or not is_authenticated_panel(response):
-            raise RuntimeError("Projudi did not accept the A1 certificate")
+            raise LoginRejected("Projudi did not accept the A1 certificate")
         return session
 
     def refresh(self, portal, session):

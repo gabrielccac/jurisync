@@ -7,12 +7,19 @@ with the session the connector already has.
 
 Nothing is solved and nothing is hidden: the browser is a normal Chrome, without headless or automation flags. When no
 browser is available the caller keeps reporting ``captcha_required``.
+
+The session cookies of one lawyer are put in that browser, so each mode keeps them apart from the next call:
+``launch`` always opens a Chrome of its own on a temporary profile and a debugging port Chrome picks, and removes the
+profile afterwards; ``attach`` uses the Chrome the operator runs and deletes the cookies it injected when it is done;
+``auto`` attaches when one is reachable and launches otherwise.
 """
 
 import json
 import os
 import shutil
 import subprocess
+import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -31,6 +38,7 @@ DEFAULT_TIMEOUT = 60
 DEFAULT_MAX_BYTES = 2 * 1024 * 1024
 MODES = ("off", "attach", "launch", "auto")
 _ALLOWED_SUFFIXES = ("/open.do", "/search.do", "/show.do")
+_LAUNCH_LOCK = threading.Lock()  # one Chrome start at a time, so two calls never race for a profile or a port
 
 
 class BrowserBridgeError(RuntimeError):
@@ -39,6 +47,16 @@ class BrowserBridgeError(RuntimeError):
 
 def _env(name, default=""):
     return str(credentials.env(name) or default).strip()
+
+
+def recorded_port(profile):
+    """The debugging port Chrome wrote in its profile, or None while the file is missing, empty or half-written."""
+    try:
+        lines = (Path(profile) / "DevToolsActivePort").read_text().splitlines()
+    except (OSError, ValueError):
+        return None
+    port = lines[0].strip() if lines else ""
+    return port if port.isdigit() and 0 < int(port) < 65536 else None
 
 
 def _json(url, method="GET", timeout=5):
@@ -80,6 +98,8 @@ class CdpTarget:
         return result.get("result", {}).get("value")
 
     def set_cookies(self, cookies, host):
+        """Inject the session cookies; returns the names Chrome accepted, for ``delete_cookies``."""
+        injected = []
         for cookie in cookies:
             params = {"name": cookie["name"], "value": cookie["value"], "domain": host, "path": "/"}
             for key in ("secure", "httpOnly"):
@@ -90,25 +110,49 @@ class CdpTarget:
             except BrowserBridgeError:
                 # A cookie Chrome refuses is not fatal: the session may still be complete without it.
                 continue
+            injected.append(cookie["name"])
+        return injected
+
+    def delete_cookies(self, names, host):
+        """Take the injected session back out of a browser that outlives this call. Best effort."""
+        for name in names:
+            try:
+                self.call("Network.deleteCookies", {"name": name, "domain": host, "path": "/"})
+            except BrowserBridgeError:
+                continue
 
     def close(self):
         self._socket.close()
 
 
 class BrowserBridge:
-    """Reaches the consultation page through a Chrome the operator already runs (``attach``) or one it opens."""
+    """Reaches the consultation page through a Chrome the operator already runs (``attach``) or one it opens.
+
+    Use it as a context manager: leaving the block stops the Chrome it launched and removes its temporary profile.
+    """
 
     def __init__(self, mode=None, endpoint=None, profile=None, timeout=None, max_bytes=None):
         self.mode = (mode or _env("ESAJ_BRIDGE_MODE", "off")).lower()
         if self.mode not in MODES:
             raise BrowserBridgeError(f"ESAJ_BRIDGE_MODE must be one of {', '.join(MODES)}")
+        # Hosted, every call launches a Chrome of its own: an operator's browser would hold several offices' cookies,
+        # and its endpoint and profile are machine settings no office may point elsewhere.
+        hosted = bool(credentials.tenant())
+        if hosted and self.mode == "attach":
+            raise BrowserBridgeError("attach shares one browser between offices; the hosted server only launches")
+        if hosted and self.mode == "auto":
+            self.mode = "launch"
+        if hosted:
+            endpoint, profile = DEFAULT_ENDPOINT, DEFAULT_PROFILE
         self.endpoint = (endpoint or _env("ESAJ_BRIDGE_CDP", DEFAULT_ENDPOINT)).rstrip("/")
         self.profile = Path(os.path.expanduser(profile or _env("ESAJ_BRIDGE_PROFILE", DEFAULT_PROFILE)))
         self.timeout = float(timeout or _env("ESAJ_BRIDGE_TIMEOUT", DEFAULT_TIMEOUT))
         self.max_bytes = int(max_bytes or _env("ESAJ_BRIDGE_MAX_BYTES", DEFAULT_MAX_BYTES))
-        self.headless = _env("ESAJ_BRIDGE_HEADLESS", "true").lower() not in ("0", "false", "no", "off")
+        self.headless = hosted or _env("ESAJ_BRIDGE_HEADLESS", "true").lower() not in ("0", "false", "no", "off")
         self._process = None
         self._temporary_profile = None
+        self._endpoint = None
+        self._attached = False
 
     def __enter__(self):
         return self
@@ -127,53 +171,78 @@ class BrowserBridge:
         return _json(f"{endpoint}/json/version")
 
     def endpoint_of_running_browser(self):
-        """The endpoint of a browsing Chrome: the configured one, or the one its profile recorded."""
+        """The endpoint of a Chrome the operator runs: the configured one, or the one its profile recorded."""
         try:
             self._version(self.endpoint)
             return self.endpoint
         except (OSError, ValueError):
             pass
-        recorded = self.profile / "DevToolsActivePort"
-        if recorded.is_file():
-            port = recorded.read_text().splitlines()[0].strip()
-            if port.isdigit():
-                endpoint = f"http://127.0.0.1:{port}"
-                try:
-                    self._version(endpoint)
-                    return endpoint
-                except (OSError, ValueError):
-                    return None
+        port = recorded_port(self.profile)
+        if port:
+            endpoint = f"http://127.0.0.1:{port}"
+            try:
+                self._version(endpoint)
+                return endpoint
+            except (OSError, ValueError):
+                return None
         return None
 
-    def chrome_command(self):
+    def chrome_command(self, profile):
         """The command of the Chrome the bridge opens: headless by default, because it mints the token too."""
         chrome = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chrome")
         if not chrome:
             raise BrowserBridgeError("Chrome is not installed on this machine")
-        command = [chrome, "--no-first-run", "--no-default-browser-check", "--remote-allow-origins=*"]
+        # No --remote-allow-origins: the websocket is opened with suppress_origin=True, so Chrome sees no Origin.
+        command = [chrome, "--no-first-run", "--no-default-browser-check"]
         if self.headless:
             command += ["--headless=new", "--disable-gpu"]
         elif not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             raise BrowserBridgeError("A visible Chrome needs a display; start it yourself and use attach")
-        command += ["--remote-debugging-port=0", f"--user-data-dir={self.profile}", "about:blank"]
+        # Port 0: Chrome picks a free port and records it in this profile, which no other Chrome shares.
+        command += ["--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"]
         return command
 
     def start(self):
-        """The CDP endpoint, opening a Chrome in ``launch`` mode when none is running."""
-        running = self.endpoint_of_running_browser()
-        if running:
-            return running
-        if self.mode == "attach":
-            raise BrowserBridgeError("No Chrome with remote debugging is reachable")
-        self.profile.mkdir(parents=True, exist_ok=True)
-        self._process = subprocess.Popen(self.chrome_command(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        deadline = time.monotonic() + min(self.timeout, 30)
-        while time.monotonic() < deadline:
-            endpoint = self.endpoint_of_running_browser()
-            if endpoint:
-                return endpoint
-            time.sleep(0.2)
-        raise BrowserBridgeError("Chrome did not open its debugging port")
+        """The CDP endpoint: an operator's Chrome in ``attach``/``auto``, a fresh one of our own otherwise.
+
+        ``launch`` never attaches: whatever listens on the configured endpoint is not ours to hand a session to.
+        """
+        if self._endpoint:
+            return self._endpoint
+        if self.mode in ("attach", "auto"):
+            running = self.endpoint_of_running_browser()
+            if running:
+                self._endpoint, self._attached = running, True
+                return running
+            if self.mode == "attach":
+                raise BrowserBridgeError("No Chrome with remote debugging is reachable")
+        self._endpoint = self._launch()
+        return self._endpoint
+
+    def _launch(self):
+        with _LAUNCH_LOCK:
+            try:
+                self._temporary_profile = tempfile.mkdtemp(prefix="jurisync-esaj-chrome-")
+                self._process = subprocess.Popen(
+                    self.chrome_command(self._temporary_profile), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                deadline = time.monotonic() + min(self.timeout, 30)
+                while time.monotonic() < deadline:
+                    if self._process.poll() is not None:
+                        raise BrowserBridgeError("Chrome exited before opening its debugging port")
+                    port = recorded_port(self._temporary_profile)
+                    if port:
+                        endpoint = f"http://127.0.0.1:{port}"
+                        try:
+                            self._version(endpoint)
+                            return endpoint
+                        except (OSError, ValueError):
+                            pass  # the port is recorded a moment before Chrome answers on it
+                    time.sleep(0.2)
+                raise BrowserBridgeError("Chrome did not open its debugging port")
+            except BaseException:
+                self.stop()
+                raise
 
     def stop(self):
         if self._process is not None:
@@ -186,6 +255,8 @@ class BrowserBridge:
         if self._temporary_profile is not None:
             shutil.rmtree(self._temporary_profile, ignore_errors=True)
             self._temporary_profile = None
+        self._endpoint = None
+        self._attached = False
 
     # --- targets -------------------------------------------------------------------------------------------------
 
@@ -204,11 +275,12 @@ class BrowserBridge:
         endpoint = self.start()
         target = self._target(endpoint, config.host, prefix)
         tab = CdpTarget(target["webSocketDebuggerUrl"], timeout=self.timeout)
+        injected = []
         try:
             tab.call("Page.enable")
             tab.call("Runtime.enable")
             if cookies:
-                tab.set_cookies(cookies, config.host)
+                injected = tab.set_cookies(cookies, config.host)
             open_url = f"https://{config.host}/{prefix}/open.do"
             tab.call("Page.navigate", {"url": open_url})
             self._wait_for_token(tab)
@@ -223,7 +295,7 @@ class BrowserBridge:
                 raise BrowserBridgeError("The consultation page is larger than the bridge limit")
             return {"status": 200, "url": result["url"], "html": html}
         finally:
-            tab.close()
+            self._release(tab, injected, config.host)
             self._close(endpoint, target)
 
     def fetch(self, portal, url, cookies=()):
@@ -237,11 +309,12 @@ class BrowserBridge:
         endpoint = self.start()
         target = self._target(endpoint, config.host, "cpopg" if config.key == "tjsp-esaj" else "cpopg5")
         tab = CdpTarget(target["webSocketDebuggerUrl"], timeout=self.timeout)
+        injected = []
         try:
             tab.call("Page.enable")
             tab.call("Runtime.enable")
             if cookies:
-                tab.set_cookies(cookies, config.host)
+                injected = tab.set_cookies(cookies, config.host)
             tab.call("Page.navigate", {"url": url})
             self._wait_for_load(tab)
             html = tab.evaluate("document.documentElement.outerHTML") or ""
@@ -249,8 +322,16 @@ class BrowserBridge:
                 raise BrowserBridgeError("The page is larger than the bridge limit")
             return {"status": 200, "url": url, "html": html}
         finally:
-            tab.close()
+            self._release(tab, injected, config.host)
             self._close(endpoint, target)
+
+    def _release(self, tab, injected, host):
+        """Close our tab; in a browser that outlives the call, first delete the session cookies put in it."""
+        try:
+            if self._attached and injected:
+                tab.delete_cookies(injected, host)
+        finally:
+            tab.close()
 
     @staticmethod
     def _close(endpoint, target):
@@ -298,12 +379,14 @@ def bridge_status():
         return {"mode": "invalid", "available": False, "reason": str(error)}
     if not bridge.enabled:
         return {"mode": "off", "available": False, "reason": "captcha_required"}
-    endpoint = bridge.endpoint_of_running_browser()
+    # launch never attaches, so only attach/auto look for a running browser; launch/auto need Chrome installed.
+    endpoint = bridge.endpoint_of_running_browser() if bridge.mode in ("attach", "auto") else None
+    installed = bridge.mode != "attach" and any(shutil.which(name) for name in ("google-chrome", "chromium", "chrome"))
     return {
         "mode": bridge.mode,
-        "available": bool(endpoint),
+        "available": bool(endpoint or installed),
         "endpoint": endpoint or "",
-        "reason": "" if endpoint else "no_browser",
+        "reason": "" if endpoint or installed else "no_browser",
     }
 
 

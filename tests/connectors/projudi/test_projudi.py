@@ -9,7 +9,7 @@ from mcp.client.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, keycloak, parsers, server, tjam, tjgo, tjpi
+from jurisync.connectors.projudi import base, parsers, server, tjgo
 from jurisync.core.documents import MAX_DOCUMENT_BYTES
 from jurisync.core.http import UnsafeUrlError
 from jurisync.core.session_pool import SessionExpired, SessionPool
@@ -227,6 +227,18 @@ class TjgoAdapterTest(unittest.TestCase):
         self.assertFalse(tjgo.ADAPTER.is_login_redirect(response(302, "/Usuario")))
         self.assertFalse(tjgo.ADAPTER.is_login_redirect(response(200)))
 
+    def test_login_start_never_follows_a_redirect_off_the_portal(self):
+        """The first GET used to follow redirects on its own; now each hop is host-checked before it is requested."""
+        session = mock.Mock()
+        session.get.return_value = mock.Mock(
+            status_code=302, url="https://projudi.tjgo.jus.br/", headers={"Location": "https://evil.invalid/steal"}
+        )
+        with self.assertRaises(UnsafeUrlError):
+            tjgo.ADAPTER.login("tjgo-1g", session=session)
+        self.assertEqual(session.get.call_count, 1)
+        self.assertIs(session.get.call_args.kwargs["allow_redirects"], False)
+        session.post.assert_not_called()
+
     def test_panel_is_told_from_the_login_page_by_its_fields_not_by_any_password_input(self):
         panel = mock.Mock(
             status_code=200,
@@ -400,7 +412,7 @@ class ServerTest(unittest.TestCase):
 
         return asyncio.run(run())
 
-    def test_four_read_only_tools_that_take_a_portal(self):
+    def test_four_tools_that_take_a_portal_and_only_the_download_is_not_read_only(self):
         async def tools():
             async with Client(server.create_server()) as client:
                 return {tool.name: tool for tool in (await client.list_tools()).tools}
@@ -412,7 +424,9 @@ class ServerTest(unittest.TestCase):
         )
         for tool in listed.values():
             with self.subTest(tool=tool.name):
-                self.assertTrue(tool.annotations.read_only_hint)
+                # The download writes a file in the shared folder, so a client must not skip its confirmation.
+                self.assertEqual(tool.annotations.read_only_hint, tool.name != "projudi_download_document")
+                self.assertFalse(tool.annotations.destructive_hint)
                 portal = tool.input_schema["properties"]["portal"]
                 self.assertEqual(portal.get("default"), "tjgo-1g")
                 self.assertEqual(portal.get("enum", [portal.get("const")]), ["tjgo-1g"])
@@ -473,17 +487,18 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(always.call_count, 2)
 
 
-class PlaceholderAdapterTest(unittest.TestCase):
-    def test_every_unwired_flavor_has_an_adapter_that_refuses_to_run(self):
-        flavors = {portal.flavor for portal in portals.PORTALS.values() if portal.system == "projudi"}
-        self.assertEqual(flavors, set(server.ADAPTERS))
-        for adapter in (keycloak.ADAPTER, tjam.ADAPTER, tjpi.ADAPTER):
-            with self.subTest(flavor=adapter.flavor):
-                self.assertIs(server.ADAPTERS[adapter.flavor], adapter)
-                with self.assertRaisesRegex(NotImplementedError, "not validated"):
-                    adapter.login("tjgo-1g")
-                with self.assertRaisesRegex(NotImplementedError, "not validated"):
-                    adapter.open_process(None, "tjgo-1g", NUMBER)
+class UnwiredGenerationTest(unittest.TestCase):
+    def test_only_tjgo_has_an_adapter_and_the_other_generations_say_not_implemented(self):
+        self.assertEqual(set(server.ADAPTERS), {"tjgo-servlet"})
+        self.assertIs(server.adapter_for("tjgo-1g"), tjgo.ADAPTER)
+        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjam-1g", "tjpi-projudi-1g"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(NotImplementedError, f"{key}.*not implemented yet; wired: tjgo-1g"):
+                    server.adapter_for(key)
+                with self.assertRaisesRegex(ToolError, "not implemented yet"):
+                    server.call(key, lambda adapter, session: self.fail("an unwired portal must not log in"))
+        with self.assertRaisesRegex(ValueError, "portal must be one of"):
+            server.adapter_for("no-such-portal")
 
     def test_keycloak_courts_share_a_flavor_and_do_not_use_the_tjgo_routes(self):
         keycloak_courts = [p.key for p in portals.PORTALS.values() if p.flavor == "legacy-keycloak"]
