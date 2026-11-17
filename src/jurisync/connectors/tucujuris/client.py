@@ -268,6 +268,19 @@ def login(portal_key=PORTAL, *, http_factory=requests.Session, clock=time.time, 
         if state == "configuracao_pendente":
             raise LoginRejected("Tucujuris asks to enroll a new authenticator; the connector never does that")
         if state == "verificacao_pendente":
+            # The account picks the second factor: an authenticator ("otp") or a code e-mailed at each login, which
+            # only a person with that mailbox can answer. The page asks the method before showing the code field.
+            method = data.get("segundo_fator_metodo") or (
+                call(
+                    http, portal, "GET", "usuario/segundo-fator-situacao",
+                    page="segundo-fator-verificar/segundo-fator-verificar.html", token=token,
+                ) or {}
+            ).get("segundo_fator_metodo")  # fmt: skip
+            if method == "email":
+                raise LoginRejected(
+                    "Tucujuris sends this account's second-factor code by e-mail; switch it to the authenticator app "
+                    "in the portal (Meu perfil) to log in unattended"
+                )
             try:
                 result = call(
                     http, portal, "POST", VERIFY_CODE, body={"codigo": fresh_code(account, clock=clock, sleep=sleep)},

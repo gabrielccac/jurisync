@@ -210,6 +210,13 @@ class LoginTest(Base):
             self.login({("POST", api("usuario/segundo-fator-verificar")): "code_refused"})
         self.assertEqual(len(self.http.calls(api("usuario/segundo-fator-verificar"))), 1)
 
+    def test_a_code_sent_by_email_is_never_guessed(self):
+        email = Response(body=b'{"status":"OK","dados":{"situacao":"verificacao_pendente","segundo_fator_metodo":"email"}}')
+        with self.assertRaisesRegex(LoginRejected, "e-mail"):
+            self.login({("GET", api("usuario/segundo-fator-situacao")): email})
+        self.assertEqual(self.http.calls(api("usuario/segundo-fator-verificar")), [])
+        self.assertTrue(self.http.closed)
+
     def test_cloudflare_challenge_stops_before_the_credentials(self):
         challenge = Response(403, b"<html>Just a moment...</html>", "text/html", {"cf-mitigated": "challenge"})
         with self.assertRaises(client.HumanVerificationRequired):
