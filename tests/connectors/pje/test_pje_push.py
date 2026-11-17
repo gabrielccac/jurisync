@@ -75,6 +75,39 @@ class PjeNotificationChecks(unittest.TestCase):
             "complete"
         ]
 
+    def test_tjrj_grid_with_the_paginator_nested_inside_is_read(self):
+        from pathlib import Path
+
+        html = (Path(__file__).parent / "fixtures" / "push_tjrj.html").read_text()
+        items = push.parse_push_items(html)
+        self.assertEqual(
+            [(i["process_number"], i["process_id"], i["registered_at"]) for i in items],
+            [
+                ("0000001-11.2026.8.19.0001", 1000001, "10/12/2025 08:10"),
+                ("0000002-22.2026.8.19.0001", 1000002, "21/10/2026 13:56"),
+                ("0000003-33.2026.8.19.0001", 1000003, "01/10/2026 09:00"),
+            ],
+        )
+        self.assertEqual(items[1]["observation"], "obs teste")
+        page = push.parse_push_page(html, len(items))
+        # "10/12/2025" is an inclusion date, not "page 10 of 12".
+        self.assertEqual((page["current_page"], page["total_pages"], page["has_next_page"]), (None, None, None))
+        self.assertEqual((page["results_count"], page["complete"]), (3, True))
+
+    def test_datascroller_pages_say_there_is_a_next_page(self):
+        html = """<table id="grid"><thead><tr><th>Processo</th></tr></thead>
+        <tfoot><tr><td><table class="rich-dtascroller-table"><tr><td class="rich-datascr-act">1</td>
+        <td class="rich-datascr-inact">2</td><td class="rich-datascr-inact">3</td></tr></table>
+        <span>45 resultados encontrados</span></td></tr></tfoot>
+        <tbody><tr><td>0000001-11.2026.8.14.0001</td></tr><tr><td>0000002-22.2026.8.14.0001</td></tr></tbody></table>"""
+        items = push.parse_push_items(html)
+        self.assertEqual(len(items), 2)
+        page = push.parse_push_page(html, len(items))
+        self.assertEqual((page["current_page"], page["total_pages"], page["has_next_page"]), (1, 3, True))
+        self.assertFalse(page["complete"])
+        explicit = push.parse_push_page("<p>Página 2 de 4</p><p>1 resultados encontrados</p>", 1)
+        self.assertEqual((explicit["current_page"], explicit["total_pages"]), (2, 4))
+
 
 if __name__ == "__main__":
     unittest.main()

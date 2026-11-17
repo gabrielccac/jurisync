@@ -59,21 +59,25 @@ PUSH_COLUMNS = {
 }
 
 
+def _own(table, name):
+    """The ``name`` elements of ``table`` itself, not of a table nested in it (a layout cell, a paginator)."""
+    return [node for node in table.find_all(name) if node.find_parent("table") is table]
+
+
 def parse_push_items(html):
     """Parse the processes registered in PJe Push (the source of Push emails).
 
-    The grid is the one table with a "Processo" column. TRF5/TRF3/TJAP add the inclusion date, an alternate
-    e-mail and an observation; TRF1 lists only the process (1,600 of them on one page), so the other
+    The grid is the one table with a "Processo" column of its own. TRF5/TRF3/TJAP add the inclusion date, an
+    alternate e-mail and an observation; TRF1 lists only the process (1,600 of them on one page), so the other
     columns are read by header name and left empty when the portal has none. A process registered twice
-    shows twice, as the portal's own count does.
+    shows twice, as the portal's own count does. Only the table's own headers and rows count: the layout tables
+    around the grid hold it as a nested table, and TJRJ/TJPA put the paginator (another table) inside the grid.
     """
     soup = BeautifulSoup(html, "html.parser")
     items = []
     full, bare = [], []
     for table in soup.find_all("table"):
-        if table.find("table"):
-            continue
-        heads = [" ".join(head.stripped_strings) for head in table.find_all("th")]
+        heads = [" ".join(head.stripped_strings) for head in _own(table, "th")]
         if "Processo" in heads:
             (full if set(PUSH_COLUMNS) <= set(heads) else bare).append((table, heads))
     # The full grid wins; a table with only the process column is the grid just where no full one exists.
@@ -83,8 +87,8 @@ def parse_push_items(html):
     if len(grids) != 1:
         raise RuntimeError("Could not uniquely identify the PJe Push process grid")
     table, heads = grids[0]
-    for row in table.find_all("tr"):
-        cells = row.find_all("td")
+    for row in _own(table, "tr"):
+        cells = row.find_all("td", recursive=False)
         values = [" ".join(c.stripped_strings) for c in cells]
         match = PROCESS_RE.search(" ".join(values))
         if not match:
@@ -113,7 +117,8 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
     base_host = _known_host(base_url)
     current_page = None
     total_pages = None
-    page_match = re.search(r"(?:p[aá]gina\s*)?(\d+)\s*(?:de|/|of)\s*(\d+)", text, re.I)
+    # Only an explicit "Página X de Y": a bare "10/12" is the inclusion date of a row (10/12/2025).
+    page_match = re.search(r"p[aá]gina\s*(\d+)\s*(?:de|/|of)\s*(\d+)", text, re.I)
     if page_match:
         candidate_page, candidate_total = map(int, page_match.groups())
         if 1 <= candidate_page <= candidate_total:
@@ -133,18 +138,24 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
         break
     if total_pages is None:
         page_numbers = []
-        for element in soup.select(".rich-datascr-button, .rf-ds-btn, [class*=pagination] a"):
+        selector = ".rich-datascr-act, .rich-datascr-inact, .rich-datascr-button, .rf-ds-btn, [class*=pagination] a"
+        for element in soup.select(selector):
             match = re.fullmatch(r"\s*(\d+)\s*", element.get_text(" "))
             if match:
                 page_numbers.append(int(match.group(1)))
         if page_numbers:
             total_pages = max(page_numbers)
     if current_page is None:
-        current = soup.select_one(".rich-datascr-button.rf-ds-btn-on, .rf-ds-btn-on, [aria-current='page']")
+        current = soup.select_one(
+            ".rich-datascr-act, .rich-datascr-button.rf-ds-btn-on, .rf-ds-btn-on, [aria-current='page']"
+        )
         if current and current.get_text(strip=True).isdigit():
             current_page = int(current.get_text(strip=True))
     if current_page and total_pages and current_page > total_pages:
         current_page = total_pages = None
+    if next_control is None and current_page and total_pages:
+        # A RichFaces datascroller has no "next" label: a page number after the current one is the next page.
+        next_control = current_page < total_pages
     rows = rows_returned if rows_returned is not None else len(parse_push_items(html))
     complete = result_count is not None and rows == result_count and next_control is not True
     return {
