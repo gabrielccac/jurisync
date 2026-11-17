@@ -22,6 +22,9 @@ from curl_cffi.requests.exceptions import RequestException
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for
+
+# TJGO login steps sometimes take longer than the default 30 s (17/11/2026: two tries timed out at 30 s).
+LOGIN_TIMEOUT = 90
 from jurisync.core.session_pool import LoginRejected
 
 LOGIN_READY = "LoginPronto=S"
@@ -99,6 +102,7 @@ def _follow(session, config, response, *, cert=None):
         check=lambda url: base.require_portal_url(config, url, "Projudi login redirect"),
         cert=cert,
         impersonate=impersonate_for(config),
+        timeout=LOGIN_TIMEOUT,
     )
 
 
@@ -118,7 +122,7 @@ class TjgoAdapter(base.Adapter):
         _follow(
             session,
             config,
-            session.get(config.url(), impersonate=impersonate_for(config), allow_redirects=False, timeout=TIMEOUT),
+            session.get(config.url(), impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUT),
         )
         if not any(cookie.name == SESSION_COOKIE for cookie in session.cookies.jar):
             raise RuntimeError("Projudi did not start a session")
@@ -127,7 +131,7 @@ class TjgoAdapter(base.Adapter):
             data={"PaginaAtual": "6"},
             impersonate=impersonate_for(config),
             allow_redirects=False,
-            timeout=TIMEOUT,
+            timeout=LOGIN_TIMEOUT,
         )
         location = started.headers.get("Location") or ""
         if started.status_code not in REDIRECTS or "hashFluxo" not in location:
@@ -136,7 +140,7 @@ class TjgoAdapter(base.Adapter):
         base.require_portal_url(config, url, "Projudi login redirect")
         with base.client_certificate(pin=pin, p12_path=p12_path) as pem:
             response = session.get(
-                url, impersonate=impersonate_for(config), cert=pem, allow_redirects=False, timeout=TIMEOUT
+                url, impersonate=impersonate_for(config), cert=pem, allow_redirects=False, timeout=LOGIN_TIMEOUT
             )
             response = _follow(session, config, response, cert=pem)
         options = [] if LOGIN_READY in (response.url or "") else serventias(response.text)
@@ -146,7 +150,7 @@ class TjgoAdapter(base.Adapter):
             response = _follow(
                 session,
                 config,
-                session.get(url, impersonate=impersonate_for(config), allow_redirects=False, timeout=TIMEOUT),
+                session.get(url, impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUT),
             )
             if not is_authenticated_panel(response) or serventias(response.text):
                 raise RuntimeError("Projudi did not open the panel of the chosen serventia")

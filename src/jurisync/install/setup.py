@@ -32,6 +32,7 @@ SERVERS = {
     "esaj": "jurisync-esaj",
     "eproc": "jurisync-eproc",
     "pje": "jurisync-pje",
+    "projudi": "jurisync-projudi",
     "advbox": "jurisync-advbox",
     "juridiq": "jurisync-juridiq",
     "djen": "jurisync-djen",
@@ -262,13 +263,39 @@ def check_juridiq():
     return True, "sessão ok"
 
 
+def check_certificate_portal(system, key):
+    """Log in once to a Projudi, e-SAJ or STJ portal with the A1 certificate."""
+    try:
+        if system == "projudi":
+            from jurisync.connectors.projudi.server import adapter_for
+
+            session = adapter_for(key).login(key)
+        elif system == "esaj":
+            from jurisync.connectors.esaj.base import login
+
+            session = login(key)
+        else:
+            from jurisync.connectors.stj.client import login
+
+            session = login()
+    except Exception as error:  # noqa: BLE001 - report any login failure to the user
+        return False, f"{type(error).__name__}: {str(error)[:140]}"
+    try:
+        session.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return True, "login ok"
+
+
 def run_check(check):
-    """``eproc:<portal>``, ``pje:<portal>``, ``advbox`` or ``juridiq`` → (ok, message)."""
+    """``eproc:``, ``pje:``, ``projudi:``, ``esaj:`` or ``stj:<portal>``, ``advbox`` or ``juridiq`` → (ok, message)."""
     system, _, key = check.partition(":")
     if system == "eproc":
         return check_login(key)
     if system == "pje":
         return check_pje(key)
+    if system in ("projudi", "esaj", "stj"):
+        return check_certificate_portal(system, key)
     if system == "advbox":
         return check_advbox()
     if system == "juridiq":
@@ -404,6 +431,46 @@ def setup_main(argv, *, ask, ask_secret, say):
     return 1 if verify_and_register([f"eproc:{key}" for key in keys], args, say) else 0
 
 
+def verify_main(argv, *, say):
+    """Test logins with the credentials already installed and register servers: no bundle, no passphrase.
+
+    For a portal added later that uses credentials the machine already has (the same A1 certificate).
+    """
+    parser = argparse.ArgumentParser(
+        prog="jurisync-setup verificar",
+        description="Testa o login de portais com as credenciais já instaladas e registra os servidores.",
+    )
+    parser.add_argument("--checks", required=True, help="ex.: projudi:tjgo-1g,esaj:tjms-esaj,stj:stj")
+    parser.add_argument(
+        "--copiar",
+        action="append",
+        default=[],
+        metavar="ORIGEM=DESTINO",
+        help="grava em DESTINO o valor já instalado de ORIGEM, sem exibi-lo (ex.: TJPR_1G_2FA_DATA=TJPR_2G_2FA_DATA)",
+    )
+    add_finish_options(parser)
+    args = parser.parse_args(argv)
+    env_file = target_env_file(args)
+    if not env_file.is_file():
+        raise ValueError(f"Não há credenciais instaladas em {env_file}: instale o pacote primeiro")
+    installed = read_env(env_file)
+    copies = {}
+    for pair in args.copiar:
+        source, _, target = pair.partition("=")
+        source, target = source.strip(), target.strip()
+        if not source or not target or not installed.get(source):
+            raise ValueError(f"--copiar {pair}: {source or '?'} não está instalado")
+        if not installed.get(target):
+            copies[target] = installed[source]
+    if copies:
+        write_env(env_file, copies)
+        say(f"Gravado: {', '.join(sorted(copies))} (valores não exibidos).")
+    os.environ.update({k: v for k, v in read_env(env_file).items() if k not in os.environ})
+    checks = [check.strip() for check in args.checks.split(",") if check.strip()]
+    servers = {check.split(":")[0] for check in checks} | set(args.servers.split(","))
+    return 1 if verify_and_register(checks, args, say, servers=servers) else 0
+
+
 def declared_names(customer, keys=None):
     """Every variable a customer's portals.toml declares: portal secrets (all alternatives) and [env].
 
@@ -511,7 +578,7 @@ def export_main(argv, *, ask_secret, say):
     checks = []
     for key in setups:
         system = portals.get(key).system
-        if system in ("eproc", "pje"):
+        if system in ("eproc", "pje", "projudi", "esaj", "stj"):
             checks.append(f"{system}:{key}")
     if any(name.startswith("ADVBOX_") for name in selected):
         checks.append("advbox")
@@ -598,6 +665,8 @@ def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
             return export_main(argv[1:], ask_secret=ask_secret, say=say)
         if argv[:1] == ["import"]:
             return import_main(argv[1:], ask_secret=ask_secret, say=say)
+        if argv[:1] == ["verificar"]:
+            return verify_main(argv[1:], say=say)
         if argv[:1] == ["skills"]:
             from jurisync.install.skills_sync import skills_main
 
