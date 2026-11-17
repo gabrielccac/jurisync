@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -192,3 +193,54 @@ def test_pending_notice_matches_only_requested_documents_without_ciencia():
         {"expedienteId": "3", "documentId": "11", "ciencia": None},
     ]
     assert [i["expedienteId"] for i in expedientes.pending_notice(items, ["10"])] == ["1"]
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_tjpa_rows_without_priority_take_the_act_document_from_the_row_links():
+    html = (FIXTURES / "expedientes_tjpa.html").read_text()
+    items = expedientes.parse_expedientes(html)
+    assert expedientes.tab_complete(html, items)
+    assert [(i["expedienteId"], i["tipo"], i["documentId"]) for i in items] == [
+        ("30000003", "Citação", "180000003"),
+        ("30000002", "Citação", "180000002"),
+        ("30000001", "Intimação", "180000001"),
+    ]
+    noticed, pending, answered = items
+    assert noticed["ciencia"] == {"por": "ADVOGADO FICTICIO DA SILVA", "em": "2026-07-27"}
+    assert noticed["fechado"] is False and noticed["atoPath"].endswith("paramIdProcessoDocumento=180000003")
+    assert noticed["parte"] == "EMPRESA AEREA TESTE S.A." and noticed["meio"] == "Expedição eletrônica"
+    assert pending["ciencia"] is None and pending["atoPath"] is None and pending["fechado"] is True
+    assert (pending["limite"], pending["limiteTipo"]) == ("2026-07-29", "ciência")
+    assert answered["prazoDias"] == 30 and answered["limite"] == "2026-11-04" and answered["respondido"] is True
+    # Only the act of the pending citação (and what shares its timeline entry) is held back; the rest reads.
+    timeline = [
+        {"movements": [{"documents": [{"id": "180000002"}, {"id": "180000004"}]}]},
+        {"movements": [{"documents": [{"id": "100000001"}]}]},
+    ]
+    assert expedientes.pending_notice(items, ["100000001"], timeline) == []
+    assert [i["expedienteId"] for i in expedientes.pending_notice(items, ["180000004"], timeline)] == ["30000002"]
+
+
+def test_a_row_without_header_still_counts_for_the_ciencia_check():
+    html = (FIXTURES / "expedientes_tjpb_sem_id.html").read_text()
+    items = expedientes.parse_expedientes(html)
+    assert expedientes.tab_complete(html, items)
+    regular, headless = items
+    assert regular["expedienteId"] == "20000002" and regular["documentId"] == "150000002"
+    assert headless["expedienteId"] is None and headless["documentId"] == "150000001"
+    assert headless["tipo"] == "Citaçao" and headless["meio"] == "Sistema" and headless["ciencia"] is None
+    timeline = [{"movements": [{"documents": [{"id": "150000001"}]}, {"documents": [{"id": "140000000"}]}]}]
+    assert expedientes.pending_notice(items, ["140000000"], timeline) == []
+    blocked = expedientes.pending_notice(items, ["150000001"], timeline)
+    assert blocked == [headless]
+    assert "sem id, documento 150000001" in expedientes.pending_message(blocked)
+
+
+def test_a_row_with_neither_expediente_nor_document_id_keeps_the_tab_incomplete():
+    html = (FIXTURES / "expedientes_tjpb_sem_id.html").read_text()
+    html = html.replace("validaDocumento.seam?idProcessoDocumento=150000001&amp;cid=9", "x")
+    items = expedientes.parse_expedientes(html)
+    assert [i["expedienteId"] for i in items] == ["20000002"]
+    assert not expedientes.tab_complete(html, items)

@@ -19,10 +19,15 @@ from jurisync.connectors.pje.parsers import response_html
 TABLE_ID = "processoParteExpedienteMenuGridList:tb"
 TAB_CONTROL = "navbar:linkAbaExpedientes1"
 
-HEADER = re.compile(r"^(?P<tipo>.+?)\s*\((?P<id>\d+)\)\s*-\s*Prioridade:\s*(?P<prioridade>\S+)", re.S)
+# "Intimação (123) - Prioridade: Normal - ID do documento (456)"; TJPA prints only "Intimação (123)".
+HEADER = re.compile(r"^(?P<tipo>[^()]+?)\s*\((?P<id>\d+)\)(?:\s*-\s*Prioridade:\s*(?P<prioridade>\S+))?")
 DOCUMENT = re.compile(r"ID do documento\s*\((\d+)\)")
+# The act's own document as the row links it, for rows whose header does not name it (TJPA, a row without header).
+ACT_DOCUMENT = re.compile(r"/Processo/Consulta/validaDocumento\.seam\?idProcessoDocumento=(\d+)")
+ATO_DOCUMENT = re.compile(r"[?&]paramIdProcessoDocumento=(\d+)")
 ISSUED = re.compile(
-    r"(Expedição eletrônica|Diário Eletrônico|Edital|Correio|Mandado|Central de Mandados)[^()]*\((\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)\)"
+    r"(Expedição eletrônica|Diário Eletrônico|Edital|Correio|Mandado|Central de Mandados|Sistema)[^()]*"
+    r"\((\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)\)"
 )
 NOTICE = re.compile(
     r"(?P<quem>.+?)\s+(?:registrou|tomou) ciência em\s+(?P<quando>\d{2}/\d{2}/\d{4}(?: \d{2}:\d{2}:\d{2})?)"
@@ -50,8 +55,48 @@ def _date(value):
     return datetime.strptime(value[:10], "%d/%m/%Y").date().isoformat()
 
 
+def _header_text(cell):
+    """The text before the recipient (``<h6>``): the act's type, its id and its document id, when printed."""
+    party = cell.find("h6")
+    if party is None:
+        return _clean(cell)
+    parts = []
+    for string in cell.strings:
+        if party in string.parents:
+            break
+        parts.append(string)
+    return " ".join(" ".join(parts).replace("\xa0", " ").split())
+
+
+def _act_document(row, header_text, ato):
+    """The act's document id: from the header, else from the row's links to that one document."""
+    document = DOCUMENT.search(header_text)
+    if document:
+        return document.group(1)
+    if ato is not None:
+        linked = ATO_DOCUMENT.search(ato["href"])
+        if linked:
+            return linked.group(1)
+    linked = {match.group(1) for a in row.find_all("a", href=True) if (match := ACT_DOCUMENT.search(a["href"]))}
+    return linked.pop() if len(linked) == 1 else None
+
+
+def _row_type(cell):
+    """A row without header names its type only beside the recipient, as ``<h6>PARTE <span>- Citação</span></h6>``."""
+    party = cell.find("h6")
+    marker = party.find("span") if party else None
+    return (_clean(marker).lstrip("- ").strip() or None) if marker else None
+
+
 def parse_expedientes(html):
-    """Rows of the tab as dicts. Dates are ISO (``YYYY-MM-DD``); ``limite`` is the PJe deadline."""
+    """Rows of the tab as dicts. Dates are ISO (``YYYY-MM-DD``); ``limite`` is the PJe deadline.
+
+    Most portals head each row with "Tipo (expediente id) - Prioridade: X - ID do documento (id)". TJPA prints only
+    "Tipo (expediente id)", and TJPB shows old citações sent to the Domicílio Eletrônico with no header at all. The
+    act's document is then the one the row links to (its signature check and, when the user may open it, "Visualizar
+    ato"); a row without header has ``expedienteId`` None. A row with neither an expediente id nor a document id is
+    left out, so ``tab_complete`` reports the tab as incomplete and reads stay refused.
+    """
     table = BeautifulSoup(html, "html.parser").find(id=TABLE_ID)
     if table is None:
         return []
@@ -60,13 +105,15 @@ def parse_expedientes(html):
         cells = row.find_all("td", recursive=False)
         if len(cells) < 2:
             continue
-        for script in cells[0].find_all("script"):
+        for script in row.find_all("script"):
             script.decompose()
         text = _clean(cells[0])
-        header = HEADER.match(text)
-        if not header:
+        header_text = _header_text(cells[0])
+        header = HEADER.match(header_text)
+        ato = row.find("a", href=ATO_HREF)
+        document_id = _act_document(row, header_text, ato)
+        if not header and not document_id:
             continue
-        document = DOCUMENT.search(text)
         issued = ISSUED.search(text)
         notice = NOTICE.search(text)
         prazo = PRAZO.search(text)
@@ -74,15 +121,14 @@ def parse_expedientes(html):
         limit_text = _clean(cells[1])
         limit = LIMIT.search(limit_text)
         action_text = _clean(cells[2]) if len(cells) > 2 else ""
-        kind = re.search(r"\(para (manifestação|ciência)\)", limit_text)
-        ato = cells[0].find("a", href=ATO_HREF)
+        kind = re.search(r"\(para (manifestação|ciência)(?: expressa)?\)", limit_text)
         response = row.find("a", href=RESPONSE_HREF)
         closed = _clean(cells[-1]) if len(cells) > 3 else ""
         items.append(
             {
-                "expedienteId": header.group("id"),
-                "tipo": header.group("tipo").strip(),
-                "documentId": document.group(1) if document else None,
+                "expedienteId": header.group("id") if header else None,
+                "tipo": header.group("tipo").strip() if header else _row_type(cells[0]),
+                "documentId": document_id,
                 "parte": _clean(party) if party else None,
                 "meio": issued.group(1) if issued else None,
                 "expedidoEm": _date(issued.group(2)) if issued else None,
@@ -247,7 +293,8 @@ def ciencia_report(items):
 
 def pending_message(items):
     shown = ", ".join(
-        f"{item.get('expedienteId')} ({item.get('tipo')}, {item.get('parte')}, "
+        f"{item.get('expedienteId') or 'sem id, documento ' + str(item.get('documentId'))} "
+        f"({item.get('tipo')}, {item.get('parte')}, "
         f"{item['prazoDias'] if item.get('prazoDias') is not None else 'sem'} dias)"
         for item in items[:5]
     )
