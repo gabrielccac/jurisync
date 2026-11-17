@@ -243,6 +243,20 @@ pendência foi aberta, marcada ou descartada.
   pode estar no futuro. As citações por carta mostram a hora real da leitura no
   portal.
 
+Conta com muitas serventias (OAB GO + suplementares; 508 processos, 314
+intimações do Diário): o mesmo bloco "Processos Ativos/Audiências" pode trazer
+contadores de audiência (`Audiencia?...`, ex. "Mediação CEJUSC para Hoje"),
+que não são tipos de processo. A busca por número curto não achou três
+processos de 2º grau dela; o link da própria lista
+(`BuscaProcesso?Id_Processo=<id>`, o mesmo das linhas do Diário) abre o
+processo e é o caminho de reserva do conector.
+
+Rede (17/11/2026): dos quatro endereços do portal (2 IPv4, 2 IPv6), um por vez
+deixava de aceitar conexão ou fechava o TLS. Com 90 s de timeout total, o login
+morria em "Connection timed out after 90000 ms". O conector usa 15 s para
+conectar e tenta de novo (até 3 vezes) quando a conexão nem abriu; quando o
+portal não responde, o erro começa com `portal_timeout`.
+
 Como o conector trata a ciência: antes de abrir o processo para ler ou salvar
 um documento, lê a página inicial e as duas listas "lidas" filtradas a partir
 de amanhã. Recusa (sem abrir nada) quando o processo tem comunicação do portal

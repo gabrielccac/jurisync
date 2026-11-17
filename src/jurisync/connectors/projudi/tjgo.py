@@ -27,15 +27,55 @@ from datetime import timedelta
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
-from curl_cffi.requests.exceptions import RequestException
+from curl_cffi.requests.exceptions import ConnectionError as CurlConnectionError
+from curl_cffi.requests.exceptions import RequestException, Timeout
 
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers, tjgo_desk
-from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for
+from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log
 from jurisync.core.session_pool import LoginRejected
 
 # TJGO login steps sometimes take longer than the default 30 s (17/11/2026: two tries timed out at 30 s).
 LOGIN_TIMEOUT = 90
+# TJGO answers on two IPv4 and two IPv6 addresses, and on 17/11/2026 one of them at a time dropped connections
+# (curl: "Connection timed out after 90000 ms", or the TLS handshake closed). A short connect timeout lets the next
+# attempt reach a live address instead of spending the whole read timeout on a dead one.
+CONNECT_TIMEOUT = 15
+CONNECT_ATTEMPTS = 3
+# The desk lists (home page, "lidas" JSON, own processes) of a lawyer with many serventias can be slow.
+LIST_TIMEOUT = 120
+
+
+class PortalTimeout(RuntimeError):
+    """TJGO did not answer in time; the message starts with ``portal_timeout``."""
+
+
+def connect_failed(error):
+    """Whether a request failed before it was sent (no connection or TLS handshake): repeating it is harmless."""
+    text = str(error)
+    if isinstance(error, Timeout):
+        return "Connection timed out" in text or "Resolving timed out" in text
+    return isinstance(error, CurlConnectionError) and ("SSL_connect" in text or "connect" in text.casefold())
+
+
+def send(call, label, read_timeout):
+    """Run ``call()`` (one request), repeating it when the connection itself failed; a timeout becomes
+    ``PortalTimeout`` with a clear ``portal_timeout`` message."""
+    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+        try:
+            return call()
+        except RequestException as error:
+            if connect_failed(error) and attempt < CONNECT_ATTEMPTS:
+                log.info("Projudi TJGO %s: connection failed (attempt %d), trying again", label, attempt)
+                continue
+            if isinstance(error, Timeout) or "timed out" in str(error):
+                phase = "connect to" if connect_failed(error) else f"answer within {read_timeout} s for"
+                raise PortalTimeout(
+                    f"portal_timeout: Projudi TJGO did not {phase} the {label} ({attempt} attempt(s)); the portal "
+                    "is slow or unreachable, try again later"
+                ) from error
+            raise
+
 
 LOGIN_READY = "LoginPronto=S"
 SESSION_COOKIE = "JSESSIONID"
@@ -107,14 +147,32 @@ def is_authenticated_panel(response):
     )
 
 
+LOGIN_TIMEOUTS = (CONNECT_TIMEOUT, LOGIN_TIMEOUT)
+
+
 def _follow(session, config, response, *, cert=None):
-    return follow_redirects(
-        session,
-        response,
-        check=lambda url: base.require_portal_url(config, url, "Projudi login redirect"),
-        cert=cert,
-        impersonate=impersonate_for(config),
-        timeout=LOGIN_TIMEOUT,
+    # Each hop is a GET the portal asked for; repeating the walk after a failed connection repeats only those GETs.
+    return send(
+        lambda: follow_redirects(
+            session,
+            response,
+            check=lambda url: base.require_portal_url(config, url, "Projudi login redirect"),
+            cert=cert,
+            impersonate=impersonate_for(config),
+            timeout=LOGIN_TIMEOUTS,
+        ),
+        "login",
+        LOGIN_TIMEOUT,
+    )
+
+
+def _login_get(session, config, url, **kwargs):
+    return send(
+        lambda: session.get(
+            url, impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUTS, **kwargs
+        ),
+        "login",
+        LOGIN_TIMEOUT,
     )
 
 
@@ -131,21 +189,20 @@ class TjgoAdapter(base.Adapter):
     def login(self, portal, *, pin=None, p12_path=None, session=None):
         config = portals.projudi(portal)
         session = session or requests.Session()
-        _follow(
-            session,
-            config,
-            session.get(
-                config.url(), impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUT
-            ),
-        )
+        _follow(session, config, _login_get(session, config, config.url()))
         if not any(cookie.name == SESSION_COOKIE for cookie in session.cookies.jar):
             raise RuntimeError("Projudi did not start a session")
-        started = session.post(
-            config.url("LogOn"),
-            data={"PaginaAtual": "6"},
-            impersonate=impersonate_for(config),
-            allow_redirects=False,
-            timeout=LOGIN_TIMEOUT,
+        # Only asks for the certificate flow (no credential is sent), so a failed connection may be tried again.
+        started = send(
+            lambda: session.post(
+                config.url("LogOn"),
+                data={"PaginaAtual": "6"},
+                impersonate=impersonate_for(config),
+                allow_redirects=False,
+                timeout=LOGIN_TIMEOUTS,
+            ),
+            "login",
+            LOGIN_TIMEOUT,
         )
         location = started.headers.get("Location") or ""
         if started.status_code not in REDIRECTS or "hashFluxo" not in location:
@@ -153,19 +210,13 @@ class TjgoAdapter(base.Adapter):
         url = urllib.parse.urljoin(started.url, location)
         base.require_portal_url(config, url, "Projudi login redirect")
         with base.client_certificate(pin=pin, p12_path=p12_path) as pem:
-            response = session.get(
-                url, impersonate=impersonate_for(config), cert=pem, allow_redirects=False, timeout=LOGIN_TIMEOUT
-            )
+            response = _login_get(session, config, url, cert=pem)
             response = _follow(session, config, response, cert=pem)
         options = [] if LOGIN_READY in (response.url or "") else serventias(response.text)
         if options:
             url = urllib.parse.urljoin(response.url, choose_serventia(config, options))
             base.require_portal_url(config, url, "Projudi serventia")
-            response = _follow(
-                session,
-                config,
-                session.get(url, impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUT),
-            )
+            response = _follow(session, config, _login_get(session, config, url))
             if not is_authenticated_panel(response) or serventias(response.text):
                 raise RuntimeError("Projudi did not open the panel of the chosen serventia")
             return session
@@ -178,13 +229,17 @@ class TjgoAdapter(base.Adapter):
         even to a live session, and a dropped one gets a 200 "sessão expirada" page."""
         config = portals.projudi(portal)
         try:
-            response = session.get(
-                config.url(tjgo_desk.HOME),
-                impersonate=impersonate_for(config),
-                allow_redirects=False,
-                timeout=TIMEOUT,
+            response = send(
+                lambda: session.get(
+                    config.url(tjgo_desk.HOME),
+                    impersonate=impersonate_for(config),
+                    allow_redirects=False,
+                    timeout=(CONNECT_TIMEOUT, LIST_TIMEOUT),
+                ),
+                "home page",
+                LIST_TIMEOUT,
             )
-        except RequestException:
+        except (RequestException, PortalTimeout):
             return None
         html = parsers.decode(response.content)
         alive = response.status_code == 200 and tjgo_desk.HOME_MARKER.search(html) and not LOGIN_FIELDS.search(html)
@@ -197,6 +252,14 @@ class TjgoAdapter(base.Adapter):
         if short:
             return f"{int(short.group(1)):07d}-{int(short.group(2)):02d}"
         return base.normalize_number(text, portal)
+
+    def request(self, session, portal, method, path, *, label="request", read_timeout=TIMEOUT, **kwargs):
+        """The shared request, with a short connect timeout, a new attempt when the connection failed and a
+        ``portal_timeout`` error when the portal does not answer."""
+        kwargs.setdefault("timeout", (CONNECT_TIMEOUT, read_timeout))
+        return send(
+            lambda: super(TjgoAdapter, self).request(session, portal, method, path, **kwargs), label, read_timeout
+        )
 
     def _page(self, response, label):
         """The decoded page of a 200 answer; a login form or "sessão expirada" means the session is gone."""
@@ -227,6 +290,17 @@ class TjgoAdapter(base.Adapter):
         html = self._search_process(session, portal, process_number)
         if not parsers.is_process_page(html) and NOT_FOUND in html:
             html = self._search_process(session, portal, process_number, ARCHIVED)
+        if not parsers.is_process_page(html) and SHORT_NUMBER.fullmatch(process_number):
+            try:
+                rows, _ = tjgo_desk.parse_process_list(html)
+            except base.ProjudiParseError:
+                rows = []
+            html = self._open_listed(session, portal, process_number, rows) or html
+        if not parsers.is_process_page(html) and SHORT_NUMBER.fullmatch(process_number):
+            # The search does not find every short number (17/11/2026: none of three 2nd-instance processes of a
+            # lawyer); the lawyer's own lists carry each process' link, so a listed process opens through it.
+            rows = [row for group in self._own_processes(session, portal)[0] for row in group["processes"]]
+            html = self._open_listed(session, portal, process_number, rows) or html
         if not parsers.is_process_page(html):
             raise ValueError("Process not found or not accessible to this account")
         process = parsers.parse_process(html)
@@ -239,10 +313,29 @@ class TjgoAdapter(base.Adapter):
             raise ValueError("Projudi opened a different process than the one requested")
         return process
 
+    def _open_listed(self, session, portal, process_number, rows):
+        """The page of the one listed row with the same sequence and check digits (a short number can match several
+        processes, one per year or court: several stop the read), opened by the row's own link; ``None`` if none."""
+        key = tjgo_desk.process_key(process_number)
+        matching = {row.get("_id") or row["number"]: row for row in rows if tjgo_desk.process_key(row["number"]) == key}
+        if len(matching) > 1:
+            raise ValueError(
+                f"The short number {process_number} matches {len(matching)} processes; pass the full CNJ number"
+            )
+        row = next(iter(matching.values()), None)
+        if row is None or not (row.get("_page") or row.get("_id")):
+            return None
+        if row.get("_page"):
+            return row["_page"]  # a type with one process answered with its page already
+        response = self.request(
+            session, portal, "GET", f"BuscaProcesso?{urllib.parse.urlencode({'Id_Processo': row['_id']})}"
+        )
+        return self._page(response, "process page")
+
     # Lawyer desk -------------------------------------------------------------------------------------------------------
 
     def _home(self, session, portal):
-        response = self.request(session, portal, "GET", tjgo_desk.HOME)
+        response = self.request(session, portal, "GET", tjgo_desk.HOME, label="home page", read_timeout=LIST_TIMEOUT)
         return tjgo_desk.parse_home(self._page(response, "home page"))
 
     def _awaiting_publication(self, session, portal):
@@ -263,7 +356,15 @@ class TjgoAdapter(base.Adapter):
                         "PosicaoPaginaAtual": str(position),
                     }
                 )
-                response = self.request(session, portal, "GET", f"PendenciaJson?{query}", headers=XHR)
+                response = self.request(
+                    session,
+                    portal,
+                    "GET",
+                    f"PendenciaJson?{query}",
+                    headers=XHR,
+                    label="read-communications list",
+                    read_timeout=LIST_TIMEOUT,
+                )
                 rows, awaiting = tjgo_desk.parse_read_page(self._page(response, "read communications"), flow)
                 found.extend(awaiting)
                 if len(rows) < tjgo_desk.PAGE_SIZE:
@@ -279,16 +380,22 @@ class TjgoAdapter(base.Adapter):
         problems = []
         try:
             home = self._home(session, portal)
-        except base.ProjudiParseError:
+        except (base.ProjudiParseError, PortalTimeout) as error:
             home = {"portal": {"items": [], "complete": False}, "dje": {"items": []}}
-            problems.append("the home page's Pendências could not be read")
+            problems.append(
+                str(error) if isinstance(error, PortalTimeout) else "the home page's Pendências could not be read"
+            )
         if not home["portal"]["complete"] and not problems:
             problems.append("the home page lists pending communications in a layout this connector cannot read")
         try:
             upcoming, complete = self._awaiting_publication(session, portal)
+            if not complete:
+                problems.append("the Diário intimations awaiting publication could not be read in full")
+        except PortalTimeout as error:
+            upcoming = []
+            problems.append(str(error))
         except base.ProjudiParseError:
-            upcoming, complete = [], False
-        if not complete:
+            upcoming = []
             problems.append("the Diário intimations awaiting publication could not be read in full")
         seen, items = set(), []
         portal_items = [
@@ -320,9 +427,16 @@ class TjgoAdapter(base.Adapter):
         }
 
     def list_processes(self, session, portal):
-        categories = self._home(session, portal)["categories"]
+        groups, complete, hearings = self._own_processes(session, portal)
+        for group in groups:
+            group["processes"] = [tjgo_desk.public(row) for row in group["processes"]]
+        return {"categories": groups, "hearingsToday": hearings, "complete": complete}
+
+    def _own_processes(self, session, portal):
+        """``(groups, complete, hearings)``; rows keep ``_id`` (the portal's link to the process) or ``_page``."""
+        home = self._home(session, portal)
         groups, complete = [], True
-        for category in categories:
+        for category in home["categories"]:
             query = urllib.parse.urlencode(
                 {
                     "PaginaAtual": "2",
@@ -332,18 +446,41 @@ class TjgoAdapter(base.Adapter):
                     "QuantidadeRegistrosPagina": "500",
                 }
             )
-            response = self.request(session, portal, "GET", f"BuscaProcesso?{query}")
+            response = self.request(
+                session, portal, "GET", f"BuscaProcesso?{query}", label="own-process list", read_timeout=LIST_TIMEOUT
+            )
             html = self._page(response, "own-process list")
             if parsers.is_process_page(html):
                 # A single result is opened at once (as a search by number does): its page stands for the row.
                 process = parsers.parse_process(html)
-                rows, total = [{"number": process["number"], "parties": process["parties"], "distributedAt": ""}], 1
+                row = {"number": process["number"], "parties": process["parties"], "distributedAt": "", "_page": html}
+                rows, total = [row], 1
             else:
                 rows, total = tjgo_desk.parse_process_list(html)
+                rows = self._more_processes(session, portal, rows, total)
             read_all = total is not None and total == len(rows)
             complete = complete and read_all
             groups.append({**category, "total": total, "complete": read_all, "processes": rows})
-        return {"categories": groups, "complete": complete}
+        return groups, complete, home["hearings"]
+
+    def _more_processes(self, session, portal, rows, total):
+        """Pages after the first (more than 500 processes of one type), through the list's own paging link."""
+        position = 1
+        while total is not None and len(rows) < total and position < MAX_LIST_PAGES:
+            query = urllib.parse.urlencode(
+                {"PaginaAtual": "2", "Paginacao": "true", "PosicaoPaginaAtual": str(position), "PassoBusca": "1"}
+            )
+            response = self.request(
+                session, portal, "GET", f"BuscaProcesso?{query}", label="own-process list", read_timeout=LIST_TIMEOUT
+            )
+            more, _ = tjgo_desk.parse_process_list(self._page(response, "own-process list"))
+            known = {row["number"] for row in rows}
+            fresh = [row for row in more if row["number"] not in known]
+            if not fresh:
+                break
+            rows = rows + fresh
+            position += 1
+        return rows
 
     def fetch_index(self, session, portal):
         response = self.request(

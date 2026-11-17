@@ -264,7 +264,9 @@ def create_server(keys=None):
                 "('Processos Ativos/Audiências'): short number NNNNNNN-DD, parties and distribution date. Each group "
                 "has the portal's total and complete=false when fewer rows came back; a type with one process is "
                 "answered by the portal with that process' page (full CNJ number, no distribution date; no document "
-                "is opened). The home counts are refreshed hourly and may differ from the totals. Archived processes "
+                "is opened). The home counts are refreshed hourly and may differ from the totals. hearingsToday has "
+                "the hearing counters the same home block shows (not opened). portal_timeout in an error means TJGO "
+                "did not answer: try again later. Archived processes "
                 "are not listed. The number feeds projudi_get_process. Read-only."
             ),
             annotations=READ_ONLY,

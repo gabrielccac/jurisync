@@ -9,6 +9,7 @@ import unittest
 from datetime import date
 from unittest import mock
 
+from curl_cffi.requests.exceptions import SSLError, Timeout
 from mcp.client.client import Client
 
 from jurisync.connectors.projudi import base, parsers, server, tjgo, tjgo_desk
@@ -196,6 +197,7 @@ class ParseListsTest(unittest.TestCase):
                     {"role": "Polo Passivo", "name": "Empresa Ficticia S.A."},
                 ],
                 "distributedAt": "04/03/2026 15:58:57",
+                "_id": "999",
             },
         )
         not_found = "<html><title>Busca de Processo</title><script>var mensagemErro = 'Nenhum Processo foi localizado.';</script></html>"
@@ -230,15 +232,25 @@ def page(html, status=200):
 class DeskSession:
     """Answers the desk's GETs by path; records every request."""
 
-    def __init__(self, home=None, reads=None, lists=None):
+    def __init__(self, home=None, reads=None, lists=None, failures=None, pages=None):
         self.home = home if home is not None else home_page()
         self.reads = reads or {}
         self.lists = lists or {}
+        self.failures = failures or {}  # path prefix -> exceptions raised before answering
+        self.pages = pages or []  # later pages of an own-process list
         self.paths = []
+        self.timeouts = []
 
     def request(self, method, url, **kwargs):
         path = url.split("projudi.tjgo.jus.br/", 1)[1]
         self.paths.append(path)
+        self.timeouts.append(kwargs.get("timeout"))
+        for prefix, errors in self.failures.items():
+            if path.startswith(prefix) and errors:
+                raise errors.pop(0)
+        if path.startswith("BuscaProcesso?") and "Paginacao=true" in path:
+            position = int(path.split("PosicaoPaginaAtual=", 1)[1].split("&", 1)[0])
+            return page(self.pages[position - 1] if position <= len(self.pages) else process_list([]))
         if path == tjgo_desk.HOME:
             return page(self.home)
         if path.startswith("PendenciaJson?"):
@@ -310,6 +322,63 @@ class TjgoGuardTest(unittest.TestCase):
             session.get.return_value = page(html)
             self.assertIsNone(self.adapter.refresh("tjgo-1g", session))
 
+    def test_hearings_of_the_day_share_the_block_with_the_process_types(self):
+        hearing = """<tr><td>Mediação CEJUSC para Hoje</td><td><a title='x'
+ href="Audiencia?PaginaAtual=2&AudienciaTipoCodigo=18&fluxo=1">1</a></td></tr></tbody>"""
+        html = home_page().replace(
+            '</tbody></table></fieldset>\n<fieldset class="fieldEdicaoEscuro"><legend>Pend',
+            hearing + '</table></fieldset>\n<fieldset class="fieldEdicaoEscuro"><legend>Pend',
+            1,
+        )
+        home = tjgo_desk.parse_home(html, now=TODAY)
+        self.assertEqual(len(home["categories"]), 2)
+        self.assertEqual(home["hearings"], [{"label": "Mediação CEJUSC para Hoje", "count": 1}])
+        session = DeskSession(
+            home=html, lists={"1": process_list(["0000001-23", "0000004-56"]), "72": process_list(["0000007-89"])}
+        )
+        listed = self.adapter.list_processes(session, "tjgo-1g")
+        self.assertEqual((listed["complete"], listed["hearingsToday"][0]["count"]), (True, 1))
+        self.assertFalse(any(p.startswith("Audiencia") for p in session.paths))
+        unknown = html.replace("Audiencia?PaginaAtual=2", "Outra?PaginaAtual=2")
+        with self.assertRaisesRegex(base.ProjudiParseError, "unexpected link"):
+            tjgo_desk.parse_home(unknown, now=TODAY)
+
+    def test_a_long_process_list_is_paged(self):
+        session = DeskSession(
+            lists={"1": process_list(["0000001-23"], total=3), "72": process_list(["0000007-89"])},
+            pages=[process_list(["0000002-34"], total=3), process_list(["0000003-45"], total=3)],
+        )
+        group = self.adapter.list_processes(session, "tjgo-1g")["categories"][0]
+        self.assertEqual([r["number"] for r in group["processes"]], ["0000001-23", "0000002-34", "0000003-45"])
+        self.assertTrue(group["complete"])
+
+    def test_a_dropped_connection_is_tried_again_and_a_timeout_says_portal_timeout(self):
+        dropped = Timeout("Failed to perform, curl: (28) Connection timed out after 15000 milliseconds.")
+        handshake = SSLError("curl: (35) BoringSSL SSL_connect: Connection closed abruptly")
+        session = DeskSession(failures={tjgo_desk.HOME: [dropped, handshake]})
+        self.assertEqual(len(self.adapter.list_intimations(session, "tjgo-1g")["diario"]), 2)
+        self.assertEqual(session.paths[:3], [tjgo_desk.HOME] * 3)
+        self.assertEqual(session.timeouts[0], (tjgo.CONNECT_TIMEOUT, tjgo.LIST_TIMEOUT))
+        slow = Timeout("Failed to perform, curl: (28) Operation timed out after 135000 milliseconds with 0 bytes")
+        session = DeskSession(failures={tjgo_desk.HOME: [slow]})
+        with self.assertRaisesRegex(tjgo.PortalTimeout, r"^portal_timeout: .*answer within 120 s for the home page"):
+            self.adapter.list_intimations(session, "tjgo-1g")
+        self.assertEqual(session.paths, [tjgo_desk.HOME])  # a request that was sent is not repeated
+        session = DeskSession(failures={tjgo_desk.HOME: [dropped] * tjgo.CONNECT_ATTEMPTS})
+        with self.assertRaisesRegex(tjgo.PortalTimeout, "portal_timeout: Projudi TJGO did not connect to"):
+            self.adapter.list_processes(session, "tjgo-1g")
+
+    def test_a_timeout_in_a_list_leaves_the_ciencia_unchecked(self):
+        slow = Timeout("Failed to perform, curl: (28) Operation timed out after 135000 milliseconds")
+        state = self.adapter.pending_ciencia(DeskSession(failures={"PendenciaJson": [slow]}), "tjgo-1g", NUMBER)
+        self.assertTrue(state["unchecked"].startswith("portal_timeout: "))
+        state = self.adapter.pending_ciencia(DeskSession(failures={tjgo_desk.HOME: [slow]}), "tjgo-1g", NUMBER)
+        self.assertIn("portal_timeout", state["unchecked"])
+        guarded = GuardedAdapter(state)
+        with self.assertRaisesRegex(base.CienciaUnchecked, "^ciência not checked: portal_timeout"):
+            base.read_documents(guarded, object(), "tjgo-1g", NUMBER, ["100"])
+        self.assertEqual(guarded.opened, [])
+
     def test_lists_of_intimations_and_processes(self):
         session = DeskSession(
             reads={"17": [read_json(("700000009", "1.23", "18/11/2026 23:59:59"))]},
@@ -336,6 +405,52 @@ class TjgoGuardTest(unittest.TestCase):
         single = processes["categories"][1]
         self.assertEqual((single["total"], single["processes"][0]["number"]), (1, NUMBER))
         self.assertEqual(single["processes"][0]["parties"][0]["name"], "Parte Autora Ficticia")
+
+    def test_short_number_matching_a_list_opens_the_one_row_with_the_same_pair(self):
+        from tests.connectors.projudi.test_projudi import PROCESS_HTML
+
+        listed = process_list(["0000001-23", "0000001-99"]).replace("submete('999')", "submete('111')", 1)
+        session = mock.Mock()
+        session.request.side_effect = [page(listed), page(PROCESS_HTML)]
+        self.assertEqual(self.adapter.open_process(session, "tjgo-1g", "0000001-23")["number"], NUMBER)
+        self.assertTrue(session.request.call_args.args[1].endswith("BuscaProcesso?Id_Processo=111"))
+        twice = process_list(["0000001-23", "0000001-23"]).replace("submete('999')", "submete('222')", 1)
+        session.request.side_effect = [page(twice)]
+        with self.assertRaisesRegex(ValueError, "matches 2 processes; pass the full CNJ number"):
+            self.adapter.open_process(session, "tjgo-1g", "0000001-23")
+        self.assertNotIn(
+            "_id",
+            json.dumps(
+                self.adapter.list_processes(
+                    DeskSession(lists={"1": listed, "72": process_list(["0000007-89"])}), "tjgo-1g"
+                )
+            ),
+        )
+
+    def test_short_number_the_search_misses_opens_through_the_own_lists(self):
+        from tests.connectors.projudi.test_projudi import NOT_LOCATED_HTML, PROCESS_HTML
+
+        class Session(DeskSession):
+            def request(self, method, url, **kwargs):
+                path = url.split("projudi.tjgo.jus.br/", 1)[1]
+                if method == "POST":
+                    self.paths.append("POST " + path)
+                    return page(NOT_LOCATED_HTML)
+                if path.startswith("BuscaProcesso?Id_Processo="):
+                    self.paths.append(path)
+                    return page(PROCESS_HTML)
+                return super().request(method, url, **kwargs)
+
+        listed = process_list(["0000004-56", "0000001-23"]).replace("submete('999')", "submete('444')", 1)
+        session = Session(lists={"1": listed, "72": process_list(["0000007-89"])})
+        self.assertEqual(self.adapter.open_process(session, "tjgo-1g", "0000001-23")["number"], NUMBER)
+        self.assertEqual(session.paths[:2], ["POST BuscaProcesso", "POST BuscaProcesso"])
+        self.assertEqual(session.paths[-1], "BuscaProcesso?Id_Processo=999")
+        single = Session(lists={"1": process_list(["0000004-56"]), "72": PROCESS_HTML})
+        self.assertEqual(self.adapter.open_process(single, "tjgo-1g", "0000001-23")["number"], NUMBER)
+        self.assertFalse(any(p.startswith("BuscaProcesso?Id_Processo=") for p in single.paths))
+        with self.assertRaisesRegex(ValueError, "not found"):
+            self.adapter.open_process(Session(lists={"1": listed, "72": listed}), "tjgo-1g", "0000009-99")
 
     def test_short_number_opens_the_process_with_the_same_pair(self):
         self.assertEqual(self.adapter.normalize_number("4.56", "tjgo-1g"), "0000004-56")

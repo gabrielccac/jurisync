@@ -38,6 +38,7 @@ SHORT_NUMBER = re.compile(r"\b(\d{1,7})[.-](\d{1,2})\b(?!\.\d{4}\.\d)")
 CNJ_NUMBER = re.compile(r"\b(\d{7})-(\d{2})\.\d{4}\.\d\.\d{2}\.\d{4}\b")
 MOVEMENT_DATE = re.compile(r"^(.*?)\s*\((\d{2}/\d{2}/\d{4}[^)]*)\)\s*$")
 DATE = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b")
+PROCESS_ID = re.compile(r"submete\('(\d{1,40})'\)")
 NUMBER_CELL = re.compile(r"\d{1,7}[.-]\d{1,2}(?:\.\d{4}\.\d\.\d{2}\.\d{4})?")
 QUANTITY = re.compile(r"Quantidade:\s*(\d+)")
 TOTAL = re.compile(r"Total de:\s*(\d+)")
@@ -146,17 +147,25 @@ def parse_home(html, now=None):
     if not HOME_MARKER.search(clean(page)):
         raise ProjudiParseError("Projudi did not return the lawyer home page")
     fieldsets = page.find_all("fieldset")
-    categories = []
+    categories, hearings = [], []
     for fieldset in fieldsets:
         if not _legend(fieldset).startswith("Processos Ativos"):
             continue
         for link in fieldset.find_all("a", href=True):
-            match = CATEGORY_LINK.match(link["href"].strip())
+            href = link["href"].strip()
+            match = CATEGORY_LINK.match(href)
             row = link.find_parent("tr")
             count = clean(link)
-            if match is None or row is None or not count.isdigit():
+            if row is None or not count.isdigit():
                 raise ProjudiParseError("Projudi own-process category has an unexpected shape")
-            categories.append({"label": clean(row.find("td")), "subtype": match.group(1), "count": int(count)})
+            label = clean(row.find("td"))
+            if match is not None:
+                categories.append({"label": label, "subtype": match.group(1), "count": int(count)})
+            elif href.startswith("Audiencia"):
+                # The same block counts today's hearings (e.g. "Mediação CEJUSC para Hoje" -> Audiencia?...).
+                hearings.append({"label": label, "count": int(count)})
+            else:
+                raise ProjudiParseError("Projudi own-process category has an unexpected link")
     pending = next((f for f in fieldsets if _legend(f) == "Pendências"), None)
     if pending is None:
         raise ProjudiParseError("Projudi home page has no Pendências block")
@@ -173,6 +182,7 @@ def parse_home(html, now=None):
     complete = rest.casefold() == NONE_PENDING or (bool(portal_items) and len(_data_rows(pending)) == len(portal_items))
     return {
         "categories": categories,
+        "hearings": hearings,
         "dje": {"items": dje_items, "declared": declared},
         "portal": {"items": portal_items, "complete": complete, "text": "" if complete else rest[:300]},
     }
@@ -246,7 +256,8 @@ def parse_process_list(html):
             if role is not None and name is not None:
                 parties.append({"role": clean(role), "name": clean(name)})
         dated = next((clean(c) for c in cells if c is not parties_cell and DATE.search(clean(c))), "")
-        rows.append({"number": number, "parties": parties, "distributedAt": dated})
+        opened = PROCESS_ID.search(row.get("onclick") or "")
+        rows.append({"number": number, "parties": parties, "distributedAt": dated, "_id": opened and opened.group(1)})
     return rows, int(total.group(1)) if total else None
 
 
