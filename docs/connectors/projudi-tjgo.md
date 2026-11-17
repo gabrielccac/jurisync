@@ -214,6 +214,45 @@ PDFs com camada de texto extraem direto; escaneados devem retornar
 precisam de strip de tags. O extrator do repo já cobre `access_denied` e
 `session_expired`.
 
+## Mesa do advogado, intimações e ciência (2026-11-17)
+
+Levantamento ao vivo, read-only, com a conta de uma advogada (A1). Nenhuma
+pendência foi aberta, marcada ou descartada.
+
+- **Página inicial** (`Usuario?PaginaAtual=-10`, o `userMainFrame` do painel):
+  `GET /Usuario` sem parâmetros serve a página pública (com o formulário de
+  login) mesmo com sessão viva; não serve para checar a sessão. Sessão caída
+  responde 200 "Problema no pedido … Usuário inválido ou sessão expirada".
+- **Processos Ativos/Audiências**: um link por tipo de serventia
+  (`BuscaProcesso?PaginaAtual=2&Proprio=1&Id_ServentiaSubTipo=<n>&ProcessoStatusCodigo=0`)
+  com a quantidade (atualizada de hora em hora). Com
+  `&QuantidadeRegistrosPagina=500` a lista vem inteira (número curto
+  `NNNNNNN-DD`, partes, distribuição, "Total de: N"); com um único processo o
+  portal abre direto a tela "Dados Processo".
+- **Pendências**: tabela "Intimações/Citações Publicadas no Diário Eletrônico"
+  (id da pendência, número curto `NNNNNNN.DD`, movimentação, data de
+  publicação, possível data limite, "Quantidade: N"), com os botões "Marcar
+  Aguardando Peticionamento" e "Retirar da Página Inicial"
+  (`DescartarPendenciaProcesso`, nunca seguidos). Depois dela vêm as
+  comunicações do próprio portal aguardando leitura; na conta testada,
+  "Não há pendências".
+- **Intimações lidas / Citações lidas** (`Pendencia?PaginaAtual=7&fluxo=7|12`,
+  dados por `PendenciaJson?AJAX=ajax&PaginaAtual=3&fluxo=17|14`, 15 por página,
+  filtro `dataInicialFim`): a intimação do Diário já aparece como "lida" desde a
+  disponibilização, com a **data de leitura igual à data de publicação**, que
+  pode estar no futuro. As citações por carta mostram a hora real da leitura no
+  portal.
+
+Como o conector trata a ciência: antes de abrir o processo para ler ou salvar
+um documento, lê a página inicial e as duas listas "lidas" filtradas a partir
+de amanhã. Recusa (sem abrir nada) quando o processo tem comunicação do portal
+aguardando leitura ou intimação do Diário com publicação ainda futura (ler
+antes pode ser tomado como ciência inequívoca), salvo `acknowledgeCiencia=true`;
+recusa todas as leituras com "ciência not checked" quando alguma dessas listas
+não pode ser lida por inteiro. O formato da lista de comunicações do portal não
+foi observado (a conta não tinha nenhuma): qualquer conteúdo ali que não seja
+uma linha com número de processo deixa a ciência "não verificada".
+
 ## Outros tribunais Projudi (não é só GO)
 
 Projudi é um sistema do CNJ usado por vários tribunais estaduais, em gerações

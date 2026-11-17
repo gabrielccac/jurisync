@@ -9,18 +9,28 @@ cookie, and an expired session is redirected to ``/LogOn``.
 
 A process is opened by CNJ number (``POST /BuscaProcesso``); its document index (``PaginaAtual=9``) exists only for the
 process opened in the session, and a file downloads with its ``id_movi_arq`` and ``hash``. The search covers only active
-processes unless told otherwise, so an archived one takes a second search with its own status code.
+processes unless told otherwise, so an archived one takes a second search with its own status code. TJGO's own lists
+show a short number (``NNNNNNN-DD``), which the search also accepts.
+
+Ciência (observed live 2026-11-17, ``tjgo_desk`` has the pages): a lawyer's TJGO intimações go out through the Diário
+Eletrônico; each one is listed under "Intimações lidas" from the moment it is made available, with the publication
+date as its reading date, which can still be in the future. The portal's own pending communications (awaiting reading)
+are listed in the home page's "Pendências" block ("Não há pendências" when none). Before a document of a process is
+read or saved, both lists are checked: a pending portal communication of that process, or a Diário intimação whose
+publication date is still ahead, refuses the read unless the caller acknowledges it, and a list that cannot be read
+in full refuses every read ("ciência not checked"). Only lists are read: no pendência is opened, marked or discarded.
 """
 
 import re
 import urllib.parse
+from datetime import timedelta
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, parsers
+from jurisync.connectors.projudi import base, parsers, tjgo_desk
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for
 from jurisync.core.session_pool import LoginRejected
 
@@ -36,6 +46,8 @@ NOT_FOUND = "Nenhum Processo foi localizado"
 ARCHIVED = {"ProcessoStatus": "", "ProcessoStatusCodigo": "1"}
 SERVENTIA_LINK = re.compile(r"^Usuario\?PaginaAtual=7&")
 SERVENTIA_OAB = re.compile(r"(\d+)-[A-Z]-([A-Z]{2})\b")
+SHORT_NUMBER = re.compile(r"(\d{1,7})[-.](\d{1,2})")
+MAX_LIST_PAGES = 10
 
 
 def serventias(html):
@@ -162,17 +174,38 @@ class TjgoAdapter(base.Adapter):
         return session
 
     def refresh(self, portal, session):
+        """The lawyer home answers only a live session. A bare ``/Usuario`` serves the public page with the login form
+        even to a live session, and a dropped one gets a 200 "sessão expirada" page."""
         config = portals.projudi(portal)
         try:
             response = session.get(
-                config.url("Usuario"),
+                config.url(tjgo_desk.HOME),
                 impersonate=impersonate_for(config),
                 allow_redirects=False,
                 timeout=TIMEOUT,
             )
         except RequestException:
             return None
-        return session if response.status_code == 200 and not LOGIN_FIELDS.search(response.text) else None
+        html = parsers.decode(response.content)
+        alive = response.status_code == 200 and tjgo_desk.HOME_MARKER.search(html) and not LOGIN_FIELDS.search(html)
+        return session if alive else None
+
+    def normalize_number(self, value, portal):
+        """A CNJ number, or the short ``NNNNNNN-DD`` (``NNNNNNN.DD``) that TJGO's own lists show."""
+        text = (value or "").strip()
+        short = SHORT_NUMBER.fullmatch(text)
+        if short:
+            return f"{int(short.group(1)):07d}-{int(short.group(2)):02d}"
+        return base.normalize_number(text, portal)
+
+    def _page(self, response, label):
+        """The decoded page of a 200 answer; a login form or "sessão expirada" means the session is gone."""
+        if response.status_code != 200:
+            raise RuntimeError(f"Projudi {label} failed (HTTP {response.status_code})")
+        html = parsers.decode(response.content)
+        if LOGIN_FIELDS.search(html) or tjgo_desk.is_expired(html):
+            raise base.ProjudiSessionExpired("Projudi session expired")
+        return html
 
     def _search_process(self, session, portal, process_number, status=None):
         response = self.request(
@@ -188,12 +221,7 @@ class TjgoAdapter(base.Adapter):
                 **(status or {}),
             },
         )
-        if response.status_code != 200:
-            raise RuntimeError(f"Projudi process search failed (HTTP {response.status_code})")
-        html = parsers.decode(response.content)
-        if LOGIN_FIELDS.search(html):
-            raise base.ProjudiSessionExpired("Projudi session expired")
-        return html
+        return self._page(response, "process search")
 
     def open_process(self, session, portal, process_number):
         html = self._search_process(session, portal, process_number)
@@ -202,9 +230,120 @@ class TjgoAdapter(base.Adapter):
         if not parsers.is_process_page(html):
             raise ValueError("Process not found or not accessible to this account")
         process = parsers.parse_process(html)
-        if re.sub(r"\D", "", process["number"]) != re.sub(r"\D", "", process_number):
+        if SHORT_NUMBER.fullmatch(process_number):
+            # A short number names sequence and check digits only; the page must carry the same pair.
+            same = tjgo_desk.process_key(process["number"]) == tjgo_desk.process_key(process_number)
+        else:
+            same = re.sub(r"\D", "", process["number"]) == re.sub(r"\D", "", process_number)
+        if not same:
             raise ValueError("Projudi opened a different process than the one requested")
         return process
+
+    # Lawyer desk -------------------------------------------------------------------------------------------------------
+
+    def _home(self, session, portal):
+        response = self.request(session, portal, "GET", tjgo_desk.HOME)
+        return tjgo_desk.parse_home(self._page(response, "home page"))
+
+    def _awaiting_publication(self, session, portal):
+        """Diário intimações and citações whose reading date is after today, from the "lidas" lists (they keep the
+        ones the lawyer removed from the home page). ``(items, complete)``."""
+        tomorrow = (tjgo_desk.today() + timedelta(days=1)).strftime("%d/%m/%Y")
+        found = []
+        for flow in tjgo_desk.READ_FLOWS:
+            for position in range(MAX_LIST_PAGES):
+                query = urllib.parse.urlencode(
+                    {
+                        "AJAX": "ajax",
+                        "PaginaAtual": "3",
+                        "fluxo": flow,
+                        "dataInicialFim": tomorrow,
+                        "dataFinalFim": "",
+                        "nomeBusca": "",
+                        "PosicaoPaginaAtual": str(position),
+                    }
+                )
+                response = self.request(session, portal, "GET", f"PendenciaJson?{query}", headers=XHR)
+                rows, awaiting = tjgo_desk.parse_read_page(self._page(response, "read communications"), flow)
+                found.extend(awaiting)
+                if len(rows) < tjgo_desk.PAGE_SIZE:
+                    break
+            else:
+                return found, False
+        return found, True
+
+    def pending_ciencia(self, session, portal, process_number):
+        """What a document read of this process could register: the portal's own pending communications (home page)
+        and the Diário intimações not published yet. Only lists are read; no pendência is opened."""
+        key = tjgo_desk.process_key(process_number)
+        problems = []
+        try:
+            home = self._home(session, portal)
+        except base.ProjudiParseError:
+            home = {"portal": {"items": [], "complete": False}, "dje": {"items": []}}
+            problems.append("the home page's Pendências could not be read")
+        if not home["portal"]["complete"] and not problems:
+            problems.append("the home page lists pending communications in a layout this connector cannot read")
+        try:
+            upcoming, complete = self._awaiting_publication(session, portal)
+        except base.ProjudiParseError:
+            upcoming, complete = [], False
+        if not complete:
+            problems.append("the Diário intimations awaiting publication could not be read in full")
+        seen, items = set(), []
+        portal_items = [
+            {**item, "kind": "pendência do portal (aguardando leitura)"} for item in home["portal"]["items"]
+        ]
+        for item in portal_items + upcoming + [i for i in home["dje"]["items"] if i["awaitingPublication"]]:
+            if item["_key"] == key and (item.get("id"), item.get("text")) not in seen:
+                seen.add((item.get("id"), item.get("text")))
+                items.append(item)
+        return {"items": items, "unchecked": "; ".join(problems) or None}
+
+    def list_intimations(self, session, portal):
+        home = self._home(session, portal)
+        upcoming, upcoming_complete = self._awaiting_publication(session, portal)
+        dje = home["dje"]
+        shown = {item["id"] for item in dje["items"]}
+        hidden = [item for item in upcoming if item["id"] not in shown]
+        # No Diário table at all (nothing published) has no footer; otherwise the footer counts the rows.
+        dje_complete = dje["declared"] == len(dje["items"]) or (dje["declared"] is None and not dje["items"])
+        return {
+            "diario": [tjgo_desk.public(item) for item in dje["items"]],
+            "diarioCount": len(dje["items"]),
+            "diarioDeclared": dje["declared"],
+            "awaitingPublicationNotOnHome": [tjgo_desk.public(item) for item in hidden],
+            "portalPending": [tjgo_desk.public(item) for item in home["portal"]["items"]],
+            "portalPendingComplete": home["portal"]["complete"],
+            "portalPendingText": home["portal"].get("text", ""),
+            "complete": dje_complete and home["portal"]["complete"] and upcoming_complete,
+        }
+
+    def list_processes(self, session, portal):
+        categories = self._home(session, portal)["categories"]
+        groups, complete = [], True
+        for category in categories:
+            query = urllib.parse.urlencode(
+                {
+                    "PaginaAtual": "2",
+                    "Proprio": "1",
+                    "Id_ServentiaSubTipo": category["subtype"],
+                    "ProcessoStatusCodigo": "0",
+                    "QuantidadeRegistrosPagina": "500",
+                }
+            )
+            response = self.request(session, portal, "GET", f"BuscaProcesso?{query}")
+            html = self._page(response, "own-process list")
+            if parsers.is_process_page(html):
+                # A single result is opened at once (as a search by number does): its page stands for the row.
+                process = parsers.parse_process(html)
+                rows, total = [{"number": process["number"], "parties": process["parties"], "distributedAt": ""}], 1
+            else:
+                rows, total = tjgo_desk.parse_process_list(html)
+            read_all = total is not None and total == len(rows)
+            complete = complete and read_all
+            groups.append({**category, "total": total, "complete": read_all, "processes": rows})
+        return {"categories": groups, "complete": complete}
 
     def fetch_index(self, session, portal):
         response = self.request(

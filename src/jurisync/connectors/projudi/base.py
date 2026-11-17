@@ -5,7 +5,9 @@ What does not change lives here: the A1 certificate and its PEM, the HTTP sessio
 number and id validation, and the document reading that every tool shares. What changes per court (login flow,
 search route, index and download routes, parsers) lives in an ``Adapter`` subclass chosen by ``Portal.flavor``.
 
-Nothing here writes to Projudi: opening a process and reading files are plain reads.
+Nothing here writes to Projudi. Reading a file can still count as the ciência of a pending intimação, so
+``read_documents``/``download_document`` first ask the adapter's ``pending_ciencia`` and refuse, with nothing opened,
+unless the caller acknowledges (``acknowledgeCiencia`` in the tools, as in the PJe server).
 """
 
 import hashlib
@@ -35,6 +37,14 @@ class ProjudiSessionExpired(SessionExpired):
 
 class ProjudiParseError(RuntimeError):
     """The portal answered, but not with the page or JSON this connector reads."""
+
+
+class CienciaPending(ValueError):
+    """Opening a document of this process may register the ciência of a pending communication."""
+
+
+class CienciaUnchecked(CienciaPending):
+    """The pending communications could not be read in full, so whether a ciência is pending is unknown."""
 
 
 def require_portal_url(config, value, label="Projudi URL"):
@@ -126,6 +136,23 @@ class Adapter:
     def is_login_redirect(self, response):
         raise NotImplementedError
 
+    def normalize_number(self, value, portal):
+        return normalize_number(value, portal)
+
+    def pending_ciencia(self, session, portal, process_number):
+        """Communications of this process whose ciência a document read could register, checked before anything is
+        opened: ``{"items": [...], "unchecked": reason or None}``, or ``None`` when the generation has no such list
+        (TJAM checks its agenda inside ``download``)."""
+        return None
+
+    def list_intimations(self, session, portal):
+        raise NotImplementedError(
+            f"Projudi {portals.projudi(portal).tribunal} has no intimation list in this connector"
+        )
+
+    def list_processes(self, session, portal):
+        raise NotImplementedError(f"Projudi {portals.projudi(portal).tribunal} has no process list in this connector")
+
     def open_process(self, session, portal, process_number):
         """Open one process by normalized CNJ number; return ``{"number", ..., "movements": [...]}``."""
         raise NotImplementedError
@@ -202,7 +229,7 @@ class Adapter:
 
 def load_process(adapter, session, portal, process_number, *, documents=True):
     """``(process, index)``: the process page and, with ``documents``, its index joined to the movements."""
-    process = adapter.open_process(session, portal, normalize_number(process_number, portal))
+    process = adapter.open_process(session, portal, adapter.normalize_number(process_number, portal))
     if not documents:
         return process, []
     index = adapter.fetch_index(session, portal)
@@ -220,9 +247,57 @@ def index_files(index):
     return {file["id"]: {**file, "movement": entry["title"]} for entry in index for file in entry["files"]}
 
 
-def read_documents(adapter, session, portal, process_number, document_ids):
-    """Text of 1-5 documents of a process; ids come from this process' fresh index."""
+CIENCIA_NOTICE = "Ler este conteúdo pode ter registrado a ciência da parte e iniciado o prazo; informe o usuário."
+
+
+def _describe(item):
+    parts = [item.get("id") or "", item.get("kind") or "intimação", item.get("process") or ""]
+    if item.get("publication"):
+        parts.append(f"publicação/leitura {item['publication']}")
+    if item.get("deadline"):
+        parts.append(f"prazo {item['deadline']}")
+    return " ".join(part for part in parts if part)
+
+
+def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
+    """Run the generation's pending-ciência check before anything of the process is opened.
+
+    Refuses (``CienciaPending``/``CienciaUnchecked``) unless the caller acknowledges; with the acknowledgement it
+    returns what the read may have done, for the result.
+    """
+    state = adapter.pending_ciencia(session, portal, adapter.normalize_number(process_number, portal))
+    if state is None:
+        return {}
+    items = [{k: v for k, v in item.items() if not k.startswith("_")} for item in state.get("items") or []]
+    unchecked = state.get("unchecked")
+    if not acknowledge:
+        if unchecked:
+            raise CienciaUnchecked(
+                f"ciência not checked: {unchecked}, so it is unknown whether this process has a communication whose "
+                "ciência is still pending. Nothing was opened. Try again later (projudi_list_intimations shows the "
+                "list when it can be read). Opening it anyway may register the party's ciência and start the "
+                "deadline: only with the user's explicit permission, repeat the call with acknowledgeCiencia=true."
+            )
+        if items:
+            shown = "; ".join(_describe(item) for item in items[:5])
+            raise CienciaPending(
+                f"ciência not yet registered for: {shown}. Nothing was opened. Opening a document of this process "
+                "may register the party's ciência and start the deadline. Ask the user for explicit permission; if "
+                "they agree, repeat the call with acknowledgeCiencia=true."
+            )
+    extra = {}
+    if unchecked:
+        extra["cienciaChecked"] = False
+    if items or unchecked:
+        extra["ciencia"] = {"pendenteAoLer": items, "aviso": CIENCIA_NOTICE}
+    return extra
+
+
+def read_documents(adapter, session, portal, process_number, document_ids, *, acknowledge_ciencia=False):
+    """``(number, documents, ciencia)``: text of 1-5 documents of a process; ids come from this process' fresh
+    index. The pending-ciência check runs before the process is opened."""
     validate_document_ids(document_ids)
+    ciencia = check_ciencia(adapter, session, portal, process_number, acknowledge_ciencia)
     process, index = load_process(adapter, session, portal, process_number)
     known = index_files(index)
     if any(identifier not in known for identifier in document_ids):
@@ -255,19 +330,20 @@ def read_documents(adapter, session, portal, process_number, document_ids):
                 "textTruncated": len(text) > MAX_TEXT_CHARACTERS,
             }
         )
-    return process["number"], results
+    return process["number"], results, ciencia
 
 
-def download_document(adapter, session, portal, process_number, document_id):
+def download_document(adapter, session, portal, process_number, document_id, *, acknowledge_ciencia=False):
     """Save one document in the shared documents folder and describe it. Never returns the hash or a URL."""
     validate_document_ids([document_id])
+    ciencia = check_ciencia(adapter, session, portal, process_number, acknowledge_ciencia)
     process, index = load_process(adapter, session, portal, process_number)
     file = index_files(index).get(document_id)
     if file is None:
         raise ValueError("Selected document ID is not in this process")
     content, content_type = adapter.download(session, portal, document_id, file["hash"])
     if content is None:
-        return {"id": document_id, "name": file["name"], "saved": False, "reason": content_type}
+        return {"id": document_id, "name": file["name"], "saved": False, "reason": content_type, **ciencia}
     kind = file_format(content, content_type)
     status, _ = extract_document_text(content, content_type, process["number"], allow_unnumbered=True)
     result = {
@@ -278,6 +354,7 @@ def download_document(adapter, session, portal, process_number, document_id):
         "bytes": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
         "extractionStatus": status,
+        **ciencia,
     }
     if status in ("access_denied", "session_expired"):
         return {**result, "saved": False}

@@ -346,7 +346,8 @@ class DocumentReadTest(unittest.TestCase):
         return base.read_documents(self.adapter, object(), "tjgo-1g", NUMBER, ids)
 
     def test_pdf_text_and_access_denied_are_reported_per_document(self):
-        number, results = self.read(["100", "101"])
+        number, results, ciencia = self.read(["100", "101"])
+        self.assertEqual(ciencia, {})
         self.assertEqual(number, NUMBER)
         self.assertEqual([r["extractionStatus"] for r in results], ["extracted", "access_denied"])
         self.assertIn("Peticao inicial ficticia", results[0]["text"])
@@ -355,7 +356,7 @@ class DocumentReadTest(unittest.TestCase):
 
     def test_html_text_is_extracted(self):
         self.adapter.documents["100"] = (self.html, "text/html;charset=iso-8859-1")
-        _, results = self.read(["100"])
+        _, results, _ = self.read(["100"])
         self.assertEqual((results[0]["extractionStatus"], results[0]["format"]), ("extracted", "html"))
 
     def test_session_expired_page_and_scanned_pdf_are_not_text(self):
@@ -413,7 +414,7 @@ class ServerTest(unittest.TestCase):
 
         return asyncio.run(run())
 
-    def test_four_tools_that_take_a_portal_and_only_the_download_is_not_read_only(self):
+    def test_tools_take_a_portal_and_only_the_document_reads_are_not_read_only(self):
         async def tools():
             async with Client(server.create_server()) as client:
                 return {tool.name: tool for tool in (await client.list_tools()).tools}
@@ -421,17 +422,32 @@ class ServerTest(unittest.TestCase):
         listed = asyncio.run(tools())
         self.assertEqual(
             sorted(listed),
-            ["projudi_download_document", "projudi_get_process", "projudi_list_documents", "projudi_read_documents"],
+            [
+                "projudi_download_document",
+                "projudi_get_process",
+                "projudi_list_documents",
+                "projudi_list_intimations",
+                "projudi_list_processes",
+                "projudi_read_documents",
+            ],
         )
+        reads = {"projudi_download_document", "projudi_read_documents"}
+        tjgo_only = {"projudi_list_intimations", "projudi_list_processes"}
         for tool in listed.values():
             with self.subTest(tool=tool.name):
-                # The download writes a file in the shared folder, so a client must not skip its confirmation.
-                self.assertEqual(tool.annotations.read_only_hint, tool.name != "projudi_download_document")
+                # A download writes a file and, like a read, may register a ciência once acknowledged.
+                self.assertEqual(tool.annotations.read_only_hint, tool.name not in reads)
                 self.assertFalse(tool.annotations.destructive_hint)
                 portal = tool.input_schema["properties"]["portal"]
                 self.assertEqual(portal.get("default"), "tjgo-1g")
-                self.assertEqual(portal.get("enum", [portal.get("const")]), ["tjgo-1g", "tjam-1g"])
+                wired = ["tjgo-1g"] if tool.name in tjgo_only else ["tjgo-1g", "tjam-1g"]
+                self.assertEqual(portal.get("enum", [portal.get("const")]), wired)
                 self.assertNotIn("portal", tool.input_schema.get("required", []))
+                if tool.name in reads:
+                    acknowledge = tool.input_schema["properties"]["acknowledgeCiencia"]
+                    self.assertIsNone(acknowledge.get("default"))
+                    self.assertNotIn("acknowledgeCiencia", tool.input_schema.get("required", []))
+        self.assertIn("ciência not checked", listed["projudi_read_documents"].description)
 
     def test_get_process_hides_hashes_and_attaches_files_to_movements(self):
         result = self.call("projudi_get_process", {"process_number": NUMBER}).structured_content
