@@ -178,6 +178,9 @@ PASSWORD_BUTTON = "pbEntrar"
 def password_credentials(config):
     """``(username, password)`` from ``<PREFIX>_USERNAME``/``_PASSWORD``, or None when the account has none."""
     username, password = config.env("USERNAME").strip(), config.env("PASSWORD")
+    if len(username) == 11 and username.isdigit():
+        # The CAS field is masked: a bare CPF is refused as a wrong password, the formatted one is accepted.
+        username = f"{username[:3]}.{username[3:6]}.{username[6:9]}-{username[9:]}"
     return (username, password) if username and password else None
 
 

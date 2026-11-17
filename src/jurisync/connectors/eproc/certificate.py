@@ -223,6 +223,12 @@ def _oab(value):
     return re.sub(r"^([A-Z]{2})0+(?=[0-9])", r"\1", compact)
 
 
+def _landing(response):
+    """Where a login stopped, safe to report: the page address without its query and the page title."""
+    title = BeautifulSoup(response.text or "", "html.parser").title
+    return f"{url_shape(response.url)}, HTTP {response.status_code}, title {(title.get_text(' ', strip=True) if title else '')[:80]!r}"
+
+
 def _choose_profile(session, config, response):
     """Pick the configured profile on "Seleção de perfil" (navigation only: never "Definir como padrão").
 
@@ -394,5 +400,5 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
                 ),
             )
     if not is_panel(response.url) or not any(c.name == "PHPSESSID" for c in session.cookies.jar):
-        raise RuntimeError("eproc certificate login did not reach the panel")
+        raise RuntimeError(f"eproc certificate login did not reach the panel ({_landing(response)})")
     return session, response.text, rooted(config, response.url)

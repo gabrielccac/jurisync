@@ -50,6 +50,16 @@ def credential_failure(html):
     return "The portal returned no OTP form; credentials may be rejected or the login page changed"
 
 
+PORTAL_LOGIN_ERROR = re.compile(r"var\s+mensagemErroLogin\s*=\s*'([^']*)'")
+
+
+def portal_login_error(html):
+    """The message a PJe's ssoCallbackLogin page carries when the court refuses an SSO login of its own accord
+    (TJPA: "Senha expirada. Solicite uma nova senha"), else ""."""
+    match = PORTAL_LOGIN_ERROR.search(html or "")
+    return match.group(1).strip() if match else ""
+
+
 def _https_pje(url):
     """PJe-JT SSO bounces back over plain http; the same PJe path serves https."""
     parts = urlsplit(url)
@@ -149,6 +159,9 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
             log_request("GET", config.search_url, response.status_code)
         certificate._require_registered(response, config)
         authenticated = certificate._authenticated(response, config.host, config.root)
+    if not authenticated and (refusal := portal_login_error(response.text)):
+        # The SSO accepted the account but this court did not: retrying cannot help until the user acts on it.
+        raise LoginRejected(f"{config.key} refused the login: {refusal}")
     if not authenticated:
         raise RuntimeError(f"Login did not reach an authenticated PJe page (HTTP {response.status_code})")
     return session, response

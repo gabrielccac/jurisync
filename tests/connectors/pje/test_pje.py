@@ -1,9 +1,13 @@
 """Offline checks: no credentials or portal requests."""
 
 import base64
+import os
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 from unittest.mock import Mock, patch
+
+import pytest
 
 from jurisync import portals
 from jurisync.connectors.pje import parsers, search
@@ -226,6 +230,24 @@ class PjeChecks(unittest.TestCase):
         self.assertFalse(actual["success"])
         session.get.assert_called_once()
         session.post.assert_called_once()
+
+    def test_empty_search_table_looks_the_process_up_in_the_acervo(self):
+        page = """<form id="fPP"><input name="javax.faces.ViewState" value="state"><input id="fPP:search" value="Pesquisar" onclick="A4J.AJAX.Submit('fPP',event,{'similarityGroupingId':'fPP:search'})"></form>"""
+        empty = """<input name="javax.faces.ViewState" value="new"><table id="fPP:processosTable"></table>"""
+        response = lambda body: SimpleNamespace(
+            status_code=200,
+            url=portals.pje("tjmt-2g").search_url,
+            headers={"Content-Type": "text/html"},
+            content=body.encode(),
+            text=body,
+        )
+        session = Mock()
+        session.get.return_value = response(page)
+        session.post.return_value = response(empty)
+        with mock.patch.object(search.acervo, "find_process", return_value=None) as find:
+            actual = search.search_process(session, "1003829-23.2023.8.11.0021", portal="tjmt-2g")
+        find.assert_called_once()
+        self.assertEqual(actual["error"], "Process not found in the search nor in the lawyer's Acervo")
 
     def test_recaptcha_hidden_search_action_is_shared(self):
         html = """<form id="fPP"><script id="fPP:j_id77">executarPesquisaReCaptcha=function(){A4J.AJAX.Submit('fPP',null,{'similarityGroupingId':'fPP:j_id77','parameters':{'fPP:j_id77':'fPP:j_id77'}})};</script><input id="fPP:searchProcessos" value="Pesquisar" onclick="return executarReCaptcha();"></form>"""
@@ -491,3 +513,34 @@ class PjeChecks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(monkeypatch):
+    from jurisync.connectors.pje import server
+
+    for name in [n for n in os.environ if n.startswith(("PJE_", "TJ", "TRF", "TRT", "TST"))]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("PJE_A1_P12", "/tmp/a1.p12")
+    monkeypatch.setenv("PJE_1G_CERT", "true")  # TRF1 1G opts in to the A1
+    monkeypatch.setenv("TJAP_1G_USERNAME", "user")
+    monkeypatch.setenv("TJAP_1G_PASSWORD", "secret")
+    for prefix in ("PJE_1G", "PJE_TRF5_1G", "TJAP_1G", "TJPE_1G"):
+        monkeypatch.setenv(f"{prefix}_2FA_DATA", "JBSWY3DPEHPK3PXP")
+    keys = server.configured_portals()
+    assert {"trf1-1g", "trf5-1g", "tjap-1g"} <= set(keys)  # opted in, certificate portal, password
+    assert "trf1-2g" not in keys and "tjpe-1g" not in keys  # no authenticator / password portal without a login
+    assert "trt7-1g" not in keys  # the A1 alone is not enough: the SSO asks the code
+    import copy
+
+    saved = {t.name: copy.deepcopy(t.parameters) for t in server.server._tool_manager.list_tools()}
+    try:
+        server.offer_only(keys)
+        schema = {t.name: t.parameters["properties"]["portal"] for t in server.server._tool_manager.list_tools()
+                  if "portal" in t.parameters.get("properties", {})}
+        assert all(field["enum"] == list(keys) for field in schema.values())
+        with pytest.raises(ValueError, match="No login is configured for trf1-2g"):
+            server._login("trf1-2g")
+    finally:
+        server._offered = None
+        for tool in server.server._tool_manager.list_tools():
+            tool.parameters = saved[tool.name]

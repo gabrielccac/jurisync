@@ -251,10 +251,17 @@ PORTALS = {
                region="19", justice="8"),
         Portal("tjmt-1g", "pje", "TJMT", "1g", "pje.tjmt.jus.br", "/pje/", "certificate_totp", "TJMT_1G",
                region="11", justice="8"),
+        # TJMT 2G runs on its own host under /pje2/ (SSO client "pje-tjmt-2g"); an appeal keeps its number.
+        Portal("tjmt-2g", "pje", "TJMT", "2g", "pje2.tjmt.jus.br", "/pje2/", "certificate_totp", "TJMT_2G",
+               region="11", justice="8", guess_by_number=False),
         Portal("tjdft-1g", "pje", "TJDFT", "1g", "pje.tjdft.jus.br", "/pje/", "certificate_totp", "TJDFT_1G",
                region="07", justice="8"),
         Portal("tjpa-1g", "pje", "TJPA", "1g", "pje.tjpa.jus.br", "/pje/", "certificate_totp", "TJPA_1G",
                region="14", justice="8"),
+        # TJMG runs PJe (juizados) beside its Eproc; same SSO (client "pje-tjmg-1g"). Region 13 is Eproc's too, so
+        # only a link host or the customer's setup picks this one.
+        Portal("tjmg-pje-1g", "pje", "TJMG", "1g", "pje.tjmg.jus.br", "/pje/", "password_totp", "TJMG_PJE_1G",
+               region="13", justice="8", guess_by_number=False),
         Portal("tjma-1g", "pje", "TJMA", "1g", "pje.tjma.jus.br", "/pje/", "certificate_totp", "TJMA_1G",
                region="10", justice="8"),
         # TJES 1G sits behind an AWS WAF image CAPTCHA (HTTP 405); the login solves it (core/awswaf.py).

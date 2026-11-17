@@ -50,3 +50,10 @@ def test_superior_court_accepts_origin_numbers_of_its_branch_only():
     assert tst.owns_number(origin) and trt12.owns_number(origin)
     assert not tst.owns_number(parse_process_number("0815689-46.2025.8.19.0042"))
     assert not trt12.owns_number(parse_process_number("0000371-73.2026.5.18.0018"))
+
+
+def test_court_refusal_after_the_sso_is_read_from_the_callback_page():
+    page = "<script>\n\t\tvar mensagemErroLogin = 'Senha expirada. Solicite uma nova senha';\n</script>"
+    assert sso.portal_login_error(page) == "Senha expirada. Solicite uma nova senha"
+    assert sso.portal_login_error("<script>var mensagemErroLogin = '';</script>") == ""
+    assert sso.portal_login_error("<html></html>") == ""

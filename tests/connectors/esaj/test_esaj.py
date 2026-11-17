@@ -582,3 +582,11 @@ def test_the_last_movements_table_does_not_repeat_the_full_table():
     assert [m["text"] for m in parsers.movements(html)] == ["Movimento 3", "Movimento 2", "Movimento 1"]
     assert len(parsers.movements(f'<table id="tabelaUltimasMovimentacoes">{last}</table>')) == 2
     assert len(parsers.movements(f"<table>{full}</table>")) == 3
+
+
+def test_a_bare_cpf_is_sent_in_the_mask_the_cas_expects(monkeypatch):
+    monkeypatch.setenv("TJMS_ESAJ_USERNAME", "12345678901")
+    monkeypatch.setenv("TJMS_ESAJ_PASSWORD", "secret")
+    assert base.password_credentials(portals.esaj("tjms-esaj")) == ("123.456.789-01", "secret")
+    monkeypatch.setenv("TJMS_ESAJ_USERNAME", "000.000.000-00")
+    assert base.password_credentials(portals.esaj("tjms-esaj"))[0] == "000.000.000-00"

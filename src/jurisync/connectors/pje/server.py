@@ -16,7 +16,7 @@ from pydantic import Field, StringConstraints
 
 from jurisync import portals
 from jurisync.connectors.pje import filing
-from jurisync.connectors.pje.auth.sessions import is_authenticated
+from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.connectors.pje.push import read_push
@@ -57,8 +57,49 @@ DraftWriteStage = Literal[
 # Portal code raises these for anticipated failures (bad input, portal or login errors).
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
 
+def configured_portals():
+    """PJe portals this account can log in to: an authenticator plus the A1 (or the A3 token) where the portal takes
+    it, else a username and password. All portals when none is configured (a fresh install), as the Eproc server does."""
+    keys = portals.keys("pje")
+
+    def ready(key):
+        config, method = portals.pje(key), auth_method(key)
+        if method == "a3_totp":
+            return True
+        # The national SSO asks the authenticator code on every login, with the A1 or the password alike.
+        if not (config.env("2FA_DATA") or config.env("2FA_QR")):
+            return False
+        if method == "certificate_totp":
+            return credentials.has("PJE_A1_P12")
+        return bool(config.env("USERNAME") and config.env("PASSWORD"))
+
+    return tuple(key for key in keys if ready(key)) or keys
+
+
+_offered = None  # the portals a local server lists (set at startup); None serves every portal (hosted)
+
+
+def offer_only(keys):
+    """List only ``keys`` as the portal choices of every tool, and refuse a login anywhere else: an agent shown all
+    47 portals tries the ones the account has no login for."""
+    global _offered
+    _offered = tuple(keys)
+    names = ", ".join(f"'{key}' ({portals.pje(key).tribunal} {portals.pje(key).instance})" for key in _offered)
+    for tool in server._tool_manager.list_tools():
+        field = tool.parameters.get("properties", {}).get("portal")
+        if field is not None:
+            field["enum"] = list(_offered)
+            field["description"] = f"PJe portal key, one of the portals configured for this account: {names}."
+
+
+def _login(portal):
+    if _offered is not None and portal not in _offered:
+        raise ValueError(f"No login is configured for {portal} on this account; configured: {', '.join(_offered)}")
+    return login_portal(portal)[0]
+
+
 sessions = SessionPool(
-    login=lambda portal: login_portal(portal)[0],
+    login=_login,
     refresh=lambda portal, session: session if is_authenticated(session, portal) else None,
     close=lambda session: session.close(),
 )
@@ -485,6 +526,7 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
 
 def main():
     load_env_file()
+    offer_only(configured_portals())
     serve(server, on_exit=sessions.close)
 
 
