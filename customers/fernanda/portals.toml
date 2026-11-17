@@ -168,3 +168,6 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMS_1G_2FA_DATA|TJMS_1G_2FA_QR"]
 [tst]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TST_2FA_DATA|TST_2FA_QR"]
+
+[env]
+secrets = ["ZAPSIGN_EMAIL", "ZAPSIGN_PASSWORD", "ADVBOX_EMAIL", "ADVBOX_PASSWORD", "CONVERSAPP_EMAIL"]

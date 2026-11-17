@@ -1,0 +1,36 @@
+# Breno Vinicius Ferreira de Souza: portais da lista de 16/11/2026. Login único por CPF + senha + TOTP do PDPJ
+# (conta "ACESSO PJE GERAL" no export do Google Authenticator; a conta "PDPJ" do mesmo export é recusada). Valores no .env (gitignored).
+
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_QR|PJE_1G_2FA_DATA"]
+
+[trf1-2g]
+method = "password_totp"
+secrets = ["PJE_2G_USERNAME", "PJE_2G_PASSWORD", "PJE_2G_2FA_QR|PJE_2G_2FA_DATA"]
+
+[tjmg-pje-1g]
+method = "password_totp"
+secrets = ["TJMG_PJE_1G_USERNAME", "TJMG_PJE_1G_PASSWORD", "TJMG_PJE_1G_2FA_QR|TJMG_PJE_1G_2FA_DATA"]
+
+# TJPA: o SSO aceita, mas o PJe do TJPA responde "Senha expirada. Solicite uma nova senha" (16/11). Trocar a senha no portal.
+[tjpa-1g]
+method = "password_totp"
+secrets = ["TJPA_1G_USERNAME", "TJPA_1G_PASSWORD", "TJPA_1G_2FA_QR|TJPA_1G_2FA_DATA"]
+
+# e-SAJ TJMS: CPF + senha recusados (16/11, com e sem máscara); o link enviado abre na aba de certificado.
+[tjms-esaj]
+method = "password_totp"
+secrets = ["TJMS_ESAJ_USERNAME", "TJMS_ESAJ_PASSWORD"]
+
+# Tucujuris (TJAP, sistema próprio; não é o PJe tjap-1g). Advogado entra com OAB + seccional ("1234AP"), não com CPF:
+# em 16/11 o CPF foi recusado com "Essa conta de usuário não existe". Ajustar TJAP_TUCUJURIS_USERNAME no .env.
+# 2FA: conta "Tucujuris" do export do Google Authenticator (TJAP_TUCUJURIS_OTP_PROFILE_MATCH).
+[tjap-tucujuris]
+method = "password_totp"
+secrets = ["TJAP_TUCUJURIS_USERNAME", "TJAP_TUCUJURIS_PASSWORD", "TJAP_TUCUJURIS_2FA_QR|TJAP_TUCUJURIS_2FA_DATA"]
+
+# PJe TJAP (pje.tjap.jus.br/1g/): onde está o volume do Breno (OAB 5091/AP). Mesmo login geral do PDPJ. Validado em 16/11.
+[tjap-1g]
+method = "password_totp"
+secrets = ["TJAP_1G_USERNAME", "TJAP_1G_PASSWORD", "TJAP_1G_2FA_QR|TJAP_1G_2FA_DATA"]

@@ -22,4 +22,4 @@ method = "browser_totp"
 secrets = ["TJSP_1G_USERNAME", "TJSP_1G_PASSWORD", "TJSP_1G_2FA_DATA"]
 
 [env]
-secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD"]
+secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ZAPSIGN_EMAIL", "ZAPSIGN_PASSWORD"]
