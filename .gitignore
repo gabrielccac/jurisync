@@ -51,3 +51,6 @@ customers/denis/
 customers/patricia/
 customers/priscila/
 .claude/skills/anaflavia-iniciais-dpa
+
+# Encrypted credential bundles (jurisync-setup export)
+*.jurisync
