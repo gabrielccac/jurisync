@@ -57,6 +57,7 @@ DraftWriteStage = Literal[
 # Portal code raises these for anticipated failures (bad input, portal or login errors).
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
 
+
 def configured_portals():
     """PJe portals this account can log in to: an authenticator plus the A1 (or the A3 token) where the portal takes
     it, else a username and password. All portals when none is configured (a fresh install), as the Eproc server does."""

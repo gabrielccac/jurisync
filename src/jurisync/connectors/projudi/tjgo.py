@@ -122,7 +122,9 @@ class TjgoAdapter(base.Adapter):
         _follow(
             session,
             config,
-            session.get(config.url(), impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUT),
+            session.get(
+                config.url(), impersonate=impersonate_for(config), allow_redirects=False, timeout=LOGIN_TIMEOUT
+            ),
         )
         if not any(cookie.name == SESSION_COOKIE for cookie in session.cookies.jar):
             raise RuntimeError("Projudi did not start a session")

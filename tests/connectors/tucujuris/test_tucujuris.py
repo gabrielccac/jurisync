@@ -211,7 +211,9 @@ class LoginTest(Base):
         self.assertEqual(len(self.http.calls(api("usuario/segundo-fator-verificar"))), 1)
 
     def test_a_code_sent_by_email_is_never_guessed(self):
-        email = Response(body=b'{"status":"OK","dados":{"situacao":"verificacao_pendente","segundo_fator_metodo":"email"}}')
+        email = Response(
+            body=b'{"status":"OK","dados":{"situacao":"verificacao_pendente","segundo_fator_metodo":"email"}}'
+        )
         with self.assertRaisesRegex(LoginRejected, "e-mail"):
             self.login({("GET", api("usuario/segundo-fator-situacao")): email})
         self.assertEqual(self.http.calls(api("usuario/segundo-fator-verificar")), [])

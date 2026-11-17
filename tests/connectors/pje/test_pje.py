@@ -535,8 +535,11 @@ def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(mo
     saved = {t.name: copy.deepcopy(t.parameters) for t in server.server._tool_manager.list_tools()}
     try:
         server.offer_only(keys)
-        schema = {t.name: t.parameters["properties"]["portal"] for t in server.server._tool_manager.list_tools()
-                  if "portal" in t.parameters.get("properties", {})}
+        schema = {
+            t.name: t.parameters["properties"]["portal"]
+            for t in server.server._tool_manager.list_tools()
+            if "portal" in t.parameters.get("properties", {})
+        }
         assert all(field["enum"] == list(keys) for field in schema.values())
         with pytest.raises(ValueError, match="No login is configured for trf1-2g"):
             server._login("trf1-2g")
