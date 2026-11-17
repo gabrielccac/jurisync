@@ -50,7 +50,9 @@ def test_consultation_search_uses_the_bridge_when_http_blocked(monkeypatch):
 
 def test_detail_blocked_by_captcha_goes_through_the_bridge(monkeypatch):
     captcha_page = '<html><body><div class="g-recaptcha" data-sitekey="fixture"></div></body></html>'
-    monkeypatch.setattr(base, "dashboard_process", lambda *_args: {"urlCpo": "https://esaj.tjms.jus.br/cpopg5/show.do"})
+    monkeypatch.setattr(
+        base, "dashboard_process", lambda *_args, **_kwargs: {"urlCpo": "https://esaj.tjms.jus.br/cpopg5/show.do"}
+    )
     monkeypatch.setattr(
         base,
         "request",

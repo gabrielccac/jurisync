@@ -143,6 +143,38 @@ def movements(html):
     return result
 
 
+def movements_on_demand(html):
+    """The detail page loads its movements on demand ("Exibir movimentações"), instead of listing them."""
+    return soup(html).find(id="btnExibirMovimentacoes") is not None
+
+
+def movement_page(html):
+    """``(movements, next_cursor)`` of one ``carregarMovimentacoesAjax.do`` answer.
+
+    The first page carries the cursor of the second in ``#cursorMovimentacoesPaginado``; every later page carries the
+    cursor of the next one in the hidden row ``#trCursorMovimentacoes``. No cursor: this was the last page.
+    """
+    page = soup(html)
+    if page.select_one(".mensagemErroMovimentacoes"):
+        from jurisync.connectors.esaj.base import EsajParseError
+
+        raise EsajParseError("e-SAJ could not load this page of movements")
+    cursor = page.find(id="cursorMovimentacoesPaginado")
+    cursor = cursor.get("value") if cursor is not None else None
+    if not cursor:
+        row = page.find(id="trCursorMovimentacoes")
+        cursor = row.get("data-cursor") if row is not None else None
+    if row := page.find(id="trCursorMovimentacoes"):
+        row.decompose()
+    return movements(str(page)), cursor or None
+
+
+def records_need_password(html):
+    """The detail page's "Visualizar autos" opens only the process-password dialog: the account is not linked."""
+    links = soup(html).select("a.linkPasta[href]")
+    return bool(links) and all(link["href"].startswith("#liberarAutoPorSenha") for link in links)
+
+
 def viewer_documents(html, number):
     """Process-bound PDF parameters from the viewer's JSON, never from a caller URL."""
     import json

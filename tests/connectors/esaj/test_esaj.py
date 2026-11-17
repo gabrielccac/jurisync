@@ -328,7 +328,7 @@ def test_direct_search_detail_still_loads_ajax_movements(monkeypatch):
     detail = response(html, url="https://esaj.tjsp.jus.br/cpopg/show.do?processo.codigo=fixture")
     mov = response('<tr class="containerMovimentacao"><td>05/11</td><td>Movimento exemplo</td></tr>')
     replies = iter([response("<form></form>"), detail, mov])
-    monkeypatch.setattr(base, "dashboard_process", lambda *a: None)
+    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
     request = Mock(side_effect=lambda *a, **kw: next(replies))
     monkeypatch.setattr(base, "request", request)
     result = base.load_process(None, "tjsp-esaj", NUMBER)
@@ -472,7 +472,7 @@ def test_tjam_process_uses_the_cpopg_consultation(monkeypatch):
         f'<span id="numeroProcesso">{number}</span><span id="classeProcesso">Classe</span>',
         url="https://consultasaj.tjam.jus.br/cpopg/show.do?processo.codigo=X",
     )
-    monkeypatch.setattr(base, "dashboard_process", lambda *a: None)
+    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
     monkeypatch.setattr(base, "consultation_search", lambda s, p, adapter, n: (detail, "http"))
     result = base.load_process(None, "tjam-esaj", number)
     assert result["fields"]["classeProcesso"] == "Classe" and result["consultationSource"] == "http"
@@ -484,7 +484,7 @@ def test_a_number_the_consultation_does_not_know_is_reported_as_not_found(monkey
         "<div>Não existem informações disponíveis para os parâmetros informados.</div>",
         url="https://consultasaj.tjam.jus.br/cpopg/search.do",
     )
-    monkeypatch.setattr(base, "dashboard_process", lambda *a: None)
+    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
     monkeypatch.setattr(base, "consultation_search", lambda *a: (page, "http"))
     monkeypatch.setattr(base, "request", lambda *a, **k: page)
 

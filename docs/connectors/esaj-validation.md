@@ -116,3 +116,34 @@ A pasta digital não usa o bridge: segue HTTP autenticado como antes.
   alternativa nem senha.
 
 Nada foi commitado, enviado ao GitHub ou protocolado.
+
+## Correções de 17/11/2026 (Hérica: TJSP, TJAL, TJAM; TJMS como regressão)
+
+- **Documentos no TJSP/TJAL/TJAM.** O painel (`tarefas-adv/api/processos`) só
+  resolve por `numerosProcesso` o que as listas de tarefas da sessão carregaram
+  (bastava no TJMS). A página do próprio painel consulta por `cdsProcesso` (o
+  código do processo), que resolve os processos da conta. O conector agora
+  pega o código na consulta (`processo.codigo` do `show.do`) ou nas petições
+  listadas e pede o `urlPasta` por código. Quando o "Visualizar autos" do
+  `show.do` só abre o pedido de senha (`#liberarAutoPorSenha`, caso do TJAM:
+  conta não vinculada ao processo), a resposta é `password_required`.
+- **Trava de intimação.** Antes de abrir a pasta (listar ou ler), o conector lê
+  as intimações do painel. Os códigos das que estão com `ciencia != true` são
+  resolvidos para números (`processos?cdsProcesso=...`, como faz o painel). Se
+  o processo estiver entre eles, a resposta é `intimacao_pending` e nada do
+  processo é aberto. Se a lista não puder ser lida ou algum código não for
+  resolvido, a trava também fecha. A checagem `validarAberturaIntimacaoNaoRecebida`
+  antes do PDF continua.
+- **Instância.** O painel devolve uma entrada por instância (`PG` e `SG`), em
+  ordem variável. A de 1º grau é a escolhida; uma entrada só de 2º grau
+  (`cposg`) deixa o `get_process` seguir pela consulta de 1º grau. Era a causa
+  do `Unexpected process detail endpoint`.
+- **Movimentações do TJSP.** `carregarMovimentacoesAjax.do` é paginado por
+  cursor (5 por página: `#cursorMovimentacoesPaginado` na 1ª, `#trCursorMovimentacoes`
+  nas seguintes). O conector lê todas as páginas (até 200; acima disso marca
+  `movementsTruncated`).
+- **Intimações do TJSP.** A 1ª chamada de `tarefas-adv/api/intimacoes` numa
+  sessão demorou mais de 180 s numa vez e 65 s em outra; as seguintes, menos de
+  1 s. Não há paginação nem filtro na API (o painel faz só `GET`). Essa chamada
+  tem agora 150 s; se passar disso, a resposta é `portal_timeout`, com a
+  orientação de tentar de novo em alguns minutos.
