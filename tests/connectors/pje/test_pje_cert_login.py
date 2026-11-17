@@ -60,6 +60,43 @@ class CertificateLoginChecks(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "no authenticated session"):
             cert_login._require_registered(response, SimpleNamespace(key="trt9-2g"))
 
+    def test_sso_registration_callback_is_a_clear_rejection_not_a_totp_retry(self):
+        from jurisync.core.session_pool import LoginRejected
+
+        config = SimpleNamespace(key="tjce-2g")
+        callback = SimpleNamespace(url="https://pje.tjce.jus.br/pje2grau/publico/usuario/ssoCadastroCallback.seam")
+        with self.assertRaisesRegex(LoginRejected, "not registered in this PJe.*ask the court"):
+            cert_login._require_registered(callback, config)
+        page = SimpleNamespace(url="https://pje.tjce.jus.br/pje2grau/publico/usuario/cadastro.seam")
+        with self.assertRaises(LoginRejected):
+            cert_login._require_registered(page, config)
+        cert_login._require_registered(SimpleNamespace(url="https://pje.tjce.jus.br/pje2grau/Painel/x.seam"), config)
+
+    def test_unregistered_user_costs_one_login_attempt(self):
+        from jurisync.core.session_pool import LoginRejected
+
+        attempts = []
+
+        def login(*args):
+            attempts.append(args)
+            cert_login._require_registered(
+                SimpleNamespace(url="https://pje.tjce.jus.br/pje2grau/publico/usuario/ssoCadastroCallback.seam"),
+                SimpleNamespace(key="tjce-2g"),
+            )
+
+        sleep = Mock()
+        with (
+            patch.object(cert_login, "_twofa", return_value=object()),
+            patch.object(cert_login.native_signer, "load_a1", return_value=(None, None)),
+            patch.object(cert_login.native_signer, "A1Signer"),
+            patch.object(cert_login, "_login", side_effect=login),
+            patch.object(cert_login.portals, "pje", return_value=SimpleNamespace(key="tjce-2g")),
+        ):
+            with self.assertRaises(LoginRejected):
+                cert_login.cert_login("tjce-2g", pin="x", sleep=sleep)
+        self.assertEqual(len(attempts), 1)
+        sleep.assert_not_called()
+
     def test_http_redirect_on_portal_host_is_upgraded_to_https(self):
         redirect = SimpleNamespace(
             status_code=302,

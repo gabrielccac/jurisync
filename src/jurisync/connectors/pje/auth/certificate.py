@@ -129,15 +129,25 @@ def _follow(sso_session, response, hops=6):
     )
 
 
+# Where PJe sends a user it does not know: the pre-registration page itself (PJe-JT), or the SSO registration
+# callback that forwards to it by script (TJCE/TJPE/TJPI 2G, TRF3 2G, TJBA 1G).
+UNREGISTERED_PATHS = ("/publico/usuario/cadastro", "/publico/usuario/ssoCadastroCallback")
+
+
 def _require_registered(response, config):
-    """PJe sends a user it does not know to the public pre-registration page, after the SSO accepted the login."""
+    """PJe sends a user it does not know to the public pre-registration page, after the SSO accepted the login.
+
+    That is not a wrong TOTP code or certificate: another attempt gets the same answer and spends another code,
+    so it raises ``LoginRejected`` (never retried, and the pool holds further logins back for a while).
+    """
     path = urllib.parse.urlsplit(response.url).path
     if path.endswith("/errorUnexpected.seam"):
         raise RuntimeError(f"{config.key}: the portal returned errorUnexpected.seam; no authenticated session")
-    if "/publico/usuario/cadastro" in path:
-        raise RuntimeError(
-            f"{config.key}: the SSO login worked but this user is not registered in this PJe "
-            "(redirected to its pre-registration page); the court must register the lawyer first"
+    if any(marker in path for marker in UNREGISTERED_PATHS):
+        raise LoginRejected(
+            f"{config.key}: the SSO accepted the certificate and the TOTP code, but this user is not registered in "
+            "this PJe (it redirected to its pre-registration page, cadastro.seam); ask the court for the lawyer's "
+            "registration in this PJe. Retrying will not help."
         )
 
 
