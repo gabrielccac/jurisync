@@ -277,7 +277,7 @@ def _document_inventory(result, timeline):
     return list(merged.values())
 
 
-REDACTED_KEYS = {"download_url", "url", "href", "hash", "ca", "viewstate"}
+REDACTED_KEYS = {"download_url", "url", "href", "hash", "ca", "viewstate", "viewer_action", "viewer"}
 
 
 def _expedientes(items, limit=30, *, complete=True):

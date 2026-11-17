@@ -3,6 +3,7 @@
 import copy
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qsl
 
 from curl_cffi.requests.exceptions import RequestException
 
@@ -235,6 +236,131 @@ class SelectedDocumentsChecks(unittest.TestCase):
         self.assertEqual(
             client.movement_candidates({"timeline": timeline})[0]["movement_texts"], first["movement_texts"]
         )
+
+
+TJMT_NUMBER = "1000001-11.2024.8.11.0041"
+TJMT_DETAIL = (
+    "https://pje.tjmt.jus.br/pje/Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam?id=77&ca=x"
+)
+TJMT_ROUTE = "/pje/seam/resource/rest/pje-legacy/documento/download/"
+TJMT_DOWNLOAD = "https://pje.tjmt.jus.br" + TJMT_ROUTE
+ACTION = "divTimeLine:j_id1:0:j_id2:1:j_id3"
+TIMELINE_LINK = (
+    f'<div><a href="#" id="{ACTION}" onclick="A4J.AJAX.Submit(\'divTimeLine\',event,'
+    f"{{'similarityGroupingId':'{ACTION}'}});return false;\"><span>900001 - Petição Inicial</span></a>"
+    '<a href="#" id="outro:link" onclick="window.open(\'x\')"><span>900002 - Procuração</span></a></div>'
+)
+
+
+def tjmt_process(viewer=True):
+    data = {
+        "success": True,
+        "portal": "tjmt-1g",
+        "numero_processo": TJMT_NUMBER,
+        "processo_id": "77",
+        "timeline": [
+            {
+                "date": "01 jul. 2024",
+                "movements": [{"documents": parsers.extract_documents(TIMELINE_LINK, TJMT_ROUTE, TJMT_DETAIL)}],
+            }
+        ],
+    }
+    if viewer:
+        data["viewer"] = {
+            "url": TJMT_DETAIL,
+            "fields": {"divTimeLine": "divTimeLine", "javax.faces.ViewState": "j_id4"},
+        }
+    return data
+
+
+def page(status=200):
+    return Mock(status_code=status, headers={}, url=TJMT_DETAIL, content=b"<html>ok</html>")
+
+
+class ViewerSelectionChecks(unittest.TestCase):
+    """TJMT serves a document on the download route only once the page's viewer shows it."""
+
+    def pdf(self):
+        return response(body=b"%PDF-1.4 fake", content_type="application/pdf")
+
+    def test_timeline_links_carry_their_viewer_action(self):
+        found = parsers.extract_documents(TIMELINE_LINK, "/d/", TJMT_DETAIL)
+        self.assertEqual(found[0]["viewer_action"], ACTION)
+        self.assertNotIn("viewer_action", found[1])
+        self.assertEqual(found[0]["download_url"], "https://pje.tjmt.jus.br/d/900001")
+
+    def test_a_404_shows_the_document_in_the_viewer_and_reads_it_again(self):
+        session = Mock()
+        session.get.side_effect = [response(status=404), self.pdf()]
+        session.post.return_value = page()
+        with patch.object(documents, "extract_document_text", return_value=("extracted", "Petição inicial")):
+            result = documents.read_selected_documents(tjmt_process(), ["900001"], session=session)[0]
+        self.assertEqual((result["status"], result["extractionStatus"]), (200, "extracted"))
+        self.assertEqual([c.args[0] for c in session.get.call_args_list], [TJMT_DOWNLOAD + "900001"] * 2)
+        session.post.assert_called_once()
+        self.assertEqual(session.post.call_args.args[0], TJMT_DETAIL)
+        sent = dict(parse_qsl(session.post.call_args.kwargs["data"]))
+        self.assertEqual(sent[ACTION], ACTION)
+        self.assertEqual(sent["ajaxSingle"], ACTION)
+        self.assertEqual(sent["javax.faces.ViewState"], "j_id4")
+
+    def test_a_document_served_at_once_needs_no_viewer_click(self):
+        session = Mock()
+        session.get.return_value = self.pdf()
+        with patch.object(documents, "extract_document_text", return_value=("extracted", "texto")):
+            result = documents.read_selected_documents(tjmt_process(), ["900001"], session=session)[0]
+        self.assertEqual(result["extractionStatus"], "extracted")
+        session.post.assert_not_called()
+
+    def test_without_a_usable_viewer_the_404_stays_an_http_error(self):
+        foreign = tjmt_process()
+        foreign["viewer"]["url"] = TJMT_DETAIL.replace("pje.tjmt.jus.br", "evil.test")
+        other_page = tjmt_process()
+        other_page["viewer"]["url"] = "https://pje.tjmt.jus.br/pje/Painel/painel_usuario/advogado.seam"
+        bad_action = tjmt_process()
+        bad_action["timeline"][0]["movements"][0]["documents"][0]["viewer_action"] = "x'); alert(1"
+        for name, data, doc_id in (
+            ("no viewer", tjmt_process(viewer=False), "900001"),
+            ("foreign host", foreign, "900001"),
+            ("other page", other_page, "900001"),
+            ("bad action", bad_action, "900001"),
+            ("no timeline action", tjmt_process(), "900002"),
+        ):
+            session = Mock()
+            session.get.return_value = response(status=404)
+            with self.subTest(name):
+                result = documents.read_selected_documents(data, [doc_id], session=session)[0]
+                self.assertEqual((result["status"], result["extractionStatus"]), (404, "http_error"))
+                session.post.assert_not_called()
+                session.get.assert_called_once()
+
+    def test_a_failed_viewer_click_keeps_the_first_answer(self):
+        session = Mock()
+        session.get.return_value = response(status=404)
+        session.post.return_value = page(status=500)
+        result = documents.read_selected_documents(tjmt_process(), ["900001"], session=session)[0]
+        self.assertEqual((result["status"], result["extractionStatus"]), (404, "http_error"))
+        session.get.assert_called_once()
+
+    def test_the_detail_page_viewer_echoes_the_timeline_form_and_its_view_state(self):
+        from jurisync.connectors.pje import search
+
+        html = (
+            '<form id="divTimeLine"><input name="divTimeLine:txtPesquisa" value="">'
+            f"{TIMELINE_LINK}</form>"
+            '<input type="hidden" name="javax.faces.ViewState" value="j_id9">'
+        )
+        viewer = search._viewer(html, TJMT_DETAIL)
+        self.assertEqual(viewer["url"], TJMT_DETAIL)
+        self.assertEqual(viewer["fields"]["javax.faces.ViewState"], "j_id9")
+        self.assertEqual(viewer["fields"]["divTimeLine"], "divTimeLine")
+        self.assertIsNone(search._viewer("<html></html>", TJMT_DETAIL))
+
+    def test_the_viewer_and_its_actions_never_reach_the_tool_output(self):
+        data = {**tjmt_process(), "documentInventory": tjmt_process()["timeline"][0]["movements"][0]["documents"]}
+        redacted = client._redact(data)
+        self.assertNotIn("viewer", redacted)
+        self.assertNotIn("viewer_action", str(redacted))
 
 
 if __name__ == "__main__":

@@ -272,14 +272,31 @@ def extract_documents(block_html, download_pattern, base_url):
         if doc_id in seen:
             continue
         seen.add(doc_id)
-        documents.append(
-            {
-                "id": doc_id,
-                "title": title.strip(),
-                "download_url": urljoin(base_url, f"{download_pattern}{doc_id}") if download_pattern else None,
-            }
-        )
+        document = {
+            "id": doc_id,
+            "title": title.strip(),
+            "download_url": urljoin(base_url, f"{download_pattern}{doc_id}") if download_pattern else None,
+        }
+        action = viewer_action(anchor)
+        if action:
+            document["viewer_action"] = action
+        documents.append(document)
     return documents
+
+
+VIEWER_ACTION = re.compile(r"divTimeLine:[A-Za-z0-9_:]+")
+
+
+def viewer_action(anchor):
+    """The timeline link's A4J action that shows the document in the process page's viewer, if any.
+
+    Some PJe (TJMT) only serve a document on the download route once it is the one shown in the viewer.
+    """
+    action = anchor.get("id") or ""
+    onclick = anchor.get("onclick") or ""
+    if VIEWER_ACTION.fullmatch(action) and re.search(r"A4J\.AJAX\.Submit\(\s*'divTimeLine'", onclick):
+        return action
+    return None
 
 
 def parse_timeline(html, download_pattern, base_url):

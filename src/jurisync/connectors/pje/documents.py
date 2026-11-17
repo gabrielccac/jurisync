@@ -11,7 +11,9 @@ from urllib.parse import urlsplit
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
-from jurisync.connectors.pje.parsers import parse_process_number
+from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje.parsers import VIEWER_ACTION, parse_process_number
+from jurisync.connectors.pje.search import DETAIL_PATH
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import MAX_DOCUMENT_BYTES, validate_document_ids
 from jurisync.core.documents_dir import save_document
@@ -106,6 +108,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
         ):
             raise ValueError("Document download location is outside the supported read route")
         selected.append(document)
+    viewer = process.get("viewer")
     results = []
     for document in selected:
         item = {
@@ -119,17 +122,13 @@ def read_selected_documents(process, document_ids, *, session, save=False):
         }
         response = None
         try:
-            response = session.get(
-                document["download_url"],
-                headers={
-                    "Accept": "application/pdf,text/html,*/*",
-                    "Referer": f"https://{host}{config.root}Processo/ConsultaProcesso/listView.seam",
-                },
-                impersonate=IMPERSONATE,
-                allow_redirects=False,
-                timeout=30,
-                stream=True,
-            )
+            response = _download(session, config, document["download_url"])
+            action = document.get("viewer_action")
+            # TJMT serves a document only once the process page shows it in its viewer, as a click does.
+            if response.status_code != 200 and action and _show_in_viewer(session, config, viewer, action):
+                response.close()
+                response = None
+                response = _download(session, config, document["download_url"])
             item.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
             if response.status_code != 200:
                 # The first-instance copy of a second-instance document is not served here: read the visible one.
@@ -162,6 +161,54 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                     item.update(extractionStatus="request_failed", text="")
         results.append(item)
     return results
+
+
+def _download(session, config, url):
+    return session.get(
+        url,
+        headers={
+            "Accept": "application/pdf,text/html,*/*",
+            "Referer": f"https://{config.host}{config.root}Processo/ConsultaProcesso/listView.seam",
+        },
+        impersonate=IMPERSONATE,
+        allow_redirects=False,
+        timeout=30,
+        stream=True,
+    )
+
+
+def _show_in_viewer(session, config, viewer, action):
+    """Click the document's timeline link on the process page, so the download route serves it.
+
+    Only the adapter's own detail page and a timeline link id are accepted; any failure means not shown.
+    """
+    url = viewer.get("url") if isinstance(viewer, dict) else None
+    fields = viewer.get("fields") if isinstance(viewer, dict) else None
+    if not isinstance(url, str) or not isinstance(fields, dict) or not VIEWER_ACTION.fullmatch(str(action)):
+        return False
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != config.host
+        or parsed.port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.path != config.root + DETAIL_PATH
+    ):
+        return False
+    payload = {
+        **fields,
+        "AJAXREQUEST": "_viewRoot",
+        action: action,
+        "ajaxSingle": action,
+        "AJAX:EVENTS_COUNT": "1",
+    }
+    try:
+        jsf.post(session, url, payload, label="PJe document viewer")
+    except (RuntimeError, RequestException):
+        return False
+    return True
 
 
 def _saved_name(number, doc_id, content, item):

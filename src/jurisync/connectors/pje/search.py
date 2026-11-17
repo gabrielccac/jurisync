@@ -344,7 +344,18 @@ def _read_detail(
         "expedientes_complete": expedientes_complete,
         "ato": ato,
         "diagnostics": diagnostics,
+        "viewer": _viewer(detail_html, detail_url),
     }
+
+
+def _viewer(detail_html, detail_url):
+    """The timeline form that shows a document in the page's viewer (internal: it carries the ViewState)."""
+    try:
+        fields = jsf.form_fields(detail_html, "divTimeLine")
+        fields["javax.faces.ViewState"] = jsf.view_state(detail_html, "PJe detail page")
+        return {"url": detail_url, "fields": fields}
+    except RuntimeError:
+        return None
 
 
 def parse_timeline_contract(html, detail_url):
