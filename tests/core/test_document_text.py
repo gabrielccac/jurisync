@@ -37,6 +37,22 @@ class DocumentTextTests(unittest.TestCase):
         with patch("pypdf.PdfReader", return_value=Reader()):
             self.assertEqual(extract_document_text(b"%PDF-1.7", "application/pdf")[0], "ocr_needed")
 
+    def test_pdf_text_never_carries_a_lone_surrogate(self):
+        # TJAC 2G, 17/11: pypdf returned half of an emoji and the whole eproc_get_process response failed to serialize.
+        class Page:
+            def extract_text(self):
+                return "Petição \ud83d inicial 😀"
+
+        class Reader:
+            is_encrypted = False
+            pages = [Page()]
+
+        with patch("pypdf.PdfReader", return_value=Reader()):
+            status, text = extract_document_text(b"%PDF-1.7", "application/pdf")
+        self.assertEqual(status, "extracted")
+        self.assertEqual(text, "Petição � inicial \U0001f600")
+        text.encode("utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,6 +73,12 @@ def _pdf_has_images(reader):
     return False
 
 
+def _without_lone_surrogates(text):
+    """pypdf can return half of an emoji (a lone surrogate, e.g. ``\\ud83d``), which no JSON response can carry:
+    rejoin split pairs and replace what is left with U+FFFD."""
+    return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
 def extract_document_text(content, content_type="", process_number="", *, allow_unnumbered=False):
     """Return ``(status, text)`` without treating portal/error pages as evidence.
 
@@ -109,7 +115,7 @@ def extract_document_text(content, content_type="", process_number="", *, allow_
                 size += len(value)
                 if size >= MAX_EXTRACTED_CHARACTERS:
                     break
-            text = " ".join(" ".join(pages).split())[:MAX_EXTRACTED_CHARACTERS]
+            text = _without_lone_surrogates(" ".join(" ".join(pages).split())[:MAX_EXTRACTED_CHARACTERS])
             if text:
                 return "extracted", text
             return ("ocr_needed", "") if _pdf_has_images(reader) else ("empty", "")
