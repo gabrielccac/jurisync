@@ -127,6 +127,19 @@ class PjeChecks(unittest.TestCase):
                 client.fetch_process("invalid", portal="trf1-1g")
             login.assert_not_called()
 
+    def test_tjpa_movement_glossary_link_is_not_a_document(self):
+        html = """
+        <div class="media data"><div class="media-body"><span class="text-muted data-interna">10 nov. 2026</span>
+        <div class="media interno tipo-D"><div><i class="fa fa-bullhorn"></i>
+        <a href="#" onclick="A4J.AJAX.Submit('divTimeLine',event,{'oncomplete':function(){Richfaces.showModalPanel('modalGlossario');},'parameters':{'codigo':'12164'}});return false;" title="Clique aqui para mais informações"><span class="text-upper texto-movimento">12164 - Proferidas outras decisões não especificadas</span></a></div>
+        <a href="#" onclick="A4J.AJAX.Submit('divTimeLine',event,{});return false;"><i class="fa fa-file-pdf-o"></i><span class="" title="">190000001 - Decisão</span></a>
+        <div class="col-sm-12"><small class="text-muted pull-right">10:00</small></div></div>
+        """
+        [day] = parsers.parse_timeline(html, "/documents/", "https://pje.tjpa.jus.br")
+        [movement] = day["movements"]
+        self.assertEqual(movement["movement"], "12164 - Proferidas outras decisões não especificadas")
+        self.assertEqual([d["id"] for d in movement["documents"]], ["190000001"])
+
     def test_timeline_preserves_document_context(self):
         html = """
         <div class="media data"><div class="media-body"><span class="text-muted data-interna">04 set. 2026</span>

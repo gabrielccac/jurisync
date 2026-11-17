@@ -264,6 +264,10 @@ def extract_documents(block_html, download_pattern, base_url):
     soup = BeautifulSoup(block_html, "html.parser")
     for anchor in soup.find_all("a"):
         span = anchor.find("span")
+        if span is not None and "texto-movimento" in (span.get("class") or []):
+            # TJPA links the movement text ("12164 - Proferidas outras decisões") to the CNJ glossary: the number
+            # is the movement code, not a document.
+            continue
         label = clean_text(span.decode_contents() if span else anchor.get_text(" "))
         match = re.match(r"(\d+)\s*-\s*(.*)", label)
         if not match:
