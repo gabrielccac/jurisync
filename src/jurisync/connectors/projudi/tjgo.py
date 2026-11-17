@@ -22,10 +22,10 @@ from curl_cffi.requests.exceptions import RequestException
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for
+from jurisync.core.session_pool import LoginRejected
 
 # TJGO login steps sometimes take longer than the default 30 s (17/11/2026: two tries timed out at 30 s).
 LOGIN_TIMEOUT = 90
-from jurisync.core.session_pool import LoginRejected
 
 LOGIN_READY = "LoginPronto=S"
 SESSION_COOKIE = "JSESSIONID"
