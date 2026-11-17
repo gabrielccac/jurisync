@@ -290,8 +290,14 @@ class ViewerSelectionChecks(unittest.TestCase):
         self.assertEqual(found[0]["download_url"], "https://pje.tjmt.jus.br/d/900001")
 
     def test_a_404_shows_the_document_in_the_viewer_and_reads_it_again(self):
+        # TJMT answers 404 and TJPA 204 for a document the process page is not showing.
+        for status in (404, 204):
+            with self.subTest(status=status):
+                self.check_viewer_click(status)
+
+    def check_viewer_click(self, status):
         session = Mock()
-        session.get.side_effect = [response(status=404), self.pdf()]
+        session.get.side_effect = [response(status=status), self.pdf()]
         session.post.return_value = page()
         with patch.object(documents, "extract_document_text", return_value=("extracted", "Petição inicial")):
             result = documents.read_selected_documents(tjmt_process(), ["900001"], session=session)[0]
