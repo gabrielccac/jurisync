@@ -305,6 +305,10 @@ PORTALS = {
                region="08", justice="8"),
         Portal("tjba-1g", "pje", "TJBA", "1g", "pje.tjba.jus.br", "/pje/", "certificate_totp", "TJBA_1G",
                region="05", justice="8"),
+        # TJBA 2G: own host, same PDPJ SSO and login flow as the 1G. An appeal keeps its number, so only the
+        # customer's setup or a link host picks it.
+        Portal("tjba-2g", "pje", "TJBA", "2g", "pje2g.tjba.jus.br", "/pje/", "certificate_totp", "TJBA_2G",
+               region="05", justice="8", guess_by_number=False),
         Portal("tjpb-1g", "pje", "TJPB", "1g", "pje.tjpb.jus.br", "/pje/", "certificate_totp", "TJPB_1G",
                region="15", justice="8"),
         Portal("tjpi-1g", "pje", "TJPI", "1g", "pje.tjpi.jus.br", "/1g/", "certificate_totp", "TJPI_1G",

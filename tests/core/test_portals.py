@@ -73,6 +73,7 @@ class PortalRegistryTest(unittest.TestCase):
                 "tjes-1g",
                 "tjes-2g",
                 "tjba-1g",
+                "tjba-2g",
                 "tjpb-1g",
                 "tjpi-1g",
                 "tjpi-2g",
