@@ -15,12 +15,13 @@ named by ``<PREFIX>_USER_PROFILE`` is picked; a single lawyer profile is picked 
 import re
 import time
 import urllib.parse
+from types import SimpleNamespace
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from jurisync import portals
-from jurisync.connectors.eproc.auth import is_panel, panel_link, portal_totp_account
+from jurisync.connectors.eproc.auth import is_panel, panel_link, portal_totp_account, session_from_cookies
 from jurisync.connectors.pje.auth import signer as native_signer
 from jurisync.core import credentials
 from jurisync.core.certificate import client_certificate
@@ -62,6 +63,13 @@ MTLS_PAGES = ("externo_controlador.php", "priv/login_cert.php")
 # Courts whose classic ``index.php`` / ``login_cert`` path answers ``erro_certificado`` to a valid A1 (TJSC, 19/11/2026);
 # their login starts at the SSO entry and never takes the classic form.
 SSO_ONLY = {"tjsc-1g", "tjsc-2g"}
+
+# Courts whose eproc entry answers an HTTP client with a JavaScript bot challenge (TRF6: F5 "bobcmn"/TSPD page, even
+# with a browser's cookies). A headless browser only opens the entry, which redirects to the Keycloak login page, and
+# hands its cookies over; the certificate host (mutual TLS), the code, the profile and every read go over HTTP like
+# any other Keycloak portal. The browser types nothing and clicks nothing.
+BROWSER_ENTRY = {"trf6-1g", "trf6-2g"}
+BROWSER_ENTRY_TIMEOUT = 60
 
 
 def is_sso_host(config, host):
@@ -143,6 +151,50 @@ def _login_page(session, config):
         if CERT_HOST.search(page.text) or _classic_certificate_url(page, config):
             break
     return page
+
+
+def _browser_cookies(driver):
+    """Every cookie of the browser, for all hosts (the entry's own bot cookies too, not only the current page's)."""
+    try:
+        cookies = driver.execute_cdp_cmd("Network.getAllCookies", {})["cookies"]
+    except Exception:  # noqa: BLE001 - a driver without CDP: the current page's cookies
+        return driver.get_cookies()
+    result = []
+    for cookie in cookies:
+        cookie = dict(cookie)
+        expires = cookie.pop("expires", None)
+        if isinstance(expires, (int, float)) and expires > 0 and not cookie.get("session"):
+            cookie["expiry"] = int(expires)
+        result.append(cookie)
+    return result
+
+
+def _browser_login_page(session, config):
+    """The SSO login page as a headless browser reaches it past the entry's bot challenge; its cookies go to ``session``.
+
+    Only navigation: the browser opens the portal entry and waits for the page that offers the certificate.
+    """
+    from seleniumbase import Driver  # imported here: other portals never pay for it
+
+    driver = Driver(uc=True, headless=True, locale="pt-BR")
+    try:
+        driver.get(config.login_url)
+        deadline = time.monotonic() + BROWSER_ENTRY_TIMEOUT
+        while True:
+            html = driver.page_source or ""
+            if CERT_HOST.search(html):
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"{config.tribunal} eproc login page did not open in the browser (bot challenge or portal down)"
+                )
+            time.sleep(0.5)
+        url = require_login_url(config, driver.get_current_url())
+        for cookie in session_from_cookies(_browser_cookies(driver)).cookies.jar:
+            session.cookies.jar.set_cookie(cookie)
+        return SimpleNamespace(text=html, url=url, status_code=200)
+    finally:
+        driver.quit()
 
 
 def _classic_certificate_url(page, config):
@@ -369,8 +421,8 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
     session = session or requests.Session()
     if config.key in {"tjms-eproc-1g", "tjmg-2g"}:
         return _local_certificate_login(session, config, key, cert, chain, account)
+    page = _browser_login_page(session, config) if config.key in BROWSER_ENTRY else _login_page(session, config)
     with client_certificate(key, cert, chain) as pem:
-        page = _login_page(session, config)
         if _classic_certificate_url(page, config):
             response = _classic_otp_step(session, config, _classic_login(session, config, page, pem), account)
         else:

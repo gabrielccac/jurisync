@@ -70,6 +70,14 @@ class ProcessReportTests(unittest.TestCase):
         self.assertFalse(partial["pagination"]["complete"])
         self.assertEqual(partial["pagination"]["totalItems"], 7)
 
+    def test_a_report_longer_than_one_page_is_not_complete(self):
+        """The caption names the whole list and the page range; the item counter holds only the page size."""
+        first_page = REPORT.replace("(1 registro)", "(843 registros - 1 a 1)")
+        result = parse_lawyer_process_report(first_page, BASE)
+        self.assertEqual(result["pagination"]["totalItems"], 843)
+        self.assertEqual(result["pagination"]["itemCount"], 1)
+        self.assertFalse(result["pagination"]["complete"])
+
     def test_empty_unknown_and_malformed_reports_are_distinguished(self):
         empty = REPORT[: REPORT.index('<tr class="infraTrClara">')] + "</table>"
         empty = empty.replace("(1 registro)", "(0 registros)")

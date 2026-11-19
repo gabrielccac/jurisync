@@ -515,3 +515,126 @@ class TjtoCertificateHostTest(unittest.TestCase):
         ):
             pem.return_value.__enter__.return_value = "/tmp/a1.pem"
             certificate.cert_login("tjto-1g")
+
+
+# TRF6 (19/11/2026): the eproc entry answers HTTP clients with an F5 JavaScript challenge; the SSO hosts do not.
+TRF6_SSO = "https://sso-eproc.trf6.jus.br/realms/eproc/protocol/openid-connect/auth?client_id=eproc1g&state=s"
+TRF6_BUTTON = (
+    '<button id="kc-login-certificate" onclick="document.location.host = \'certificado-sso-eproc.trf6.jus.br\';">'
+    "Certificado Digital</button>"
+)
+TRF6_X509 = (
+    '<form id="kc-x509-login-info" action="https://sso-eproc.trf6.jus.br/realms/eproc/login-actions/authenticate?s=1">'
+    '<input type="submit" name="login" value="Continuar"></form>'
+)
+TRF6_OTP = (
+    '<form id="kc-otp-login-form" action="https://sso-eproc.trf6.jus.br/realms/eproc/login-actions/authenticate?s=2">'
+    '<input name="otp"><input type="checkbox" name="saveDevice" checked><input type="submit" name="login"></form>'
+)
+TRF6_PANEL = "https://eproc1g.trf6.jus.br/eproc/controlador.php?acao=painel_adv_listar&hash=x"
+CHALLENGE = '<script>window["bobcmn"]="1"</script>'
+
+
+class FakeDriver:
+    def __init__(self, sources, url=TRF6_SSO, cookies=None):
+        self.sources = list(sources)
+        self.url = url
+        self.cookies = cookies or []
+        self.opened = []
+        self.quit_called = False
+
+    @property
+    def page_source(self):
+        return self.sources.pop(0) if len(self.sources) > 1 else self.sources[0]
+
+    def get(self, url):
+        self.opened.append(url)
+
+    def get_current_url(self):
+        return self.url
+
+    def execute_cdp_cmd(self, command, params):
+        assert command == "Network.getAllCookies"
+        return {"cookies": self.cookies}
+
+    def quit(self):
+        self.quit_called = True
+
+
+class Trf6BrowserEntryTest(unittest.TestCase):
+    def setUp(self):
+        self.config = portals.eproc("trf6-1g")
+
+    def browse(self, driver):
+        from curl_cffi import requests
+
+        session = requests.Session()
+        module = SimpleNamespace(Driver=lambda **options: driver)
+        with mock.patch.dict("sys.modules", {"seleniumbase": module}), mock.patch.object(certificate.time, "sleep"):
+            return session, certificate._browser_login_page(session, self.config)
+
+    def test_both_instances_open_the_entry_in_the_browser(self):
+        self.assertEqual(certificate.BROWSER_ENTRY, {"trf6-1g", "trf6-2g"})
+
+    def test_the_browser_waits_past_the_challenge_and_hands_every_cookie_over(self):
+        cookies = [
+            {"name": "TS6b115ce5029", "value": "bot", "domain": "eproc1g.trf6.jus.br", "path": "/", "expires": -1,
+             "session": True},
+            {"name": "AUTH_SESSION_ID", "value": "kc", "domain": "sso-eproc.trf6.jus.br", "path": "/",
+             "expires": 4102444800.5, "session": False},
+        ]  # fmt: skip
+        driver = FakeDriver([CHALLENGE, TRF6_BUTTON], cookies=cookies)
+        session, result = self.browse(driver)
+        self.assertEqual(driver.opened, [self.config.login_url])
+        self.assertTrue(driver.quit_called)
+        self.assertEqual((result.url, result.text), (TRF6_SSO, TRF6_BUTTON))
+        jar = {cookie.name: cookie for cookie in session.cookies.jar}
+        self.assertEqual(
+            {name: cookie.value for name, cookie in jar.items()}, {"TS6b115ce5029": "bot", "AUTH_SESSION_ID": "kc"}
+        )
+        self.assertIsNone(jar["TS6b115ce5029"].expires)  # a browser-session cookie stays a session cookie
+        self.assertEqual(jar["AUTH_SESSION_ID"].expires, 4102444800)
+        target = certificate._certificate_url(result.text, result.url, self.config)
+        self.assertTrue(target.startswith("https://certificado-sso-eproc.trf6.jus.br/realms/eproc/"), target)
+
+    def test_a_page_that_never_offers_the_certificate_stops_and_closes_the_browser(self):
+        driver = FakeDriver([CHALLENGE])
+        with (
+            mock.patch.object(certificate, "BROWSER_ENTRY_TIMEOUT", -1),
+            self.assertRaisesRegex(RuntimeError, "did not open in the browser"),
+        ):
+            self.browse(driver)
+        self.assertTrue(driver.quit_called)
+
+    def test_a_browser_sent_off_the_court_hands_nothing_over(self):
+        driver = FakeDriver([TRF6_BUTTON], url="https://sso-eproc.trf6.example/realms/eproc")
+        with self.assertRaises(UnsafeUrlError):
+            self.browse(driver)
+        self.assertTrue(driver.quit_called)
+
+    def test_certificate_continue_and_code_go_over_http_without_releasing_the_device(self):
+        authenticate = "https://sso-eproc.trf6.jus.br/realms/eproc/login-actions/authenticate"
+        session = FakeSession(
+            [
+                ("GET", "https://certificado-sso-eproc.trf6.jus.br/realms/eproc/", page(TRF6_SSO, TRF6_X509)),
+                ("POST", authenticate + "?s=1", page(TRF6_SSO, TRF6_OTP)),
+                ("POST", authenticate + "?s=2", page(TRF6_PANEL)),
+            ]
+        )
+        entry = mock.Mock(return_value=page(TRF6_SSO, TRF6_BUTTON))
+        with (
+            mock.patch.dict("os.environ", {"PJE_A1_PIN": "pin"}, clear=True),
+            mock.patch.object(certificate, "_browser_login_page", entry),
+            mock.patch.object(certificate, "_login_page", side_effect=AssertionError("no HTTP entry")),
+            mock.patch.object(certificate, "portal_totp_account", return_value={"secret": "JBSWY3DPEHPK3PXP"}),
+            mock.patch.object(certificate, "totp", return_value=mock.Mock(now=lambda: "123456")),
+            mock.patch.object(certificate.native_signer, "load_a1", return_value=("key", "cert", [])),
+            mock.patch.object(certificate, "client_certificate") as pem,
+        ):
+            pem.return_value.__enter__.return_value = "/tmp/a1.pem"
+            result = certificate.cert_login("trf6-1g", session=session)
+        entry.assert_called_once_with(session, self.config)
+        self.assertEqual(result[2], TRF6_PANEL)
+        self.assertEqual(session.calls[0][3], "/tmp/a1.pem")  # only the certificate host gets the A1
+        self.assertIsNone(session.calls[2][3])
+        self.assertEqual(session.calls[2][2], {"otp": "123456", "login": "Sign In"})  # never saveDevice

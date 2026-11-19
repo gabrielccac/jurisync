@@ -58,10 +58,37 @@ def _inventory(process):
         identifier = document.get("id")
         if identifier is None:
             continue
-        if identifier in known and known[identifier].get("url") != document.get("url"):
-            raise ValueError("Conflicting document locations for an ID")
+        if identifier in known:
+            if not _same_location(known[identifier].get("url"), document.get("url")):
+                raise ValueError("Conflicting document locations for an ID")
+            continue  # the first link wins
         known[identifier] = document
     return known
+
+
+# A document attached to one event and cited by a later one is linked from both rows; the two links differ only in
+# the event that shows it and that link's hash (TJSC, 19/11/2026).
+PER_EVENT_PARAMS = {"evento", "hash"}
+
+
+def _same_location(first, second):
+    """Whether two links open the same document: same address, differing at most in the per-event parameters."""
+    if first == second:
+        return True
+    if not isinstance(first, str) or not isinstance(second, str):
+        return False
+    parts = urlsplit(first), urlsplit(second)
+    if parts[0]._replace(query="") != parts[1]._replace(query=""):
+        return False
+    queries = [
+        {
+            key: value
+            for key, value in parse_qs(part.query, keep_blank_values=True).items()
+            if key not in PER_EVENT_PARAMS
+        }
+        for part in parts
+    ]
+    return queries[0] == queries[1]
 
 
 def _item(document):
