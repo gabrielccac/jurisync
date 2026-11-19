@@ -88,6 +88,7 @@ class PortalRegistryTest(unittest.TestCase):
                 "tjmg-2g",
                 "tjms-eproc-1g",
                 "tjrj-eproc-1g",
+                "tjrj-eproc-2g",
                 "tjpr-1g",
                 "tjpr-2g",
                 "trf4-1g-sc",
