@@ -199,3 +199,36 @@ def publication(row):
         "registro": mask_registro(row.get("numeroRegistro")),
         "process": f"{row.get('siglaClasse', '')} {row.get('numeroProcessoClasse', '')}".strip() or None,
     }
+
+
+def tramitacao(rows):
+    """``qtdprocessotramitacao`` rows to ``{"active": n, "closed": n, "total": n}``."""
+    counts = {"S": 0, "N": 0}
+    for row in rows or []:
+        if row.get("tramitando") in counts:
+            counts[row["tramitando"]] += int(row.get("qtd") or 0)
+    return {"active": counts["S"], "closed": counts["N"], "total": counts["S"] + counts["N"]}
+
+
+def represented_seqs(rows, oab):
+    """The ``seq`` of every party the lawyer ``oab`` acts for: the CPE lists a lawyer right after the party, or the
+    run of parties, he represents."""
+    seqs, run, after_lawyer = [], [], False
+    for row in rows or []:
+        if row.get("tipo") == "Advogado":
+            after_lawyer = True
+            if row.get("codigoOAB") == oab:
+                seqs.extend(item for item in run if item not in seqs)
+            continue
+        if after_lawyer:
+            run, after_lawyer = [], False
+        if row.get("seq") is not None:
+            run.append(row["seq"])
+    return seqs
+
+
+def vista(row):
+    """One open vista. The CPE answers an empty list for every process of the validation account, so only
+    ``codTipoDocumento`` (which the CPE app itself reads) is certain; the plain fields it sends are kept."""
+    scalars = {k: v for k, v in row.items() if isinstance(v, str | int | float | bool) and "cpf" not in k.lower()}
+    return {"documentType": row.get("codTipoDocumento"), "fields": scalars}

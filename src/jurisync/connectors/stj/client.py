@@ -277,6 +277,32 @@ def oabs(session):
     return session.oabs
 
 
+def tramitacao_counts(session, oab):
+    """``GET /advogados/{oab}/qtdprocessotramitacao``: ``[{"tramitando": "S"|"N", "qtd": n}]``."""
+    return get_json(session, f"/api/advogados/{oab}/qtdprocessotramitacao", empty=[]) or []
+
+
+def interest_processes(session, oab, page=1, page_size=20):
+    """The processes the lawyer follows without being a party's lawyer ("Meus interesses")."""
+    return get_json(
+        session, f"/api/advogados/{oab}/processosInteresse", params={"page": page, "offset": page_size}, empty=[]
+    )
+
+
+def open_vistas(session, registro, seqs):
+    """``GET /processo/{registro}/vistasEmAberto``: open vistas (the lawyer's deadline to answer) for the parties
+    ``seqs`` (the ``seq`` of each party, not ``seqParteProcesso``). Reading it records nothing."""
+    if not seqs:
+        return []
+    values = ",".join(str(seq) for seq in seqs)
+    return get_json(session, f"/api/processo/{registro}/vistasEmAberto", params={"values": values}, empty=[]) or []
+
+
+def next_message(session):
+    """The portal's next unread notice to the lawyer, or ``None``. Marking it read is a POST this module refuses."""
+    return get_json(session, "/api/mensagens/proxima", empty=None)
+
+
 def publications(session, oab, page=1, page_size=20):
     return get_json(session, f"/api/advogados/{oab}/publicacoes", params={"page": page, "offset": page_size}, empty=[])
 
