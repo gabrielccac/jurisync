@@ -127,3 +127,41 @@ def test_only_a_refusal_raises_login_rejected(monkeypatch):
             sso.login_session("123.456.789-09", "pw", None, portal="tst")
         assert type(raised.value) is error
         assert session.post.call_args.kwargs["data"]["username"] == "12345678909"
+
+
+def test_a_jt_landing_without_the_panel_text_is_confirmed_by_the_rest_api(monkeypatch):
+    """TRT19 lands on the /pjekz/ loader and its search page forwards to /consultaprocessual/: neither carries the
+    panel markers, but the REST token knows the user, so the login worked."""
+    from jurisync.connectors.pje import kz
+    from jurisync.connectors.pje.auth import certificate
+
+    base = "https://sso.cloud.pje.jus.br/auth/realms/pje"
+    form = f'<form id="kc-form-login" action="{base}/login-actions/authenticate">'
+    otp = f'<form id="kc-otp-login-form" action="{base}/login-actions/authenticate?step=otp">'
+    monkeypatch.setattr(
+        sso, "_sso_page", lambda session, url: page(200, f"{base}/protocol/openid-connect/auth", text=form)
+    )
+    monkeypatch.setattr(sso, "totp", lambda account: SimpleNamespace(now=lambda: "000000"))
+    loader = page(200, "https://pje.trt19.jus.br/pjekz/", text="<title>Processo Judicial Eletrônico</title>")
+    session = Mock()
+    session.post.side_effect = [
+        page(200, f"{base}/login-actions/authenticate", text=otp),
+        page(302, f"{base}/login-actions/authenticate", "https://pje.trt19.jus.br/pjekz/"),
+    ]
+    session.get.return_value = loader
+    monkeypatch.setattr(sso.requests, "Session", Mock(return_value=session))
+    monkeypatch.setattr(certificate, "_follow", lambda s, r: page(200, "https://pje.trt19.jus.br/consultaprocessual/"))
+    checked = []
+    monkeypatch.setattr(kz, "is_authenticated", lambda s, portal: checked.append(portal) or True)
+    assert sso.login_session("123.456.789-09", "pw", None, portal="trt19-1g")[0] is session
+    assert checked == ["trt19-1g"]
+
+    monkeypatch.setattr(kz, "is_authenticated", lambda s, portal: False)
+    session.post.side_effect = [
+        page(200, f"{base}/login-actions/authenticate", text=otp),
+        page(302, f"{base}/login-actions/authenticate", "https://pje.trt19.jus.br/pjekz/"),
+    ]
+    import pytest
+
+    with pytest.raises(RuntimeError, match="at https://pje.trt19.jus.br/consultaprocessual/"):
+        sso.login_session("123.456.789-09", "pw", None, portal="trt19-1g")

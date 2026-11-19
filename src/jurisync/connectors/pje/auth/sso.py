@@ -236,9 +236,16 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
             log_request("GET", config.search_url, response.status_code)
         certificate._require_registered(response, config)
         authenticated = certificate._authenticated(response, config.host, config.root)
+        if not authenticated:
+            # The landing page varies by court; the REST API that every PJe-JT read uses is the real test.
+            from jurisync.connectors.pje import kz
+
+            authenticated = kz.is_authenticated(session, config.key)
     if not authenticated and (refusal := portal_login_error(response.text)):
         # The SSO accepted the account but this court did not: retrying cannot help until the user acts on it.
         raise LoginRejected(f"{config.key} refused the login: {refusal}")
     if not authenticated:
-        raise RuntimeError(f"Login did not reach an authenticated PJe page (HTTP {response.status_code})")
+        raise RuntimeError(
+            f"Login did not reach an authenticated PJe page (HTTP {response.status_code} at {url_shape(response.url)})"
+        )
     return session, response
