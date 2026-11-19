@@ -475,3 +475,27 @@ def _response(html):
     from types import SimpleNamespace
 
     return SimpleNamespace(status_code=200, headers={"Content-Type": "text/html"}, content=html.encode(), text=html)
+
+
+def test_a_bucket_whose_tree_leads_to_fewer_rows_than_it_counts_is_not_complete(monkeypatch):
+    class EmptyTreePanel:
+        def open(self):
+            return [{"index": 0, "label": "Pendentes de ciência ou de resposta", "count": 15}]
+
+    class Context:
+        def __init__(self, portal, session):
+            pass
+
+        def __enter__(self):
+            return EmptyTreePanel()
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(inbox, "_panel", Context)
+    monkeypatch.setattr(inbox, "walk", lambda panel, bucket, regions=None: {})
+    result = inbox.read_inbox("tjmg-pje-1g", session=object())
+    assert result["inboxes"] == [] and result["complete"] is False
+    assert result["bucketShortfall"] == {"bucketCount": 15, "foundInInboxes": 0}
+    # A region filter reads part of the bucket on purpose: no shortfall is reported.
+    assert inbox.read_inbox("tjmg-pje-1g", regions=["Belo Horizonte"], session=object())["complete"] is True

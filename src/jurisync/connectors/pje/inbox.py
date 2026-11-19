@@ -630,13 +630,20 @@ def read_inbox(portal, *, bucket=None, regions=None, filters=None, max_pages=25,
         for node in nodes.values():
             if node["inbox"] and not _empty(node) and _wanted(paths[node["id"]], regions):
                 inboxes.append(_read_pages(panel, node, paths[node["id"]], max_pages, filters))
-        return {
+        result = {
             "success": True,
             "portal": portal,
             "bucket": _brief(selected),
             "inboxes": inboxes,
             "complete": all(box["complete"] for box in inboxes),
         }
+        found = sum(box["total"] for box in inboxes)
+        if not regions and not filters and found < selected["count"]:
+            # The bucket counts more than its region tree leads to (TJMG PJe: 15 pending, an empty tree). Saying
+            # "complete" there would read as "nothing pending".
+            result["complete"] = False
+            result["bucketShortfall"] = {"bucketCount": selected["count"], "foundInInboxes": found}
+        return result
 
 
 def _brief(bucket):
