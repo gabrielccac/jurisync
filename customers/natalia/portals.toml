@@ -4,9 +4,10 @@
 # (QR_Natalia_1de2.png = 10 profiles, QR_Natalia_2de2.png = Eproc/TJMG).
 # QR 1de2 profiles: PDPJ/PJE, Eproc/TRF6, GERID/INSS, Eproc/TJM, Eproc/TJRJ,
 # Projudi/Projudi, Eproc/TRF2, PDPJ/11840189606, Eproc/TJSP, Eproc/TJMS.
-# Not wired (no connector/match): Eproc/TJM, Eproc/TJMS, GERID/INSS, Projudi.
-# PDPJ profile 11840189606 available; PJe tribunal(s) to define.
+# Every PJe portal uses OTP profile index 0 (PDPJ/PJE); the eproc username is the CPF with digits only.
+# Her list has 32 portals; the 7 at the end have no connector yet. Validation: VALIDACAO-2026-11-19.md.
 
+# --- Eproc (password route; TRF6 password still refused on 19/11) ---
 [trf6-1g]
 method = "browser_totp"
 secrets = ["TRF6_USERNAME", "TRF6_PASSWORD", "TRF6_2FA_DATA|TRF6_2FA_QR"]
@@ -27,23 +28,15 @@ secrets = ["TRF2_1G_RJ_USERNAME", "TRF2_1G_RJ_PASSWORD", "TRF2_1G_RJ_2FA_DATA|TR
 method = "browser_totp"
 secrets = ["TRF2_1G_ES_USERNAME", "TRF2_1G_ES_PASSWORD", "TRF2_1G_ES_2FA_DATA|TRF2_1G_ES_2FA_QR"]
 
-[trf2-2g]
-method = "browser_totp"
-secrets = ["TRF2_2G_USERNAME", "TRF2_2G_PASSWORD", "TRF2_2G_2FA_DATA|TRF2_2G_2FA_QR"]
-
-[tjsp-1g]
-method = "browser_totp"
-secrets = ["TJSP_1G_USERNAME", "TJSP_1G_PASSWORD", "TJSP_1G_2FA_DATA|TJSP_1G_2FA_QR"]
-
-[tjsp-2g]
-method = "browser_totp"
-secrets = ["TJSP_2G_USERNAME", "TJSP_2G_PASSWORD", "TJSP_2G_2FA_DATA|TJSP_2G_2FA_QR"]
-
 [tjmg-1g]
 method = "browser_totp"
 secrets = ["TJMG_1G_USERNAME", "TJMG_1G_PASSWORD", "TJMG_1G_2FA_DATA|TJMG_1G_2FA_QR"]
 
-# --- 12/11: PJe com login único (CPF + senha) + PDPJ (perfil 11840189606). Não validados. ---
+[tjms-eproc-1g]
+method = "browser_totp"
+secrets = ["TJMS_1G_USERNAME", "TJMS_1G_PASSWORD", "TJMS_1G_2FA_DATA|TJMS_1G_2FA_QR"]
+
+# --- PJe: CPF + password + PDPJ TOTP (no A1). TST refused the login on 17/11 and 19/11; TRTs not tried yet. ---
 [trf1-1g]
 method = "password_totp"
 secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
@@ -56,7 +49,65 @@ secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA
 method = "password_totp"
 secrets = ["PJE_TRF3_2G_USERNAME", "PJE_TRF3_2G_PASSWORD", "PJE_TRF3_2G_2FA_DATA|PJE_TRF3_2G_2FA_QR"]
 
-# No registro estes usam certificate_totp; ela só tem A3 (PIN no gerid-adapter). Login/senha + PDPJ
-# já estão no .env (prefixos PJE_TRF5_1G, TJRJ_PJE_1G, TJPA_1G, TJBA_1G, TRT18_1G, TST); testar se o
-# SSO aceita senha ou ligar A3 (PJE_AUTH=a3) antes de declarar aqui.
-# Sem conector: TRT 1,2,3,5,6,10,12,15,17,19,24; TJMG PJe 1G, Turma Recursal e Themis 2G; TJMS eproc.
+[trf5-1g]
+method = "password_totp"
+secrets = ["PJE_TRF5_1G_USERNAME", "PJE_TRF5_1G_PASSWORD", "PJE_TRF5_1G_2FA_DATA|PJE_TRF5_1G_2FA_QR"]
+
+[tjrj-1g]
+method = "password_totp"
+secrets = ["TJRJ_PJE_1G_USERNAME", "TJRJ_PJE_1G_PASSWORD", "TJRJ_PJE_1G_2FA_DATA|TJRJ_PJE_1G_2FA_QR"]
+
+[tjpa-1g]
+method = "password_totp"
+secrets = ["TJPA_1G_USERNAME", "TJPA_1G_PASSWORD", "TJPA_1G_2FA_DATA|TJPA_1G_2FA_QR"]
+
+[tjba-1g]
+method = "password_totp"
+secrets = ["TJBA_1G_USERNAME", "TJBA_1G_PASSWORD", "TJBA_1G_2FA_DATA|TJBA_1G_2FA_QR"]
+
+[tjmg-pje-1g]
+method = "password_totp"
+secrets = ["TJMG_PJE_1G_USERNAME", "TJMG_PJE_1G_PASSWORD", "TJMG_PJE_1G_2FA_DATA|TJMG_PJE_1G_2FA_QR"]
+
+[tst]
+method = "password_totp"
+secrets = ["TST_USERNAME", "TST_PASSWORD", "TST_2FA_DATA|TST_2FA_QR"]
+
+[trt1-1g]
+method = "password_totp"
+secrets = ["TRT1_1G_USERNAME", "TRT1_1G_PASSWORD", "TRT1_1G_2FA_DATA|TRT1_1G_2FA_QR"]
+
+[trt1-2g]
+method = "password_totp"
+secrets = ["TRT1_2G_USERNAME", "TRT1_2G_PASSWORD", "TRT1_2G_2FA_DATA|TRT1_2G_2FA_QR"]
+
+[trt2-1g]
+method = "password_totp"
+secrets = ["TRT2_1G_USERNAME", "TRT2_1G_PASSWORD", "TRT2_1G_2FA_DATA|TRT2_1G_2FA_QR"]
+
+[trt3-1g]
+method = "password_totp"
+secrets = ["TRT3_1G_USERNAME", "TRT3_1G_PASSWORD", "TRT3_1G_2FA_DATA|TRT3_1G_2FA_QR"]
+
+[trt3-2g]
+method = "password_totp"
+secrets = ["TRT3_2G_USERNAME", "TRT3_2G_PASSWORD", "TRT3_2G_2FA_DATA|TRT3_2G_2FA_QR"]
+
+[trt5-1g]
+method = "password_totp"
+secrets = ["TRT5_1G_USERNAME", "TRT5_1G_PASSWORD", "TRT5_1G_2FA_DATA|TRT5_1G_2FA_QR"]
+
+[trt12-1g]
+method = "password_totp"
+secrets = ["TRT12_1G_USERNAME", "TRT12_1G_PASSWORD", "TRT12_1G_2FA_DATA|TRT12_1G_2FA_QR"]
+
+[trt15-1g]
+method = "password_totp"
+secrets = ["TRT15_1G_USERNAME", "TRT15_1G_PASSWORD", "TRT15_1G_2FA_DATA|TRT15_1G_2FA_QR"]
+
+[trt18-1g]
+method = "password_totp"
+secrets = ["TRT18_1G_USERNAME", "TRT18_1G_PASSWORD", "TRT18_1G_2FA_DATA|TRT18_1G_2FA_QR"]
+
+# No connector yet (credentials already in .env): TRT6, TRT10, TRT17, TRT19, TRT24 1G (PJe-JT);
+# TJMG Turma Recursal (PJe) and TJMG 2G (Themis).

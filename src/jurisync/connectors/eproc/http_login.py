@@ -1,19 +1,26 @@
-"""eproc password + A3 certificate + TOTP login over HTTP, for the classic (non-Keycloak) eproc login form.
+"""eproc password (+ A3 certificate) + TOTP login over HTTP, for the classic (non-Keycloak) eproc login form.
 
-Why: after the password, classic eproc (TJMG) routes through ``priv/login_cert.php``, which asks for the client
-certificate in the TLS handshake. A headless Chrome cannot answer the certificate picker / token PIN, so the browser
-login hangs. Without a certificate the server answers ``principal&erro=erro_certificado`` (back to the login form).
-Here the password goes over plain HTTP and only ``login_cert.php`` is fetched with the A3 token (``jurisync.core.mtls``,
-key kept in the token), as a browser does when the user picks the certificate.
+The form has two buttons. "Entrar" (``Submit('login')``) posts user and password to ``index.php``: the password
+alone, then the TOTP. "Certificado Digital" (``SubmitCert()``) posts the same fields to
+``externo_controlador.php?acao=login_cert``, which then asks for the client certificate. The password route is the
+default; the certificate route is taken only when the customer logs in with the A3 token (``<PREFIX>_AUTH=a3``).
 
-Flow (from a TJMG HAR): POST externo_controlador.php?acao=login_cert {txtUsuario, pwdSenha, hdnAcao=login}
+Why the certificate route goes over HTTP: after the password, classic eproc (TJMG) routes through
+``priv/login_cert.php``, which asks for the client certificate in the TLS handshake. A headless Chrome cannot answer
+the certificate picker / token PIN, so the browser login hangs. Without a certificate the server answers
+``principal&erro=erro_certificado`` (back to the login form). Here the password goes over plain HTTP and only
+``login_cert.php`` is fetched with the A3 token (``jurisync.core.mtls``, key kept in the token), as a browser does
+when the user picks the certificate.
+
+Certificate flow (from a TJMG HAR): POST externo_controlador.php?acao=login_cert {txtUsuario, pwdSenha, hdnAcao=login}
 -> priv/login_cert.php (mTLS) -> entrar_cert -> principal (form with txtAcessoCodigo) -> POST index.php
 {txtAcessoCodigo, hdnAcao=2fa_validar} -> ... -> controlador.php?acao=painel_adv_listar.
 
-Infra CAPTCHA portals (TJTO, ``flavor="infra-captcha"``): the password goes to ``index.php`` (what ``Submit('login')``
-does; their ``acao=login_cert`` leaves for a separate mutual-TLS host). Every password post is answered with an image
-CAPTCHA (``txtInfraCaptcha``) before the password is checked; a wrong code only draws a new picture, a right one lets
-the portal check the password (``msg=Senha ou usuário Inválidos`` back on the login form) and go on to the code screen.
+Infra CAPTCHA: the password post may be answered with an image CAPTCHA (``txtInfraCaptcha``) before the password
+is checked; TJTO (``flavor="infra-captcha"``) always asks, other classic portals (TJMG) now and then. A wrong code
+only draws a new picture, a right one lets the portal check the password (``msg=Senha ou usuário Inválidos`` back on
+the login form) and go on to the code screen. TJTO's ``acao=login_cert`` leaves for a separate mutual-TLS host, so
+there the password always goes to ``index.php``.
 """
 
 import re
@@ -24,7 +31,7 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.a3 import _cookies_for, _store_cookies, eproc_message
-from jurisync.connectors.eproc.auth import PANEL_MARKER
+from jurisync.connectors.eproc.auth import is_panel, panel_link
 from jurisync.core import image_captcha, mtls
 from jurisync.core.session_pool import LoginRejected
 from jurisync.core.totp import next_code, totp
@@ -132,8 +139,12 @@ def _post(session, url, data, referer):
     )
 
 
-def login(username, password, account, *, portal, signer=None):
-    """Return ``(session, panel_html, panel_url)``. Raises NotClassicLogin before sending any credential."""
+def login(username, password, account, *, portal, signer=None, certificate=False):
+    """Return ``(session, panel_html, panel_url)``. Raises NotClassicLogin before sending any credential.
+
+    ``certificate``: take the "Certificado Digital" route (password, then the A3 token at ``login_cert.php``);
+    otherwise "Entrar" (the password alone).
+    """
     from jurisync.connectors.pje.auth import a3
 
     if account["type"] != "totp":
@@ -143,6 +154,11 @@ def login(username, password, account, *, portal, signer=None):
     trail = []
 
     def with_token(url):
+        if not certificate:
+            raise RuntimeError(
+                f"{config.key}: the portal asks for the certificate after the password; log in with the A3 token "
+                f"({config.env_name('AUTH')}=a3)"
+            )
         cookies = _cookies_for(session, config.host)
         if signer is not None:
             return mtls.fetch(url, signer=signer, cookies=cookies)
@@ -167,21 +183,20 @@ def login(username, password, account, *, portal, signer=None):
 
         # From here on the credentials are sent: never fall back to another login after this point.
         trail.append("login")
-        captcha = config.flavor == INFRA_CAPTCHA
+        certificate_route = certificate and config.flavor != INFRA_CAPTCHA
         response = _post(
             session,
-            config.url("index.php" if captcha else "externo_controlador.php?acao=login_cert"),
+            config.url("externo_controlador.php?acao=login_cert" if certificate_route else "index.php"),
             {"txtUsuario": username, "pwdSenha": password, "hdnAcao": "login", "hdnDebug": ""},
             page.url,
         )
         response = _follow(session, response, config.host, with_token, trail)
-        if captcha:
-            response = _captcha_step(session, response, config, with_token, trail)
+        response = _captcha_step(session, response, config, with_token, trail)
         if _has_field(response.text, "pwdSenha"):
             reason = eproc_message(response.url, response.text)
-            if captcha:
-                # Past the CAPTCHA the form comes back only when the portal checked and refused the password: never
-                # send it again on its own (the session pool keeps a cool-down for LoginRejected).
+            if not certificate_route:
+                # On the password route (past any CAPTCHA) the form comes back only when the portal checked and refused
+                # the password: never send it again on its own (the session pool keeps a cool-down for LoginRejected).
                 raise LoginRejected(
                     f"{config.key}: eproc refused the user or password" + (f" ({reason})" if reason else "")
                 )
@@ -204,7 +219,18 @@ def login(username, password, account, *, portal, signer=None):
         if _has_field(response.text, "txtAcessoCodigo"):
             raise RuntimeError("eproc rejected the OTP")
 
-        if PANEL_MARKER not in response.url and PANEL_MARKER not in response.text:
+        link = None if is_panel(response.url) else panel_link(response.text, response.url)
+        if link:
+            # Logged in, but landed on another page (TJMG's "Alterar Cadastro"): plain navigation, nothing is saved.
+            trail.append(_acao(link) or "painel")
+            response = session.get(link, impersonate="chrome", timeout=60, allow_redirects=False)
+            response = _follow(session, response, config.host, with_token, trail)
+        if not is_panel(response.url) and not is_panel(response.text):
+            if _acao(response.url) == "pessoa_alterar":
+                raise RuntimeError(
+                    f"{config.key}: the portal holds the login on its registration update page (Alterar Cadastro); "
+                    "the lawyer has to log in once in a browser and confirm the registration data"
+                )
             reason = eproc_message(response.url, response.text)
             title = BeautifulSoup(response.text, "html.parser").title
             where = " ".join(title.get_text().split())[:120] if title else urlsplit(response.url).path

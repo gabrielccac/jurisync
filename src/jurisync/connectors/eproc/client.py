@@ -186,22 +186,33 @@ def uses_a3(portal):
 
 
 def authenticate(portal):
-    if uses_a3(portal):
+    config = portals.eproc(portal)
+    certificate = uses_a3(portal)
+    if certificate and not (config.env("USERNAME") and config.env("PASSWORD")):
         from jurisync.connectors.eproc import a3
 
         return a3.login(portal)
-    if portals.eproc(portal).uses_certificate():
+    if config.uses_certificate():
         return cert_login(portal)
     username, password = _credentials(portal)
     account = portal_totp_account(portal)
-    # Classic eproc asks for a client certificate after the password; a headless browser hangs on the picker when
-    # an A3 token is plugged in. Log in over HTTP when the portal shows the classic form (nothing sent otherwise).
+    # The classic form takes the password alone ("Entrar") or the password plus the certificate ("Certificado
+    # Digital"); the certificate route is taken only with <PREFIX>_AUTH=a3. Log in over HTTP when the portal shows the
+    # classic form (nothing sent otherwise); a headless browser hangs on the certificate picker.
     from jurisync.connectors.eproc import http_login
 
     try:
-        return http_login.login(username, password, account, portal=portal)
+        return http_login.login(username, password, account, portal=portal, certificate=certificate)
     except http_login.NotClassicLogin:
-        return login(username, password, account, portal=portal)
+        pass
+    if certificate:
+        from jurisync.connectors.eproc import a3
+
+        try:
+            return a3.login(portal)
+        except a3.NoKeycloakCertificate:
+            pass  # classic form behind a bot challenge (TRF6): the browser posts the password, then the token
+    return login(username, password, account, portal=portal, certificate=certificate)
 
 
 def _first(mapping, *keys):

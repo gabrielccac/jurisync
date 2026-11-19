@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from jurisync import portals
 from jurisync.connectors.eproc import client, http_login
 from jurisync.core.mtls import Response
+from jurisync.core.session_pool import LoginRejected
 
 BASE = "https://eproc1g.tjmg.jus.br/eproc/"
 LOGIN_FORM = '<form id="frmLogin"><input name="txtUsuario"><input name="pwdSenha" type="password"></form>'
@@ -84,7 +85,7 @@ class CertificateFlow(unittest.TestCase):
             patch.object(http_login.requests, "Session", return_value=session),
             patch.object(http_login.mtls, "fetch", return_value=cert) as fetch,
         ):
-            result = http_login.login("u", "p", ACCOUNT, portal="tjmg-1g", signer=Mock())
+            result = http_login.login("u", "p", ACCOUNT, portal="tjmg-1g", signer=Mock(), certificate=True)
         self.assertEqual(result[2], PANEL)
         self.assertTrue(fetch.call_args.args[0].endswith("/eproc/priv/login_cert.php?acao_origem="))
         password_post, otp_post = session.post.call_args_list
@@ -113,7 +114,98 @@ class CertificateFlow(unittest.TestCase):
             patch.object(http_login.mtls, "fetch", return_value=cert),
         ):
             with self.assertRaisesRegex(RuntimeError, "erro_certificado"):
-                http_login.login("u", "p", ACCOUNT, portal="tjmg-1g", signer=Mock())
+                http_login.login("u", "p", ACCOUNT, portal="tjmg-1g", signer=Mock(), certificate=True)
+
+
+class PasswordFlow(unittest.TestCase):
+    """ "Entrar": the password alone goes to index.php, then the TOTP (JFRJ, JFES, TJMG without a token)."""
+
+    def test_password_then_totp_reach_the_panel_without_the_certificate(self):
+        session = session_with(
+            gets=[
+                reply(BASE, text=LOGIN_FORM),
+                reply(BASE + "externo_controlador.php?acao=principal", text=OTP_FORM),
+                reply(BASE + "controlador.php?acao=principal", 302, location=PANEL),
+                reply(PANEL, text="Painel do Advogado"),
+            ],
+            posts=[
+                reply(BASE + "index.php", 302, location="externo_controlador.php?acao=principal"),
+                reply(BASE + "index.php", 302, location=BASE + "controlador.php?acao=principal"),
+            ],
+        )
+        with (
+            patch.object(http_login.requests, "Session", return_value=session),
+            patch.object(http_login.mtls, "fetch") as fetch,
+        ):
+            result = http_login.login("u", "p", ACCOUNT, portal="tjmg-1g")
+        self.assertEqual(result[2], PANEL)
+        fetch.assert_not_called()
+        password_post, otp_post = session.post.call_args_list
+        self.assertEqual(password_post.args[0], BASE + "index.php")
+        self.assertEqual(password_post.kwargs["data"]["hdnAcao"], "login")
+        self.assertEqual(otp_post.kwargs["data"]["hdnAcao"], "2fa_validar")
+
+    def test_refused_password_is_never_sent_again(self):
+        session = session_with(
+            gets=[
+                reply(BASE, text=LOGIN_FORM),
+                reply(BASE + "externo_controlador.php?acao=principal", text=LOGIN_FORM),
+            ],
+            posts=[reply(BASE + "index.php", 302, location="externo_controlador.php?acao=principal")],
+        )
+        with patch.object(http_login.requests, "Session", return_value=session):
+            with self.assertRaises(LoginRejected):
+                http_login.login("u", "p", ACCOUNT, portal="tjmg-1g")
+        self.assertEqual(session.post.call_count, 1)
+
+    def test_landing_outside_the_panel_follows_the_panel_link(self):
+        cadastro = BASE + "controlador.php?acao=pessoa_alterar&hash=h"
+        session = session_with(
+            gets=[
+                reply(BASE, text=LOGIN_FORM),
+                reply(BASE + "externo_controlador.php?acao=principal", text=OTP_FORM),
+                reply(cadastro, text='<a href="controlador.php?acao=painel_adv_listar&amp;hash=h">Painel</a>'),
+                reply(PANEL, text="Painel do Advogado"),
+            ],
+            posts=[
+                reply(BASE + "index.php", 302, location="externo_controlador.php?acao=principal"),
+                reply(BASE + "index.php", 302, location=cadastro),
+            ],
+        )
+        with patch.object(http_login.requests, "Session", return_value=session):
+            result = http_login.login("u", "p", ACCOUNT, portal="tjmg-1g")
+        self.assertEqual(result[2], PANEL)
+        self.assertEqual(session.post.call_count, 2)
+
+    def test_registration_update_page_without_a_panel_link_is_explained(self):
+        cadastro = BASE + "controlador.php?acao=pessoa_alterar&hash=h"
+        session = session_with(
+            gets=[
+                reply(BASE, text=LOGIN_FORM),
+                reply(BASE + "externo_controlador.php?acao=principal", text=OTP_FORM),
+                reply(cadastro, text="<title>Alterar Cadastro</title>"),
+            ],
+            posts=[
+                reply(BASE + "index.php", 302, location="externo_controlador.php?acao=principal"),
+                reply(BASE + "index.php", 302, location=cadastro),
+            ],
+        )
+        with patch.object(http_login.requests, "Session", return_value=session):
+            with self.assertRaisesRegex(RuntimeError, "Alterar Cadastro"):
+                http_login.login("u", "p", ACCOUNT, portal="tjmg-1g")
+
+    def test_account_that_needs_the_certificate_says_how_to_log_in(self):
+        session = session_with(
+            gets=[reply(BASE, text=LOGIN_FORM)],
+            posts=[reply(BASE + "index.php", 302, location="priv/login_cert.php?acao_origem=")],
+        )
+        with (
+            patch.object(http_login.requests, "Session", return_value=session),
+            patch.object(http_login.mtls, "fetch") as fetch,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "TJMG_1G_AUTH=a3"):
+                http_login.login("u", "p", ACCOUNT, portal="tjmg-1g")
+        fetch.assert_not_called()
 
 
 class ClientRouting(unittest.TestCase):
@@ -128,6 +220,31 @@ class ClientRouting(unittest.TestCase):
         ):
             self.assertEqual(client.authenticate("trf6-1g"), "browser")
         browser.assert_called_once()
+
+    def test_password_route_unless_the_customer_logs_in_with_the_token(self):
+        for a3, expected in ((False, False), (True, True)):
+            with (
+                patch.object(client, "uses_a3", return_value=a3),
+                patch.object(client, "_credentials", return_value=("u", "p")),
+                patch.object(client, "portal_totp_account", return_value=ACCOUNT),
+                patch.dict("os.environ", {"TRF2_1G_RJ_USERNAME": "u", "TRF2_1G_RJ_PASSWORD": "p"}),
+                patch.object(http_login, "login", return_value="http") as http,
+            ):
+                self.assertEqual(client.authenticate("trf2-1g-rj"), "http")
+            self.assertIs(http.call_args.kwargs["certificate"], expected)
+
+    def test_token_without_a_password_keeps_the_keycloak_certificate_login(self):
+        from jurisync.connectors.eproc import a3
+
+        with (
+            patch.object(client, "uses_a3", return_value=True),
+            patch.dict("os.environ", {"TJRS_1G_USERNAME": "", "TJRS_1G_PASSWORD": ""}),
+            patch.object(a3, "login", return_value="a3") as token_login,
+            patch.object(http_login, "login") as http,
+        ):
+            self.assertEqual(client.authenticate("tjrs-1g"), "a3")
+        token_login.assert_called_once()
+        http.assert_not_called()
 
 
 if __name__ == "__main__":
