@@ -49,6 +49,8 @@ SAFE_CONTROL = {
     "bucket": re.compile(r"^formAbaExpediente:listaAgrSitExp:\d+:j_id\d+$"),
     "branch": re.compile(r"^formAbaExpediente:listaAgrSitExp:\d+:\w+:[^:]+(?::[^:]+)*::j_id\d+$"),
     "inbox": re.compile(r"^formAbaExpediente:listaAgrSitExp:\d+:\w+:[^:]+(?::[^:]+)*::j_id\d+:cxExItem$"),
+    # The jurisdiction's own link: on some deployments (TJMG) only it renders the branch's inboxes.
+    "jurisdiction": re.compile(r"^formAbaExpediente:listaAgrSitExp:\d+:\w+:[^:]+(?::[^:]+)*::jNp$"),
     "page": re.compile(rf"^{TABLE}:sc\w+$"),
     "search": re.compile(r"^formExpedientes:btPesq$"),
 }
@@ -221,6 +223,7 @@ def parse_tree(html, bucket):
             "expanded": bool(flag and flag.get("value") == "true"),
             "expand": _submit(expander["rich:onexpand"]) if expander and not inbox else None,
             "inbox": _submit(inbox["onclick"]) if inbox else None,
+            "select": _submit(anchor["onclick"]) if anchor and not inbox and anchor.get("onclick") else None,
         }
         if node["expand"] or node["inbox"]:
             nodes.append(node)
@@ -481,7 +484,16 @@ class Panel:
         html = self._post("branch", control, form, CONTAINER, parameters, extra=list(self.tree.items()))
         self.tree.update(tree_state(html, bucket["index"]))
         self.tree[flag] = "true"
-        return parse_tree(html, bucket["index"])
+        nodes = parse_tree(html, bucket["index"])
+        if any(n["id"] != node["id"] for n in nodes) or not node.get("select"):
+            return nodes
+        # TJMG answers the expander with an empty update; the browser opens such a branch by its link, which renders
+        # the branch with its inboxes (and only lists, like opening an inbox).
+        form, parameters = node["select"]["form"], node["select"]["params"]
+        html = self._post("jurisdiction", parameters["ajaxSingle"], form, CONTAINER, parameters)
+        self.tree.update(tree_state(html, bucket["index"]))
+        self.tree[flag] = "true"
+        return [n for n in parse_tree(html, bucket["index"]) if n["id"] != node["id"]]
 
     def open_inbox(self, node):
         self.filtered = False

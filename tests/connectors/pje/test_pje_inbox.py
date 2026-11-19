@@ -499,3 +499,36 @@ def test_a_bucket_whose_tree_leads_to_fewer_rows_than_it_counts_is_not_complete(
     assert result["bucketShortfall"] == {"bucketCount": 15, "foundInInboxes": 0}
     # A region filter reads part of the bucket on purpose: no shortfall is reported.
     assert inbox.read_inbox("tjmg-pje-1g", regions=["Belo Horizonte"], session=object())["complete"] is True
+
+
+def jurisdiction_link(key):
+    control = f"{TREE}:{key}::jNp"
+    return (
+        f"gravarValorPesquisaJurisdicao();;A4J.AJAX.Submit('formAbaExpediente',event,{{'similarityGroupingId':"
+        f"'{control}','containerId':'conteudoAbaExpedientes','oncomplete':function(request,event,data)"
+        f"{{filtrarJurisdicoes();}},'parameters':{{'{control}':'{control}','ajaxSingle':'{control}'}} }} );return false;"
+    )
+
+
+def test_a_branch_whose_expander_answers_empty_is_opened_by_its_jurisdiction_link():
+    """TJMG: the expander's answer only updates messages; the jurisdiction link renders the branch's inboxes."""
+    region = branch("210", "Turma Recursal", 2).replace(
+        f'id="{TREE}:210::jNp" href="#"', f'id="{TREE}:210::jNp" href="#" onclick="{jurisdiction_link("210")}"'
+    )
+    panel = inbox.Panel(session=None, portal="tjmg-pje-tr")
+    panel.tree, posted = {}, []
+
+    def post(kind, control, form, container, parameters, extra=()):
+        inbox.check_request(kind, control, form, parameters, extra)
+        posted.append((kind, control))
+        return "<html></html>" if kind == "branch" else branch("210", "Turma Recursal", 2, "true", leaf("210", 2))
+
+    panel._post = post
+    node = inbox.parse_tree(region, 0)[0]
+    assert node["select"]["params"]["ajaxSingle"] == f"{TREE}:210::jNp"
+    children = panel.expand({"index": 0}, node)
+    assert [kind for kind, _ in posted] == ["branch", "jurisdiction"]
+    assert [(n["label"], n["count"], bool(n["inbox"])) for n in children] == [("Caixa de entrada", 2, True)]
+    # Only the node's own link is accepted as a jurisdiction control.
+    with pytest.raises(RuntimeError):
+        inbox.check_control("jurisdiction", f"{TREE}:210::j_id99:cxExItem")
