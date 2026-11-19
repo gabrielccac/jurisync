@@ -367,7 +367,9 @@ class LoginFlowTest(unittest.TestCase):
             {},
         )
         self.assertEqual(result[2], panel)
-        self.assertEqual(session.calls[0][1], "https://eproc2g.tjsc.jus.br/eproc/externo_controlador.php?acao=SSO/login")
+        self.assertEqual(
+            session.calls[0][1], "https://eproc2g.tjsc.jus.br/eproc/externo_controlador.php?acao=SSO/login"
+        )
         self.assertEqual(session.calls[2][2], {"otp": "123456", "login": "Sign In"})
 
     def test_tjsc_never_takes_the_classic_login_cert_form(self):
