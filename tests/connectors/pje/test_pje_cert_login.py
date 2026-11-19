@@ -240,16 +240,6 @@ class Pje1xGuards(unittest.TestCase):
         self.assertTrue(portals.pje("trf5-legacy").pje1x)
         self.assertFalse(portals.pje("trf5-tru").pje1x)
 
-    def test_counters_inbox_and_search_say_pje1x_is_not_supported(self):
-        from jurisync.connectors.pje import inbox, search
-
-        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*Expedientes"):
-            inbox.read_counters("trf5-legacy", session=Mock())
-        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*Expedientes"):
-            inbox.read_inbox("trf5-legacy", session=Mock())
-        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*not supported"):
-            search.search_process(Mock(), "0000001-00.2026.4.05.8100", portal="trf5-legacy")
-
     def test_session_check_looks_for_the_pje1x_search_form(self):
         from jurisync.connectors.pje.auth import sessions
 

@@ -142,9 +142,16 @@ def search_process(
             ato_allow_pending=ato_allow_pending,
         )
     if config.pje1x:
-        raise RuntimeError(
-            f"{config.key} is a PJe 1.x portal: its process search and detail pages are not supported yet "
-            "(only login, the Push list and the session are)"
+        from jurisync.connectors.pje import legacy
+
+        return legacy.search_process(
+            session,
+            process_number,
+            raw_html_path,
+            portal=portal,
+            ato_expediente=ato_expediente,
+            ato_text_limit=ato_text_limit,
+            ato_allow_pending=ato_allow_pending,
         )
     search_url = config.search_url
     parts = parse_process_number(process_number)

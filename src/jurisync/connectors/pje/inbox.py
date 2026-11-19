@@ -21,7 +21,7 @@ from html import unescape
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import jsf, kz
+from jurisync.connectors.pje import jsf, kz, legacy
 from jurisync.connectors.pje.acervo import PANEL_SUFFIX
 from jurisync.connectors.pje.expedientes import NOTICE, PRAZO
 from jurisync.connectors.pje.parsers import response_html
@@ -572,20 +572,13 @@ def walk(panel, bucket, regions=None):
     return nodes
 
 
-def _require_expedientes(portal):
-    if portals.pje(portal).pje1x:
-        raise RuntimeError(
-            f"{portal} is a PJe 1.x portal: its panel has Acervo and Intimações tabs, not the Expedientes buckets; "
-            "counters and inbox are not supported there"
-        )
-
-
 def read_counters(portal, *, session=None, tree=False, bucket=None):
     """The fixed buckets with their counts; ``tree=True`` also lists each bucket's regions and inboxes.
 
     ``bucket`` (index or part of the label) lists the regions of that bucket only, without walking the others.
     """
-    _require_expedientes(portal)
+    if portals.pje(portal).pje1x:
+        return _kz_call(portal, session, lambda s: legacy.read_counters(s, portal))
     if portals.pje(portal).kz:
         return _kz_call(portal, session, lambda s: kz.read_counters(s, portal, tree=tree, bucket=bucket))
     with _panel(portal, session) as panel:
@@ -619,7 +612,8 @@ def read_inbox(portal, *, bucket=None, regions=None, filters=None, max_pages=25,
     the rows read reach the total PJe reports for it; more rows than the total means the inbox
     gained items while its pages were being read (``changedWhileReading``), and they are all kept.
     """
-    _require_expedientes(portal)
+    if portals.pje(portal).pje1x:
+        return _kz_call(portal, session, lambda s: legacy.read_inbox(s, portal, bucket=bucket, filters=filters))
     if portals.pje(portal).kz:
         return _kz_call(
             portal,
