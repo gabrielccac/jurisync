@@ -15,6 +15,15 @@ class PjeNotificationChecks(unittest.TestCase):
         self.assertIsNone(result["total_pages"])
         self.assertFalse(result["complete"])
 
+    def test_an_empty_push_registry_is_a_complete_list_of_zero(self):
+        # TRF5 2G / TJRJ 1G with nothing registered: no grid, no count, only this sentence.
+        html = """<ul><li>Processos cadastrados</li><li>Processos relacionados</li></ul>
+        <div class="alert">Não há nenhum processo cadastrado na sua lista de processos do Push.</div>"""
+        self.assertEqual(push.parse_push_items(html), [])
+        result = push.parse_push_page(html, rows_returned=0)
+        self.assertEqual(result["results_count"], 0)
+        self.assertTrue(result["complete"])
+
     def test_push_rows_are_scoped_to_the_watched_process_grid(self):
         html = """<table><tr><th>Processo</th><th>Data de inclusão</th><th>Email alternativo</th><th>Observação</th></tr><tr><td></td><td>1016572-38.2026.4.01.0000</td><td>today</td><td></td><td></td></tr></table><table><tr><th>Processo</th></tr><tr><td>0006826-91.2011.4.01.0000</td></tr></table>"""
         self.assertEqual(

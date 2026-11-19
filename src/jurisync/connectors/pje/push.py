@@ -22,6 +22,7 @@ PUSH_SUFFIX = "Push/listView.seam?iframe=true"
 PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}(?!\d)")
 # TJBA 2G lists appeals' incidents as "<number>R1.1.EDCiv": the registration is of that incident, under the same number.
 INCIDENT_RE = re.compile(r"R\d+(?:\.\d+)*\.[A-Za-z]+")
+EMPTY_PUSH = re.compile(r"n[ãa]o\s+h[áa]\s+nenhum\s+processo\s+cadastrado\s+na\s+sua\s+lista", re.I)
 PUSH_TIMEOUT = 90
 
 
@@ -115,6 +116,9 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
     result_count_match = re.search(r"(\d+)\s+resultados?\s+encontrados|encontrados:\s*(\d+)\s+resultados?", text, re.I)
     if result_count_match:
         result_count = int(result_count_match.group(1) or result_count_match.group(2))
+    elif EMPTY_PUSH.search(text):
+        # An empty registry has no grid and no count, only this sentence (TRF5 2G, TRF5 TRU, TJRJ 1G).
+        result_count = 0
     else:
         range_match = re.search(r"\b\d+\s*-\s*\d+\s+de\s+(\d+)\b", text, re.I)
         result_count = int(range_match.group(1)) if range_match else None
