@@ -336,6 +336,10 @@ PORTALS = {
         # only a link host or the customer's setup picks this one.
         Portal("tjmg-pje-1g", "pje", "TJMG", "1g", "pje.tjmg.jus.br", "/pje/", "password_totp", "TJMG_PJE_1G",
                region="13", justice="8", guess_by_number=False),
+        # The Turmas Recursais of the TJMG juizados run their own PJe (SSO client "pje-tjmg-2g"); an appeal keeps the
+        # 1G number, so only a link host or the customer's setup picks it.
+        Portal("tjmg-pje-tr", "pje", "TJMG", "2g", "pjerecursal.tjmg.jus.br", "/pje/", "password_totp", "TJMG_PJE_TR",
+               region="13", justice="8", guess_by_number=False),
         Portal("tjma-1g", "pje", "TJMA", "1g", "pje.tjma.jus.br", "/pje/", "certificate_totp", "TJMA_1G",
                region="10", justice="8"),
         # TJES 1G sits behind an AWS WAF image CAPTCHA (HTTP 405); the login solves it (core/awswaf.py).
