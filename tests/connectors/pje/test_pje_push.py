@@ -75,6 +75,21 @@ class PjeNotificationChecks(unittest.TestCase):
             "complete"
         ]
 
+    def test_tjba_2g_incident_numbers_are_listed_under_their_process_number(self):
+        html = """<table><tr><th></th><th>Processo</th></tr>
+        <tr><td></td><td>8003528-10.2021.8.05.0080R2.2.EDCiv</td></tr>
+        <tr><td></td><td>8005133-08.2019.8.05.0000R1.1.AgIntCiv</td></tr>
+        <tr><td></td><td>8019223-67.2022.8.05.0080</td></tr></table>"""
+        items = push.parse_push_items(html)
+        self.assertEqual(
+            [(i["process_number"], i.get("incident")) for i in items],
+            [
+                ("8003528-10.2021.8.05.0080", "R2.2.EDCiv"),
+                ("8005133-08.2019.8.05.0000", "R1.1.AgIntCiv"),
+                ("8019223-67.2022.8.05.0080", None),
+            ],
+        )
+
     def test_tjrj_grid_with_the_paginator_nested_inside_is_read(self):
         from pathlib import Path
 

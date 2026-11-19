@@ -19,7 +19,9 @@ from jurisync.core.redaction import url_shape
 
 PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
 PUSH_SUFFIX = "Push/listView.seam?iframe=true"
-PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b")
+PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}(?!\d)")
+# TJBA 2G lists appeals' incidents as "<number>R1.1.EDCiv": the registration is of that incident, under the same number.
+INCIDENT_RE = re.compile(r"R\d+(?:\.\d+)*\.[A-Za-z]+")
 PUSH_TIMEOUT = 90
 
 
@@ -96,6 +98,9 @@ def parse_push_items(html):
         onclick = " ".join(a.get("onclick", "") for a in row.find_all("a"))
         process_id = re.search(r"construirLogicaAcesso\((\d+)\)", onclick)
         item = {"process_number": match.group(0)}
+        incident = INCIDENT_RE.match(" ".join(values)[match.end() :])
+        if incident:
+            item["incident"] = incident.group(0)
         for head, key in PUSH_COLUMNS.items():
             index = heads.index(head) if head in heads else None
             item[key] = values[index] if index is not None and index < len(values) else ""
