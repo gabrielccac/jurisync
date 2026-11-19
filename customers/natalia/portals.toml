@@ -133,5 +133,10 @@ secrets = ["TRT24_1G_USERNAME", "TRT24_1G_PASSWORD", "TRT24_1G_2FA_DATA|TRT24_1G
 method = "password_totp"
 secrets = ["TJMG_PJE_TR_USERNAME", "TJMG_PJE_TR_PASSWORD", "TJMG_PJE_TR_2FA_DATA|TJMG_PJE_TR_2FA_QR"]
 
-# TJMG 2G (JPe/Themis, jpe.tjmg.jus.br/rupe): no connector. Its PDPJ button fails server-side (Keycloak answers
-# HTTP 400 "redirect_uri" for client jpe-tjmg-2g, 19/11); its own login is a JPe username + password, not the CPF.
+# TJMG 2G (JPe/Themis, jpe.tjmg.jus.br/rupe; connector "jpe", docs/connectors/jpe.md). Its PDPJ button fails
+# server-side (Keycloak answers HTTP 400 "redirect_uri" for client jpe-tjmg-2g, confirmed in a real browser on 19/11),
+# so the PDPJ route answers SsoRefused until TJMG fixes it. The JPe's own login works instead: add
+# TJMG_JPE_2G_LOGIN (the JPe "Usuário", not the CPF) and TJMG_JPE_2G_LOGIN_PASSWORD to the .env.
+[tjmg-jpe-2g]
+method = "password_totp"
+secrets = ["TJMG_THEMIS_2G_USERNAME|TJMG_JPE_2G_LOGIN", "TJMG_THEMIS_2G_PASSWORD|TJMG_JPE_2G_LOGIN_PASSWORD"]

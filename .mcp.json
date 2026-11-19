@@ -70,6 +70,17 @@
         "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
       }
     },
+    "jpe": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": [
+        "-m",
+        "jurisync.connectors.jpe.server"
+      ],
+      "env": {
+        "JURISYNC_ENV_FILE": "${CLAUDE_PROJECT_DIR:-.}/.env"
+      }
+    },
     "advbox": {
       "type": "stdio",
       "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",

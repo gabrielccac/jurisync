@@ -27,7 +27,7 @@ LEGACY_NAMES = {"USERNAME": ("USUARIO",), "PASSWORD": ("SENHA",), "2FA_DATA": ("
 @dataclass(frozen=True)
 class Portal:
     key: str  # unique within its system: "trf1-1g", "trf4-1g-sc"
-    system: str  # "pje" | "eproc" | "projudi" | "esaj" | "stj" | "tucujuris"
+    system: str  # "pje" | "eproc" | "projudi" | "esaj" | "stj" | "tucujuris" | "jpe"
     tribunal: str  # TRF1, TRF4, TRF5, TJRS, TJAP, STJ
     instance: str  # "1g" | "2g"
     host: str
@@ -83,6 +83,8 @@ class Portal:
             return self.url(self.login_path or entry.get(self.flavor, "usuario/logon.do?actionType=inicio"))
         if self.system == "tucujuris":
             return self.url("pages/login/login.html")  # a static page; the login itself is a JSON POST to /api/
+        if self.system == "jpe":
+            return self.url("portaljus/intranet/principal.rupe?contexto=jpe")  # public page holding all three logins
         if self.system == "eproc":
             # The Eproc root redirects to the SSO login. The externo_controlador.php
             # path is 403-blocked on some deployments (e.g. TJRS behind Cloudflare).
@@ -467,6 +469,14 @@ PORTALS = {
         # same shape, so a number alone never points here; only a tucujuris.tjap.jus.br link does.
         Portal("tjap-tucujuris", "tucujuris", "TJAP", "1g", "tucujuris.tjap.jus.br", "/", "password_totp",
                "TJAP_TUCUJURIS", region="03", justice="8", guess_by_number=False),
+        # JPe (Themis, "Portal do Processo Eletrônico"): the TJMG's own 2nd-instance system, JSF 1.2 + RichFaces 3.3
+        # pages ending in .rupe under /rupe/. Two logins are wired, picked by configuration: the JPe's own Login (not the
+        # CPF) + password at j_security_check, or the PDPJ SSO (client "jpe-tjmg-2g", CPF + password + TOTP), which
+        # on 19/11/2026 the SSO itself refused (HTTP 400 "redirect_uri"). TJMG_THEMIS_2G is the name customers' .env
+        # files used first. 2nd-instance numbers keep the origin's shape (CNJ origin 0000 for appeals filed there,
+        # but TJMG's Eproc 2G holds the newer ones), so only a jpe.tjmg.jus.br link or the setup picks this portal.
+        Portal("tjmg-jpe-2g", "jpe", "TJMG", "2g", "jpe.tjmg.jus.br", "/rupe/", "password_totp", "TJMG_JPE_2G",
+               legacy_env_prefixes=("TJMG_THEMIS_2G",), region="13", justice="8", guess_by_number=False),
         # STJ: the lawyer's area is the CPE (cpe.web.stj.jus.br, REST under /api/). The A1 logs in over mutual TLS at
         # cpe-auth.web.stj.jus.br/api/auth/cert with no authenticator; password logins add TOTP/e-mail MFA and gov.br is
         # OAuth. The parent domain as host claims every STJ link (processo., ww2., cpe.web.). CNJ J=3, TR=00.
@@ -508,6 +518,10 @@ def stj(key):
 
 def tucujuris(key):
     return get(key, "tucujuris")
+
+
+def jpe(key):
+    return get(key, "jpe")
 
 
 def get(key, system=None):
