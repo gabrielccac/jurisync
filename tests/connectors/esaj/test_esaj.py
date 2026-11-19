@@ -72,6 +72,22 @@ def test_mailbox_nonempty_empty_and_unrecognized():
         parsers.messages("<html>login</html>")
 
 
+def test_mailbox_subjects_follow_the_header_charset_not_the_conflicting_meta(monkeypatch):
+    # Real shape (TJSP, 19/11/2026): ISO-8859-1 bytes, header charset ISO-8859-1, a UTF-8 meta before an iso-8859-1 one.
+    html = (
+        '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">'
+        '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"/>'
+        '<input name="pag" value="1"><table><tr><td></td><td>Enviada</td><td>Assunto</td></tr>'
+        '<tr><td><input name="nuSeqMensagem" value="9"></td><td>05/11/2026</td>'
+        "<td>Protocolo Eletr\xf4nico e-Saj - Peti\xe7\xe3o Intermedi\xe1ria Protocolada</td></tr></table>"
+    )
+    raw = html.encode("latin-1")
+    page = SimpleNamespace(content=raw, text=raw.decode("latin-1"), status_code=200, url="https://esaj.tjsp.jus.br/x")
+    monkeypatch.setattr(base, "request", lambda *args, **kwargs: page)
+    items = base.list_messages(None, "tjsp-esaj")["items"]
+    assert items[0]["subject"] == "Protocolo Eletrônico e-Saj - Petição Intermediária Protocolada"
+
+
 def test_json_privacy_and_process_parser():
     value = parsers.public_json(
         {

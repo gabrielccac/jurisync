@@ -147,3 +147,14 @@ Nada foi commitado, enviado ao GitHub ou protocolado.
   1 s. Não há paginação nem filtro na API (o painel faz só `GET`). Essa chamada
   tem agora 150 s; se passar disso, a resposta é `portal_timeout`, com a
   orientação de tentar de novo em alguns minutos.
+
+## Validação ao vivo: TJSP com o A1 de outro advogado (19/11/2026, só leitura)
+
+- Sessão, intimações, audiências, petições (4 estados), caixa postal e consulta `cpopg` (campos, partes, movimentações
+  paginadas por `carregarMovimentacoesAjax`) responderam. Conta sem tarefas: as listas vieram vazias.
+- Correção: o assunto das mensagens da caixa postal saía com mojibake (a página é ISO-8859-1 com dois `<meta>`
+  conflitantes); agora o texto segue o charset do cabeçalho HTTP.
+- Pasta digital: processo em que a OAB não está habilitada devolve `password_required` (sem abrir nada). Inventário e
+  PDF só valem para processo habilitado na conta (aparece em intimações/petições do painel).
+- A busca por OAB (`cbPesquisa=NUMOAB`, GET) responde 200 sem CAPTCHA no TJSP; o conector não a expõe.
+- `cposg` não está implementado para o TJSP (o adaptador usa só `cpopg`).

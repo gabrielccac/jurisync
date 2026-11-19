@@ -373,7 +373,9 @@ def list_messages(session, portal, page=1):
         response = request(session, portal, "GET", "caixapostal/listaPaginada.do", params={"pag": page})
     if response.status_code != 200:
         raise EsajParseError(f"e-SAJ mailbox failed (HTTP {response.status_code})")
-    return {"page": page, "items": messages(response.content)}
+    # The mailbox is served as ISO-8859-1 behind two conflicting <meta> tags (UTF-8 first): the HTTP header's charset
+    # (what ``response.text`` follows) decides, otherwise subjects come out as mojibake ("Eletr˘nico").
+    return {"page": page, "items": messages(response.text)}
 
 
 def list_tasks(session, portal, kind, state="AGUARDANDO_ASSINATURA"):
