@@ -23,7 +23,9 @@ class PjeChecks(unittest.TestCase):
         html = (
             '<form id="loginForm"></form><span class="kc-feedback-text">Senha expirada. Solicite uma nova senha</span>'
         )
-        self.assertIn("expired password", auth.credential_failure(html))
+        kind, reason = auth.credential_failure(html)
+        self.assertEqual(kind, "expired")
+        self.assertIn("expired password", reason)
 
     def test_response_html_falls_back_when_pje_lies_about_utf8(self):
         response = SimpleNamespace(

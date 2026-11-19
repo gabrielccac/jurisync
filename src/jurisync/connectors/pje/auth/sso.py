@@ -32,22 +32,96 @@ def form_action(html, page_url, form_id):
     return action
 
 
+# Where the Keycloak themes of the PDPJ SSO put the message of a refused step: the field error (#input-error), the
+# feedback alert (pje-v2: span.kc-feedback-text inside .alert-error) and the error page (pdpj: #kc-error-message).
+ALERT_SELECTORS = (
+    "#input-error",
+    "#input-error-username",
+    "#input-error-password",
+    ".kc-feedback-text",
+    "#kc-error-message",
+    ".alert-error",
+    ".alert-danger",
+    ".alert-warning",
+    ".pf-c-alert__title",
+)
+# A CPF/CNPJ (with or without punctuation) or an e-mail the SSO may echo back never leaves this module.
+IDENTIFIERS = re.compile(r"\d[\d.\-/]{9,}\d|[\w.+-]+@[\w-]+\.[\w.-]+")
+# The exact wording of each refusal, in Portuguese and English: a bare "invalid" also matches "sessão inválida".
+WRONG_CREDENTIALS = (
+    "usuário ou senha inválid",
+    "usuário e/ou senha inválid",
+    "nome de usuário ou senha inválid",
+    "senha inválida",
+    "senha incorreta",
+    "credenciais inválidas",
+    "invalid username or password",
+    "invalid username, email or password",
+    "invalid password",
+)
+EXPIRED_PASSWORD = ("senha expirada", "password expired", "expired password")
+ACCOUNT_BLOCKED = ("conta desativada", "conta bloqueada", "temporariamente", "account is disabled", "account disabled")
+FLOW_ERRORS = ("cookie", "expirou", "expired", "tempo esgotado", "timeout", "erro inesperado", "unexpected error")
+
+
+def alert_text(soup):
+    """The SSO's own alert on the page (one line, at most 200 characters, identifiers masked), else ""."""
+    for selector in ALERT_SELECTORS:
+        for tag in soup.select(selector):
+            for link in tag.find_all("a"):
+                link.decompose()  # "Voltar para login"
+            text = " ".join(" ".join(tag.stripped_strings).split())
+            if text:
+                return IDENTIFIERS.sub("[…]", text)[:200]
+    return ""
+
+
 def credential_failure(html):
-    """Explain why the credential POST did not reach the OTP step without dumping HTML."""
+    """Return ``(kind, reason)`` for a credential POST that did not reach the OTP step, without dumping HTML.
+
+    ``kind`` is ``"credentials"`` (the SSO said the username or password is wrong), ``"expired"``, ``"blocked"``
+    (disabled or locked account), ``"flow"`` (a session/cookie/timeout error: another attempt may work), ``"waf"``
+    or ``"unknown"``. The reason quotes the SSO's own alert so a refusal can be told from any other error.
+    """
     soup = BeautifulSoup(html, "html.parser")
     otp_fields = soup.find_all("input", attrs={"name": "otp"})
     if otp_fields:
         parent = otp_fields[0].find_parent("form")
         form_id = parent.get("id") if parent else None
-        return f"OTP field was returned under unexpected form {form_id!r}"
-    text = " ".join(soup.stripped_strings).lower()
-    if "senha expirada" in text:
-        return "The portal reports an expired password; reset it through the portal and update the configured password"
-    if any(marker in text for marker in ("captcha", "aws waf", "access denied", "challenge")):
-        return "The credential response looks like a WAF/challenge page"
-    if any(marker in text for marker in ("invalid", "incorreto", "inválido", "usuário ou senha", "senha inválida")):
-        return "The portal rejected the username/password; use the CPF/username from the browser request"
-    return "The portal returned no OTP form; credentials may be rejected or the login page changed"
+        return "unknown", f"OTP field was returned under unexpected form {form_id!r}"
+    alert = alert_text(soup)
+    quoted = f' (SSO message: "{alert}")' if alert else " (the page carried no SSO alert)"
+    text = (alert or " ".join(soup.stripped_strings)).lower()
+    if any(marker in text for marker in EXPIRED_PASSWORD):
+        return "expired", (
+            "The portal reports an expired password; reset it through the portal and update the configured password"
+            + quoted
+        )
+    if any(marker in text for marker in ACCOUNT_BLOCKED):
+        return "blocked", "The SSO refused the account itself (disabled or locked); ask the court's support" + quoted
+    if any(marker in text for marker in WRONG_CREDENTIALS):
+        return "credentials", "The portal rejected the username/password" + quoted
+    if any(marker in text for marker in ("captcha", "aws waf", "access denied")):
+        return "waf", "The credential response looks like a WAF/challenge page" + quoted
+    if alert and any(marker in text for marker in FLOW_ERRORS):
+        return "flow", "The SSO interrupted the login flow, not the credentials" + quoted
+    if alert:
+        return "unknown", "The SSO answered with an error that is not a password refusal" + quoted
+    return "unknown", "The portal returned no OTP form and no SSO alert; the login page may have changed"
+
+
+def sso_username(username, form_id):
+    """The username as the PDPJ theme of the PJe-JT login (``kc-form-login``) expects it: a CPF/CNPJ as digits.
+
+    Its page asks for "CPF/CNPJ" and its own submit script strips ``.``, ``-`` and ``/``; the TRF-style theme
+    (``loginForm``) gets the value as configured, which those portals already accept.
+    """
+    value = username.strip()
+    if form_id == "kc-form-login" and re.fullmatch(r"[\d.\-/ ]+", value):
+        digits = re.sub(r"\D", "", value)
+        if len(digits) in (11, 14):
+            return digits
+    return value
 
 
 PORTAL_LOGIN_ERROR = re.compile(r"var\s+mensagemErroLogin\s*=\s*'([^']*)'")
@@ -94,10 +168,12 @@ def _sso_page(session, app_url):
     return response
 
 
+def _login_form_id(html):
+    return "loginForm" if BeautifulSoup(html, "html.parser").find("form", id="loginForm") else "kc-form-login"
+
+
 def _login_form(html, page_url):
-    soup = BeautifulSoup(html, "html.parser")
-    form_id = "loginForm" if soup.find("form", id="loginForm") else "kc-form-login"
-    return form_action(html, page_url, form_id)
+    return form_action(html, page_url, _login_form_id(html))
 
 
 def login_session(username, password, account, app_url=None, expected_app_host=None, portal=None):
@@ -106,10 +182,11 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     expected_app_host = expected_app_host or config.host
     session = requests.Session()
     response = _sso_page(session, app_url)
-    login_url = _login_form(response.text, response.url)
+    form_id = _login_form_id(response.text)
+    login_url = form_action(response.text, response.url, form_id)
     response = session.post(
         login_url,
-        data={"username": username, "password": password, "pjeoffice-code": "", "phrase": ""},
+        data={"username": sso_username(username, form_id), "password": password, "pjeoffice-code": "", "phrase": ""},
         allow_redirects=False,
         impersonate=IMPERSONATE,
     )
@@ -117,8 +194,8 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     try:
         otp_url = form_action(response.text, response.url, "kc-otp-login-form")
     except RuntimeError as error:
-        reason = credential_failure(response.text)
-        refused = "rejected the username/password" in reason or "expired password" in reason
+        kind, reason = credential_failure(response.text)
+        refused = kind in {"credentials", "expired", "blocked"}
         raise (LoginRejected if refused else RuntimeError)(f"{reason} ({error})") from None
     otp = totp(account).now()
 
