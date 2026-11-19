@@ -112,9 +112,9 @@ def parse_push_items(html):
 def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.br/pje/Push/listView.seam"):
     """Parse Push counts/navigation without replaying an unverified page action."""
     text = " ".join(BeautifulSoup(html, "html.parser").stripped_strings)
-    result_count_match = re.search(r"(\d+)\s+resultados?\s+encontrados", text, re.I)
+    result_count_match = re.search(r"(\d+)\s+resultados?\s+encontrados|encontrados:\s*(\d+)\s+resultados?", text, re.I)
     if result_count_match:
-        result_count = int(result_count_match.group(1))
+        result_count = int(result_count_match.group(1) or result_count_match.group(2))
     else:
         range_match = re.search(r"\b\d+\s*-\s*\d+\s+de\s+(\d+)\b", text, re.I)
         result_count = int(range_match.group(1)) if range_match else None
