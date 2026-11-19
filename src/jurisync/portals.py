@@ -219,6 +219,22 @@ PORTALS = {
             region="01", justice="5", flavor="kz",
         ),
         Portal(
+            "trt5-1g", "pje", "TRT5", "1g", "pje.trt5.jus.br", "/primeirograu/", "certificate_totp", "TRT5_1G",
+            region="05", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt5-2g", "pje", "TRT5", "2g", "pje.trt5.jus.br", "/segundograu/", "certificate_totp", "TRT5_2G",
+            region="05", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt20-1g", "pje", "TRT20", "1g", "pje.trt20.jus.br", "/primeirograu/", "certificate_totp", "TRT20_1G",
+            region="20", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt20-2g", "pje", "TRT20", "2g", "pje.trt20.jus.br", "/segundograu/", "certificate_totp", "TRT20_2G",
+            region="20", justice="5", flavor="kz",
+        ),
+        Portal(
             "trt3-1g", "pje", "TRT3", "1g", "pje.trt3.jus.br", "/primeirograu/", "certificate_totp", "TRT3_1G",
             region="03", justice="5", flavor="kz",
         ),
@@ -240,6 +256,8 @@ PORTALS = {
         Portal("tjms-eproc-1g", "eproc", "TJMS", "1g", "eproc1g.tjms.jus.br", "/eproc/", "certificate_totp", "TJMS_1G",
                region="12", justice="8", guess_by_number=False),
         Portal("tjrj-eproc-1g", "eproc", "TJRJ", "1g", "eproc1g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_1G",
+               region="19", justice="8"),
+        Portal("tjrj-eproc-2g", "eproc", "TJRJ", "2g", "eproc2g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_2G",
                region="19", justice="8"),
         Portal("tjpr-1g", "eproc", "TJPR", "1g", "eproc1g.tjpr.jus.br", "/eproc/", "certificate_totp", "TJPR_1G",
                region="16", justice="8"),
