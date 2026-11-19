@@ -218,6 +218,53 @@ class CertificateLoginChecks(unittest.TestCase):
         response = SimpleNamespace(status_code=200, url=url, text=html)
         self.assertTrue(cert_login._authenticated(response, "pje.trf5.jus.br"))
 
+    def test_trf5_legacy_identity_logout_link_counts_as_authenticated(self):
+        html = (
+            '<html><a href="/pje/home.seam?actionMethod=QuadroAviso%2FlistViewQuadroAvisoMensagem.xhtml'
+            '%3Aidentity.logout&amp;cid=18012">Sair</a><input name="javax.faces.ViewState" value="j_id1"></html>'
+        )
+        url = "https://pje.trf5.jus.br/pje/QuadroAviso/listViewQuadroAvisoMensagem.seam"
+        self.assertTrue(
+            cert_login._authenticated(SimpleNamespace(status_code=200, url=url, text=html), "pje.trf5.jus.br")
+        )
+        login = '<form id="loginForm"><input name="javax.faces.ViewState" value="j_id1"></form>'
+        self.assertFalse(
+            cert_login._authenticated(SimpleNamespace(status_code=200, url=url, text=login), "pje.trf5.jus.br")
+        )
+
+
+class Pje1xGuards(unittest.TestCase):
+    def test_trf5_legacy_is_a_pje1x_portal(self):
+        from jurisync import portals
+
+        self.assertTrue(portals.pje("trf5-legacy").pje1x)
+        self.assertFalse(portals.pje("trf5-tru").pje1x)
+
+    def test_counters_inbox_and_search_say_pje1x_is_not_supported(self):
+        from jurisync.connectors.pje import inbox, search
+
+        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*Expedientes"):
+            inbox.read_counters("trf5-legacy", session=Mock())
+        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*Expedientes"):
+            inbox.read_inbox("trf5-legacy", session=Mock())
+        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*not supported"):
+            search.search_process(Mock(), "0000001-00.2026.4.05.8100", portal="trf5-legacy")
+
+    def test_session_check_looks_for_the_pje1x_search_form(self):
+        from jurisync.connectors.pje.auth import sessions
+
+        page = SimpleNamespace(
+            status_code=200,
+            url="https://pje.trf5.jus.br/pje/Processo/ConsultaProcesso/listView.seam",
+            text='<form id="consultarProcessoForm"><input name="javax.faces.ViewState" value="j"></form>',
+        )
+        session = Mock()
+        session.get.return_value = page
+        self.assertTrue(sessions.is_authenticated(session, "trf5-legacy"))
+        page.url = "https://pje.trf5.jus.br/pje/login.seam"
+        page.text = '<form id="loginForm"><input name="javax.faces.ViewState" value="j"></form>'
+        self.assertFalse(sessions.is_authenticated(session, "trf5-legacy"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -174,6 +174,8 @@ def _require_registered(response, config):
 
 
 def _authenticated(response, host, root="/pje/"):
+    # The logout link is ``<root>logout.seam`` on most portals; TRF5's PJe 1.x (pje.trf5.jus.br) links
+    # ``home.seam?actionMethod=...:identity.logout`` instead.
     if urllib.parse.urlsplit(response.url).path.endswith("/errorUnexpected.seam"):
         return False
     soup = BeautifulSoup(response.text, "html.parser")
@@ -183,7 +185,7 @@ def _authenticated(response, host, root="/pje/"):
         and urllib.parse.urlsplit(response.url).hostname == host
         and (
             (
-                bool(soup.find("a", href=re.compile(re.escape(root) + r"logout\.seam")))
+                bool(soup.find("a", href=re.compile(re.escape(root) + r"logout\.seam|identity\.logout")))
                 and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
             )
             # JT portals land on a shell page (via /pjekz/ + error.seam forward) that carries

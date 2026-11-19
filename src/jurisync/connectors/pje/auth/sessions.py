@@ -83,7 +83,7 @@ def is_authenticated(session, portal):
     return bool(
         response.status_code == 200
         and urlsplit(response.url).hostname == config.host
-        and soup.find("form", id="fPP")
+        and soup.find("form", id="consultarProcessoForm" if config.pje1x else "fPP")
         and soup.find("input", attrs={"name": "javax.faces.ViewState"})
     )
 

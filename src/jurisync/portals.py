@@ -41,8 +41,13 @@ class Portal:
     wired: bool = True  # False: recognized, but no connector yet
     guess_by_number: bool = True  # False: never suggested from a process number alone (only a link host picks it)
     login_path: str = ""  # Projudi: the page that starts the login when the flavor's default entry is not it
-    flavor: str = ""  # Projudi/e-SAJ generation (adapter), Eproc "infra-captcha" (TJTO): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST)
+    flavor: str = ""  # Projudi/e-SAJ generation (adapter), Eproc "infra-captcha" (TJTO): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST) | "pje1x" (PJe 1.x)
     impersonate: str = ""  # curl_cffi profile override; "" keeps the global default (see core.http.IMPERSONATE)
+
+    @property
+    def pje1x(self):
+        """PJe 1.x (TRF5's pje.trf5.jus.br): other panel (Acervo/Intimações tabs) and search form (consultarProcessoForm)."""
+        return self.system == "pje" and self.flavor == "pje1x"
 
     @property
     def kz(self):
@@ -142,7 +147,7 @@ PORTALS = {
         # family name, no code is asked. Only the host picks it.
         Portal(
             "trf5-legacy", "pje", "TRF5", "2g", "pje.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_LEGACY",
-            legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False,
+            legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False, flavor="pje1x",
         ),
         # TJAP is a state court (CNJ J=8, TR=03) served by the PDPJ PJe under /1g/; login goes through the
         # same Keycloak SSO as the federal courts (realm "pje", client "pje-tjap-1g").
