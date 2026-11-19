@@ -57,3 +57,111 @@ def test_court_refusal_after_the_sso_is_read_from_the_callback_page():
     assert sso.portal_login_error(page) == "Senha expirada. Solicite uma nova senha"
     assert sso.portal_login_error("<script>var mensagemErroLogin = '';</script>") == ""
     assert sso.portal_login_error("<html></html>") == ""
+
+
+# Anonymized shapes of the two PDPJ SSO themes: pje-v2 (TRF1, loginForm) and pdpj (PJe-JT, kc-form-login).
+PJE_V2_REFUSAL = (
+    '<form id="loginForm" action="/x"></form><div class="alert alert-error">'
+    '<span class="kc-feedback-text">Usuário ou senha inválidos.</span></div>'
+)
+PDPJ_FIELD_ERROR = (
+    '<form id="kc-form-login" action="/x"><input name="username" value="123.456.789-09">'
+    '<span id="input-error" class="kc-feedback-text">Usuário ou senha inválidos.</span></form>'
+)
+PDPJ_ERROR_PAGE = (
+    '<div id="kc-error-message"><p class="instruction">Cookie não encontrado. Favor habilitar os cookies no seu '
+    'navegador.</p><p><a id="backToApplication" href="/x">Voltar para login</a></p></div>'
+)
+
+
+def test_a_password_refusal_quotes_the_sso_alert():
+    for html in (PJE_V2_REFUSAL, PDPJ_FIELD_ERROR):
+        kind, reason = sso.credential_failure(html)
+        assert kind == "credentials"
+        assert 'SSO message: "Usuário ou senha inválidos."' in reason
+        assert "123" not in reason
+
+
+def test_a_keycloak_flow_error_is_not_a_password_refusal():
+    kind, reason = sso.credential_failure(PDPJ_ERROR_PAGE)
+    assert kind == "flow"
+    assert "Cookie não encontrado" in reason and "Voltar" not in reason
+
+
+def test_a_bare_invalid_elsewhere_on_the_page_is_not_a_password_refusal():
+    html = '<form id="kc-form-login"></form><div class="alert alert-error"><span class="kc-feedback-text">Sessão inválida</span></div>'
+    assert sso.credential_failure(html)[0] == "unknown"
+    assert sso.credential_failure("<p>invalid request id</p>")[0] == "unknown"
+
+
+def test_a_disabled_account_is_told_apart_and_identifiers_are_masked():
+    html = (
+        '<div class="alert-error"><span class="kc-feedback-text">Conta desativada 123.456.789-09 a@b.com</span></div>'
+    )
+    kind, reason = sso.credential_failure(html)
+    assert kind == "blocked"
+    assert "123.456" not in reason and "a@b.com" not in reason
+
+
+def test_the_pdpj_theme_gets_the_cpf_as_digits_and_the_trf_theme_as_configured():
+    assert sso.sso_username("123.456.789-09", "kc-form-login") == "12345678909"
+    assert sso.sso_username("12.345.678/0001-95", "kc-form-login") == "12345678000195"
+    assert sso.sso_username("123.456.789-09", "loginForm") == "123.456.789-09"
+    assert sso.sso_username("someone@example.com", "kc-form-login") == "someone@example.com"
+
+
+def test_only_a_refusal_raises_login_rejected(monkeypatch):
+    import pytest
+
+    from jurisync.core.session_pool import LoginRejected
+
+    form = '<form id="kc-form-login" action="https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/authenticate">'
+    sso_url = "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth"
+    monkeypatch.setattr(sso, "_sso_page", lambda session, url: page(200, sso_url, text=form))
+    for answer, error in ((PDPJ_FIELD_ERROR, LoginRejected), (PDPJ_ERROR_PAGE, RuntimeError)):
+        posted = page(200, sso_url, text=answer)
+        session = Mock()
+        session.post.return_value = posted
+        monkeypatch.setattr(sso.requests, "Session", Mock(return_value=session))
+        with pytest.raises(error) as raised:
+            sso.login_session("123.456.789-09", "pw", None, portal="tst")
+        assert type(raised.value) is error
+        assert session.post.call_args.kwargs["data"]["username"] == "12345678909"
+
+
+def test_a_jt_landing_without_the_panel_text_is_confirmed_by_the_rest_api(monkeypatch):
+    """TRT19 lands on the /pjekz/ loader and its search page forwards to /consultaprocessual/: neither carries the
+    panel markers, but the REST token knows the user, so the login worked."""
+    from jurisync.connectors.pje import kz
+    from jurisync.connectors.pje.auth import certificate
+
+    base = "https://sso.cloud.pje.jus.br/auth/realms/pje"
+    form = f'<form id="kc-form-login" action="{base}/login-actions/authenticate">'
+    otp = f'<form id="kc-otp-login-form" action="{base}/login-actions/authenticate?step=otp">'
+    monkeypatch.setattr(
+        sso, "_sso_page", lambda session, url: page(200, f"{base}/protocol/openid-connect/auth", text=form)
+    )
+    monkeypatch.setattr(sso, "totp", lambda account: SimpleNamespace(now=lambda: "000000"))
+    loader = page(200, "https://pje.trt19.jus.br/pjekz/", text="<title>Processo Judicial Eletrônico</title>")
+    session = Mock()
+    session.post.side_effect = [
+        page(200, f"{base}/login-actions/authenticate", text=otp),
+        page(302, f"{base}/login-actions/authenticate", "https://pje.trt19.jus.br/pjekz/"),
+    ]
+    session.get.return_value = loader
+    monkeypatch.setattr(sso.requests, "Session", Mock(return_value=session))
+    monkeypatch.setattr(certificate, "_follow", lambda s, r: page(200, "https://pje.trt19.jus.br/consultaprocessual/"))
+    checked = []
+    monkeypatch.setattr(kz, "is_authenticated", lambda s, portal: checked.append(portal) or True)
+    assert sso.login_session("123.456.789-09", "pw", None, portal="trt19-1g")[0] is session
+    assert checked == ["trt19-1g"]
+
+    monkeypatch.setattr(kz, "is_authenticated", lambda s, portal: False)
+    session.post.side_effect = [
+        page(200, f"{base}/login-actions/authenticate", text=otp),
+        page(302, f"{base}/login-actions/authenticate", "https://pje.trt19.jus.br/pjekz/"),
+    ]
+    import pytest
+
+    with pytest.raises(RuntimeError, match="at https://pje.trt19.jus.br/consultaprocessual/"):
+        sso.login_session("123.456.789-09", "pw", None, portal="trt19-1g")

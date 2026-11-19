@@ -251,6 +251,46 @@ PORTALS = {
             region="20", justice="5", flavor="kz",
         ),
         Portal(
+            "trt6-1g", "pje", "TRT6", "1g", "pje.trt6.jus.br", "/primeirograu/", "certificate_totp", "TRT6_1G",
+            region="06", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt6-2g", "pje", "TRT6", "2g", "pje.trt6.jus.br", "/segundograu/", "certificate_totp", "TRT6_2G",
+            region="06", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt10-1g", "pje", "TRT10", "1g", "pje.trt10.jus.br", "/primeirograu/", "certificate_totp", "TRT10_1G",
+            region="10", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt10-2g", "pje", "TRT10", "2g", "pje.trt10.jus.br", "/segundograu/", "certificate_totp", "TRT10_2G",
+            region="10", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt17-1g", "pje", "TRT17", "1g", "pje.trt17.jus.br", "/primeirograu/", "certificate_totp", "TRT17_1G",
+            region="17", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt17-2g", "pje", "TRT17", "2g", "pje.trt17.jus.br", "/segundograu/", "certificate_totp", "TRT17_2G",
+            region="17", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt19-1g", "pje", "TRT19", "1g", "pje.trt19.jus.br", "/primeirograu/", "certificate_totp", "TRT19_1G",
+            region="19", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt19-2g", "pje", "TRT19", "2g", "pje.trt19.jus.br", "/segundograu/", "certificate_totp", "TRT19_2G",
+            region="19", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt24-1g", "pje", "TRT24", "1g", "pje.trt24.jus.br", "/primeirograu/", "certificate_totp", "TRT24_1G",
+            region="24", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt24-2g", "pje", "TRT24", "2g", "pje.trt24.jus.br", "/segundograu/", "certificate_totp", "TRT24_2G",
+            region="24", justice="5", flavor="kz",
+        ),
+        Portal(
             "trt3-1g", "pje", "TRT3", "1g", "pje.trt3.jus.br", "/primeirograu/", "certificate_totp", "TRT3_1G",
             region="03", justice="5", flavor="kz",
         ),
@@ -295,6 +335,10 @@ PORTALS = {
         # TJMG runs PJe (juizados) beside its Eproc; same SSO (client "pje-tjmg-1g"). Region 13 is Eproc's too, so
         # only a link host or the customer's setup picks this one.
         Portal("tjmg-pje-1g", "pje", "TJMG", "1g", "pje.tjmg.jus.br", "/pje/", "password_totp", "TJMG_PJE_1G",
+               region="13", justice="8", guess_by_number=False),
+        # The Turmas Recursais of the TJMG juizados run their own PJe (SSO client "pje-tjmg-2g"); an appeal keeps the
+        # 1G number, so only a link host or the customer's setup picks it.
+        Portal("tjmg-pje-tr", "pje", "TJMG", "2g", "pjerecursal.tjmg.jus.br", "/pje/", "password_totp", "TJMG_PJE_TR",
                region="13", justice="8", guess_by_number=False),
         Portal("tjma-1g", "pje", "TJMA", "1g", "pje.tjma.jus.br", "/pje/", "certificate_totp", "TJMA_1G",
                region="10", justice="8"),
