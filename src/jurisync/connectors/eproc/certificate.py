@@ -59,6 +59,11 @@ MTLS_HOSTS = {"tjto-1g": "mtls.tjto.jus.br", "tjto-2g": "mtls.tjto.jus.br"}
 MTLS_PAGES = ("externo_controlador.php", "priv/login_cert.php")
 
 
+# Courts whose classic ``index.php`` / ``login_cert`` path answers ``erro_certificado`` to a valid A1 (TJSC, 19/11/2026);
+# their login starts at the SSO entry and never takes the classic form.
+SSO_ONLY = {"tjsc-1g", "tjsc-2g"}
+
+
 def is_sso_host(config, host):
     """Whether ``host`` is a single sign-on host of this portal's own court.
 
@@ -128,7 +133,10 @@ def _certificate_url(html, page_url, config):
 
 def _login_page(session, config):
     """The SSO login page. The portal root sometimes serves its home page instead of redirecting to it."""
-    for url in (config.login_url, config.url("externo_controlador.php?acao=SSO/login")):
+    entries = [config.login_url, config.url("externo_controlador.php?acao=SSO/login")]
+    if config.key in SSO_ONLY:
+        entries.reverse()  # SSO entry first
+    for url in entries:
         page = _follow(
             session, config, session.get(url, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT)
         )
@@ -139,6 +147,8 @@ def _login_page(session, config):
 
 def _classic_certificate_url(page, config):
     """The ``login_cert`` address behind a classic login form's certificate button, if the page has one."""
+    if config.key in SSO_ONLY:
+        return None
     field = BeautifulSoup(page.text, "html.parser").find("input", attrs={"name": CLASSIC_CERT_FIELD})
     if field is None or not field.get("value"):
         return None
