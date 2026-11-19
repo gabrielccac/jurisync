@@ -117,9 +117,11 @@ PORTALS = {
             "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_1G",
             legacy_env_prefixes=("PJE_TRF5",), region="05",
         ),
-        # Same Keycloak SSO (client "pje-trf5-2g") and the same A1 certificate + authenticator as the 1G. It also
-        # serves the Turmas Recursais, whose appeals keep the 1G number, so a number alone cannot tell the two
-        # apart (as in TRF1): DJEN's link host can.
+        # pje2g.trf5.jus.br is the "Turmas Recursais" PJe (the JEF appeals), NOT the Tribunal: the login page says so.
+        # Same Keycloak SSO (client "pje-trf5-2g") and the same A1 certificate + authenticator as the 1G. Its appeals
+        # keep the 1G number, so a number alone cannot tell the two apart (as in TRF1): DJEN's link host can.
+        # The key stays "trf5-2g" (customers' portals.toml and PJE_TRF5_2G_* secrets use it); the Tribunal's 2nd
+        # instance is "trf5-tru" (pjett) and the old PJe 1.x host is "trf5-legacy".
         Portal(
             "trf5-2g", "pje", "TRF5", "2g", "pje2g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_2G",
             legacy_env_prefixes=("PJE_TRF5",), region="05",
@@ -127,10 +129,19 @@ PORTALS = {
         # TRF3 (SP/MS) serves the same PJe under /pje/; the password flow is the default, the A1 certificate opts in.
         Portal("trf3-1g", "pje", "TRF3", "1g", "pje1g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_1G", region="03"),
         Portal("trf3-2g", "pje", "TRF3", "2g", "pje2g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_2G", region="03"),
-        # Turma Regional de Uniformização da 5ª Região: its own PJe host, same SSO and A1 certificate. Its cases keep
-        # the JEF number, so only the link host (DJEN) or the panel it appears in points here.
+        # pjett.trf5.jus.br is "2º Grau e TRU": the Tribunal's 2nd instance AND the Turma Regional de Uniformização
+        # (the page header says so). Own PJe host, same SSO and A1 certificate. The key "trf5-tru" is kept for
+        # compatibility (customers' portals.toml and PJE_TRF5_TRU_* secrets). Its cases keep the JEF number, so only
+        # the link host (DJEN) or the panel it appears in points here.
         Portal(
             "trf5-tru", "pje", "TRF5", "2g", "pjett.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_TRU",
+            legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False,
+        ),
+        # pje.trf5.jus.br is the old PJe 1.x of the Tribunal (PJeOffice): no SSO and no TOTP. The login page carries
+        # ASSINATURA_MENSAGEM, which the A1 certificate signs (certificate._legacy_login); "certificate_totp" is only the
+        # family name, no code is asked. Only the host picks it.
+        Portal(
+            "trf5-legacy", "pje", "TRF5", "2g", "pje.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_LEGACY",
             legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False,
         ),
         # TJAP is a state court (CNJ J=8, TR=03) served by the PDPJ PJe under /1g/; login goes through the
