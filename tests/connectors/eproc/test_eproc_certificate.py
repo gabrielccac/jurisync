@@ -352,6 +352,31 @@ class LoginFlowTest(unittest.TestCase):
         self.assertEqual(result[2], panel)
         self.assertEqual(session.calls[2][2], {"otp": "123456", "login": "Sign In"})
 
+    def test_tjsc_starts_at_the_sso_entry_and_ignores_the_classic_form(self):
+        sso = "https://sso.tjsc.jus.br/realms/eproc/protocol/openid-connect/auth?client_id=eproc-tjsc-2g"
+        button = "<button onclick=\"document.location.host = 'cert-sso.tjsc.jus.br';\"></button>"
+        otp_form = '<form id="kc-otp-login-form" action="https://sso.tjsc.jus.br/realms/eproc/login-actions/authenticate?s=1"></form>'
+        panel = "https://eproc2g.tjsc.jus.br/eproc/controlador.php?acao=painel_adv_listar&hash=x"
+        session, result = self.run_login(
+            "tjsc-2g",
+            [
+                ("GET", "https://eproc2g.tjsc.jus.br/eproc/externo_controlador.php?acao=SSO/login", page(sso, button)),
+                ("GET", "https://cert-sso.tjsc.jus.br/", page(sso.replace("sso.", "cert-sso."), otp_form)),
+                ("POST", "https://sso.tjsc.jus.br/realms/eproc/login-actions/authenticate", page(panel)),
+            ],
+            {},
+        )
+        self.assertEqual(result[2], panel)
+        self.assertEqual(
+            session.calls[0][1], "https://eproc2g.tjsc.jus.br/eproc/externo_controlador.php?acao=SSO/login"
+        )
+        self.assertEqual(session.calls[2][2], {"otp": "123456", "login": "Sign In"})
+
+    def test_tjsc_never_takes_the_classic_login_cert_form(self):
+        for portal in ("tjsc-1g", "tjsc-2g"):
+            config = portals.eproc(portal)
+            self.assertIsNone(certificate._classic_certificate_url(page(config.login_url, TJMG_LOGIN), config))
+
     def test_tjmg_second_instance_dispatches_to_the_local_certificate_form(self):
         session = object()
         with (
