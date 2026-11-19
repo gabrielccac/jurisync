@@ -1,0 +1,354 @@
+
+
+
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+
+<html>
+    <head>
+        
+        
+        
+        
+        <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1" />
+        <link rel="shortcut icon" type="image/x-icon" href="/rupe/geral/imagens/icones/favicon.ico" />
+        <title>
+            
+                
+                    Portal do Processo Eletrônico
+                
+                
+            
+        </title>
+        <link href="/rupe/geral/css/principal.css" rel="stylesheet" type="text/css" />
+        <link href="/rupe/geral/css/mensagens.css" rel="stylesheet" type="text/css" />
+        <link href="/rupe/geral/css/login.css" rel="stylesheet" type="text/css" />
+        <link href="/rupe/geral/css/layout.css" rel="stylesheet" type="text/css" />
+        <link href="/rupe/geral/scripts/easyui/themes/gray/easyui.css" rel="stylesheet" type="text/css" />
+        <script type="text/javascript" src="/rupe/geral/scripts/jquery-1.6.min.js"></script>
+        <script type="text/javascript" src="/rupe/geral/scripts/easyui/jquery.easyui.min.js"></script>
+        <script type="text/javascript" src="/rupe/geral/scripts/login.js"></script>
+        <script type="text/javascript" src="/rupe/geral/scripts/assinador.js"></script>
+        <script type="text/javascript" src="/rupe/geral/scripts/rupe.js"></script>
+
+        <script type="text/javascript">
+            function createApplet() {
+                if (document.getElementById(ID_APPLET_ASSINADOR) != null) {
+                    document.getElementById('assinadorContent').removeChild(document.getElementById('appletAssinador'));
+                }
+
+                //Cria o objeto de applet
+                var assinador = document.createElement('applet');
+                //adiciona os atributos principais ao objeto <applet>
+                assinador.setAttribute('id', ID_APPLET_ASSINADOR);
+                assinador.setAttribute('code' , 'br/com/esec/signapplet/ChallangeAuthApplet.class');
+                assinador.setAttribute('codebase', 'http://jpe.tjmg.jus.br:80/rupe/geral/assinador/');
+                assinador.setAttribute('archive', 'sdk-web.jar');
+                assinador.setAttribute('width', '40');
+                assinador.setAttribute('height', '40');
+                //adiciona os parâmetros internos em forma de <param>
+                assinador.appendChild(createParam('cache_version','1.6.5.11'));
+                assinador.appendChild(createParam('cache_archive','http://jpe.tjmg.jus.br:80/rupe/geral/assinador/sdk-web.jar'));
+                assinador.appendChild(createParam('sdk-base-version','1.6.5.11'));
+                assinador.appendChild(createParam('remoteMessages','false'));
+                assinador.appendChild(createParam('messagesURL','http://jpe.tjmg.jus.br:80/rupe/geral/assinador/sdk-web_pt_BR.properties'));
+                assinador.appendChild(createParam('config.type','local'));
+                assinador.appendChild(createParam('userid','RUPE'));
+                assinador.appendChild(createParam('challenge','3Lee2Ej3eMLFy/nqcrs+PQnHZvg='));
+                assinador.appendChild(createParam('checkLibs','true'));
+                //adiciona o applet ao body
+                document.getElementById('assinadorContent').appendChild(assinador);
+            }
+
+            function getApplet() {
+                var applet = document.getElementById(ID_APPLET_ASSINADOR);
+
+                if (applet != null && isAssinadorInicializado()) {
+                    return applet;
+                } else {
+                    if (confirm('O assinador digital não foi carregado corretamente.\nDeseja tentar recarregar o assinador?')) {
+                        createApplet();
+                        return getApplet();
+                    } else {
+                        alert('O assinador digital não foi carregado corretamente.\nTente limpar o cache do navegador e recarregar a página.');
+                    }
+                }
+            }
+
+            function assinar(){
+                var applet = getApplet();
+
+                try {
+                    document.getElementById('challengeResponse').value = applet.getResponse();
+                    //certificado codificado em base64
+                    document.getElementById('certificadoUsuario').value = applet.getUserCertificate();
+                    if(document.getElementById('challengeResponse').value == "" || document.getElementById('certificadoUsuario').value == ""){
+                       alert("Erro ao realizar assinatura digital para login por certificado.\nNão foi possível recuperar a assinatura ou o certificado.");
+                       return false;
+                    }
+                }
+                catch(err) {
+                    alert("Erro: " + err);
+                    return false;
+                }
+
+                document.getElementById('formLoginCertificado').submit();
+            }
+
+            function exibirDadosLoginCertDigital() {
+                createApplet();
+                document.getElementById('dadosLogin').style.display = 'none';
+                document.getElementById('dadosAssinador').style.display = 'block';
+                document.getElementById('dadosLoginSSO').style.display = 'none';
+                document.getElementById("iconeTipoLogin").style.backgroundImage = "url('/rupe/geral/imagens/icones/cd-icone.png')";
+            }
+
+
+            function exibirDadosLoginUsuario() {
+                document.getElementById('dadosLogin').style.display = 'block';
+                document.getElementById('dadosAssinador').style.display = 'none';
+                document.getElementById('dadosLoginSSO').style.display = 'none';
+                document.getElementById('tipoSSO').value = "TJMG";
+                document.getElementById("iconeTipoLogin").style.backgroundImage = "url('/rupe/geral/imagens/icones/tjm-icone.png')";
+            }
+
+        </script>
+    </head>
+    <body onload="configurarCarregamento();">
+        <div id="banner" align="right">
+            
+            
+                
+                    <div style="height: 80px; background-image: url(/rupe/geral/imagens/banner_home.jpg); background-position: left; background-repeat: no-repeat;"><table cellspacing="0" cellpadding="0" width="100%"><tr><td style="width: 30%;"><a target="blank" href="http://www.tjmg.jus.br"><img border="0" align="left" src="/rupe/geral/imagens/logo_tjmg_pequeno.png"/></a></td><td style="width: 40%;"><img border="0" align="center" src="/rupe/geral/imagens/portal/banner_centro.png"/></td><td style="width: 30%;"/></tr></table></div>
+                
+                
+            
+        </div>
+        <div id="conteudo" align="center">
+            <br/>
+            
+            <div style="width: 80%; height: 80%; margin-top: 30px;" align="center"><table cellspacing="0" cellpadding="0" width="100%"><tr style="height: 250px;"><td style="width: 70%; vertical-align: top;"><script type="text/javascript">
+        var THEMIS = "themis";
+        var CONSULTA = "consulta";
+        var JURISPRUDENCIA = "jurisprudencia";
+        var DJE = "dje";
+        var PJE = "pje";
+
+        function visualizaJanela(janela) {
+            document.getElementById(THEMIS).style.display = 'none';
+            document.getElementById(CONSULTA).style.display = 'none';
+            document.getElementById(JURISPRUDENCIA).style.display = 'none';
+            document.getElementById(DJE).style.display = 'none';
+            document.getElementById(PJE).style.display = 'none';
+
+            if (janela == THEMIS) {
+                document.getElementById(THEMIS).style.display = 'block';
+            } else if (janela == CONSULTA) {
+                document.getElementById(CONSULTA).style.display = 'block';
+            } else if (janela == JURISPRUDENCIA) {
+                document.getElementById(JURISPRUDENCIA).style.display = 'block';
+            } else if (janela == DJE) {
+                document.getElementById(DJE).style.display = 'block';
+            } else if (janela == PJE) {
+                document.getElementById(PJE).style.display = 'block';
+            }
+        }
+    </script><div style="width: 100%; height: 100%; border: 1px solid #C9C9C9;"><div style="margin: 20px; height: 192px;"><div style="display: block;" id="themis"><table cellspacing="0" cellpadding="0" width="100%"><tr><td style="width: 236px; text-align: center; border-right: 0px solid #C9C9C9; margin-right: 0px;"><img src="/rupe/geral/imagens/portal/pasta.png"/></td><td><div style="margin-left: 10px;"><div onclick="visualizaJanela('themis');" style="background-color: #50575B; text-align: center; border-width: 1px 1px 0px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:bold;font-style:normal;text-decoration:none;color:#FFFFFF;">Peticionamento Eletrônico</span></div><div style="height: 110px; background-color: #FFFFFF; text-align: left; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9;"><div style="padding: 10px;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">O sistema serve ao peticionamento eletrônico (petição inicial, intermediária, protocolização de documentos, entre outros) e o acesso às peças processuais.</span></div></div><div onclick="visualizaJanela('consulta');" style="background-color: #757B7F; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Consulta Pública</span></div><div onclick="visualizaJanela('jurisprudencia');" style="background-color: #C6C8CC; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Jurisprudência</span></div><div onclick="visualizaJanela('dje');" style="background-color: #F3F3F5; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Diário do Judiciário Eletrônico</span></div><div onclick="visualizaJanela('pje');" style="background-color: #FFFFFF; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">PJe - Processo Judicial Eletrônico</span></div></div></td></tr></table></div><div style="display: none;" id="consulta"><table cellspacing="0" cellpadding="0" width="100%"><tr><td style="width: 236px; text-align: center; border-right: 0px solid #C9C9C9; margin-right: 0px;"><img src="/rupe/geral/imagens/portal/pesquisa.jpg"/></td><td><div style="margin-left: 10px;"><div onclick="visualizaJanela('themis');" style="background-color: #FFFFFF; text-align: center; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Peticionamento Eletrônico</span></div><div onclick="visualizaJanela('consulta');" style="background-color: #50575B; text-align: center; border-width: 0px 1px 0px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:bold;font-style:normal;text-decoration:none;color:#FFFFFF;">Consulta Pública</span></div><div style="height: 110px; background-color: #FFFFFF; text-align: left; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9;"><div style="padding: 10px;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Página para visualização do acompanhamento processual de feitos que não tramitem em segredo de justiça ou cuja visibilidade externa esteja condizente com as disposições da Resolução nº 121/2010 do CNJ.</span><br/><br/><a target="_blank" href="http://www4.tjmg.jus.br/juridico/sf/proc_massiva2.jsp"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;">Acessar a Consulta Processual Pública</span></a></div></div><div onclick="visualizaJanela('jurisprudencia');" style="background-color: #757B7F; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Jurisprudência</span></div><div onclick="visualizaJanela('dje');" style="background-color: #C6C8CC; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Diário do Judiciário Eletrônico</span></div><div onclick="visualizaJanela('pje');" style="background-color: #F3F3F5; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">PJe - Processo Judicial Eletrônico</span></div></div></td></tr></table></div><div style="display: none;" id="jurisprudencia"><table cellspacing="0" cellpadding="0" width="100%"><tr><td style="width: 236px; text-align: center; border-right: 0px solid #C9C9C9; margin-right: 0px;"><img src="/rupe/geral/imagens/portal/justica.jpg"/></td><td><div style="margin-left: 10px;"><div onclick="visualizaJanela('themis');" style="background-color: #F3F3F5; text-align: center; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Peticionamento Eletrônico</span></div><div onclick="visualizaJanela('consulta');" style="background-color: #FFFFFF; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Consulta Pública</span></div><div onclick="visualizaJanela('jurisprudencia');" style="background-color: #50575B; text-align: center; border-width: 0px 1px 0px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:bold;font-style:normal;text-decoration:none;color:#FFFFFF;">Jurisprudência</span></div><div style="height: 110px; background-color: #FFFFFF; text-align: left; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9;"><div style="padding: 10px;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Página de consulta ao acervo jurisprudencial dos acórdãos proferidos na 2ª instância da Justiça Comum do TJMG.</span><br/><br/><a target="_blank" href="http://www5.tjmg.jus.br/jurisprudencia/formEspelhoAcordao.do"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;">Acessar a Consulta à Jurisprudência</span></a></div></div><div onclick="visualizaJanela('dje');" style="background-color: #757B7F; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Diário do Judiciário Eletrônico</span></div><div onclick="visualizaJanela('pje');" style="background-color: #C6C8CC; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">PJe - Processo Judicial Eletrônico</span></div></div></td></tr></table></div><div style="display: none;" id="dje"><table cellspacing="0" cellpadding="0" width="100%"><tr><td style="width: 236px; text-align: center; border-right: 0px solid #C9C9C9; margin-right: 0px;"><img src="/rupe/geral/imagens/portal/dje.jpg"/></td><td><div style="margin-left: 10px;"><div onclick="visualizaJanela('themis');" style="background-color: #C6C8CC; text-align: center; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Peticionamento Eletrônico</span></div><div onclick="visualizaJanela('consulta');" style="background-color: #F3F3F5; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Consulta Pública</span></div><div onclick="visualizaJanela('jurisprudencia');" style="background-color: #FFFFFF; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Jurisprudência</span></div><div onclick="visualizaJanela('dje');" style="background-color: #50575B; text-align: center; border-width: 0px 1px 0px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:bold;font-style:normal;text-decoration:none;color:#FFFFFF;">Diário do Judiciário Eletrônico</span></div><div style="height: 110px; background-color: #FFFFFF; text-align: left; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9;"><div style="padding: 10px;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Página de acesso a consulta dos cadernos eletrônicos dos atos oficiais, judiciais e administrativos do Poder Judiciário de Minas Gerais.</span><br/><br/><a target="_blank" href="http://www.tjmg.jus.br/portal/processos/diario-do-judiciario/diario-do-judiciario.htm"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;">Acessar a Consulta ao Diário do Judiciário Eletrônico</span></a></div></div><div onclick="visualizaJanela('pje');" style="background-color: #757B7F; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">PJe - Processo Judicial Eletrônico</span></div></div></td></tr></table></div><div style="display: none;" id="pje"><table cellspacing="0" cellpadding="0" width="100%"><tr><td style="width: 236px; text-align: center; border-right: 0px solid #C9C9C9; margin-right: 0px;"><img src="/rupe/geral/imagens/portal/pje.png"/></td><td><div style="margin-left: 10px;"><div onclick="visualizaJanela('themis');" style="background-color: #757B7F; text-align: center; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Peticionamento Eletrônico</span></div><div onclick="visualizaJanela('consulta');" style="background-color: #C6C8CC; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Consulta Pública</span></div><div onclick="visualizaJanela('jurisprudencia');" style="background-color: #F3F3F5; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Jurisprudência</span></div><div onclick="visualizaJanela('dje');" style="background-color: #FFFFFF; text-align: center; border-width: 0px 1px 0px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:bold;font-style:normal;text-decoration:none;color:#333333;">Diário do Judiciário Eletrônico</span></div><div onclick="visualizaJanela('pje');" style="background-color: #50575B; text-align: center; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#FFFFFF;">PJe - Processo Judicial Eletrônico</span></div><div style="height: 110px; background-color: #FFFFFF; text-align: left; border-width: 0px 1px 1px 1px; border-style: solid; border-color: #C9C9C9;"><div style="padding: 10px;"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;color:#333333;">Página de acesso aos processos eletrônicos em tramitação na 1ª instância.</span><br/><br/><a target="_blank" href="http://pje.tjmg.jus.br/pje/login.seam"><span style="font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;">Acessar PJe - Processo Judicial Eletrônico</span></a></div></div></div></td></tr></table></div></div></div></td><td style="width: 2%;"/><td style="width: 28%; vertical-align: top;"><link type="text/css" rel="stylesheet" href="/rupe/geral/css/login.css"/><script type="text/javascript">
+        var challenge = Rupe.getLoginChallenge();
+        var tarefaAutenticador = criarTarefaAutenticador('http://jpe.tjmg.jus.br:80/rupe', 'nFUdMdpkADn+rR1x7gbY/N3QedLXJWCyi8S3e8vRJfnrrfqqIkU6RzZ7e2ZM+yZGW/RtHLdbheeTsoJQP8DaPfNpcpTajQMoO+DzdEKJYnRYaOj5z/M2AHCmqamzZQPjIbbNTt1jxnmNyWCCgBYMzALF/zcsVx/IyTw7I5b9+tLbgkVfbt+Rmvd5OS/uP+dGObK6aif5vnz4+lhakcO6rlOctpTGOI6DiYWa/wCYea/dk7HXDq1u//mfUj/KBbIV6fWAmfTxCZ0XGNc1lfsQwVzM/QF4ESWrZGlK5IYQwcUy7unKQlpvmG8uc04L3IClGhgH14oH20Q0kVAGBCWprA==', challenge);
+    </script><div style="width: 100%; height: 100%; border: 1px solid #C9C9C9; background-color: #f8f8f8"><div style="height: 20px; vertical-align: central; padding-top: 5px; text-align: center;"><span class="tituloPagina"><span style="background:url('/rupe/geral/imagens/icones/tjm-icone.png') no-repeat; background-size: 17px; padding-left: 20px;" id="iconeTipoLogin">LOGIN DO SISTEMA</span></span></div><div style="display: block;" id="dadosLogin"><form onSubmit="return validarCampos();" action="/rupe/j_security_check" name="formLogin" method="post" id="formLogin"><table cellspacing="0" cellpadding="0" width="100%"><tr style="height: 40px; vertical-align: middle;"><td style="text-align: right;"><span>Usuário:</span></td><td style="text-align: right; padding-right: 10px;"><input onKeyPress="return tratarEnter(event, TIPO_TRATAMENTO_TAB, 'senha');" style="width:195px; height:25px; text-align: left; font-family:'Arial'; font-size: 13px; color:#000000; font-style:normal; font-weight:normal; text-decoration:none;" name="j_username" type="text" id="login"/></td></tr><tr style="height: 40px; vertical-align: middle;"><td style="text-align: right;"><span>Senha:</span></td><td style="text-align: right; padding-right: 10px;"><input onkeypress="return tratarEnter(event, TIPO_TRATAMENTO_SUBMIT, 'formLogin');" style="width:195px; height:25px; text-align: left;; font-family:'Arial'; font-size: 13px; color:#000000; font-style:normal; font-weight:normal; text-decoration:none;" name="j_password" type="password" id="senha"/></td></tr><tr><td style="vertical-align: top;" colspan="2"><table width="100%"><tr><td style="text-align: right; padding-right: 10px;" colspan="2"><input class="botaoEntrar" value="ENTRAR" type="submit" id="entrar"/></td></tr></table></td></tr><tr style="height: 30px; font-size: 80%;"><td style="padding-left: 15px; padding-right: 15px;" colspan="2"><div class="container-linhas"><div class="linha-container"><div class="linha-esquerda"> </div><span class="texto-linha">OU</span><div class="linha-direita"> </div></div></div></td></tr><tr style="height: 20px; font-size: 80%;"><td style="padding-left: 15px; padding-right: 15px;" colspan="2"><div style="flex;display: flex;justify-content: center;align-items: center;"><div onclick="exibirDadosLoginCertDigital();" title="Alternar modo de login para Certificado Digital" class="botao-certificado-digital">
+									    CERTIFICADO DIGITAL
+									</div></div></td></tr><tr style="height: 30px; font-size: 80%;"><td style="padding-left: 15px; padding-right: 15px;" colspan="2"><div class="container-linhas"><div class="linha-container"><div class="linha-esquerda"> </div><span class="texto-linha">OU</span><div class="linha-direita"> </div></div></div></td></tr><tr style="height: 20px; font-size: 80%;"><td colspan="2" style="padding-left: 15px; padding-right: 15px;"><div class="container-orientacao-pdpj"><span class="texto-orientacao-pdpj">Login por credencial do PJE</span></div></td></tr><tr style="height: 20px; font-size: 80%;"><td style="padding-left: 15px; padding-right: 15px;" colspan="2"><div style="display: flex; justify-content: center; align-items: center;"><div class="botao-sso" title="Alternar modo de login para credenciais SSO PDPJ - PJe" onclick="submitSsoLogin();"><img alt="Jusbr" src="/rupe/geral/imagens/jusbr2.png"/></div></div></td></tr><tr style="height: 18px; font-size: 70%;"><td align="center" colspan="2"><a href="/rupe/administracao/publico/autoCadastramento.rupe">Autocadastramento de advogados</a></td></tr><tr style="height: 18px; font-size: 70%;"><td align="center" colspan="2"><a href="/rupe/administracao/publico/autoCadastramentoSociedadeAdvogados.rupe">Autocadastramento de sociedade de advogados</a></td></tr><tr style="height: 18px; font-size: 70%;"><td align="center" colspan="2"><a href="/rupe/administracao/publico/autoCadastramentoEmpresas.rupe">Autocadastramento de empresas, municípios e entidades públicas</a></td></tr><tr style="height: 20px; font-size: 80%;"><td align="center" colspan="2"><table style="width: 100%;"><tr><td align="center"><a href="/rupe/administracao/publico/esqueciSenha.rupe">Esqueci a senha</a></td><td align="center"><a href="/rupe/administracao/publico/esqueciUsuario.rupe">Esqueci o usuário</a></td></tr></table></td></tr></table></form></div><div style="display: none;" id="dadosAssinador"><form action="/rupe/loginCertificado" name="formLoginCertificado" method="post" id="formLoginCertificado"><input name="origem" type="hidden" id="origem"/><input name="challengeResponse" type="hidden" id="challengeResponse"/><input name="certificadoUsuario" type="hidden" id="certificadoUsuario"/><div style="padding: 0px 7px 0px 7px;" id="dadosAssinadorJava"><table align="center" border="0"><tr style="height: 100px;"><td colspan="2"><div style="font-family:Tahoma;font-size:11px;text-align:justify;color: #254076;"><div style="text-indent: 20px;">Para realizar a assinatura com um certificado digital, primeiro  necessário configurar o certificado no cone chave abaixo.</div><div style="text-indent: 20px;">Caso esteja configurado basta clicar no boto "Entrar" e realizar a assinatura quando solicitado.</div><div style="text-indent: 20px;">Se ocorrer qualquer erro com o assinador, recarregue a página de login.</div></div></td></tr><tr style="height: 50px;"><td align="right"><div align="right" id="assinadorContent"/></td><td nowrap="nowrap" width="50%" align="right"><img onclick="showConfigAssinador();" style="vertical-align:middle; padding-right: 10px; cursor: pointer;" src="/rupe/geral/imagens/botoes/configurar.png" class="imagemLink" title="Configurar o certificado" alt="configurar"/><input onclick="assinar(); return false;" style="width: 80px;" value="Entrar" type="button" id="entrarCertificado"/></td></tr><tr style="height: 25px;"><td colspan="2" align="center"><a title="Alternar modo de login para usuário e Senha" onclick="exibirDadosLoginUsuario();" href="#">Login por usuário e senha</a></td></tr><tr style="height: 15px; font-size: 70%;"><td align="center" colspan="2"><a onclick="exibirSelecaoModoAssinatura(); return false;" href="#">Alterar Modo de Assinatura</a></td></tr></table></div><div style="padding: 0px 7px 0px 7px;" id="dadosAssinadorLocal"><table align="center" border="0"><tr style="height: 100px;"><td colspan="2"><div style="font-family:Tahoma;font-size:11px;text-align:justify;color: #254076;"><div style="text-indent: 20px;">Para realizar a assinatura com um certificado digital, primeiro  necessário instalar o aplicativo assinador <a target="_blank" href="http://www.pje.jus.br/wiki/index.php/PJeOffice"><b>PJeOffice</b></a> e configurar o certificado digital.</div><div style="text-indent: 20px;">Caso esteja instalado e configurado basta clicar no boto "Entrar" e realizar a assinatura quando solicitado.</div><div style="text-indent: 20px;">Se ocorrer qualquer erro com o assinador, recarregue a página de login.</div></div></td></tr><tr style="height: 50px;"><td nowrap="nowrap" width="50%" align="center"><input onclick=" assinarPorTarefa(tarefaAutenticador); return false;" style="width: 80px;" value="Entrar" type="button" id="entrarCertificadoLocal"/></td></tr><tr style="height: 25px;"><td colspan="2" align="center"><a title="Alternar modo de login para usuário e Senha" onclick="exibirDadosLoginUsuario();" href="#">Login por usuário e senha</a></td></tr><tr style="height: 15px; font-size: 70%;"><td align="center" colspan="2"><a onclick="exibirSelecaoModoAssinatura(); return false;" href="#">Alterar Modo de Assinatura</a></td></tr></table></div><script>
+                    jQuery("#origem").val(window.location.href);
+                    if (Rupe.getTipoAssinatura() == TipoAssinatura.JAVA.valueOf()) {
+                        jQuery("#dadosAssinadorLocal").hide();
+                        jQuery("#dadosAssinadorJava").show();
+                    } else {
+                        jQuery("#dadosAssinadorLocal").show();
+                        jQuery("#dadosAssinadorJava").hide();
+                    }
+                </script></form></div><form action="/rupe/loginSsoKeycloakServlet" name="formLoginSSO" method="post" id="formLoginSSO"><input name="origemURL" type="hidden" id="origemURL"/></form><form action="/rupe/loginSsoKeycloakServlet/checkUsuarioLogadoSso" name="formCheckSsoUser" method="post" id="formCheckSsoUser"><input name="origemURLSsoUser" type="hidden" id="origemURLSsoUser"/></form><script>
+           jQuery("#origemURL").val(window.location.href);
+        </script><style>
+        			.botaoEntrar{
+        				    background-color: #c93131;
+						    color: #fff;
+						    font-size: 10px;
+						    border: none;
+						    font-weight: bold;
+						    padding: 5PX;
+						    cursor: pointer;
+						    font-family: Verdana, Verdana CE, Arial, Arial CE, Lucida Grande CE, lucida, Helvetica CE, sans-serif;
+					}
+        			
+					.linha-esquerda{
+						    height: 1px;
+						    background: linear-gradient(to right, #d3d3d3, #cccccc, #888);
+						    width: 150px;
+					}
+					
+					.linha-direita{
+						    height: 1px;
+						    background: linear-gradient(to right, #888, #cccccc, #d3d3d3);
+						    width: 150px;
+					}					
+				
+			        .linha-container {
+			            display: flex;
+					    justify-content: center;
+					    align-items: center;
+					 	margin-bottom: 10px;
+    					margin-top: 10px;
+			        }
+			        
+			        .container-linhas{
+			        	width: 100%;
+					    display: flex;
+					    justify-content: center;
+			        }
+			        			
+			        .texto-linha {
+			            margin: 0 10px;
+			            color: #696969;
+			            font-size: 10px;
+			        }
+			        
+			        .container-orientacao-pdpj {
+			        	display: flex;
+    					justify-content: center
+			        }			            
+			        
+			        .texto-orientacao-pdpj{
+			        	color: #6B2727;
+			        	font-size: 11px;
+			        }
+			        
+			        .botao-certificado-digital{
+			        	color: #fff;
+						width: 300px;
+						text-transform: uppercase;
+						border: none;
+						font-size: 13px;
+						background: #c93131 url(/rupe/geral/imagens/icones/certificado-digital-login.png) 0 center no-repeat;
+						min-height: 45px;
+						font-weight: bold;
+						display: flex;
+						justify-content: center;
+						align-items: center;
+						border-radius: 5px;
+						padding-left: 35px;
+						cursor: pointer;									    
+			        }
+			        
+			        
+			        .botao-sso {
+					    width: 326px;
+					    border: solid;
+					    border-width: thin;
+					    border-color: #cccccc;
+					    font-size: 13px;
+					    background: #fff;
+					    min-height: 45px;
+					    display: flex;
+					    justify-content: center;
+					    align-items: center;
+					    border-radius: 5px;
+					    padding-left: 5px;
+					    cursor: pointer;
+					    margin-bottom: 10px;
+					    gap: 60px;
+					}					
+					
+					.botao-sso .jusbrasil {
+					    margin-right: auto; 
+					}
+					
+					.botao-sso .jusbr {
+					    margin: 0 auto; 
+					}		        
+			    </style></div><script>
+		// Condição para não haver redirect em ambientes de desenvolvimento e teste.
+		
+			function submitSsoLogin() {
+			    localStorage.setItem('sso_checked', 'true');
+			    document.getElementById('formLoginSSO').submit();
+			}	
+			
+			if (!window.location.href.includes('hml') && !window.location.href.includes('sup') && !window.location.href.includes('localhost')) {
+				window.onload = function () {
+				    document.getElementById("origemURLSsoUser").value = window.location.href;
+			
+				    var form = document.getElementById("formLogin");
+				    var submitButton = form.querySelector('input[type="submit"]');
+			
+				    if (submitButton) {
+				        submitButton.addEventListener('click', function () {
+				            localStorage.setItem('sso_checked', 'true');
+				        });
+				    }
+			
+				    if (!localStorage.getItem('sso_checked')) {
+				        if (sessionStorage.getItem("sso_checked")) {
+				            return;
+				        }
+			
+				        localStorage.setItem('sso_checked', 'true');
+				        setTimeout(function () {
+				            document.getElementById("formCheckSsoUser").submit();
+				        }, 10);
+				    } else {
+				        localStorage.removeItem('sso_checked');
+				    }
+				};
+		}
+	</script></td></tr><tr style="height: 50px;"><td style="width: 70%; background-image: url('/rupe/geral/imagens/icones/info-redondo.png'); background-position: 0px center; background-repeat: no-repeat;"><div class="tituloPagina" style="margin-left: 40px; margin-bottom: 5px; margin-top: 6px;">Outras Informações</div></td><td style="width: 2%;"/><td style="width: 28%; background-image: url('/rupe/geral/imagens/icones/aviso-redondo.png'); background-position: 0px center; background-repeat: no-repeat;"><div class="tituloPagina" style="margin-left: 40px; margin-bottom: 5px; margin-top: 6px;">Softwares Recomendados</div></td></tr><tr style="height: 190px;"><td style="width: 70%; vertical-align: top;"><script type="text/javascript">
+        var N1 = "n1";
+        var N2 = "n2";
+        var N3 = "n3";
+        var N4 = "n4";
+
+        function mostrarNoticia(janela) {
+            document.getElementById(N1).style.display = 'none';
+            document.getElementById(N2).style.display = 'none';
+            document.getElementById(N3).style.display = 'none';
+            //Exibe a aba solicitada
+            document.getElementById(janela).style.display = 'block';
+        }
+    </script><div style="width: 100%; height: 300px; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; font-family:Tahoma;font-size:13px;font-weight:normal;font-style:normal;text-decoration:none;"><div style="margin: 15px;"><div style="position: relative; display: block;" id="n1"><div style="width: 100%; font-weight: normal;"><table border="0" cellspacing="0" cellpadding="0"><tr><td align="center" valign="top"><div onclick="mostrarNoticia(N1);" style="width: 110px; height: 20px; background-color: #FFFFFF; color: #990000; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Suporte</div><div style="position: relative; top: -1px; z-index: 50"><img src="/rupe/geral/imagens/portal/seta_aba.jpg"/></div></td><td align="center" valign="top"><div onclick="mostrarNoticia(N2);" style="width: 110px; height: 20px; background-color: #E9E9E9; color: #666666; border-width: 1px 0px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Validação</div></td><td align="center" valign="top"><div onclick="mostrarNoticia(N3);" style="width: 160px; height: 20px; background-color: #E9E9E9; color: #666666; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Funcionalidades Públicas</div></td></tr></table></div><div style="position: relative; top: -11px; width: 100%; padding-top: 10px; padding-bottom: 10px; border: 1px solid #C9C9C9; background-color: #FFFFFF;"><table cellspacing="0" cellpadding="0" border="0" width="100%"><tr style="height: 80px;"><td style="padding-bottom: 10px;" valign="middle" align="center" width="120px"><img src="/rupe/geral/imagens/manual.jpg"/></td><td colspan="2" valign="top"><div style="padding: 0px 10px 0px 20px; overflow-y: auto;" align="justify"><span style="font-weight: bold; font-size: 14px">Suporte:</span><span style="color: blue;"> O atendimento é realizado de segunda a sexta-feira, das 08:00h às 18:00h. Aos sábados, domingos e feriados, o horário é das 09:00h às 12:00h e das 13:00h às 18:00h.</span><br/><br/><span style="font-weight: bold; font-size: 14px">Canais de atendimento:</span><br/><span style="font-weight: bold; font-size: 14px">Chat:</span><a target="_blank" href="https://livechat.tjmg.jus.br/livechat"><span style="font-weight: bold; font-size: 13px; font-color: #6B2727;"> Clique aqui para acesso ao Chat Oficial Link</span></a><br/><span style="font-weight: bold; font-size: 14px">Link do manual:  </span><a style="font-weight: bold;" target="blank" href="http://www8.tjmg.jus.br/Processo_Eletronico_TJMG/Manual-JPe/Manual_JPe.html?Novidades.html"> Manual de Utilização do Portal do Processo Eletrônico</a></div></td></tr></table></div></div><div style="position: relative; display: none;" id="n2"><div style="width: 100%; font-weight: normal;"><table border="0" cellspacing="0" cellpadding="0"><tr><td align="center" valign="top"><div onclick="mostrarNoticia(N1);" style="width: 110px; height: 20px; background-color: #E9E9E9; color: #666666; border-width: 1px 0px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Suporte</div></td><td align="center" valign="top"><div onclick="mostrarNoticia(N2);" style="width: 110px; height: 20px; background-color: #FFFFFF; color: #990000; border-width: 1px 0px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Validação</div><div style="position: relative; top: -1px; z-index: 50"><img src="/rupe/geral/imagens/portal/seta_aba.jpg"/></div></td><td align="center" valign="top"><div onclick="mostrarNoticia(N3);" style="width: 160px; height: 20px; background-color: #E9E9E9; color: #666666; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Funcionalidades Públicas</div></td></tr></table></div><div style="position: relative; top: -11px; width: 100%; height: 125px; padding-top: 10px; border: 1px solid #C9C9C9; background-color: #FFFFFF;"><table cellspacing="0" cellpadding="0" border="0" width="100%"><tr style="height: 125px;"><td style="padding-bottom: 10px;" valign="middle" align="center" width="120px"><img src="/rupe/geral/imagens/valida.png"/></td><td valign="top"><div style="padding: 0px 10px 0px 20px; overflow-y: auto;" align="justify"><span style="font-weight: bold;">Validação da Autenticidade de Documentos Eletrônicos</span><br/>
+                                    Página para verificação da autenticidade de uma peça processual produzida e armazenada no Portal do Processo Eletrônico.
+                                    <br/><br/><a href="/rupe/publico/paginas/autenticarDocumento.rupe">Acesse a Página da Validação da Autenticidade do Documento</a></div></td></tr></table></div></div><div style="position: relative; display: none;" id="n3"><div style="width: 100%; font-weight: normal;"><table border="0" cellspacing="0" cellpadding="0"><tr><td align="center" valign="top"><div onclick="mostrarNoticia(N1);" style="width: 110px; height: 20px; background-color: #E9E9E9; color: #666666; border-width: 1px 0px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Suporte</div></td><td align="center" valign="top"><div onclick="mostrarNoticia(N2);" style="width: 110px; height: 20px; background-color: #E9E9E9; color: #666666; border-width: 1px 0px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Validação</div></td><td align="center" valign="top"><div onclick="mostrarNoticia(N3);" style="width: 160px; height: 20px; background-color: #FFFFFF; color: #990000; border-width: 1px 1px 1px 1px; border-style: solid; border-color: #C9C9C9; cursor: pointer;">Funcionalidades Públicas</div><div style="position: relative; top: -1px; z-index: 50"><img src="/rupe/geral/imagens/portal/seta_aba.jpg"/></div></td></tr></table></div><div style="position: relative; top: -11px; width: 100%; height: 125px; padding-top: 10px; border: 1px solid #C9C9C9; background-color: #FFFFFF;"><table cellspacing="0" cellpadding="0" border="0" width="100%"><tr style="height: 125px;"><td style="padding-bottom: 10px;" valign="middle" align="center" width="120px"><img src="/rupe/geral/imagens/cadeado.png"/></td><td valign="top"><div style="padding: 0px 10px 0px 20px; overflow-y: auto;" align="justify"><span style="font-weight: bold;">Funcionalidades Públicas do Sistema</span><br/>
+                                    Área reservada a funcionalidades de utilização pública ou mediante uma chave personalizada de acesso.
+                                    <br/><br/></div></td></tr></table></div></div></div></div></td><td style="width: 2%;"/><td style="width: 28%; vertical-align: top;"><div style="width: 100%; height: 300px; border: 1px solid #C9C9C9; font-size: 90%;"><table><tr><td width="50%"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-firefox.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://www.mozilla.org/pt-BR/firefox/new/">Firefox atualizado</a></div></center></div></td><td width="50%"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-chrome.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://www.google.com/intl/pt-BR/chrome/">Chrome atualizado</a></div></center></div></td></tr><tr><td width="50%"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-windows.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://www.microsoft.com/pt-br/windows">Windows 7, 10 ou 11</a></div></center></div></td><td width="50%"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-java.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://www.java.com/pt-BR/">Java atualizado</a></div></center></div></td></tr><tr><td width="50%"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-pdf.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://get.adobe.com/br/reader/">Adobe Reader</a></div></center></div></td><td width="50%"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-pje-office.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://pjeoffice.trf3.jus.br/pjeoffice-pro/docs/index.html">PjeOffice</a></div></center></div></td></tr><tr><td colspan="2"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-cute-pdf.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a target="_blank" href="https://www.cutepdf.com/index.htm">Drive de impressora para geração de pdf (CutePdf)</a></div></center></div></td></tr><tr><td colspan="2"><div style="height: 30px; margin: 10px; background-image: url('/rupe/geral/imagens/icones/logo-token.png'); background-repeat: no-repeat; background-size: 30px;"><center><div style="padding: 5px 0px 5px 40px;"><a href="#">Cadeias de certificação digital, gerenciador e driver do token do usuário</a></div></center></div></td></tr></table></div></td></tr></table></div>
+            <div style="display:none; padding-left: 5px; padding-right: 5px;" title="Seleção do Modo de Assinatura Digital" id="selecaoAssinadorPanel"><div style="width: 700px; height: 130px;"><table style="padding: 13px;" cellspacing="0" cellpadding="0" width="100%"><tr><td style="padding: 5px; text-align: center;" colspan="2"><span style="white-space: nowrap;" class="tituloPagina">Selecione o Modo de Assinatura Digital e Autenticação no Sistema</span></td></tr><tr><td style="padding: 5px; text-align: center;"><input onclick="selecionarTipoAssinatura(TipoAssinatura.LOCAL); return false;" value="PjeOffice" type="submit" id="tipoLocal"/></td><td style="text-align: left;"><b>(Recomendado)</b> Utiliza o aplicativo instalado no computador local. <a target="_blank" href="http://www.pje.jus.br/wiki/index.php/PJeOffice">Clique aqui</a> para mais informações.
+                    </td></tr><tr style="height: 40px; vertical-align: middle;"><td style="padding: 5px; text-align: center;"><input onclick="selecionarTipoAssinatura(TipoAssinatura.JAVA); return false;" value="Applet Java" type="submit" id="tipoJava"/></td><td style="text-align: left;">
+                        Modo alternativo de assinatura. Necessita do Java instalado no computador e de navegador compatível com sua execução.
+                    </td></tr></table></div></div><script type="text/javascript">
+        function exibirSelecaoModoAssinatura() {
+            jQuery('#selecaoAssinadorPanel')
+                .show()
+                .dialog({
+                    closed: false,
+                    modal: true
+                });
+        }
+
+        if (Rupe.getTipoAssinatura() === null || Rupe.getTipoAssinatura() === "") {
+            exibirSelecaoModoAssinatura();
+        } else {
+            setTipoAssinaturaSessao(Rupe.getTipoAssinatura());
+        }
+
+        function selecionarTipoAssinatura(tipoAssinatura) {
+            Rupe.setTipoAssinatura(tipoAssinatura);
+            jQuery('#selecaoAssinadorPanel').dialog('close');
+            location.reload();
+        }
+    </script>
+        </div>
+        <div align="center" id="rodape" class="tRodape">
+            <div class="conteudoRodape"><div class="conteudoCopyright"><span id="copyright"/></div><div class="versaoSistema">v9.33.11_20261118110524</div></div>
+        </div>
+
+        <script type="text/javascript" src="/rupe/geral/scripts/footer/copyright.js"></script>
+    </body>
+</html>
