@@ -62,7 +62,8 @@ def _legacy_login(session, config, page, signer):
     PJeOffice (``PjeWebClient``) posts a form, not JSON: ``assinatura`` (base64 MD5withRSA over the UTF-8 challenge)
     and ``cadeiaCertificado`` (base64 Java PkiPath, root first), with the browser's cookies and a ``versao`` header.
     The callback answers ``Sucesso`` or ``Erro:<motivo>``; on success the browser goes to ``homePJeOffice.seam``
-    of the same conversation.
+    of the same conversation. Some portals (TRF5 ``pje.trf5.jus.br``) answer instead with an empty 301/302 whose
+    ``Location`` is the landing page (the notice board): that redirect is the success and the browser opens it.
     """
     import base64
 
@@ -86,21 +87,42 @@ def _legacy_login(session, config, page, signer):
     )
     log_request("POST", action, response.status_code)
     answer = (response.text or "").strip()
-    if not answer.startswith("Sucesso"):
-        reason = answer[len("Erro:") :] if answer.startswith("Erro:") else f"HTTP {response.status_code}"
-        reason = " ".join(BeautifulSoup(reason, "html.parser").get_text(" ").split())[:500]
-        if re.search(r"Certificado n[ãa]o encont", reason):
-            # The callback read the signature and the chain and found no user for the holder's certificate.
-            raise RuntimeError(
-                f"{config.key}: the portal found no user for this certificate (Certificado não encontrado); "
-                f"the lawyer is probably not registered in this PJe. Portal message: {reason}"
-            )
-        raise RuntimeError(f"{config.key}: the PJeOffice callback refused the certificate login: {reason}")
-    home = f"{root}/homePJeOffice.seam?cid={cid}"
+    home = _legacy_redirect(response, config)
+    if home is None:
+        if not answer.startswith("Sucesso"):
+            reason = answer[len("Erro:") :] if answer.startswith("Erro:") else f"HTTP {response.status_code}"
+            reason = " ".join(BeautifulSoup(reason, "html.parser").get_text(" ").split())[:500]
+            if re.search(r"Certificado n[ãa]o encont", reason):
+                # The callback read the signature and the chain and found no user for the holder's certificate.
+                raise RuntimeError(
+                    f"{config.key}: the portal found no user for this certificate (Certificado não encontrado); "
+                    f"the lawyer is probably not registered in this PJe. Portal message: {reason}"
+                )
+            raise RuntimeError(f"{config.key}: the PJeOffice callback refused the certificate login: {reason}")
+        home = f"{root}/homePJeOffice.seam?cid={cid}"
     require_allowed_url(home)
     landing = _follow(session, session.get(home, impersonate=IMPERSONATE, allow_redirects=False, timeout=60))
     log_request("GET", home, landing.status_code)
     return landing
+
+
+def _legacy_redirect(response, config):
+    """The landing URL of a 301/302 answer to the PJeOffice callback, or None when it is not a login success.
+
+    The ``Location`` must stay on the portal's host (``require_allowed_url``) and must not send the user back to
+    ``login.seam``, which is what a refused login does.
+    """
+    if response.status_code not in (301, 302):
+        return None
+    location = (response.headers.get("Location") or "").strip()
+    if not location:
+        return None
+    target = urllib.parse.urljoin(response.url or config.login_url, location)
+    require_allowed_url(target)
+    parts = urllib.parse.urlsplit(target)
+    if parts.hostname != config.host or parts.path.endswith("/login.seam"):
+        return None
+    return target
 
 
 def _submit_code(sso_session, action, token):
@@ -152,6 +174,8 @@ def _require_registered(response, config):
 
 
 def _authenticated(response, host, root="/pje/"):
+    # The logout link is ``<root>logout.seam`` on most portals; TRF5's PJe 1.x (pje.trf5.jus.br) links
+    # ``home.seam?actionMethod=...:identity.logout`` instead.
     if urllib.parse.urlsplit(response.url).path.endswith("/errorUnexpected.seam"):
         return False
     soup = BeautifulSoup(response.text, "html.parser")
@@ -161,7 +185,7 @@ def _authenticated(response, host, root="/pje/"):
         and urllib.parse.urlsplit(response.url).hostname == host
         and (
             (
-                bool(soup.find("a", href=re.compile(re.escape(root) + r"logout\.seam")))
+                bool(soup.find("a", href=re.compile(re.escape(root) + r"logout\.seam|identity\.logout")))
                 and bool(soup.find("input", attrs={"name": "javax.faces.ViewState"}))
             )
             # JT portals land on a shell page (via /pjekz/ + error.seam forward) that carries

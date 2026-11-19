@@ -31,7 +31,7 @@ src/jurisync/
                         one adapter per Projudi generation (tjgo.py validated; keycloak.py TJPR/TJRR, tjam.py, tjpi.py are
                         placeholders for portals registered with wired=False)
     stj/                STJ Central do Processo Eletrônico (A1 over mutual TLS, REST): processes, process, documents, DJe
-    pje/                TRF1 1G/2G, TRF3 1G/2G, TRF5 1G/2G and TRU, TJAP 1G, TJPE 1G/2G: one search flow for every deployment, documents,
+    pje/                TRF1 1G/2G, TRF3 1G/2G, TRF5 1G, 2G (Turmas Recursais), TRU (2º Grau e TRU, pjett) and the PJe 1.x host (trf5-legacy), TJAP 1G, TJPE 1G/2G: one search flow for every deployment, documents,
                         Expedientes panel inboxes (inbox.py), Push registry, TRF5 draft filing; jsf.py holds the shared JSF mechanics
                         (auth/ holds SSO, A1 certificate, session cache)
     eproc/              TRF4 (1G SC/RS/PR, 2G), TRF6, TRF2 (2G, 1G RJ/ES) and TJRS: notice queues, process, documents (A1 certificate or Selenium login)

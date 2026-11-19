@@ -164,6 +164,107 @@ class CertificateLoginChecks(unittest.TestCase):
             cert_login._legacy_login(session, config, page, signer)
         session.get.assert_not_called()
 
+    def _trf5_legacy(self, status=302, location="/pje/QuadroAviso/listViewQuadroAvisoMensagem.seam", text=""):
+        from jurisync import portals
+
+        config, page, signer, session, landing = self._legacy("")
+        config = portals.pje("trf5-legacy")
+        headers = {"Location": location} if location is not None else {}
+        session.post.return_value = SimpleNamespace(
+            status_code=status, text=text, headers=headers, url="https://pje.trf5.jus.br/pje/logarPJeOffice.seam"
+        )
+        landing.url = "https://pje.trf5.jus.br/pje/QuadroAviso/listViewQuadroAvisoMensagem.seam"
+        return config, page, signer, session, landing
+
+    def test_legacy_login_follows_an_empty_302_to_the_landing_page(self):
+        config, page, signer, session, landing = self._trf5_legacy()
+        self.assertIs(cert_login._legacy_login(session, config, page, signer), landing)
+        self.assertEqual(session.post.call_args.args[0], "https://pje.trf5.jus.br/pje/logarPJeOffice.seam?cid=15881")
+        self.assertEqual(
+            session.get.call_args.args[0],
+            "https://pje.trf5.jus.br/pje/QuadroAviso/listViewQuadroAvisoMensagem.seam",
+        )
+
+    def test_legacy_login_accepts_301_and_an_absolute_location_on_the_same_host(self):
+        config, page, signer, session, landing = self._trf5_legacy(
+            status=301, location="https://pje.trf5.jus.br/pje/Painel/x.seam"
+        )
+        self.assertIs(cert_login._legacy_login(session, config, page, signer), landing)
+        self.assertEqual(session.get.call_args.args[0], "https://pje.trf5.jus.br/pje/Painel/x.seam")
+
+    def test_legacy_login_does_not_accept_a_redirect_back_to_the_login(self):
+        config, page, signer, session, _ = self._trf5_legacy(location="/pje/login.seam")
+        with self.assertRaisesRegex(RuntimeError, "refused the certificate login: HTTP 302"):
+            cert_login._legacy_login(session, config, page, signer)
+        session.get.assert_not_called()
+
+    def test_legacy_login_refuses_a_redirect_off_the_allowed_hosts(self):
+        config, page, signer, session, _ = self._trf5_legacy(location="https://evil.example/pje/x.seam")
+        with self.assertRaises(RuntimeError):
+            cert_login._legacy_login(session, config, page, signer)
+        session.get.assert_not_called()
+
+    def test_legacy_login_refuses_a_302_without_location(self):
+        config, page, signer, session, _ = self._trf5_legacy(location=None)
+        with self.assertRaisesRegex(RuntimeError, "HTTP 302"):
+            cert_login._legacy_login(session, config, page, signer)
+
+    def test_trf5_notice_board_counts_as_authenticated(self):
+        html = (
+            '<html><title>Processo Judicial Eletrônico: Quadro de Aviso</title><a href="/pje/logout.seam">Sair</a>'
+            '<input type="hidden" name="javax.faces.ViewState" value="j_id1"></html>'
+        )
+        url = "https://pje.trf5.jus.br/pje/QuadroAviso/listViewQuadroAvisoMensagem.seam"
+        response = SimpleNamespace(status_code=200, url=url, text=html)
+        self.assertTrue(cert_login._authenticated(response, "pje.trf5.jus.br"))
+
+    def test_trf5_legacy_identity_logout_link_counts_as_authenticated(self):
+        html = (
+            '<html><a href="/pje/home.seam?actionMethod=QuadroAviso%2FlistViewQuadroAvisoMensagem.xhtml'
+            '%3Aidentity.logout&amp;cid=18012">Sair</a><input name="javax.faces.ViewState" value="j_id1"></html>'
+        )
+        url = "https://pje.trf5.jus.br/pje/QuadroAviso/listViewQuadroAvisoMensagem.seam"
+        self.assertTrue(
+            cert_login._authenticated(SimpleNamespace(status_code=200, url=url, text=html), "pje.trf5.jus.br")
+        )
+        login = '<form id="loginForm"><input name="javax.faces.ViewState" value="j_id1"></form>'
+        self.assertFalse(
+            cert_login._authenticated(SimpleNamespace(status_code=200, url=url, text=login), "pje.trf5.jus.br")
+        )
+
+
+class Pje1xGuards(unittest.TestCase):
+    def test_trf5_legacy_is_a_pje1x_portal(self):
+        from jurisync import portals
+
+        self.assertTrue(portals.pje("trf5-legacy").pje1x)
+        self.assertFalse(portals.pje("trf5-tru").pje1x)
+
+    def test_counters_inbox_and_search_say_pje1x_is_not_supported(self):
+        from jurisync.connectors.pje import inbox, search
+
+        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*Expedientes"):
+            inbox.read_counters("trf5-legacy", session=Mock())
+        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*Expedientes"):
+            inbox.read_inbox("trf5-legacy", session=Mock())
+        with self.assertRaisesRegex(RuntimeError, "PJe 1.x portal.*not supported"):
+            search.search_process(Mock(), "0000001-00.2026.4.05.8100", portal="trf5-legacy")
+
+    def test_session_check_looks_for_the_pje1x_search_form(self):
+        from jurisync.connectors.pje.auth import sessions
+
+        page = SimpleNamespace(
+            status_code=200,
+            url="https://pje.trf5.jus.br/pje/Processo/ConsultaProcesso/listView.seam",
+            text='<form id="consultarProcessoForm"><input name="javax.faces.ViewState" value="j"></form>',
+        )
+        session = Mock()
+        session.get.return_value = page
+        self.assertTrue(sessions.is_authenticated(session, "trf5-legacy"))
+        page.url = "https://pje.trf5.jus.br/pje/login.seam"
+        page.text = '<form id="loginForm"><input name="javax.faces.ViewState" value="j"></form>'
+        self.assertFalse(sessions.is_authenticated(session, "trf5-legacy"))
+
 
 if __name__ == "__main__":
     unittest.main()

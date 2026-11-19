@@ -35,6 +35,7 @@ class PortalRegistryTest(unittest.TestCase):
                 "trf3-1g",
                 "trf3-2g",
                 "trf5-tru",
+                "trf5-legacy",
                 "tjap-1g",
                 "tjpe-1g",
                 "tjpe-2g",
@@ -188,6 +189,8 @@ class PortalRegistryTest(unittest.TestCase):
         self.assertEqual([p.key for p in portals.for_process("5001234-56.2026.4.03.6100")], ["trf3-1g", "trf3-2g"])
         # The TRU keeps the JEF number: only its own host points to it, never the number alone.
         self.assertEqual(portals.for_host("pjett.trf5.jus.br").key, "trf5-tru")
+        self.assertEqual(portals.for_host("pje.trf5.jus.br").key, "trf5-legacy")
+        self.assertEqual(portals.for_host("pje1g.trf5.jus.br").key, "trf5-1g")
         self.assertEqual(portals.for_host("pje2g.trf3.jus.br").key, "trf3-2g")
         self.assertEqual([p.key for p in portals.for_process("1024853-70.2023.4.01.3400")], ["trf1-1g", "trf1-2g"])
         self.assertEqual([p.key for p in portals.for_process("0001234-56.2026.8.03.0001")], ["tjap-1g"])

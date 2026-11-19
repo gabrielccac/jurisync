@@ -141,6 +141,11 @@ def search_process(
             ato_text_limit=ato_text_limit,
             ato_allow_pending=ato_allow_pending,
         )
+    if config.pje1x:
+        raise RuntimeError(
+            f"{config.key} is a PJe 1.x portal: its process search and detail pages are not supported yet "
+            "(only login, the Push list and the session are)"
+        )
     search_url = config.search_url
     parts = parse_process_number(process_number)
     response = jsf.get(session, search_url, label=f"{config.key} search page", referer=config.base_url)
