@@ -24,6 +24,10 @@ from jurisync.core.totp import next_code, totp
 MTLS_HOST = re.compile(r"document\.location\.host\s*=\s*'([a-z0-9.-]+)'", re.I)
 
 
+class NoKeycloakCertificate(RuntimeError):
+    """The login page has no Keycloak X.509 button (classic eproc form): nothing was sent."""
+
+
 def _parent_domain(host):
     return host.split(".", 1)[1] if "." in host else host
 
@@ -124,7 +128,7 @@ def login(portal, *, signer=None):
             raise RuntimeError(f"{config.tribunal} eproc is unavailable (HTTP {page.status_code})")
         host = MTLS_HOST.search(page.text)
         if not host:
-            raise RuntimeError(f"{config.key} login page offers no Keycloak X.509 certificate login")
+            raise NoKeycloakCertificate(f"{config.key} login page offers no Keycloak X.509 certificate login")
 
         def run(token):
             return _keycloak_x509(session, page, host.group(1), token)

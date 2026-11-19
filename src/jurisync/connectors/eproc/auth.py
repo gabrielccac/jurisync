@@ -296,7 +296,7 @@ def _classic_cert_login(driver, config):
     return wait_for_step(driver)
 
 
-def login(username, password, account, *, portal):
+def login(username, password, account, *, portal, certificate=False):
     if account["type"] != "totp":
         raise ValueError("Selected authenticator account is not TOTP")
 
@@ -307,8 +307,9 @@ def login(username, password, account, *, portal):
     try:
         driver.get(config.login_url)
         classic = _first_element(driver, ("#txtUsuario", "#username"), timeout=20)
-        if classic is not None and has(driver, "#txtUsuario", 0.5) and has(driver, "#pwdSenha", 0.5):
-            # Classic eproc form (TRF6, TJMG): password, then the A3 certificate, then the TOTP.
+        if certificate and classic is not None and has(driver, "#txtUsuario", 0.5) and has(driver, "#pwdSenha", 0.5):
+            # Classic eproc form (TRF6, TJMG), "Certificado Digital": password, then the A3 certificate, then the TOTP.
+            # Without the certificate the form below is filled and "Entrar" sends the password alone.
             result = driver.execute_async_script(
                 _POST_LOGIN_JS, username, password, config.url("externo_controlador.php?acao=login_cert")
             )
