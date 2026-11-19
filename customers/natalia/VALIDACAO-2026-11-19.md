@@ -71,3 +71,30 @@ O conector passou a usar a rota de senha ("Entrar", `index.php`) como padrão no
 | `trf6-2g` | não tentado | — | — | — | — | Mesma credencial do 1G |
 
 Nenhum documento de intimação pendente foi aberto. Nenhuma ciência, alteração de cadastro ou "liberar dispositivo".
+
+# PJe-JT, TST e TJMG Turma Recursal em 19/11/2026 (tarde)
+
+A recusa no TST (17/11 e 19/11) era o formato do usuário: a tela do PJe-JT (tema "pdpj", `kc-form-login`) precisa do CPF só com dígitos. O conector passou a mandar assim nesse formulário. Os portais novos são TRT6, TRT10, TRT17, TRT19, TRT24 (1G e 2G) e a Turma Recursal do TJMG (`tjmg-pje-tr`, `pjerecursal.tjmg.jus.br`).
+
+| Portal | Login | Contadores (Acervo / Meus exp. / Arquivados) | Processo (timeline) | Documento |
+|---|---|---|---|---|
+| `trt1-1g` | ✅ | 9 / 4 / 2; caixa com 4 linhas | 0100854-63.2025.5.01.0069 | ✅ Certidão de Publicação |
+| `trt1-2g` | ✅ | 1 / 0 / 1 | 0101698-25.2024.5.01.0432 | ✅ Habilitação |
+| `trt2-1g` | ✅ | 4 / 0 / 2 | 1000666-39.2024.5.02.0332 | ✅ Certidão de Oficial de Justiça |
+| `trt3-1g` | ✅ | 96 / 9 / 247; Push 15 | 0010405-28.2022.5.03.0160 | ✅ Despacho |
+| `trt3-2g` | ✅ | 26 / 10 / 67 | 0010894-41.2024.5.03.0113 | ✅ Certidão de Publicação |
+| `trt5-1g` | ✅ | 2 / 0 / 3 | 0000631-66.2026.5.05.0551 | ✅ Intimação com ciência já dada |
+| `trt6-1g` | ✅ | 1 / 0 / 1 | 0000613-80.2026.5.06.0401 | ✅ Manifestação |
+| `trt10-1g` | ✅ | 3 / 1 / 3 | 0000566-73.2026.5.10.0861 | ✅ Manifestação |
+| `trt12-1g` | ✅ | 1 / 0 / 0 | 0001988-15.2025.5.12.0004 | ✅ Alvará |
+| `trt15-1g` | ✅ | 6 / 0 / 10 | 0010591-51.2023.5.15.0073 | ✅ Manifestação |
+| `trt17-1g` | ✅ | 3 / 1 / 0; Push 3 | 0001395-59.2025.5.17.0161 | ✅ Certidão de Publicação |
+| `trt18-1g` | ✅ | 3 / 1 / 3 | 0001204-07.2025.5.18.0122 | ✅ Certidão de Remessa |
+| `trt19-1g` | ✅ (2ª tentativa) | 1 / 0 / 4 | 0000216-14.2026.5.19.0060 | ✅ Manifestação |
+| `trt24-1g` | ✅ | 1 / 0 / 4 | 0024351-16.2026.5.24.0072 | ✅ Intimação com ciência já dada |
+| `tst` | ✅ | 10 / 3 / 10 | 0010024-18.2024.5.03.0041 | ✅ Certidão de redistribuição |
+| `tjmg-pje-tr` | ✅ | 2 pendentes; caixa com 2 linhas | 5006706-93.2025.8.13.0261 | ✅ Embargos de Declaração |
+
+Expedientes com ciência pendente (não abertos): TRT1 1G, TRT3 1G, TRT18 1G, TST e Turma Recursal do TJMG.
+
+**TJMG 2G (JPe/Themis):** sem conector. O botão "Login por credencial do PJE" do JPe é recusado pelo próprio SSO do PDPJ (HTTP 400, `redirect_uri` inválido para o client `jpe-tjmg-2g`) antes de pedir senha. O login próprio do JPe usa um "Login" diferente do CPF, criado por autocadastro com certificado. Nenhuma credencial foi enviada.

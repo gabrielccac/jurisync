@@ -36,7 +36,7 @@ secrets = ["TJMG_1G_USERNAME", "TJMG_1G_PASSWORD", "TJMG_1G_2FA_DATA|TJMG_1G_2FA
 method = "browser_totp"
 secrets = ["TJMS_1G_USERNAME", "TJMS_1G_PASSWORD", "TJMS_1G_2FA_DATA|TJMS_1G_2FA_QR"]
 
-# --- PJe: CPF + password + PDPJ TOTP (no A1). TST refused the login on 17/11 and 19/11; TRTs not tried yet. ---
+# --- PJe: CPF + password + PDPJ TOTP (no A1); PJe-JT (TRTs, TST) sends the CPF with digits only. ---
 [trf1-1g]
 method = "password_totp"
 secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
@@ -109,5 +109,29 @@ secrets = ["TRT15_1G_USERNAME", "TRT15_1G_PASSWORD", "TRT15_1G_2FA_DATA|TRT15_1G
 method = "password_totp"
 secrets = ["TRT18_1G_USERNAME", "TRT18_1G_PASSWORD", "TRT18_1G_2FA_DATA|TRT18_1G_2FA_QR"]
 
-# No connector yet (credentials already in .env): TRT6, TRT10, TRT17, TRT19, TRT24 1G (PJe-JT);
-# TJMG Turma Recursal (PJe) and TJMG 2G (Themis).
+[trt6-1g]
+method = "password_totp"
+secrets = ["TRT6_1G_USERNAME", "TRT6_1G_PASSWORD", "TRT6_1G_2FA_DATA|TRT6_1G_2FA_QR"]
+
+[trt10-1g]
+method = "password_totp"
+secrets = ["TRT10_1G_USERNAME", "TRT10_1G_PASSWORD", "TRT10_1G_2FA_DATA|TRT10_1G_2FA_QR"]
+
+[trt17-1g]
+method = "password_totp"
+secrets = ["TRT17_1G_USERNAME", "TRT17_1G_PASSWORD", "TRT17_1G_2FA_DATA|TRT17_1G_2FA_QR"]
+
+[trt19-1g]
+method = "password_totp"
+secrets = ["TRT19_1G_USERNAME", "TRT19_1G_PASSWORD", "TRT19_1G_2FA_DATA|TRT19_1G_2FA_QR"]
+
+[trt24-1g]
+method = "password_totp"
+secrets = ["TRT24_1G_USERNAME", "TRT24_1G_PASSWORD", "TRT24_1G_2FA_DATA|TRT24_1G_2FA_QR"]
+
+[tjmg-pje-tr]
+method = "password_totp"
+secrets = ["TJMG_PJE_TR_USERNAME", "TJMG_PJE_TR_PASSWORD", "TJMG_PJE_TR_2FA_DATA|TJMG_PJE_TR_2FA_QR"]
+
+# TJMG 2G (JPe/Themis, jpe.tjmg.jus.br/rupe): no connector. Its PDPJ button fails server-side (Keycloak answers
+# HTTP 400 "redirect_uri" for client jpe-tjmg-2g, 19/11); its own login is a JPe username + password, not the CPF.
