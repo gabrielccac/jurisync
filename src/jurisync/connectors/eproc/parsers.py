@@ -182,8 +182,11 @@ def _list_pagination(soup, items):
         total_items = int(values["hdnInfraNroItens"])
     except (KeyError, TypeError, ValueError):
         total_items = None
-    # Some queues leave the selection counter at zero but show the actual total in the caption.
-    count = re.search(r"\((\d+)\s+registros?\)", text(soup.select_one("table.infraTable caption")), re.I)
+    # Some queues leave the selection counter at zero but show the actual total in the caption. A list longer than one
+    # page says "(843 registros - 1 a 500)" while the counter holds the page size (TJSC report, 19/11/2026).
+    count = re.search(
+        r"\((\d+)\s+registros?(?:\s*-\s*\d+\s+a\s+\d+)?\)", text(soup.select_one("table.infraTable caption")), re.I
+    )
     if count:
         total_items = int(count[1])
     if total_items is not None and total_items < len(items):
