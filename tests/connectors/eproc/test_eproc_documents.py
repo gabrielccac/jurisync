@@ -86,6 +86,40 @@ class EprocDocumentTests(unittest.TestCase):
                 read_selected_documents(process(url), ["9"], session=session, portal="jfsc")
         session.request.assert_not_called()
 
+    def test_a_document_cited_by_two_events_opens_through_its_first_link(self):
+        """TJSC links a document from the event that holds it and from a later one, with that event's hash."""
+        first = WRAPPER + "&evento=193"
+        cited = WRAPPER.replace("hash=h", "hash=other") + "&evento=196"
+        record = {
+            "success": True,
+            "number": NUMBER,
+            "documents": [{"id": "9", "title": "A", "url": cited}],
+            "events": [
+                {"id": "196", "documents": [{"id": "9", "url": cited}]},
+                {"id": "193", "documents": [{"id": "9", "url": first}]},
+            ],
+        }
+        session = Mock()
+        session.request.side_effect = [
+            reply(f'<iframe id="conteudoIframe" src="{IMPLEMENTATION}"></iframe>'.encode()),
+            reply(f"<html><p>{NUMBER}</p></html>".encode()),
+        ]
+        result = read_selected_documents(record, ["9"], session=session, portal="jfsc")[0]
+        self.assertEqual(result["extractionStatus"], "extracted")
+        self.assertEqual(session.request.call_args_list[0].args, ("GET", cited))
+
+    def test_links_that_differ_beyond_the_event_still_conflict(self):
+        session = Mock()
+        for other in (
+            WRAPPER.replace("acao=acessar_documento", "acao=acessar_documento_implementacao"),
+            WRAPPER + "&key=k",
+            WRAPPER.replace("/eprocV2/", "/eproc/"),
+        ):
+            record = {**process(), "events": [{"id": "2", "documents": [{"id": "9", "url": other}]}]}
+            with self.subTest(other=other), self.assertRaisesRegex(ValueError, "Conflicting"):
+                read_selected_documents(record, ["9"], session=session, portal="jfsc")
+        session.request.assert_not_called()
+
     def test_denial_redirect_oversize_and_network_failures_are_safe(self):
         for wrapper, status, expected in (
             (b"Sem acesso ao documento solicitado.", 200, "access_denied"),
