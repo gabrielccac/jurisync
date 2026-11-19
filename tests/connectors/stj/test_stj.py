@@ -90,6 +90,28 @@ ROW = {
 }  # fmt: skip
 
 
+PARTIES_LAWYER = [
+    {"tipo": "Parte", "seq": 11, "nome": "MUNICIPIO A", "indicadorAutorReu": "A", "seqParteProcesso": 101},
+    {"tipo": "Advogado", "seq": 0, "nome": "ADVOGADO UM", "codigoOAB": "BA000001"},
+    {"tipo": "Parte", "seq": 22, "nome": "PESSOA B", "indicadorAutorReu": "R", "seqParteProcesso": 102},
+    {"tipo": "Parte", "seq": 33, "nome": "PESSOA C", "indicadorAutorReu": "R", "seqParteProcesso": 103},
+    {"tipo": "Advogado", "seq": 0, "nome": "ADVOGADA TESTE", "codigoOAB": "BA000002"},
+]  # fmt: skip
+TRAMITACAO = [{"tramitando": "N", "qtd": 6}, {"tramitando": "S", "qtd": 1}]
+VISTA = {"codTipoDocumento": 10, "descTipoDocumento": "Acórdão", "dataVista": "2026-11-10", "cpfParte": "00000000001"}
+# One DJEN item as the Comunica API answered for an STJ intimation (names and numbers invented).
+DJEN_ITEM = {
+    "id": 400000001, "data_disponibilizacao": "2026-11-06", "siglaTribunal": "STJ", "tipoComunicacao": "Intimação",
+    "nomeOrgao": "COORDENADORIA DE JULGAMENTO", "idOrgao": 59697, "numero_processo": "00000012320258050000",
+    "texto": "<html><body><p>ACÓRDÃO Vistos e relatados estes autos.</p></body></html>", "meio": "D",
+    "link": "https://processo.stj.jus.br/processo/julgamento/eletronico/documento/mediado/?registro_numero=202600000017",
+    "tipoDocumento": "EMENTA / ACORDÃO", "nomeClasse": "AGRAVO EM RECURSO ESPECIAL", "codigoClasse": "11881",
+    "ativo": True, "hash": "abc", "status": "P", "datadisponibilizacao": "06/11/2026",
+    "numeroprocessocommascara": "0000012-32.2025.8.05.0000",
+    "destinatarios": [{"nome": "1. EMPRESA A S/A (AGRAVANTE)", "polo": "A"}], "destinatarioadvogados": [],
+}  # fmt: skip
+
+
 def jwt(exp):
     def part(value):
         return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
@@ -175,6 +197,12 @@ READ_ROUTES = {
         ]
     ),  # fmt: skip
     ("POST", "/api/advogados/processosFiltro"): FakeResponse(payload=[ROW]),
+    ("GET", "/api/advogados/minhasOABs/00000000001"): FakeResponse(
+        payload=[{"codigoOAB": "BA000002", "oabPrincipal": "S"}]
+    ),
+    ("GET", "/api/advogados/BA000002/qtdprocessotramitacao"): FakeResponse(payload=TRAMITACAO),
+    ("GET", "/api/advogados/BA000002/processosInteresse"): FakeResponse(payload=[]),
+    ("GET", "/api/mensagens/proxima"): FakeResponse(204, content=b""),
 }
 
 
@@ -209,6 +237,10 @@ class ReadOnlyGuardTest(unittest.TestCase):
         ("GET", f"/api/visualizador/externo/processos/{REGISTRO}/peca"),
         ("GET", "/api/advogados/GO000002/publicacoes"),
         ("POST", "/api/advogados/processosFiltro"),
+        ("GET", "/api/advogados/BA000002/qtdprocessotramitacao"),
+        ("GET", "/api/advogados/BA000002/processosInteresse"),
+        ("GET", f"/api/processo/{REGISTRO}/vistasEmAberto"),
+        ("GET", "/api/mensagens/proxima"),
     )
 
     def test_writes_are_refused_before_any_request(self):
@@ -355,6 +387,23 @@ class ParserTest(unittest.TestCase):
         self.assertNotIn("00000000000100", json.dumps(row))
 
 
+class CounterParsersTest(unittest.TestCase):
+    def test_tramitacao(self):
+        self.assertEqual(parsers.tramitacao(TRAMITACAO), {"active": 1, "closed": 6, "total": 7})
+        self.assertEqual(parsers.tramitacao(None), {"active": 0, "closed": 0, "total": 0})
+
+    def test_represented_seqs_follow_the_lawyer_runs(self):
+        self.assertEqual(parsers.represented_seqs(PARTIES_LAWYER, "BA000002"), [22, 33])
+        self.assertEqual(parsers.represented_seqs(PARTIES_LAWYER, "BA000001"), [11])
+        self.assertEqual(parsers.represented_seqs(PARTIES_LAWYER, "BA999999"), [])
+
+    def test_vista_keeps_plain_fields_but_no_cpf(self):
+        row = parsers.vista(VISTA)
+        self.assertEqual(row["documentType"], 10)
+        self.assertEqual(row["fields"]["dataVista"], "2026-11-10")
+        self.assertNotIn("cpfParte", row["fields"])
+
+
 class ServerTest(unittest.TestCase):
     def setUp(self):
         routes = dict(READ_ROUTES)
@@ -389,8 +438,8 @@ class ServerTest(unittest.TestCase):
         listed = asyncio.run(tools())
         self.assertEqual(
             sorted(listed),
-            ["stj_download_document", "stj_get_process", "stj_list_processes", "stj_list_publications",
-             "stj_read_documents"],
+            ["stj_download_document", "stj_get_counters", "stj_get_process", "stj_list_inbox", "stj_list_processes",
+             "stj_list_publications", "stj_read_documents"],
         )  # fmt: skip
         for tool in listed.values():
             self.assertEqual(tool.annotations.read_only_hint, tool.name != "stj_download_document")
@@ -432,7 +481,51 @@ class ServerTest(unittest.TestCase):
         body = [r for r in self.session.http.sent if r[0] == "POST"][0][3]
         self.assertEqual(body, {"page": 0, "qtd": "20", "tramitando": "S"})
 
+    def vista_routes(self, vistas):
+        self.session.http.routes[("GET", f"/api/processo/{REGISTRO}/partesadvogados")] = FakeResponse(
+            payload=PARTIES_LAWYER
+        )
+        self.session.http.routes[("GET", f"/api/processo/{REGISTRO}/vistasEmAberto")] = FakeResponse(payload=vistas)
+
+    def test_counters(self):
+        self.vista_routes([VISTA])
+        data, error = self.call("stj_get_counters", {})
+        self.assertFalse(error)
+        self.assertEqual(data["oabs"], [{"oab": "BA000002", "active": 1, "closed": 6, "total": 7}])
+        self.assertEqual((data["active"], data["closed"], data["total"]), (1, 6, 7))
+        self.assertEqual((data["processesWithOpenVista"], data["processesOfInterest"]), (1, 0))
+        self.assertFalse(data["unreadPortalMessage"])
+        vistas = [r for r in self.session.http.sent if r[1].endswith("vistasEmAberto")][0]
+        self.assertEqual(vistas[2], {"values": "22,33"})  # only the parties of BA000002
+
+    def test_inbox_lists_vistas_and_djen_notices(self):
+        self.vista_routes([VISTA])
+        with mock.patch.object(server.djen, "fetch_page", return_value={"count": 1, "items": [DJEN_ITEM]}) as fetch:
+            data, error = self.call("stj_list_inbox", {"days": 10, "include_text": True})
+        self.assertFalse(error)
+        self.assertEqual(fetch.call_args.args[:2], ("2", "BA"))
+        self.assertEqual(fetch.call_args.args[4], "STJ")
+        self.assertEqual(data["vistas"][0]["registro"], "2026/0000001-7")
+        self.assertEqual(data["vistas"][0]["vistas"][0]["documentType"], 10)
+        self.assertNotIn("cpfParte", json.dumps(data))
+        self.assertEqual(data["activeProcesses"][0]["lastPhase"], "Conclusos para decisão")
+        notice = data["notices"][0]
+        self.assertEqual(notice["numero_processo_mascara"], "0000012-32.2025.8.05.0000")
+        self.assertIn("Vistos e relatados", notice["texto"])
+        self.assertEqual(data["noticesTotal"], 1)
+
+    def test_inbox_without_vistas_or_text(self):
+        self.vista_routes([])
+        with mock.patch.object(server.djen, "fetch_page", return_value={"count": 0, "items": []}):
+            data, error = self.call("stj_list_inbox", {})
+        self.assertFalse(error)
+        self.assertEqual((data["vistas"], data["notices"]), ([], []))
+
     def test_no_tool_ever_sends_a_write(self):
+        self.vista_routes([VISTA])
+        with mock.patch.object(server.djen, "fetch_page", return_value={"count": 0, "items": []}):
+            self.call("stj_list_inbox", {})
+        self.call("stj_get_counters", {})
         for name, arguments in (
             ("stj_get_process", {"process": CNJ}),
             ("stj_read_documents", {"process": REGISTRO, "document_ids": ["1", "2"]}),
