@@ -156,18 +156,31 @@ def import_bundle(args, say):
     wanted = wanted_names(args.portal, tenant["customer"]) if args.portal else None
     merge(
         vault,
-        tenant["id"],
+        tenant,
         *normalize(values, files, wanted),
         say,
         portal_keys=args.portal,
-        customer=tenant["customer"],
         check=args.check,
         store=store,
+        replace_renewed=args.replace_renewed,
     )
 
 
-def merge(vault, tenant, values, files, say, *, portal_keys=None, customer="", check=False, store=None):
+def keep_renewed(current, values, replace=False):
+    """``values`` with the vault's ``current`` value of each name the server renews (ADVBOX device id): a bundle
+    carries the one the office's machine had, older than the server's. ``replace`` keeps the bundle's."""
+    from jurisync.hosted.access import SERVER_RENEWED
+
+    if replace:
+        return dict(values)
+    return {**values, **{name: current[name] for name in SERVER_RENEWED if current.get(name)}}
+
+
+def merge(vault, office, values, files, say, *, portal_keys=None, check=False, store=None, replace_renewed=False):
+    """Add ``values``/``files`` to the office's vault (a store row); with ``check``, only after each login gets in."""
+    tenant, customer = office["id"], office["customer"]
     current_values, current_files = vault.get(tenant)
+    values = keep_renewed(current_values, values, replace_renewed)
     current_values.update(values)
     current_files.update(files)
     if check:
@@ -178,7 +191,7 @@ def merge(vault, tenant, values, files, say, *, portal_keys=None, customer="", c
             raise SystemExit(
                 f"--check precisa de --portal com ao menos um portal ou serviço ({', '.join(SERVICE_NAMES)})"
             )
-        failed = [key for key in targets if not run_check(store, tenant, key, current_values, current_files, say)]
+        failed = [key for key in targets if not run_check(store, office, key, current_values, current_files, say)]
         if failed:
             raise SystemExit(f"Nada foi gravado: o login falhou em {', '.join(failed)}")
     vault.put(tenant, current_values, current_files)
@@ -190,15 +203,17 @@ def merge(vault, tenant, values, files, say, *, portal_keys=None, customer="", c
         say(f"Atenção: {portal} ainda precisa de {', '.join(groups)}")
 
 
-def run_check(store, tenant, portal, values, files, say):
-    """Log in to one portal or service with these credentials; record and print the result."""
+def run_check(store, office, portal, values, files, say):
+    """Log in to one portal or service with these vault credentials, read as the server reads them; record and print
+    the result. ``office`` is the store row."""
     from jurisync.core.mcp import sanitize_diagnostics
     from jurisync.core.session_pool import EXPLANATIONS, login_reason
     from jurisync.hosted import access
 
+    tenant = office["id"]
     say(f"Testando o login em {portal}...")
     try:
-        with access.tenant_scope(tenant, values, files):
+        with access.tenant_scope(office, values, files):
             access.check(portal)
     except Exception as error:  # noqa: BLE001 - any portal failure is reported, never raised to the operator
         reason = login_reason(error)
@@ -215,10 +230,10 @@ def run_check(store, tenant, portal, values, files, say):
     return True
 
 
-def forget(tenant, values, files, portal_keys):
+def forget(office, values, files, portal_keys):
     from jurisync.hosted import access
 
-    with access.tenant_scope(tenant, values, files):
+    with access.tenant_scope(office, values, files):
         for key in portal_keys:
             access.forget(key)
 
@@ -227,10 +242,11 @@ def certificate_remove(args, say):
     from jurisync.hosted import access
 
     store, vault = open_store(), open_vault()
-    tenant = require_existing(store, args.tenant)["id"]
+    office = require_existing(store, args.tenant)
+    tenant = office["id"]
     values, files = vault.get(tenant)
     # The A1 also logs in to Eproc, e-SAJ, Projudi, STJ: every portal's login and cookie cache goes.
-    forget(tenant, values, files, access.served_portals())
+    forget(office, values, files, access.served_portals())
     values.pop(access.A1_PIN, None)
     files.pop(access.A1_FILE, None)
     vault.put(tenant, values, files)
@@ -248,10 +264,7 @@ def portal_list(args, say):
         say(f"{tenant}: só local ({office['reason'] or 'instalação local'}); nenhum portal no servidor")
         return
     values, files = vault.get(tenant)
-    if office["customer"]:
-        # The server applies the profile's pinned values on every call; show the same state.
-        for key, value in customers.fixed_variables(office["customer"]).items():
-            values.setdefault(key, value)
+    values = access.tenant_values(office, values)  # the state the server logs in with
     info = access.certificate_info(values, files)
     say(f"Certificado A1: {f'{info.holder}, válido até {info.expires}' if info else 'não cadastrado'}")
     checks = store.checks(tenant)
@@ -287,9 +300,9 @@ def office_portals(office, values, checks=()):
 
 def portal_check(args, say):
     store, vault = open_store(), open_vault()
-    tenant = require_existing(store, args.tenant)["id"]
-    values, files = vault.get(tenant)
-    if not run_check(store, tenant, args.portal, values, files, say):
+    office = require_existing(store, args.tenant)
+    values, files = vault.get(office["id"])
+    if not run_check(store, office, args.portal, values, files, say):
         raise SystemExit(1)
 
 
@@ -297,10 +310,11 @@ def portal_remove(args, say):
     from jurisync.hosted import access
 
     store, vault = open_store(), open_vault()
-    tenant = require_existing(store, args.tenant)["id"]
+    office = require_existing(store, args.tenant)
+    tenant = office["id"]
     config = portals.get(args.portal)
     values, files = vault.get(tenant)
-    forget(tenant, values, files, [config.key])
+    forget(office, values, files, [config.key])
     vault.put(tenant, access.without_portal(values, config), files)
     store.forget_check(tenant, config.key)
     store.log(tenant, "operador", "acesso ao portal removido", config.key)
@@ -372,6 +386,9 @@ def serve(args):
             close()
 
 
+REPLACE_RENEWED_HELP = "grava o ADVBOX_DEVICE_ID do pacote mesmo quando o servidor já renovou o seu"
+
+
 def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     parser = argparse.ArgumentParser(prog="jurisync-hosted", description="Servidor remoto do Jurisync.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -400,6 +417,7 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     from_bundle.add_argument("--portal", nargs="*", choices=_access.check_targets())
     from_bundle.add_argument("--check", action="store_true", help="só grava se o login nos portais e serviços entrar")
     from_bundle.add_argument("--passphrase-file", help="arquivo (0600) com a senha do pacote, em vez de digitá-la")
+    from_bundle.add_argument("--replace-renewed", action="store_true", help=REPLACE_RENEWED_HELP)
     listing = secrets.add_parser("list")
     listing.add_argument("tenant")
 
@@ -452,6 +470,7 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     apply_parser.add_argument("--passphrase-file", required=True)
     apply_parser.add_argument("--office", nargs="+", help="só estes escritórios")
     apply_parser.add_argument("--user-passwords", help="arquivo 0600 das senhas iniciais (padrão: na pasta de dados)")
+    apply_parser.add_argument("--replace-renewed", action="store_true", help=REPLACE_RENEWED_HELP)
 
     plugin_parser = provision.add_parser("plugin", help="cópia de um plugin do escritório apontando para o servidor")
     plugin_parser.add_argument("source", help="pasta do plugin, ex. plugins/victor")
@@ -547,7 +566,12 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         from jurisync.hosted import provision as provisioning
 
         provisioning.apply(
-            args.plan, args.passphrase_file, only=args.office, user_passwords=args.user_passwords, say=say
+            args.plan,
+            args.passphrase_file,
+            only=args.office,
+            user_passwords=args.user_passwords,
+            replace_renewed=args.replace_renewed,
+            say=say,
         )
     elif args.command == "provision" and args.action == "plugin":
         from jurisync.hosted import provision as provisioning

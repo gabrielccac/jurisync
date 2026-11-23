@@ -1,7 +1,7 @@
 """Juridiq REST client: cached bearer session and named operations.
 
-The bearer token is cached per account in a private file, kept in memory by the client that read it, and refreshed
-once on a 401. Each client reuses one HTTP session. Writes require JURIDIQ_ALLOW_WRITES=true; the
+The bearer token is cached per account in a private file, kept in memory by the client that read it (until the
+credentials signature changes: a token another password got is not reused), and refreshed once on a 401. Each client reuses one HTTP session. Writes require JURIDIQ_ALLOW_WRITES=true; the
 POST /generic-tables query is a read.
 """
 
@@ -180,7 +180,8 @@ class JuridiqApi:
     def __init__(self, send=None):
         self._http = None
         self._lock = threading.Lock()
-        self._tokens = {}  # (session file, API base) -> {"token", "expiresAt"}: one entry per account and office
+        # (session file, API base) -> {"token", "expiresAt", "signature"}: one entry per account and office
+        self._tokens = {}
         self._send = send or self._session_send
 
     def _session_send(self, method, url, headers, body):
@@ -228,6 +229,7 @@ class JuridiqApi:
                         "token": token,
                         "baseUrl": settings["apiBaseUrl"],
                         "expiresAt": jwt_expiry(token),
+                        "signature": credentials.signature(),
                         "updatedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                     },
                     indent=2,
@@ -241,21 +243,31 @@ class JuridiqApi:
         account, not on every request."""
         settings = config()
         key = (str(settings["sessionFile"]), settings["apiBaseUrl"])
+        signature = credentials.signature()
         if not force_refresh:
             held = self._tokens.get(key)
             # Deleting the file (a logout, or another process dropping a refused token) also drops the copy here.
-            if held and is_fresh(held) and settings["sessionFile"].exists():
+            if held and held["signature"] == signature and is_fresh(held) and settings["sessionFile"].exists():
                 return held["token"]
             try:
                 cached = json.loads(settings["sessionFile"].read_text(encoding="utf-8"))
             except (FileNotFoundError, ValueError):
                 cached = None
-            if isinstance(cached, dict) and cached.get("baseUrl") == settings["apiBaseUrl"] and is_fresh(cached):
-                self._tokens[key] = {"token": cached["token"], "expiresAt": cached.get("expiresAt")}
+            if (
+                isinstance(cached, dict)
+                and cached.get("baseUrl") == settings["apiBaseUrl"]
+                and cached.get("signature", "") == signature
+                and is_fresh(cached)
+            ):
+                self._tokens[key] = {
+                    "token": cached["token"],
+                    "expiresAt": cached.get("expiresAt"),
+                    "signature": signature,
+                }
                 return cached["token"]
         self._tokens.pop(key, None)
         token = self._login(settings)
-        self._tokens[key] = {"token": token, "expiresAt": jwt_expiry(token)}
+        self._tokens[key] = {"token": token, "expiresAt": jwt_expiry(token), "signature": signature}
         return token
 
     def request(self, path, method="GET", body=None):

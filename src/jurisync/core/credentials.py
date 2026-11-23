@@ -7,9 +7,14 @@ environment, so one office can never log in with another's (or the operator's) c
 
 Files (the A1 certificate) travel as bytes in the scope and are read with ``read_file``; nothing is written to disk.
 A connector that learns a new value of its own (ADVBOX's device id) stores it with ``save``.
+
+Each scope carries a ``signature`` of its credentials. The operator changes a vault from another process
+(``jurisync-hosted``), so what the server keeps in memory for an office (logins, clients, tokens, a cool-down after
+rejected credentials) is kept with the signature it was made under and dropped when the office's signature changes.
 """
 
 import contextvars
+import hashlib
 import os
 import tempfile
 from contextlib import contextmanager
@@ -23,20 +28,37 @@ class Scope:
     values: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)
     saver: object = None
+    signature: str = ""
 
 
 _current = contextvars.ContextVar("jurisync_credentials", default=None)
 
 
+def digest(values, files, skip=()):
+    """A short SHA-256 of credentials (``values`` and ``files``), ignoring the names in ``skip``."""
+    hashed = hashlib.sha256()
+    for kind, entries in ((b"v", values or {}), (b"f", files or {})):
+        for name in sorted(set(entries) - set(skip)):
+            value = entries[name]
+            value = value if isinstance(value, bytes) else str(value).encode("utf-8")
+            for part in (kind, name.encode("utf-8"), value):
+                hashed.update(len(part).to_bytes(8, "big") + part)
+    return hashed.hexdigest()[:16]
+
+
 @contextmanager
-def scope(tenant, values=None, files=None, saver=None):
+def scope(tenant, values=None, files=None, saver=None, signature=None):
     """Read every credential from ``values`` (name -> text) and ``files`` (name -> bytes) inside the block.
 
     ``saver(name, value)``, when given, stores one value in the tenant's vault entry for later requests (see ``save``).
+    ``signature`` defaults to the ``digest`` of the values and files.
     """
     if not tenant:
         raise ValueError("A credentials scope needs a tenant id")
-    token = _current.set(Scope(tenant, dict(values or {}), dict(files or {}), saver))
+    values, files = dict(values or {}), dict(files or {})
+    if signature is None:
+        signature = digest(values, files)
+    token = _current.set(Scope(tenant, values, files, saver, signature))
     try:
         yield
     finally:
@@ -47,6 +69,12 @@ def tenant():
     """The tenant of the current scope, or "" for a local single-account install."""
     current = _current.get()
     return current.tenant if current else ""
+
+
+def signature():
+    """The current scope's credentials signature; "" locally (a changed .env takes a restart)."""
+    current = _current.get()
+    return current.signature if current else ""
 
 
 def env(name, default=""):

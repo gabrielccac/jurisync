@@ -40,6 +40,9 @@ ciência; o usuário sempre fica sabendo o que a leitura fez. Por sistema, hoje:
 `sessions.run` refaz o login uma vez quando a sessão expira (PJe, Eproc, e-SAJ, Projudi, STJ, Tucujuris, JPe). No
 máximo `JURISYNC_MAX_LOGINS` logins ao mesmo tempo; senha recusada não é reenviada por 15 min
 (`JURISYNC_LOGIN_COOLDOWN_SECONDS`). Só portais configurados para o escritório abrem login (`SessionPool.only`).
+No servidor, sessões, clientes ADVBOX, tokens Juridiq e o bloqueio de 15 min guardam a assinatura das credenciais do
+escritório (`credentials.signature()`): uma troca feita pelo `jurisync-admin` vale na chamada seguinte, sem reiniciar.
+Todo login falho traz um motivo fixo (`core/session_pool.REASONS`) com a explicação em português.
 
 ## Feito nesta rodada de consertos (branch `chore/hardening`)
 
@@ -53,11 +56,28 @@ máximo `JURISYNC_MAX_LOGINS` logins ao mesmo tempo; senha recusada não é reen
 - `a8aa101` Eproc, e-SAJ e Projudi: `sessions.run`, bloco de ciência, portais configurados, títulos.
 - `63536ef` STJ, JPe, Tucujuris, Juridiq e MindChat: portais configurados, bloco de ciência, valores por escritório.
 - `269488f` ADVBOX: datas AAAA-MM-DD e verificação do aparelho com o código pedido ao usuário.
+- `eb4d834` Login: motivo da falha padronizado em todos os sistemas (senha, senha expirada, TOTP, A1, sem cadastro,
+  bloqueio, CAPTCHA, portal fora, login faltando); um só carregador de A1 (`core/certificate.load_configured`) e um só
+  código TOTP (`core/totp`) para PJe, Eproc, Projudi, e-SAJ, STJ, JPe e Tucujuris.
+- `0e5f779` Ciência com autorização prévia; tabela do Push do PJe; motivo de falha nos downloads do PJe.
+- `3876c04`, `d8924ca` Consertos da revisão: servidor remoto (portal check do PJe-JT, `provision apply` substitui o
+  cofre, `Vault.update` com trava), portais do perfil, deploy; `.env` sem quebra de linha, Push e downloads, código
+  TOTP fresco, verificações ADVBOX expiradas.
+- Rodada de causa raiz:
+  - `3039bec` PJe: downloads lentos do TJBA (prazos por etapa), link `frameBinario` do TJPA, erros de fluxo do
+    Keycloak (sessão inválida/ação expirada) com uma nova tentativa, busca do PJe-JT reaproveitada 180 s, OCR de PDF
+    escaneado (`core/ocr.py`, extra `pdf-ocr`).
+  - `bac29ab` e-SAJ: pasta digital pelo botão "Visualizar autos", "múltiplas consultas simultâneas" repetida
+    (rate limit) e espera de 150 s do painel.
+  - `b99b207` Projudi TJGO: filtros da busca limpos antes de procurar por número; Eproc pelo Chrome: motivo e
+    diagnóstico no login.
+  - `52a7970` Projudi TJBA: resolvedor do CAPTCHA Tencent (`core/tencent_captcha.py`) e adaptador cnj-servlet,
+    **ainda não ligado** (`wired=False`) até um login real com senha válida (Thaile: senha expirada; Max: recusada).
 
 ## Próximas etapas (em ordem)
 
-1. **Terminar a limpeza** (em andamento): motivos de falha de login claros por portal (senha, TOTP, A1 vencido,
-   portal fora); um só fluxo Keycloak/x509/OTP e um só carregador de A1 para PJe, Eproc e Projudi.
+1. **Terminar a limpeza**: um só fluxo Keycloak/x509/OTP para PJe, Eproc e Projudi (hoje `pje/auth/sso.py`,
+   `eproc/auth.py`/`http_login.py` e `projudi/keycloak.py`); ligar o Projudi TJBA quando houver uma senha válida.
 2. **Testar o servidor com escritórios reais**, um de cada vez, com o checklist "Validation per office" de
    `hosted.md`:
    - piloto: victor (comparar com a instância atual "Pje Victor Hugo" por uma semana antes de desligá-la);

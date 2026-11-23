@@ -209,6 +209,7 @@ class LocalOfficeTest(ProvisionCase):
             store.add_tenant("delta", "Delta", customer="delta", connectors=["pje", "djen"])
             store.add_user("antiga@delta.test", "delta", PASSWORD)
             vault.put("delta", {"PJE_1G_PASSWORD": "senha-delta"})
+            store.save_check("delta", "trf1-1g", True, "login OK")
             plan = json.loads((self.out / provision.PLAN).read_text())
             for office in plan["offices"]:
                 office["users"] = [f"advogada@{office['tenant']}.test"]
@@ -218,6 +219,7 @@ class LocalOfficeTest(ProvisionCase):
             self.assertEqual((office["mode"], office["connectors"]), ("local", []))
             self.assertEqual(vault.names("delta"), ([], []))
             self.assertEqual(store.users("delta"), [])
+            self.assertEqual(store.checks("delta"), {})
             with self.assertRaises(ValueError):
                 store.add_user("nova@delta.test", "delta", PASSWORD)
             said = []
@@ -252,7 +254,7 @@ class ApplyTest(ProvisionCase):
         values, files = vault.get("alfa")
         self.assertEqual(files["PJE_A1_P12"], self.p12)
         self.assertEqual(values["ADVBOX_ALLOW_WRITES"], "true")
-        self.assertEqual(values["PJE_1G_CERT"], "true")  # pinned in the profile, stored with the office
+        self.assertNotIn("PJE_1G_CERT", values)  # pinned in the profile: the server reads it there, never a copy
         for never in ("PJE_ALLOW_DRAFT_WRITES", "MINDCHAT_API_KEY"):
             self.assertNotIn(never, values)
         beta, _ = vault.get("beta")
@@ -296,6 +298,30 @@ class ApplyTest(ProvisionCase):
         self.assertEqual(set(store.checks("alfa")), {"trf5-1g"})
         self.assertIn("alfa: removidos do cofre: OLD_P12, PJE_2G_PASSWORD", self.said)
         self.assertNotIn("dropped-portal", "\n".join(self.said))
+
+    def test_the_device_id_the_server_renewed_beats_the_bundle_unless_replaced(self):
+        env = self.ours / "alfa" / ".env"
+        env.write_text(env.read_text() + "ADVBOX_DEVICE_ID=office-machine-device\n")
+        self.export("alfa")
+        _, vault = self.apply()
+        self.assertEqual(vault.get("alfa")[0]["ADVBOX_DEVICE_ID"], "office-machine-device")
+        vault.update("alfa", "ADVBOX_DEVICE_ID", "renewed-device")
+        _, vault = self.apply()
+        self.assertEqual(vault.get("alfa")[0]["ADVBOX_DEVICE_ID"], "renewed-device")
+        with mock.patch.dict(os.environ, self.server()):
+            provision.apply(self.out, self.passphrase, replace_renewed=True, say=self.said.append)
+        self.assertEqual(vault.get("alfa")[0]["ADVBOX_DEVICE_ID"], "office-machine-device")
+
+    def test_an_import_keeps_the_renewed_device_id(self):
+        with mock.patch.dict(os.environ, self.server()):
+            store, vault = cli.open_store(), cli.open_vault()
+            store.add_tenant("alfa", "Alfa", customer="", connectors=["advbox"])
+            vault.put("alfa", {"ADVBOX_DEVICE_ID": "renewed-device"})
+            office = store.tenant("alfa")
+            cli.merge(vault, office, {"ADVBOX_DEVICE_ID": "old", "ADVBOX_EMAIL": "a@x.br"}, {}, self.said.append)
+            self.assertEqual(vault.get("alfa")[0], {"ADVBOX_DEVICE_ID": "renewed-device", "ADVBOX_EMAIL": "a@x.br"})
+            cli.merge(vault, office, {"ADVBOX_DEVICE_ID": "old"}, {}, self.said.append, replace_renewed=True)
+            self.assertEqual(vault.get("alfa")[0]["ADVBOX_DEVICE_ID"], "old")
 
     def test_serve_refuses_an_office_whose_profile_is_not_installed(self):
         self.export()

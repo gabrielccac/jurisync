@@ -198,3 +198,23 @@ def test_an_input_error_keeps_the_session_but_other_errors_mark_it_stale():
     with pool.session("jfsc"):
         pass
     assert refreshed == ["session"]
+
+
+def test_changed_credentials_drop_the_session_and_the_cooldown():
+    portal = Portal()
+    with credentials.scope("office", {"PASSWORD": "old"}):
+        first = portal.use("trf1-1g")
+    with credentials.scope("office", {"PASSWORD": "old"}):
+        assert portal.use("trf1-1g") == first  # same credentials: the login is kept
+    with credentials.scope("office", {"PASSWORD": "new"}):
+        assert portal.use("trf1-1g") != first
+    assert portal.closed == [first]
+    portal.rejecting.add("trf1-1g")
+    with credentials.scope("office", {"PASSWORD": "wrong"}), pytest.raises(LoginRejected, match="wrong password"):
+        portal.pool.check("trf1-1g")
+    with credentials.scope("office", {"PASSWORD": "wrong"}), pytest.raises(LoginRejected, match="no new login"):
+        portal.pool.check("trf1-1g")
+    portal.rejecting.clear()
+    with credentials.scope("office", {"PASSWORD": "fixed"}):
+        portal.pool.check("trf1-1g")  # the operator stored a new password: the cool-down is lifted
+    assert len(portal.logins) == 4

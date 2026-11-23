@@ -30,6 +30,17 @@ class TenantLocalTest(unittest.TestCase):
         local.close()
         self.assertEqual(len(closed), 3)
 
+    def test_an_instance_made_under_other_credentials_is_replaced(self):
+        closed = []
+        local = TenantLocal(object, close=closed.append)
+        with credentials.scope("office-a", {"ADVBOX_PASSWORD": "old"}):
+            old = local.get()
+        with credentials.scope("office-a", {"ADVBOX_PASSWORD": "old"}):
+            self.assertIs(local.get(), old)
+        with credentials.scope("office-a", {"ADVBOX_PASSWORD": "new"}):
+            self.assertIsNot(local.get(), old)
+        self.assertEqual(closed, [old])
+
 
 class AdvboxTest(unittest.TestCase):
     def setUp(self):
@@ -77,6 +88,29 @@ class JuridiqTest(unittest.TestCase):
         self.assertIn("tenants/office-a", str(settings["sessionFile"]))
         with mock.patch.dict(os.environ, {"JURIDIQ_PASSWORD": "server"}), credentials.scope("office-b"):
             self.assertIsNone(config()["password"] or None)
+
+    def test_a_token_from_other_credentials_is_not_reused(self):
+        from jurisync.connectors.juridiq.api import JuridiqApi
+
+        logins = []
+
+        def send(method, url, headers, body):
+            logins.append(body)
+            return mock.Mock(status_code=200, json=lambda: {"token": f"token-{len(logins)}"})
+
+        values = {"JURIDIQ_EMAIL": "a@x.br", "JURIDIQ_PASSWORD": "old"}
+        api = JuridiqApi(send=send)
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch("jurisync.connectors.juridiq.api._cache_dir", return_value=Path(directory)):
+                with credentials.scope("office-a", values):
+                    first = api.token()
+                with credentials.scope("office-a", values):
+                    self.assertEqual(api.token(), first)
+                with credentials.scope("office-a", {**values, "JURIDIQ_PASSWORD": "new"}):
+                    self.assertNotEqual(api.token(), first)
+                with credentials.scope("office-a", {**values, "JURIDIQ_PASSWORD": "new"}):
+                    self.assertEqual(JuridiqApi(send=send).token(), api.token())  # the file serves the new password
+        self.assertEqual(len(logins), 2)
 
 
 class AccessChecksTest(unittest.TestCase):
@@ -182,6 +216,49 @@ class ServerGuardsTest(unittest.TestCase):
         with mock.patch("jurisync.hosted.app.AuthenticatedUser", mock.Mock):
             anyio.run(gate, {"type": "http", "user": user}, None, None)
         self.assertEqual(seen, {"tenant": "victor", "writes": "true", "cert": "true", "customer": "victor"})
+
+    def gate_values(self, tenant="victor", *names):
+        seen = {}
+
+        async def app(scope, receive, send):
+            seen.update({name: credentials.env(name) for name in names}, signature=credentials.signature())
+
+        user = mock.Mock()
+        user.access_token = mock.Mock(claims={"tenant": tenant}, resource=None)
+        gate = TenantGate(app, connector="advbox", store=self.store, vault=self.vault, resource="https://x/advbox/mcp")
+        import anyio
+
+        with mock.patch("jurisync.hosted.app.AuthenticatedUser", mock.Mock):
+            anyio.run(gate, {"type": "http", "user": user}, None, None)
+        return seen
+
+    def test_the_profile_wins_over_the_vault_and_the_operator_checks_read_the_same(self):
+        self.store.add_tenant("victor", "Victor", customer="victor", connectors=["advbox"])
+        # A copy an older provision stored, and a later portals.toml change.
+        self.vault.put("victor", {"ADVBOX_ALLOW_WRITES": "false", "PJE_1G_CERT": "", "JURISYNC_CUSTOMER": "x"})
+        names = ("ADVBOX_ALLOW_WRITES", "PJE_1G_CERT", "JURISYNC_CUSTOMER")
+        served = self.gate_values("victor", *names)
+        self.assertEqual([served[name] for name in names], ["true", "true", "victor"])
+        checked = {}
+
+        def check(target):
+            checked.update({name: credentials.env(name) for name in names}, signature=credentials.signature())
+
+        with mock.patch.object(access, "check", side_effect=check):
+            self.assertTrue(
+                cli.run_check(None, self.store.tenant("victor"), "trf1-1g", *self.vault.get("victor"), print)
+            )
+        self.assertEqual(checked, served)  # the same configuration, so a token the check got is the server's too
+
+    def test_a_vault_change_changes_the_signature_and_a_renewed_device_id_does_not(self):
+        self.store.add_tenant("victor", "Victor", customer="victor", connectors=["advbox"])
+        self.vault.put("victor", {"ADVBOX_PASSWORD": "old", "ADVBOX_DEVICE_ID": "d1"})
+        first = self.gate_values()["signature"]
+        self.assertEqual(self.gate_values()["signature"], first)
+        self.vault.update("victor", "ADVBOX_DEVICE_ID", "d2")
+        self.assertEqual(self.gate_values()["signature"], first)
+        self.vault.update("victor", "ADVBOX_PASSWORD", "new")
+        self.assertNotEqual(self.gate_values()["signature"], first)
 
 
 class ServiceImportTest(unittest.TestCase):

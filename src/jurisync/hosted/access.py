@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import pyotp
 
-from jurisync import portals, registry
+from jurisync import customers, portals, registry
 from jurisync.core import credentials
 from jurisync.core.totp import parse_accounts, select_account
 
@@ -319,5 +319,23 @@ def forget_sessions(portal):
         path.unlink(missing_ok=True)
 
 
-def tenant_scope(tenant, values, files):
-    return credentials.scope(tenant, values, files)
+# Values the server renews itself (``credentials.save``). They stay out of the signature: renewing one must not drop
+# the office's other logins.
+SERVER_RENEWED = ("ADVBOX_DEVICE_ID",)
+
+
+def tenant_values(tenant, values):
+    """What a call of this office reads: its vault ``values``, its customer and its profile's pinned values
+    (``[env].set``). The profile wins over the vault: the configuration chosen at setup lives in portals.toml."""
+    values = dict(values)
+    if tenant["customer"]:
+        values["JURISYNC_CUSTOMER"] = tenant["customer"]
+        values.update(customers.fixed_variables(tenant["customer"]))
+    return values
+
+
+def tenant_scope(tenant, values, files, saver=None):
+    """The credentials scope of an office (a store row) as the server opens it for every call."""
+    values = tenant_values(tenant, values)
+    signature = credentials.digest(values, files, skip=SERVER_RENEWED)
+    return credentials.scope(tenant["id"], values, files, saver=saver, signature=signature)

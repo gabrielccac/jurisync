@@ -9,6 +9,10 @@ A session idle longer than ``revalidate_after`` seconds is checked with
 Logins are the expensive, risky step: at most ``JURISYNC_MAX_LOGINS`` run at once in the process, and
 credentials a portal rejected are not sent again for ``login_cooldown`` seconds (a few wrong passwords lock
 the account). Sessions unused for ``idle_ttl`` seconds are closed the next time the pool is used.
+
+A session and a cool-down hold the ``credentials.signature()`` they were made under: once the office's credentials
+change (the operator's ``jurisync-hosted`` runs in another process), the session is closed and the cool-down lifted, so
+the next call logs in with the new credentials.
 """
 
 import os
@@ -63,7 +67,7 @@ class LoginRejected(LoginFailed):
     """Raised by a connector's login when the portal refused the credentials (wrong password, OTP or certificate).
 
     Network and page errors are not this. The pool never retries it and blocks further logins for the same
-    tenant and portal until the cool-down passes or ``forget`` reports that the credentials changed.
+    tenant and portal until the cool-down passes, the credentials signature changes or ``forget`` is called.
     ``reason`` is one of ``REFUSALS``, or ``unexpected`` when the portal stopped the login for something none of them
     names (a profile to choose, an account action the connector never takes).
     """
@@ -141,9 +145,9 @@ class SessionPool:
         self._idle_ttl = idle_ttl
         self._clock = clock
         self._wall_clock = wall_clock
-        self._entries = {}  # key -> (session, last successful use; -inf after a failed call)
+        self._entries = {}  # key -> (session, last successful use; -inf after a failed call, credentials signature)
         self._used = {}  # key -> last use of any kind, for idle eviction
-        self._rejected = {}  # key -> (clock time, wall time, reason) of the last LoginRejected
+        self._rejected = {}  # key -> (clock time, wall time, reason, credentials signature) of the last LoginRejected
         self._locks = {}
         self._guard = threading.Lock()
         self._only = None  # the portals a local server offers; None logs in anywhere (hosted: the office decides)
@@ -215,6 +219,9 @@ class SessionPool:
     def _check_cooldown(self, key):
         with self._guard:
             rejected = self._rejected.get(key)
+            if rejected is not None and rejected[3] != credentials.signature():
+                del self._rejected[key]  # the credentials changed since the portal refused them
+                return
         if rejected is None:
             return
         remaining = self._cooldown() - (self._clock() - rejected[0])
@@ -242,7 +249,7 @@ class SessionPool:
                 return (login or self._login)(portal)
             except LoginRejected as error:
                 with self._guard:
-                    self._rejected[key] = (self._clock(), self._wall_clock(), error.reason)
+                    self._rejected[key] = (self._clock(), self._wall_clock(), error.reason, credentials.signature())
                 raise
 
     def fresh_login(self, portal, login=None):
@@ -256,11 +263,14 @@ class SessionPool:
     @contextmanager
     def session(self, portal):
         key = (credentials.tenant(), portal)
+        signature = credentials.signature()
         self._evict_idle(keep=key)
         with self._held(key):
             self._touch(key)
             entry = self._entries.get(key)
-            if entry is not None and self._clock() - entry[1] > self._revalidate_after:
+            if entry is not None and entry[2] != signature:
+                self._discard(key)
+            elif entry is not None and self._clock() - entry[1] > self._revalidate_after:
                 try:
                     value = self._refresh(portal, entry[0])
                 except Exception:
@@ -268,9 +278,9 @@ class SessionPool:
                 if value is None:
                     self._discard(key)
                 else:
-                    self._entries[key] = entry = (value, self._clock())
+                    self._entries[key] = (value, self._clock(), signature)
             if key not in self._entries:
-                self._entries[key] = (self._new_login(key, portal), self._clock())
+                self._entries[key] = (self._new_login(key, portal), self._clock(), signature)
             value = self._entries[key][0]
             try:
                 yield value
@@ -278,11 +288,11 @@ class SessionPool:
                 raise  # Refused input says nothing about the session: keep it as it was.
             except BaseException:
                 # The failure may be an expired session: verify before next reuse.
-                self._entries[key] = (value, float("-inf"))
+                self._entries[key] = (value, float("-inf"), signature)
                 raise
             finally:
                 self._touch(key)
-            self._entries[key] = (value, self._clock())
+            self._entries[key] = (value, self._clock(), signature)
 
     def run(self, portal, read):
         """``read(session)`` on the pooled session; if it raises ``SessionExpired``, log in again once and repeat.

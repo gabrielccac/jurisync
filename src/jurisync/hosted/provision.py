@@ -14,8 +14,9 @@ offices' accounts) and decides, per portal, whether the server can log in there:
 * Portals whose declared secrets are missing are skipped, so the server never tries a login that cannot work.
 * Legacy names (``*_USUARIO``/``*_SENHA``/``*_EXPORT_DATA``, older prefixes) become the canonical ones in the bundle;
   the customer's ``.env`` is not changed.
-* QR images become ``*_2FA_DATA`` text, the A1 file becomes bytes, the profile's pinned values (``[env].set``) and the
-  office's own ``ADVBOX_ALLOW_WRITES``/``JURIDIQ_ALLOW_WRITES`` travel with it. A3 switches and PJe draft writes never do.
+* QR images become ``*_2FA_DATA`` text, the A1 file becomes bytes, the office's own
+  ``ADVBOX_ALLOW_WRITES``/``JURIDIQ_ALLOW_WRITES`` travel with it. A3 switches and PJe draft writes never do, nor do the
+  profile's pinned values (``[env].set``): the server reads them from the installed profile on every call.
 
 It writes ``plan.json`` (names, portals, connectors, reasons; no values), one ``<office>.jurisync`` bundle per office
 sealed with the rollout passphrase, and ``profiles/<customer>/`` (``portals.toml``, ``settings.toml``) for the server's
@@ -45,8 +46,6 @@ PROFILE_FILES = ("portals.toml", "settings.toml")
 SYSTEM_ORDER = tuple(registry.CONNECTORS)
 SERVICES = {name: registry.get(name).login for name in registry.SERVICES}
 WRITE_GRANTS = tuple(connector.write_grant for connector in registry.CONNECTORS.values() if connector.write_grant)
-# Values the server renews itself (``credentials.save``): an apply keeps them unless the bundle brings its own.
-SERVER_RENEWED = ("ADVBOX_DEVICE_ID",)
 # Portals whose login meets a CAPTCHA the server answers with JURISYNC_CAPTCHA_API_KEY (or the captcha-ocr extra).
 CAPTCHA_PORTALS = {"tjes-1g": "AWS WAF"}
 
@@ -205,10 +204,8 @@ def vault_content(plan, values):
     values, _ = canonical_names(values, [key for key in plan.portals if key not in SERVICES] + list(plan.skipped))
     values = resolve_files(values, customers.customer_dir(plan.customer))
     fixed = customers.fixed_variables(plan.customer)
-    values.update(fixed)
     wanted = cli.wanted_names(plan.portals, plan.customer) if plan.portals else set()
     wanted |= {name for name in WRITE_GRANTS if values.get(name)}
-    wanted |= set(fixed)
     if plan.portals or fixed:
         optional = customers.extra_variables(plan.customer)[1]
         wanted |= {name for name in optional if values.get(name)}
@@ -220,11 +217,14 @@ def vault_content(plan, values):
         for prefix in (portals.get(key).env_prefix, *portals.get(key).legacy_env_prefixes)
         if prefix
     )
-    # Settings of a planned portal (method, TOTP profile, cache identity) or a service; nothing of a skipped portal.
+    # Settings of a planned portal (method, TOTP profile, cache identity) or a service; nothing of a skipped portal,
+    # nothing the profile pins (it wins on the server, so a copy would only go stale).
     picked = {
         name: value
         for name, value in values.items()
-        if value and (name in wanted or (name.startswith(prefixes) and name.endswith(cli.SETTING_SUFFIXES)))
+        if value
+        and name not in fixed
+        and (name in wanted or (name.startswith(prefixes) and name.endswith(cli.SETTING_SUFFIXES)))
     }
     return cli.normalize(picked, {}, wanted | set(picked))
 
@@ -358,7 +358,7 @@ def install_profile(source, customer):
     return True
 
 
-def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=print):
+def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace_renewed=False, say=print):
     from jurisync.hosted import cli
 
     directory = Path(directory).expanduser()
@@ -389,7 +389,7 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=pri
         for variable, name in opened["file_vars"].items():
             values.pop(variable, None)
             files[variable] = opened["files"][name]
-        replace_vault(store, vault, tenant, values, files, office["portals"], customer, say)
+        replace_vault(store, vault, tenant, values, files, office["portals"], customer, say, replace_renewed)
         existing = {row["email"] for row in store.users()}
         for email in office.get("users", []):
             email = email.strip().lower()
@@ -409,13 +409,13 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=pri
     say("Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)")
 
 
-def replace_vault(store, vault, tenant, values, files, portal_keys, customer, say):
-    """The office's vault becomes the bundle: names the plan dropped go, the values the server renews stay."""
+def replace_vault(store, vault, tenant, values, files, portal_keys, customer, say, replace_renewed=False):
+    """The office's vault becomes the bundle: names the plan dropped go, the values the server renews stay (the
+    bundle's copy is the office machine's, older; ``replace_renewed`` takes it anyway)."""
     from jurisync.hosted import cli
 
     current_values, current_files = vault.get(tenant)
-    kept = {name: current_values[name] for name in SERVER_RENEWED if name in current_values and name not in values}
-    values = {**values, **kept}
+    values = cli.keep_renewed(current_values, values, replace_renewed)
     removed = sorted((set(current_values) - set(values)) | (set(current_files) - set(files)))
     vault.put(tenant, values, files)
     store.log(tenant, "operador", "credenciais importadas", ", ".join(sorted(values) + sorted(files)))
@@ -444,6 +444,8 @@ def apply_local(store, vault, office, say):
     if vault.names(tenant) != ([], []):
         vault.delete(tenant)
         say(f"{tenant}: credenciais apagadas do cofre")
+    for portal in sorted(store.checks(tenant)):
+        store.forget_check(tenant, portal)
     for row in store.users(tenant):
         store.remove_user(row["email"])
         say(f"{tenant}: usuário {row['email']} removido")

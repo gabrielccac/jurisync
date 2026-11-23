@@ -41,8 +41,9 @@ from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from jurisync import customers, registry
+from jurisync import registry
 from jurisync.core import credentials
+from jurisync.hosted import access
 from jurisync.hosted.oauth import SCOPE, BrowserBinding, Provider, login_routes
 from jurisync.hosted.throttle import IP_MAX_FAILURES, Throttle
 
@@ -286,15 +287,10 @@ class TenantGate:
                 status_code=403,
             )(scope, receive, send)
         values, files = self.vault.get(tenant["id"])
-        if tenant["customer"]:
-            values.setdefault("JURISYNC_CUSTOMER", tenant["customer"])
-            # The profile's pinned values ([env].set: certificate opt-ins, ADVBOX writes) apply as they do locally.
-            for key, value in customers.fixed_variables(tenant["customer"]).items():
-                values.setdefault(key, value)
         user = (token.subject or "") if token else ""
         marker = caller.set((tenant, user))
         try:
-            with credentials.scope(tenant["id"], values, files, saver=self._saver(tenant["id"])):
+            with access.tenant_scope(tenant, values, files, saver=self._saver(tenant["id"])):
                 await self.app(scope, receive, send)
         finally:
             caller.reset(marker)

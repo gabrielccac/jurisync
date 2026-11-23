@@ -69,6 +69,14 @@ per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
 - Every login, including the operator's `portal check`, goes through the session pool: at most
   `JURISYNC_MAX_LOGINS` at once, and credentials a portal rejected are not sent again for the cool-down
   (`JURISYNC_LOGIN_COOLDOWN_SECONDS`, 15 min) unless the access is changed.
+- Each call's scope carries a signature (SHA-256) of the office's credentials as the server reads them. A pooled
+  login, an ADVBOX client, a Juridiq token and a cool-down are kept with the signature they were made under: when the
+  operator changes the vault from another process (`secrets import-bundle`, `certificate remove`, `portal remove`,
+  `provision apply`), the next call drops them and logs in with the new credentials. `ADVBOX_DEVICE_ID`, which the
+  server renews itself, is left out of the signature.
+- The office's profile wins over its vault: `JURISYNC_CUSTOMER` comes from the tenant and the profile's `[env].set`
+  values override a vault value of the same name. `serve`, `portal list`, `portal check` and `import-bundle --check`
+  read the same values (`access.tenant_values`).
 
 ## Provisioning every office
 
@@ -82,14 +90,17 @@ uv run jurisync-hosted provision export --out ~/rollout --passphrase-file ~/.con
 Per office it keeps the portals the server can log in to and says why the others stay out: A3 portals (`*_A3_PIN`),
 portals with a declared secret missing in the office's own `.env` (the shared root `.env` is never read), systems not
 served. Legacy names (`*_USUARIO`, `*_SENHA`, `*_EXPORT_DATA`) are stored under the standard names; QR images become
-`*_2FA_DATA`; the A1 file becomes bytes; pinned values and the office's own write grants go along. Connectors follow
+`*_2FA_DATA`; the A1 file becomes bytes; the office's own write grants go along; pinned values (`[env].set`) stay in
+the profile, which the server reads on every call. Connectors follow
 from the kept portals (+ `advbox`/`juridiq` when their login is set, + `djen`). Output: `plan.json` (names, reasons,
 users; no values), `<office>.jurisync` sealed with the rollout passphrase (a 0600 file kept apart from the folder,
 never printed) and `profiles/<customer>/` (five customer folders are not in the repository).
 
 On the server, `jurisync-admin provision apply <folder> --passphrase-file <file>` creates or updates the tenants,
 installs the profiles in `JURISYNC_CUSTOMERS_DIR`, stores each bundle without a login and adds the plan's users with
-random passwords written to a 0600 file. The first login of each portal is `deploy/check-office.sh <office>`, from the
+random passwords written to a 0600 file. An `ADVBOX_DEVICE_ID` already in the vault (the server renews it) is kept over
+the bundle's, also on `import-bundle`; `--replace-renewed` takes the bundle's. Switching an office to local deletes
+its vault entry, users and login checks. The first login of each portal is `deploy/check-office.sh <office>`, from the
 server, one portal at a time.
 
 ### Local-only offices
@@ -180,8 +191,8 @@ Run for every office before it uses the server for real. Each step names what pr
    server opens one login per office.
 7. **Scheduled routine.** A cloud routine with the office's connector runs with no one connected and produces its
    result. Proof: the routine output and the server log.
-8. **Changes take effect.** A new password in the web area is used on the next call; removing a user or changing
-   their password stops their Claude connector.
+8. **Changes take effect.** A new password (web area or `jurisync-admin`) is used on the next call; removing a user
+   or changing their password stops their Claude connector.
 
 
 ## Known limits of the pilot

@@ -85,7 +85,7 @@ def test_setup_and_hosted_checks_explain_the_reason_in_portuguese():
         mock.patch.object(access, "tenant_scope", return_value=contextlib.nullcontext()),
         mock.patch.object(access, "check", side_effect=LoginRejected("refused", reason="otp_refused")),
     ):
-        assert cli.run_check(store, "office-a", "trf1-1g", {}, {}, said.append) is False
+        assert cli.run_check(store, {"id": "office-a", "customer": ""}, "trf1-1g", {}, {}, said.append) is False
     assert "o código do autenticador foi recusado" in said[-1]
     assert store.save_check.call_args.args[3] == "[otp_refused] refused"
 
