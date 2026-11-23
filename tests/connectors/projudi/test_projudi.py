@@ -347,7 +347,7 @@ class DocumentReadTest(unittest.TestCase):
 
     def test_pdf_text_and_access_denied_are_reported_per_document(self):
         number, results, ciencia = self.read(["100", "101"])
-        self.assertEqual(ciencia, {})
+        self.assertEqual(ciencia, {"estado": "nenhuma"})
         self.assertEqual(number, NUMBER)
         self.assertEqual([r["extractionStatus"] for r in results], ["extracted", "access_denied"])
         self.assertIn("Peticao inicial ficticia", results[0]["text"])
@@ -414,6 +414,40 @@ class ServerTest(unittest.TestCase):
 
         return asyncio.run(run())
 
+    def test_configured_portals_follow_each_adapter_login(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(server.configured_portals(), ())
+        with mock.patch.dict(os.environ, {"TJAM_1G_USERNAME": "AM000", "TJAM_1G_PASSWORD": "x"}, clear=True):
+            self.assertEqual(server.configured_portals(), ("tjam-1g",))
+        for certificate in (
+            {"PJE_A1_P12": "/a1.p12", "PJE_A1_PIN": "pin"},
+            {"PROJUDI_A1_P12": "/projudi.p12", "PJE_A1_PIN": "pin"},
+        ):
+            with mock.patch.dict(os.environ, certificate, clear=True):
+                self.assertEqual(server.configured_portals(), ("tjgo-1g",))
+        with mock.patch.dict(os.environ, {"PJE_A1_P12": "/a1.p12"}, clear=True):
+            self.assertEqual(server.configured_portals(), ())  # no PIN: the login cannot open the certificate
+
+    def test_main_offers_and_logs_in_only_where_a_login_is_set(self):
+        with (
+            mock.patch.object(server, "load_env_file"),
+            mock.patch.object(server, "serve"),
+            mock.patch.object(server, "create_server") as create,
+            mock.patch.object(server, "configured_portals", return_value=("tjam-1g",)),
+        ):
+            server.main()
+        self.assertEqual(create.call_args.args, (("tjam-1g",),))
+        self.assertEqual(server.sessions._only, ("tjam-1g",))
+
+        async def tools():
+            async with Client(server.create_server(["tjam-1g"])) as client:
+                return {tool.name: tool for tool in (await client.list_tools()).tools}
+
+        listed = asyncio.run(tools())
+        self.assertNotIn("projudi_list_intimations", listed)
+        portal = listed["projudi_get_process"].input_schema["properties"]["portal"]
+        self.assertEqual((portal.get("default"), portal.get("enum", [portal.get("const")])), ("tjam-1g", ["tjam-1g"]))
+
     def test_tools_take_a_portal_and_only_the_document_reads_are_not_read_only(self):
         async def tools():
             async with Client(server.create_server()) as client:
@@ -438,6 +472,7 @@ class ServerTest(unittest.TestCase):
                 # A download writes a file and, like a read, may register a ciência once acknowledged.
                 self.assertEqual(tool.annotations.read_only_hint, tool.name not in reads)
                 self.assertFalse(tool.annotations.destructive_hint)
+                self.assertTrue(tool.title)
                 portal = tool.input_schema["properties"]["portal"]
                 self.assertEqual(portal.get("default"), "tjgo-1g")
                 wired = ["tjgo-1g"] if tool.name in tjgo_only else ["tjgo-1g", "tjam-1g"]

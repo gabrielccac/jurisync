@@ -24,37 +24,7 @@ class EprocServerTest(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(server.configured_portals(), ("trf4-1g-sc",))
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(
-                server.configured_portals(),
-                (
-                    "tjmg-1g",
-                    "tjmg-2g",
-                    "tjms-eproc-1g",
-                    "tjrj-eproc-1g",
-                    "tjrj-eproc-2g",
-                    "tjpr-1g",
-                    "tjpr-2g",
-                    "trf4-1g-sc",
-                    "trf4-1g-rs",
-                    "trf6-1g",
-                    "trf6-2g",
-                    "trf4-1g-pr",
-                    "trf4-2g",
-                    "trf2-1g-rj",
-                    "trf2-1g-es",
-                    "trf2-2g",
-                    "tjrs-1g",
-                    "tjsc-1g",
-                    "tjsc-2g",
-                    "tjac-1g",
-                    "tjac-2g",
-                    "tjto-1g",
-                    "tjto-2g",
-                    "tjsp-1g",
-                    "tjsp-2g",
-                    "tnu",
-                ),
-            )
+            self.assertEqual(server.configured_portals(), ())
         shared = {"TRF6_USUARIO": "u", "TRF6_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
         with mock.patch.dict(os.environ, shared, clear=True):
             self.assertEqual(server.configured_portals(), ("trf6-1g", "trf6-2g"))
@@ -66,6 +36,52 @@ class EprocServerTest(unittest.TestCase):
 
         portal = asyncio.run(schema())
         self.assertEqual(portal.get("enum", [portal.get("const")]), ["trf4-1g-sc"])
+
+    def test_main_offers_and_logs_in_only_where_a_login_is_set(self):
+        served = []
+        env = {"JFSC_USUARIO": "u", "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(server, "load_env_file"),
+            mock.patch.object(server, "serve", side_effect=lambda srv, on_exit: served.append(srv)),
+            mock.patch.object(server, "create_server", wraps=server.create_server) as create,
+            mock.patch.object(server.sessions, "_only", None),
+        ):
+            server.main()
+            self.assertEqual(create.call_args.args, (("trf4-1g-sc",),))
+            self.assertEqual(server.sessions._only, ("trf4-1g-sc",))
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(server, "load_env_file"),
+            mock.patch.object(server, "serve"),
+            mock.patch.object(server, "create_server") as create,
+            mock.patch.object(server.sessions, "_only", None),
+        ):
+            server.main()  # nothing configured: every wired portal, so the error names the missing login
+            self.assertEqual(create.call_args.args, (portals.keys("eproc"),))
+
+    def test_a_login_page_answer_logs_in_again_once_and_repeats(self):
+        logins = []
+
+        def login(portal):
+            logins.append(portal)
+            return mock.Mock(), "<html>panel</html>", "https://x"
+
+        answers = iter(
+            [
+                {"success": False, "portal": "trf4-1g-sc", "items": [], "diagnostics": ["session_expired"]},
+                {"success": True, "portal": "trf4-1g-sc", "items": [], "diagnostics": []},
+            ]
+        )
+        srv = server.create_server(["trf4-1g-sc"])
+        with (
+            mock.patch.object(server.sessions, "_login", side_effect=login),
+            mock.patch.object(server, "list_notices", side_effect=lambda queue, **context: next(answers)),
+        ):
+            result = self.call(srv, "eproc_list_notices", {"portal": "trf4-1g-sc", "queue": "pending"})
+        self.assertFalse(result.is_error)
+        self.assertEqual(logins, ["trf4-1g-sc", "trf4-1g-sc"])
+        server.sessions.close()
 
     def test_unconfigured_portal_is_rejected_before_login(self):
         with mock.patch.object(server, "authenticate") as login:
@@ -118,7 +134,7 @@ class EprocServerTest(unittest.TestCase):
         def fetch(number, scope, document_ids, **kwargs):
             seen.append((document_ids, kwargs["save"]))
             self.assertNotIn("acknowledge_ciencia", kwargs)
-            return {"success": True, "ciencia": {"pendente": True, "aviso": "informe o advogado"}}
+            return {"success": True, "ciencia": {"estado": "dada", "aviso": "informe o advogado"}}
 
         srv = server.create_server(["trf4-1g-sc"])
         arguments = {"portal": "trf4-1g-sc", "processNumber": "5000001-23.2026.4.04.7207", "documentIds": ["9"]}

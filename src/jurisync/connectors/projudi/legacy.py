@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers
+from jurisync.core.ciencia import NONE, report
 from jurisync.core.http import REDIRECTS
 
 SESSION_EXPIRED_MARKERS = ("a sessao expirou", "a sessão expirou")
@@ -51,7 +52,14 @@ class HumanVerificationRequired(RuntimeError):
 
 
 class DocumentsBlocked(RuntimeError):
-    """Reading a Projudi document is blocked until it is proven not to register ciência."""
+    """Reading a Projudi document is blocked until it is proven not to register ciência.
+
+    ``ciencia`` is the block of the refused read: nothing was opened.
+    """
+
+    def __init__(self, message, ciencia=None):
+        super().__init__(message)
+        self.ciencia = ciencia or report(NONE)
 
 
 def session_expired(html):

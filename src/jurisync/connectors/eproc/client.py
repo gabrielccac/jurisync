@@ -9,6 +9,8 @@ import argparse
 import json
 import re
 import sys
+import time
+import weakref
 from contextlib import redirect_stdout
 from urllib.parse import parse_qs, urljoin, urlsplit
 
@@ -31,6 +33,7 @@ from jurisync.core import credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
+from jurisync.core.session_pool import SessionExpired
 
 # Read-only citation/intimation queues, keyed by the tool's `queue` argument.
 # The panel advertises which of these a deployment exposes; the extra kinds are
@@ -72,6 +75,11 @@ READ_ACTIONS = QUEUE_ACTIONS | {
 NOT_FOUND_ACTION = "processo_consultar"
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
 MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit
+# Seconds the pending queues read for one session answer the next process reads; opening a document drops them,
+# since the intimação it belongs to may no longer be pending.
+PENDING_TTL = 120
+clock = time.monotonic
+_pending = weakref.WeakKeyDictionary()  # session -> (read at, queues)
 
 
 def controller_path(config, *, ajax=False):
@@ -361,15 +369,18 @@ def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal
             session.close()
 
 
-def pending_notices(session, panel, process_number, *, panel_url, portal):
-    """``(rows, problem)``: this process' rows in the lawyer's pending citação/intimação queues.
+def pending_queues(session, panel, *, panel_url, portal):
+    """``[(queue, items, complete, problem)]``: the lawyer's pending citação/intimação queues.
 
-    ``problem`` is set when a queue could not be read to its end, so an empty ``rows`` does not prove that nothing is
-    pending. The main pending queue must be advertised by the panel; the other kinds are read when it shows them.
+    ``problem`` is set when a queue could not be read. The main pending queue must be advertised by the panel; the
+    other kinds are read when it shows them. A reading without problems is reused for ``PENDING_TTL`` seconds by the
+    same session, until ``forget_pending``.
     """
+    cached = _pending.get(session)
+    if cached is not None and clock() - cached[0] < PENDING_TTL:
+        return cached[1]
     base_url = portals.eproc(portal).base_url
-    wanted = re.sub(r"\D", "", process_number)
-    rows, problem, state = [], None, False
+    queues, state = [], False
     for queue in ciencia.PENDING_QUEUES:
         try:
             try:
@@ -380,22 +391,46 @@ def pending_notices(session, panel, process_number, *, panel_url, portal):
                 endpoint = _state_link(state, queue, portal)
             if endpoint is None:
                 if queue == "pending":
-                    problem = problem or "the panel did not expose the pending queue"
+                    queues.append((queue, [], False, "the panel did not expose the pending queue"))
                 continue
             url = urljoin(panel_url or base_url, endpoint)
             require_route(url, {QUEUE_KINDS[queue]}, portal=portal)
             response, body = request(session, "GET", url, portal=portal)
         except RuntimeError:
-            problem = problem or f"the {queue} queue request failed"
+            queues.append((queue, [], False, f"the {queue} queue request failed"))
             continue
         error = _response_error(response, body)
+        if error == "session_expired":
+            raise SessionExpired("eproc session expired")  # nothing was opened yet: the read can be repeated
         if error:
-            problem = problem or f"the {queue} queue answered {error}"
+            queues.append((queue, [], False, f"the {queue} queue answered {error}"))
             continue
         parsed = parse_process_list_page(body, base_url)
-        found = [item for item in parsed.get("items", []) if re.sub(r"\D", "", item.get("number") or "") == wanted]
+        queues.append((queue, parsed.get("items", []), bool((parsed.get("pagination") or {}).get("complete")), None))
+    if not any(problem for *_, problem in queues):
+        _pending[session] = (clock(), queues)
+    return queues
+
+
+def forget_pending(session):
+    _pending.pop(session, None)
+
+
+def pending_notices(session, panel, process_number, *, panel_url, portal):
+    """``(rows, problem)``: this process' rows in the lawyer's pending citação/intimação queues.
+
+    ``problem`` is set when a queue could not be read to its end, so an empty ``rows`` does not prove that nothing is
+    pending.
+    """
+    wanted = re.sub(r"\D", "", process_number)
+    rows, problem = [], None
+    for queue, items, complete, error in pending_queues(session, panel, panel_url=panel_url, portal=portal):
+        if error:
+            problem = problem or error
+            continue
+        found = [item for item in items if re.sub(r"\D", "", item.get("number") or "") == wanted]
         rows.extend({**item, "queue": queue} for item in found)
-        if not found and not (parsed.get("pagination") or {}).get("complete"):
+        if not found and not complete:
             problem = problem or f"the {queue} queue was not read to its end"
     return rows, problem
 
@@ -534,9 +569,8 @@ def fetch_process(
 ):
     """Read one process; with ``document_ids`` also the text of those documents.
 
-    The documents are always read. When the process had a citação/intimação waiting for ciência (or that could not be
-    checked) the result carries a ``ciencia`` notice (``ciencia.notice``), which the caller must relay to the user:
-    opening the documents may have registered the ciência and started the deadline.
+    The documents are always read. The result always carries the ``ciencia`` block (``ciencia.notice``), which the
+    caller must relay to the user: opening the documents may have registered the ciência and started the deadline.
     """
     portal = portals.eproc(portal).key  # aliases in, current key out
     if not isinstance(process_number, str) or not portals.CNJ.fullmatch(process_number):
@@ -618,21 +652,23 @@ def fetch_process(
         document_inventory = list(documents.values())
         internal = {**detail, "events": selected_events, "documents": document_inventory}
         attachments = []
-        notice = {}
+        # Read the pending queues before opening anything: afterwards the intimação may no longer be pending.
+        notices, problem = pending_notices(session, panel, process_number, panel_url=panel_url, portal=portal)
+        block = ciencia.notice(
+            process_number,
+            document_ids,
+            notices=notices,
+            problem=problem,
+            events=events,
+            events_complete=bool(pagination.get("complete")) and not event_diagnostics,
+        )
         if document_ids is not None:
-            # Read the pending queues before opening anything: afterwards the intimação may no longer be pending.
-            notices, problem = pending_notices(session, panel, process_number, panel_url=panel_url, portal=portal)
-            notice = ciencia.notice(
-                process_number,
-                document_ids,
-                notices=notices,
-                problem=problem,
-                events=events,
-                events_complete=bool(pagination.get("complete")) and not event_diagnostics,
-            )
-            attachments = read_selected_documents(
-                internal, document_ids, session=session, portal=portal, save=save, ciencia_checked=True
-            )
+            try:
+                attachments = read_selected_documents(
+                    internal, document_ids, session=session, portal=portal, save=save, ciencia_checked=True
+                )
+            finally:
+                forget_pending(session)
         result = {
             "success": True,
             "source": "eproc",
@@ -656,7 +692,7 @@ def fetch_process(
             "attachments": attachments,
             "pagination": pagination,
             "diagnostics": event_diagnostics,
-            **notice,
+            "ciencia": block,
         }
         return _redact(result)
     finally:

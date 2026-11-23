@@ -1,21 +1,24 @@
-"""Ciência notice for eproc document reads.
+"""Ciência block of eproc process reads (``core.ciencia.report``).
 
 Opening the document of a citação/intimação whose deadline was not opened yet may make the lawyer count as notified,
-which starts the deadline. Eproc documents are always read (owner's decision, 2026-11-09); before they are fetched the
-client reads the lawyer's pending queues (the panel's "citações/intimações pendentes" lists) and looks for the process
-there, so the result can tell the user what the read may have done:
+which starts the deadline. Eproc documents are always read (owner's decision, 2026-11-09); before anything is opened
+the client reads the lawyer's pending queues (the panel's "citações/intimações pendentes" lists) and looks for the
+process there, so the result can tell the user what the read did or would do:
 
-- not in any pending queue, every queue read to its end: no notice;
-- in a pending queue: ``ciencia = {"pendente": true, "intimacoes": [...], "aviso": ...}``;
-- the queues could not be read to their end: ``ciencia = {"verificada": false, "motivo": ..., "aviso": ...}``.
+- not in any pending queue, every queue read to its end: ``nenhuma``;
+- in a pending queue: ``dada`` when documents were opened, ``pendente`` when none were (``intimacoes``, ``aviso``);
+- the queues could not be read to their end: ``desconhecida`` when documents were opened (``motivo``), else
+  ``nenhuma`` with an ``aviso``.
 
 Which document a pending intimação covers is not in the captured pages. The standard eproc timeline marks the
 intimação event with "Status: AGUARD. ABERTURA" and "Refer. ao Evento N"; ``EVENT_LINK_CONFIRMED`` turns that reading
-on (the notice then names the requested documents that belong to the pending event), and it stays off until it is
+on (the block then names the requested documents that belong to the pending event), and it stays off until it is
 confirmed on a live portal.
 """
 
 import re
+
+from jurisync.core.ciencia import GIVEN, NONE, PENDING, UNKNOWN, report
 
 # The queues of ``client.QUEUE_KINDS`` that list citações/intimações still waiting for ciência.
 PENDING_QUEUES = ("pending", "pending_urgent", "pending_agreement", "art334")
@@ -94,42 +97,51 @@ def _deadline_days(notices, markers):
 
 
 def notice(process_number, document_ids, *, notices, problem, events, events_complete):
-    """The keys to add to a read of ``document_ids``: ``{}`` when nothing was pending, else a ``ciencia`` block.
+    """The ``ciencia`` block of a read that opened ``document_ids`` (``None``: no document was opened).
 
     ``notices`` are this process' rows in the pending queues, ``problem`` says why the queues could not be read to
     their end (``None`` when they were). Never refuses: the documents are read either way.
     """
+    opened = document_ids is not None
     if not notices and problem:
-        return {
-            "ciencia": {
-                "verificada": False,
-                "motivo": problem,
-                "aviso": (
-                    f"Não foi possível verificar se o processo {process_number} tinha intimação aguardando ciência; "
-                    "os documentos foram abertos e, se havia intimação pendente, a ciência pode ter sido registrada "
-                    "e o prazo iniciado. Informe o advogado."
-                ),
-            }
-        }
+        if not opened:
+            block = report(
+                NONE,
+                f"Não foi possível verificar se o processo {process_number} tem intimação aguardando ciência; nenhum "
+                "documento foi aberto. Abrir documentos dele pode registrar a ciência e iniciar o prazo.",
+            )
+        else:
+            block = report(
+                UNKNOWN,
+                f"Não foi possível verificar se o processo {process_number} tinha intimação aguardando ciência; "
+                "os documentos foram abertos e, se havia intimação pendente, a ciência pode ter sido registrada "
+                "e o prazo iniciado. Informe o advogado.",
+            )
+        return {**block, "motivo": problem}
     if not notices:
-        return {}
+        return report(NONE)
     markers = awaiting_events(events)
     days = _deadline_days(notices, markers)
     shown = "; ".join(_describe(row) for row in notices[:5])
     if markers:
         shown += "; na linha do tempo: " + "; ".join(_describe_event(marker) for marker in markers[:5])
-    block = {
-        "pendente": True,
-        "intimacoes": [{key: row.get(key) for key in QUEUE_FIELDS} for row in notices],
-    }
+    deadline = f"o prazo de {days} dias" if days else "o prazo"
+    if opened:
+        aviso = (
+            f"Este processo ({process_number}) tinha intimação aguardando ciência ({shown}); abrir os documentos pode "
+            f"ter registrado a ciência e iniciado {deadline}. Informe o advogado."
+        )
+    else:
+        aviso = (
+            f"Este processo ({process_number}) tem intimação aguardando ciência ({shown}); nenhum documento foi "
+            f"aberto, mas abrir os documentos dele pode registrar a ciência e iniciar {deadline}."
+        )
+    block = report(
+        GIVEN if opened else PENDING, aviso, [{key: row.get(key) for key in QUEUE_FIELDS} for row in notices]
+    )
     if markers:
         block["eventos"] = markers
-    tied = tied_documents(events, markers) if events_complete else None
+    tied = tied_documents(events, markers) if opened and events_complete else None
     if tied is not None:
         block["documentosDaIntimacao"] = sorted({str(identifier) for identifier in document_ids} & tied)
-    deadline = f"o prazo de {days} dias" if days else "o prazo"
-    block["aviso"] = (
-        f"Este processo ({process_number}) tinha intimação aguardando ciência ({shown}); abrir os documentos pode "
-        f"ter registrado a ciência e iniciado {deadline}. Informe o advogado."
-    )
-    return {"ciencia": block}
+    return block

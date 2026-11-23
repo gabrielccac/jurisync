@@ -7,7 +7,8 @@ search route, index and download routes, parsers) lives in an ``Adapter`` subcla
 
 Nothing here writes to Projudi. Reading a file can still count as the ciência of a pending intimação, so
 ``read_documents``/``download_document`` first ask the adapter's ``pending_ciencia`` and refuse, with nothing opened,
-unless the caller acknowledges (``acknowledgeCiencia`` in the tools, as in the PJe server).
+unless the caller acknowledges (``acknowledgeCiencia`` in the tools, as in the PJe server). Both report what the read
+did in the ``core.ciencia`` block; a refusal carries the block of what it did not open.
 """
 
 import hashlib
@@ -19,6 +20,7 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.core import certificate, credentials
+from jurisync.core.ciencia import GIVEN, NONE, PENDING, UNKNOWN, report
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import read_limited, validate_document_ids
 from jurisync.core.documents_dir import save_document
@@ -40,7 +42,14 @@ class ProjudiParseError(RuntimeError):
 
 
 class CienciaPending(ValueError):
-    """Opening a document of this process may register the ciência of a pending communication."""
+    """Opening a document of this process may register the ciência of a pending communication.
+
+    ``ciencia`` is the block of the refused read: nothing was opened.
+    """
+
+    def __init__(self, message, ciencia=None):
+        super().__init__(message)
+        self.ciencia = ciencia or report(NONE)
 
 
 class CienciaUnchecked(CienciaPending):
@@ -70,6 +79,11 @@ def _credential_names():
     if credentials.has("PROJUDI_A1_P12"):
         return "PROJUDI_A1_P12", "PROJUDI_A1_PIN" if credentials.has("PROJUDI_A1_PIN") else "PJE_A1_PIN"
     return "PJE_A1_P12", "PJE_A1_PIN"
+
+
+def has_certificate():
+    """Whether the account sets the A1 file and the PIN ``load_certificate`` reads."""
+    return all(credentials.has(name) for name in _credential_names())
 
 
 def load_certificate(*, pin=None, p12_path=None):
@@ -248,6 +262,10 @@ def index_files(index):
 
 
 CIENCIA_NOTICE = "Ler este conteúdo pode ter registrado a ciência da parte e iniciado o prazo; informe o usuário."
+UNCHECKED_NOTICE = (
+    "Não foi possível verificar se havia comunicação aguardando ciência; se havia, ler este conteúdo pode ter "
+    "registrado a ciência e iniciado o prazo. Informe o usuário."
+)
 
 
 def _describe(item):
@@ -262,12 +280,13 @@ def _describe(item):
 def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
     """Run the generation's pending-ciência check before anything of the process is opened.
 
-    Refuses (``CienciaPending``/``CienciaUnchecked``) unless the caller acknowledges; with the acknowledgement it
-    returns what the read may have done, for the result.
+    Refuses (``CienciaPending``/``CienciaUnchecked``) unless the caller acknowledges; otherwise returns the ``ciencia``
+    block of the read that follows. A generation without the check (TJAM refuses inside ``download``) reads only when
+    nothing is pending: ``nenhuma``.
     """
     state = adapter.pending_ciencia(session, portal, adapter.normalize_number(process_number, portal))
     if state is None:
-        return {}
+        return report(NONE)
     items = [{k: v for k, v in item.items() if not k.startswith("_")} for item in state.get("items") or []]
     unchecked = state.get("unchecked")
     if not acknowledge:
@@ -276,28 +295,46 @@ def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
                 f"ciência not checked: {unchecked}, so it is unknown whether this process has a communication whose "
                 "ciência is still pending. Nothing was opened. Try again later (projudi_list_intimations shows the "
                 "list when it can be read). Opening it anyway may register the party's ciência and start the "
-                "deadline: only with the user's explicit permission, repeat the call with acknowledgeCiencia=true."
+                "deadline: only with the user's explicit permission, repeat the call with acknowledgeCiencia=true.",
+                {
+                    **report(
+                        NONE,
+                        "Nada foi aberto: não foi possível verificar se o processo tem comunicação aguardando ciência, "
+                        "e ler seus documentos pode registrá-la e iniciar o prazo.",
+                        items,
+                    ),
+                    "motivo": unchecked,
+                },
             )
         if items:
             shown = "; ".join(_describe(item) for item in items[:5])
             raise CienciaPending(
                 f"ciência not yet registered for: {shown}. Nothing was opened. Opening a document of this process "
                 "may register the party's ciência and start the deadline. Ask the user for explicit permission; if "
-                "they agree, repeat the call with acknowledgeCiencia=true."
+                "they agree, repeat the call with acknowledgeCiencia=true.",
+                report(
+                    PENDING,
+                    f"Comunicação aguardando ciência ({shown}); nada foi aberto. Ler os documentos do processo pode "
+                    "registrar a ciência e iniciar o prazo: pergunte ao usuário.",
+                    items,
+                ),
             )
-    extra = {}
-    if unchecked:
-        extra["cienciaChecked"] = False
-    if items or unchecked:
-        extra["ciencia"] = {"pendenteAoLer": items, "aviso": CIENCIA_NOTICE}
-    return extra
+    if items:
+        block = report(GIVEN, CIENCIA_NOTICE, items)
+    elif unchecked:
+        block = report(UNKNOWN, UNCHECKED_NOTICE)
+    else:
+        return report(NONE)
+    return {**block, "motivo": unchecked} if unchecked else block
 
 
-def read_documents(adapter, session, portal, process_number, document_ids, *, acknowledge_ciencia=False):
+def read_documents(adapter, session, portal, process_number, document_ids, *, acknowledge_ciencia=False, ciencia=None):
     """``(number, documents, ciencia)``: text of 1-5 documents of a process; ids come from this process' fresh
-    index. The pending-ciência check runs before the process is opened."""
+    index. The pending-ciência check runs before the process is opened, unless ``ciencia`` is the block of this
+    call's earlier check (a read repeated after a new login: what the first try opened may no longer be pending)."""
     validate_document_ids(document_ids)
-    ciencia = check_ciencia(adapter, session, portal, process_number, acknowledge_ciencia)
+    if ciencia is None:
+        ciencia = check_ciencia(adapter, session, portal, process_number, acknowledge_ciencia)
     process, index = load_process(adapter, session, portal, process_number)
     known = index_files(index)
     if any(identifier not in known for identifier in document_ids):
@@ -333,17 +370,22 @@ def read_documents(adapter, session, portal, process_number, document_ids, *, ac
     return process["number"], results, ciencia
 
 
-def download_document(adapter, session, portal, process_number, document_id, *, acknowledge_ciencia=False):
-    """Save one document in the shared documents folder and describe it. Never returns the hash or a URL."""
+def download_document(
+    adapter, session, portal, process_number, document_id, *, acknowledge_ciencia=False, ciencia=None
+):
+    """Save one document in the shared documents folder and describe it. Never returns the hash or a URL.
+
+    ``ciencia`` as in ``read_documents``."""
     validate_document_ids([document_id])
-    ciencia = check_ciencia(adapter, session, portal, process_number, acknowledge_ciencia)
+    if ciencia is None:
+        ciencia = check_ciencia(adapter, session, portal, process_number, acknowledge_ciencia)
     process, index = load_process(adapter, session, portal, process_number)
     file = index_files(index).get(document_id)
     if file is None:
         raise ValueError("Selected document ID is not in this process")
     content, content_type = adapter.download(session, portal, document_id, file["hash"])
     if content is None:
-        return {"id": document_id, "name": file["name"], "saved": False, "reason": content_type, **ciencia}
+        return {"id": document_id, "name": file["name"], "saved": False, "reason": content_type, "ciencia": ciencia}
     kind = file_format(content, content_type)
     status, _ = extract_document_text(content, content_type, process["number"], allow_unnumbered=True)
     result = {
@@ -354,7 +396,7 @@ def download_document(adapter, session, portal, process_number, document_id, *, 
         "bytes": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
         "extractionStatus": status,
-        **ciencia,
+        "ciencia": ciencia,
     }
     if status in ("access_denied", "session_expired"):
         return {**result, "saved": False}

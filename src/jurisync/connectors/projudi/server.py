@@ -8,7 +8,8 @@ TJPR/TJRR, ``tjpi-publico`` for TJPI) are recognized in ``portals.py`` and answe
 about each is in ``docs/connectors/projudi-mapping.md``. Add one as an ``Adapter`` subclass in its own module only
 after a live smoke proves login + process + one document.
 The authenticated session of each portal stays in memory; when Projudi sends it back to the login page, the call logs
-in again once and repeats.
+in again once and repeats. A repeated document read keeps the ciência check of its first try: what that try opened
+may no longer be pending.
 """
 
 from typing import Annotated, Any, Literal
@@ -19,10 +20,10 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, tjam, tjgo
+from jurisync.connectors.projudi import base, legacy, tjam, tjgo
 from jurisync.connectors.projudi.base import ProjudiParseError, public_file
 from jurisync.core.documents import MAX_DOCUMENTS
-from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, load_env_file, sanitize_diagnostics, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
 
 DEFAULT_PORTAL = "tjgo-1g"
@@ -39,9 +40,11 @@ CIENCIA_GUARD = (
     "be pending (a portal intimação/citação awaiting reading, or a Diário intimação whose publication date is still "
     "ahead: see projudi_list_intimations); reading it may register the party's ciência and start the deadline. Ask "
     "the user; only with their explicit yes repeat the call with acknowledgeCiencia=true. It is also refused when "
-    "those lists could not be read in full (the error starts with 'ciência not checked'). When such a read happens "
-    "the result has ciencia.pendenteAoLer and an aviso (cienciaChecked=false when unchecked): tell the user and note "
-    "it in the task. On TJAM a process with an intimação awaiting ciência stays blocked (no override)."
+    "those lists could not be read in full (the reason starts with 'ciência not checked'). On TJAM a process with an "
+    "intimação awaiting ciência stays blocked (no override). The result always carries a ciencia block: estado "
+    "'nenhuma' (nothing pending opened), 'pendente' (refused, success=false: intimacoes lists what awaits ciência), "
+    "'dada' (read with acknowledgeCiencia: the ciência may have been registered) or 'desconhecida' (read with "
+    "acknowledgeCiencia while the lists were unreadable), with an aviso: tell the user and note it in the task."
 )
 ACKNOWLEDGE = Field(
     description="Leave empty. true reads even when a ciência may be pending, which may register the party's ciência "
@@ -75,6 +78,24 @@ def call(portal, read):
         adapter = adapter_for(portal)
         key = portals.projudi(portal).key
         return sessions.run(key, lambda session: read(adapter, session))
+
+
+def open_documents(portal, read):
+    """``call`` for a read that opens documents: a ciência refusal is a result carrying its ``ciencia`` block."""
+
+    def guarded(adapter, session):
+        try:
+            return read(adapter, session)
+        except (base.CienciaPending, legacy.DocumentsBlocked) as refused:
+            return {
+                "success": False,
+                "portal": portals.projudi(portal).key,
+                "error": "ciencia_unchecked" if isinstance(refused, base.CienciaUnchecked) else "ciencia_pending",
+                "reason": sanitize_diagnostics(refused),
+                "ciencia": refused.ciencia,
+            }
+
+    return call(portal, guarded)
 
 
 def _public_movement(movement):
@@ -121,17 +142,30 @@ def list_documents(adapter, session, portal, process_number, movement_id):
     return {"success": True, "number": number, "movements": movements, "notice": UNTRUSTED}
 
 
+def has_login(config):
+    """Whether the account sets what the portal's adapter logs in with: TJGO the A1 certificate (mutual TLS), the
+    others login and password, plus the authenticator where the portal asks for one."""
+    if config.auth == "certificate_mtls":
+        return base.has_certificate()
+    login = config.env("USERNAME") and config.env("PASSWORD")
+    if config.auth == "password_totp":
+        return bool(login and (config.env("2FA_DATA") or config.env("2FA_QR")))
+    return bool(login)
+
+
 def configured_portals():
-    return portals.keys("projudi")
+    """Wired Projudi portals whose login is set in the current credentials; ``()`` when none is."""
+    return tuple(key for key in portals.keys("projudi") if has_login(portals.projudi(key)))
 
 
 def create_server(keys=None):
-    keys = tuple(keys or configured_portals())
-    Portal = Literal[keys]  # noqa: N806 - a type built from the wired portals
+    keys = tuple(keys or portals.keys("projudi"))
+    default = DEFAULT_PORTAL if DEFAULT_PORTAL in keys else keys[0]
+    Portal = Literal[keys]  # noqa: N806 - a type built from the configured portals
     where = ", ".join(f"{key} ({portals.projudi(key).host})" for key in keys)
     server = MCPServer("projudi", version="1.0.0")
 
-    portal_field = Field(description=f"Projudi portal key (default '{DEFAULT_PORTAL}'). Wired: {where}.")
+    portal_field = Field(description=f"Projudi portal key (default '{default}'). Wired: {where}.")
     number_field = Field(
         min_length=1,
         description="CNJ process number with punctuation, e.g. '0000000-00.2026.8.09.0000'. TJGO also takes the short "
@@ -150,7 +184,7 @@ def create_server(keys=None):
     )
     def projudi_get_process(
         process_number: Annotated[str, number_field],
-        portal: Annotated[Portal, portal_field] = DEFAULT_PORTAL,
+        portal: Annotated[Portal, portal_field] = default,
         include_documents: Annotated[bool, Field(description="Include the files of every movement.")] = True,
     ) -> dict[str, Any]:
         return call(
@@ -169,7 +203,7 @@ def create_server(keys=None):
     )
     def projudi_list_documents(
         process_number: Annotated[str, number_field],
-        portal: Annotated[Portal, portal_field] = DEFAULT_PORTAL,
+        portal: Annotated[Portal, portal_field] = default,
         movement_id: Annotated[
             str | None, Field(description="Numeric movementId of one movement; omit to list every movement with files.")
         ] = None,
@@ -195,16 +229,20 @@ def create_server(keys=None):
             list[Annotated[str, Field(min_length=1)]],
             Field(min_length=1, max_length=MAX_DOCUMENTS, description="1-5 numeric document ids."),
         ],
-        portal: Annotated[Portal, portal_field] = DEFAULT_PORTAL,
+        portal: Annotated[Portal, portal_field] = default,
         acknowledgeCiencia: Annotated[bool | None, ACKNOWLEDGE] = None,  # noqa: N803 - same name as the PJe tools
     ) -> dict[str, Any]:
-        def read(adapter, session):
-            number, documents, ciencia = base.read_documents(
-                adapter, session, portal, process_number, document_ids, acknowledge_ciencia=bool(acknowledgeCiencia)
-            )
-            return {"success": True, "number": number, "documents": documents, **ciencia, "notice": UNTRUSTED}
+        checked = []
 
-        return call(portal, read)
+        def read(adapter, session):
+            if not checked:
+                checked.append(base.check_ciencia(adapter, session, portal, process_number, bool(acknowledgeCiencia)))
+            number, documents, ciencia = base.read_documents(
+                adapter, session, portal, process_number, document_ids, ciencia=checked[0]
+            )
+            return {"success": True, "number": number, "documents": documents, "ciencia": ciencia, "notice": UNTRUSTED}
+
+        return open_documents(portal, read)
 
     @server.tool(
         name="projudi_download_document",
@@ -219,16 +257,18 @@ def create_server(keys=None):
     def projudi_download_document(
         process_number: Annotated[str, number_field],
         document_id: Annotated[str, Field(min_length=1, description="Numeric document id.")],
-        portal: Annotated[Portal, portal_field] = DEFAULT_PORTAL,
+        portal: Annotated[Portal, portal_field] = default,
         acknowledgeCiencia: Annotated[bool | None, ACKNOWLEDGE] = None,  # noqa: N803 - same name as the PJe tools
     ) -> dict[str, Any]:
+        checked = []
+
         def read(adapter, session):
-            saved = base.download_document(
-                adapter, session, portal, process_number, document_id, acknowledge_ciencia=bool(acknowledgeCiencia)
-            )
+            if not checked:
+                checked.append(base.check_ciencia(adapter, session, portal, process_number, bool(acknowledgeCiencia)))
+            saved = base.download_document(adapter, session, portal, process_number, document_id, ciencia=checked[0])
             return {"success": True, **saved}
 
-        return call(portal, read)
+        return open_documents(portal, read)
 
     if TJGO_ONLY in keys:
         tjgo_portal = Field(description=f"Projudi portal key; only '{TJGO_ONLY}' has this list.")
@@ -284,7 +324,9 @@ def create_server(keys=None):
 
 def main():
     load_env_file()
-    serve(create_server(), on_exit=sessions.close)
+    keys = configured_portals() or portals.keys("projudi")
+    sessions.only(keys)
+    serve(create_server(keys), on_exit=sessions.close)
 
 
 if __name__ == "__main__":

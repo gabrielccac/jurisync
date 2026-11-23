@@ -149,7 +149,7 @@ def test_server_block_and_tenant_session_usage(monkeypatch):
 
 @pytest.mark.anyio
 async def test_tools_and_registration():
-    from jurisync.install.serve import SERVERS
+    from jurisync import registry
 
     tools = await server.create_server().list_tools()
     assert {t.name for t in tools} == {
@@ -164,10 +164,61 @@ async def test_tools_and_registration():
     # Only the download writes a file (the shared documents folder); nothing is destructive.
     assert {t.name for t in tools if not t.annotations.read_only_hint} == {"esaj_download_document"}
     assert not any(t.annotations.destructive_hint for t in tools)
+    assert all(t.title for t in tools)
     assert not hasattr(base, "list_intimacoes")
-    assert "esaj" in SERVERS
+    assert "esaj" in registry.CONNECTORS
     assert portals.esaj("tjsp-esaj").auth == "certificate_challenge"
     assert portals.eproc("tjsp-1g").system == "eproc"
+
+
+def test_configured_portals_follow_the_login(monkeypatch):
+    for name in ("ESAJ_A1_P12", "ESAJ_A1_PIN", "PJE_A1_P12", "PJE_A1_PIN", "TJMS_ESAJ_USERNAME", "TJMS_ESAJ_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    assert server.configured_portals() == ()
+    monkeypatch.setenv("TJMS_ESAJ_USERNAME", "12345678901")
+    monkeypatch.setenv("TJMS_ESAJ_PASSWORD", "x")
+    assert server.configured_portals() == ("tjms-esaj",)
+    monkeypatch.setenv("PJE_A1_P12", "/a1.p12")
+    assert server.configured_portals() == ()  # the certificate goes first and its PIN is missing
+    monkeypatch.setenv("PJE_A1_PIN", "pin")
+    assert server.configured_portals() == portals.keys("esaj")
+
+
+@pytest.mark.anyio
+async def test_server_offers_only_the_given_portals():
+    tools = {t.name: t for t in await server.create_server(["tjms-esaj"]).list_tools()}
+    field = tools["esaj_get_process"].input_schema["properties"]["portal"]
+    assert field.get("enum", [field.get("const")]) == ["tjms-esaj"]
+    assert field["default"] == "tjms-esaj"
+
+
+def test_main_logs_in_only_where_a_login_is_set(monkeypatch):
+    built = []
+    monkeypatch.setattr(server, "load_env_file", lambda: None)
+    monkeypatch.setattr(server, "serve", lambda srv, on_exit: None)
+    monkeypatch.setattr(server, "create_server", built.append)
+    monkeypatch.setattr(server, "configured_portals", lambda: ("tjal-esaj",))
+    monkeypatch.setattr(server.sessions, "_only", None)
+    server.main()
+    assert built == [("tjal-esaj",)]
+    assert server.sessions._only == ("tjal-esaj",)
+    monkeypatch.setattr(server, "configured_portals", lambda: ())
+    server.main()
+    assert built[-1] == portals.keys("esaj")
+
+
+def test_document_tools_always_report_the_ciencia(monkeypatch):
+    pool = Mock()
+    monkeypatch.setattr(server, "sessions", pool)
+    pool.run.return_value = {"processNumber": NUMBER, "text": "teor"}
+    assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == {"estado": "nenhuma"}
+    pool.run.side_effect = base.EsajBlocked("Opening this document may register the receipt", "intimacao_pending")
+    result = server.open_document("tjsp-esaj", lambda s: {})
+    assert result["success"] is False and result["error"] == "intimacao_pending"
+    assert result["ciencia"]["estado"] == "pendente"
+    assert "nada foi aberto" in result["ciencia"]["aviso"]
+    pool.run.side_effect = base.EsajBlocked("captcha", "captcha_required")
+    assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == {"estado": "nenhuma"}
 
 
 def viewer_html(number=NUMBER, document_id="38", restricted=False):

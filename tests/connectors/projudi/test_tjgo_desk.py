@@ -520,25 +520,33 @@ class CienciaGuardTest(unittest.TestCase):
         self.assertIn("ciência not yet registered for: 700000002 Intimação 4.56", str(error))
         self.assertIn("acknowledgeCiencia=true", str(error))
         self.assertEqual(adapter.opened, [])
+        self.assertEqual(error.ciencia["estado"], "pendente")
+        self.assertEqual(error.ciencia["intimacoes"][0]["id"], "700000002")
+        self.assertNotIn("_key", json.dumps(error.ciencia))
 
     def test_unchecked_ciencia_refuses_before_anything_is_opened(self):
         adapter, error = self.read({"items": [], "unchecked": "the home page's Pendências could not be read"})
         self.assertIsInstance(error, base.CienciaUnchecked)
         self.assertTrue(str(error).startswith("ciência not checked: the home page"))
         self.assertEqual(adapter.opened, [])
+        self.assertEqual(error.ciencia["estado"], "nenhuma")  # nothing was opened
+        self.assertEqual(error.ciencia["motivo"], "the home page's Pendências could not be read")
+        self.assertIn("Nada foi aberto", error.ciencia["aviso"])
 
     def test_acknowledged_read_reports_what_it_may_have_done(self):
         adapter, (_, documents, ciencia) = self.read(PENDING, acknowledge_ciencia=True)
         self.assertEqual(documents[0]["extractionStatus"], "extracted")
-        self.assertEqual(ciencia["ciencia"]["pendenteAoLer"][0]["id"], "700000002")
+        self.assertEqual(ciencia["estado"], "dada")
+        self.assertEqual(ciencia["intimacoes"][0]["id"], "700000002")
         self.assertNotIn("_key", json.dumps(ciencia))
-        self.assertIn("aviso", ciencia["ciencia"])
+        self.assertIn("aviso", ciencia)
         _, (_, _, unchecked) = self.read({"items": [], "unchecked": "x"}, acknowledge_ciencia=True)
-        self.assertIs(unchecked["cienciaChecked"], False)
+        self.assertEqual(unchecked["estado"], "desconhecida")
+        self.assertEqual(unchecked["motivo"], "x")
 
-    def test_nothing_pending_reads_without_a_notice(self):
+    def test_nothing_pending_reads_and_says_none(self):
         adapter, (_, documents, ciencia) = self.read({"items": [], "unchecked": None})
-        self.assertEqual((ciencia, documents[0]["extractionStatus"]), ({}, "extracted"))
+        self.assertEqual((ciencia, documents[0]["extractionStatus"]), ({"estado": "nenhuma"}, "extracted"))
         self.assertEqual(adapter.opened, [("process", NUMBER), ("file", "100")])
 
     def test_download_is_guarded_too(self):
@@ -569,16 +577,43 @@ class GuardedServerTest(unittest.TestCase):
 
         return asyncio.run(run())
 
-    def test_refusal_is_a_tool_error_and_the_acknowledgement_reads(self):
+    def test_refusal_reports_the_pending_ciencia_and_the_acknowledgement_reads(self):
         refused = self.call("projudi_read_documents", {"process_number": NUMBER, "document_ids": ["100"]})
-        self.assertTrue(refused.is_error)
-        self.assertIn("ciência not yet registered", refused.content[0].text)
+        self.assertFalse(refused.is_error)
+        result = refused.structured_content
+        self.assertEqual((result["success"], result["error"]), (False, "ciencia_pending"))
+        self.assertIn("ciência not yet registered", result["reason"])
+        self.assertEqual(result["ciencia"]["estado"], "pendente")
         self.assertEqual(self.adapter.opened, [])
         read = self.call(
             "projudi_read_documents", {"process_number": NUMBER, "document_ids": ["100"], "acknowledgeCiencia": True}
         ).structured_content
-        self.assertEqual(read["ciencia"]["pendenteAoLer"][0]["id"], "700000002")
+        self.assertEqual(read["ciencia"]["estado"], "dada")
+        self.assertEqual(read["ciencia"]["intimacoes"][0]["id"], "700000002")
         self.assertEqual(read["documents"][0]["extractionStatus"], "extracted")
+        saved = self.call(
+            "projudi_download_document", {"process_number": NUMBER, "document_id": "100"}
+        ).structured_content
+        self.assertEqual((saved["error"], saved["ciencia"]["estado"]), ("ciencia_pending", "pendente"))
+
+    def test_a_read_repeated_after_a_new_login_keeps_the_first_ciencia_check(self):
+        """The first try may have opened the pending intimação: the repeat must still say so."""
+        calls = []
+
+        def download(session, portal, document_id, hash_value):
+            calls.append(document_id)
+            if len(calls) == 1:
+                self.adapter.state = {"items": [], "unchecked": None}  # the read registered the ciência
+                raise base.ProjudiSessionExpired("Projudi session expired")
+            return self.adapter.pdf, "application/pdf"
+
+        with mock.patch.object(self.adapter, "download", side_effect=download):
+            read = self.call(
+                "projudi_read_documents",
+                {"process_number": NUMBER, "document_ids": ["100"], "acknowledgeCiencia": True},
+            ).structured_content
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(read["ciencia"]["estado"], "dada")
 
     def test_lists_are_tool_errors_on_a_generation_without_them(self):
         with mock.patch.object(base.Adapter, "list_processes", side_effect=NotImplementedError("no list")):

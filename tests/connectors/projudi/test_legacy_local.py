@@ -315,8 +315,9 @@ class SessionAndReadsTest(unittest.TestCase):
     def test_a_pending_intimacao_blocks_the_files_of_that_process(self):
         session = FakeSession(self.routes(agenda=AGENDA_PENDING))
         _, index = base.load_process(tjam.ADAPTER, session, KEY, NUMBER)
-        with self.assertRaises(legacy.DocumentsBlocked):
+        with self.assertRaises(legacy.DocumentsBlocked) as blocked:
             tjam.ADAPTER.download(session, KEY, "1001", index[0]["files"][0]["hash"])
+        self.assertEqual(blocked.exception.ciencia["estado"], "pendente")
         self.assertFalse(any("arquivo.do" in call[1] for call in session.calls))
         with self.assertRaises(ValueError):
             tjam.ADAPTER.download_url(KEY, "1001", "../evil")

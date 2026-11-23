@@ -1,10 +1,11 @@
-"""The ciência notice of eproc document reads, over the real parsers and a session faked by URL."""
+"""The ciência block of eproc process reads, over the real parsers and a session faked by URL."""
 
 import json
 import unittest
 from unittest import mock
 
 from jurisync.connectors.eproc import ciencia, client
+from jurisync.core.session_pool import SessionExpired
 
 NUMBER = "5000001-23.2026.4.04.7207"
 OTHER = "5000002-08.2026.4.04.7207"
@@ -111,25 +112,66 @@ READ = ["acessar_documento", "acessar_documento_implementacao"]
 
 
 class CienciaNoticeTest(unittest.TestCase):
-    def test_no_pending_intimacao_reads_without_a_notice(self):
+    def test_no_pending_intimacao_reads_and_says_none(self):
         portal = Portal(citacao_intimacao_pendente_listar=queue(OTHER))
         result = read(portal, ["20"])
         self.assertEqual(result["attachments"][0]["extractionStatus"], "extracted")
         self.assertIn("teor do documento", result["attachments"][0]["text"])
         self.assertEqual(portal.opened, READ)
-        self.assertNotIn("ciencia", result)
+        self.assertEqual(result["ciencia"], {"estado": "nenhuma"})
         # An empty queue that says it is empty is "nothing pending" too.
         result = read(Portal(citacao_intimacao_pendente_listar=queue()), ["10"])
         self.assertEqual(len(result["attachments"]), 1)
-        self.assertNotIn("ciencia", result)
+        self.assertEqual(result["ciencia"], {"estado": "nenhuma"})
 
-    def test_without_document_ids_the_queues_are_not_even_read(self):
+    def test_without_document_ids_nothing_is_opened_and_a_pending_intimacao_is_announced(self):
         portal = Portal(citacao_intimacao_pendente_listar=queue(NUMBER))
         result = read(portal, None)
         self.assertTrue(result["success"])
-        self.assertNotIn("citacao_intimacao_pendente_listar", portal.actions)
         self.assertEqual(portal.opened, [])
-        self.assertNotIn("ciencia", result)
+        notice = result["ciencia"]
+        self.assertEqual(notice["estado"], "pendente")
+        self.assertEqual(notice["intimacoes"][0]["queue"], "pending")
+        self.assertIn("nenhum documento foi aberto", notice["aviso"])
+        self.assertNotIn("documentosDaIntimacao", notice)
+        result = read(Portal(citacao_intimacao_pendente_listar=queue(OTHER)), None)
+        self.assertEqual(result["ciencia"], {"estado": "nenhuma"})
+        result = read(Portal(citacao_intimacao_pendente_listar=Reply("erro", status=500)), None)
+        self.assertEqual(result["ciencia"]["estado"], "nenhuma")
+        self.assertIn("Não foi possível verificar", result["ciencia"]["aviso"])
+        self.assertTrue(result["ciencia"]["motivo"])
+
+    def test_pending_queues_are_read_once_per_session_until_a_document_is_opened(self):
+        portal = Portal(citacao_intimacao_pendente_listar=queue(NUMBER))
+
+        def reads():
+            return portal.actions.count("citacao_intimacao_pendente_listar")
+
+        with mock.patch.object(client, "clock", return_value=1000.0):
+            for _ in range(3):
+                self.assertEqual(read(portal, None)["ciencia"]["estado"], "pendente")
+            self.assertEqual(reads(), 1)
+            self.assertEqual(read(portal, ["20"])["ciencia"]["estado"], "dada")  # the memo answers, then is dropped
+            self.assertEqual(reads(), 1)
+            read(portal, None)
+            self.assertEqual(reads(), 2)
+            other = Portal(citacao_intimacao_pendente_listar=queue())
+            read(other, None)  # another session (portal or office) reads its own
+            self.assertEqual(other.actions.count("citacao_intimacao_pendente_listar"), 1)
+        with mock.patch.object(client, "clock", return_value=1000.0 + client.PENDING_TTL):
+            read(portal, None)
+        self.assertEqual(reads(), 3)
+        # A failed reading is not kept: the next call tries again.
+        failing = Portal(citacao_intimacao_pendente_listar=Reply("erro", status=500))
+        read(failing, None)
+        read(failing, None)
+        self.assertEqual(failing.actions.count("citacao_intimacao_pendente_listar"), 2)
+
+    def test_a_queue_answering_the_login_page_expires_the_session_before_anything_opens(self):
+        portal = Portal(citacao_intimacao_pendente_listar='<form><input name="username"></form>')
+        with self.assertRaises(SessionExpired):
+            read(portal, ["10"])
+        self.assertEqual(portal.opened, [])
 
     def test_pending_intimacao_reads_and_tells_the_user(self):
         portal = Portal(citacao_intimacao_pendente_listar=queue(OTHER, NUMBER))
@@ -137,7 +179,7 @@ class CienciaNoticeTest(unittest.TestCase):
         self.assertEqual(portal.opened, READ)
         self.assertEqual(result["attachments"][0]["extractionStatus"], "extracted")
         notice = result["ciencia"]
-        self.assertIs(notice["pendente"], True)
+        self.assertEqual(notice["estado"], "dada")
         self.assertEqual(
             notice["intimacoes"],
             [
@@ -173,10 +215,6 @@ class CienciaNoticeTest(unittest.TestCase):
     def test_unreadable_pending_state_reads_and_says_it_was_not_verified(self):
         cases = {
             "queue answers an error": ({"citacao_intimacao_pendente_listar": Reply("erro", status=500)}, PANEL),
-            "queue answers the login page": (
-                {"citacao_intimacao_pendente_listar": '<form><input name="username"></form>'},
-                PANEL,
-            ),
             "queue has more rows than were read": (
                 {"citacao_intimacao_pendente_listar": queue(OTHER, total=40)},
                 PANEL,
@@ -197,7 +235,7 @@ class CienciaNoticeTest(unittest.TestCase):
                 result = read(portal, ["10"], panel=panel)
                 self.assertEqual(portal.opened, READ)
                 notice = result["ciencia"]
-                self.assertIs(notice["verificada"], False)
+                self.assertEqual(notice["estado"], "desconhecida")
                 self.assertTrue(notice["motivo"])
                 self.assertIn("Não foi possível verificar", notice["aviso"])
                 self.assertIn("Informe o advogado", notice["aviso"])
@@ -213,7 +251,7 @@ class CienciaNoticeTest(unittest.TestCase):
             citacao_intimacao_pendente_listar=queue(),
             citacao_intimacao_pendente_listar_urgente=Reply("erro", status=500),
         )
-        self.assertIs(read(portal, ["10"], panel=panel)["ciencia"]["verificada"], False)
+        self.assertEqual(read(portal, ["10"], panel=panel)["ciencia"]["estado"], "desconhecida")
 
     def test_queue_links_of_a_state_panel_are_read_once(self):
         """TJSP-style panels publish the queue links through one ajax state payload instead of static links."""

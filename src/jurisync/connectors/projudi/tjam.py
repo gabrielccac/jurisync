@@ -37,6 +37,7 @@ from curl_cffi.requests.exceptions import RequestException
 from jurisync import portals
 from jurisync.connectors.projudi import base, legacy, parsers
 from jurisync.connectors.projudi.legacy import HumanVerificationRequired, MissingCredentials
+from jurisync.core.ciencia import NONE, PENDING, report
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
 from jurisync.core.session_pool import LoginRejected
 
@@ -395,7 +396,18 @@ class TjamAdapter(legacy.LegacyAdapter):
         if number in numbers or not complete:
             raise legacy.DocumentsBlocked(
                 "This process has an intimação awaiting ciência for this account (or the agenda could not be read in "
-                "full): opening its files could count as reading it. Open it in the portal if the user decides to."
+                "full): opening its files could count as reading it. Open it in the portal if the user decides to.",
+                report(
+                    PENDING,
+                    "Este processo tem intimação aguardando ciência; nada foi aberto. Abrir seus arquivos pode "
+                    "registrar a ciência e iniciar o prazo: abra no portal se o usuário decidir.",
+                )
+                if number in numbers
+                else report(
+                    NONE,
+                    "Nada foi aberto: a agenda de intimações não pôde ser lida por inteiro, então não se sabe se este "
+                    "processo tem intimação aguardando ciência.",
+                ),
             )
         content, kind = base.Adapter.download(self, session, portal, document_id, hash_value)
         if (

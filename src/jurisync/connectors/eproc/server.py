@@ -1,8 +1,9 @@
 """Eproc MCP server for every configured Eproc portal. Read-only toward the portal, except that opening the document
-of a pending intimação may register its ciência (the result then carries a ``ciencia`` notice for the user).
+of a pending intimação may register its ciência (eproc_get_process always reports it in its ``ciencia`` block).
 
 Each portal keeps its own session: the Selenium login runs once per portal;
-later calls reuse the authenticated cookies and re-read the panel.
+later calls reuse the authenticated cookies and re-read the panel. A call the portal answers with its login page
+logs in again once and is repeated.
 """
 
 import sys
@@ -25,7 +26,7 @@ from jurisync.connectors.eproc.client import (
     uses_a3,
 )
 from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
-from jurisync.core.session_pool import SessionPool
+from jurisync.core.session_pool import SessionExpired, SessionPool
 
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
 # eproc_get_process can store a file in the shared folder and, by opening a document, register a ciência.
@@ -54,34 +55,42 @@ sessions = SessionPool(login=authenticate, refresh=refresh_panel, close=lambda v
 
 
 def configured_portals():
-    """Eproc portals whose credentials are set; all wired portals when none are."""
-    keys = portals.keys("eproc")
-    ready = tuple(
+    """Eproc portals whose login is set in the current credentials; ``()`` when none is."""
+    return tuple(
         key
-        for key in keys
+        for key in portals.keys("eproc")
         if (portals.eproc(key).env("2FA_DATA") or portals.eproc(key).env("2FA_QR"))
         and (portals.eproc(key).env("USERNAME") or portals.eproc(key).uses_certificate() or uses_a3(key))
     )
-    return ready or keys
 
 
 def describe(keys):
     return ", ".join(f"{key} ({portals.eproc(key).host})" for key in keys)
 
 
+def expired(result):
+    """A result whose page was the portal's login page. Such a read stopped before any document was opened."""
+    if "session_expired" in result.get("diagnostics", []):
+        raise SessionExpired("eproc session expired")
+    return result
+
+
 def create_server(keys=None):
-    keys = tuple(keys or configured_portals())
+    keys = tuple(keys or portals.keys("eproc"))
     Portal = Literal[keys]  # noqa: N806 - a type built from the configured portals
     Queue = Literal[tuple(QUEUE_KINDS)]  # noqa: N806 - a type built from the queue kinds
     server = MCPServer("eproc", version="1.0.0")
 
     def call(portal, read):
-        with (
-            tool_errors("Eproc", *anticipated_errors()),
-            sessions.session(portal) as (session, panel_html, panel_url),
-        ):
+        with tool_errors("Eproc", *anticipated_errors()):
             return require_success(
-                "Eproc", read(session=session, panel_html=panel_html, panel_url=panel_url, portal=portal)
+                "Eproc",
+                sessions.run(
+                    portal,
+                    lambda value: expired(
+                        read(session=value[0], panel_html=value[1], panel_url=value[2], portal=portal)
+                    ),
+                ),
             )
 
     @server.tool(
@@ -128,11 +137,13 @@ def create_server(keys=None):
         title="Get Eproc process context",
         description=(
             "Read an Eproc process, parties, events, document inventory and up to five selected document texts. "
-            "Without documentIds it is a pure read. With documentIds the documents are always opened. When the process "
-            "had a citação/intimação waiting for ciência, the response carries a top-level ciencia block "
-            "(pendente, intimacoes, aviso); when that could not be checked, ciencia.verificada=false with an aviso. "
-            "Opening the documents may have registered the lawyer's ciência and started the deadline: always relay "
-            "ciencia.aviso to the user and note it in the task. With save=true each read document is stored in the "
+            "Without documentIds no document is opened. With documentIds the documents are always opened. The "
+            "response always carries a top-level ciencia block, checked against the lawyer's pending queues: "
+            "estado 'nenhuma' (nothing pending involved), 'pendente' (a citação/intimação awaits ciência and no "
+            "document was opened), 'dada' (documents of a process with one were opened: the ciência may have been "
+            "registered and the deadline started) or 'desconhecida' (documents were opened but the queues could not "
+            "be checked; motivo says why), with intimacoes and an aviso. Always relay ciencia.aviso to the user and "
+            "note it in the task. With save=true each read document is stored in the "
             "shared documents folder (HTML acts are rendered to PDF) and reported as savedAs, so a task can attach it "
             "by file name. Not annotated read-only because of the save and ciência effects. "
             f"Portals: {describe(keys)}."
@@ -181,7 +192,9 @@ def create_server(keys=None):
 
 def main():
     load_env_file()
-    serve(create_server(), on_exit=sessions.close)
+    keys = configured_portals() or portals.keys("eproc")
+    sessions.only(keys)
+    serve(create_server(keys), on_exit=sessions.close)
 
 
 if __name__ == "__main__":

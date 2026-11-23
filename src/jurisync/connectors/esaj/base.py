@@ -81,6 +81,11 @@ def _a1_names():
     return certificate.credential_names("ESAJ")
 
 
+def has_certificate():
+    """Whether the account sets the A1 file and its PIN (``load_certificate`` reads both)."""
+    return all(credentials.has(name) for name in _a1_names())
+
+
 def load_certificate(*, pin=None, p12_path=None):
     file_name, pin_name = _a1_names()
     pin = pin or credentials.env(pin_name)
