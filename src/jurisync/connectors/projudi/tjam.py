@@ -24,9 +24,19 @@ Safety rules (the generic read rules are in ``legacy.py``):
 - a document is read only when the desk's intimação agenda ("Aguardando Ciência") has no entry for that process:
   otherwise ``DocumentsBlocked``, because opening a file there could count as reading the intimação;
 - the connector never asks for or uses the internal Projudi certificate password.
+
+Lists (observed live on 2026-11-23, one login): the frameset menu groups its ``add_menu`` links under section headers
+(``add_menu("Intimações")``), and the same label repeats across sections ("Já Cumpridas" under Intimações and
+Citações), so the lists are found by (section, label). Each list is a GET of its menu link (page 1) and, for more
+pages or the 2nd instance, a POST of the page's own list form to its ``actionType=listar...`` action with the page
+number (or ``instancia``) changed: the same request its paging links and radio make. The rows' "Visualizar" link
+(``intimacao.do``) is what registers the reading; it is never followed, and no link of a row is returned. A page past
+the end answers the last rows again ("exibindo de 21 até 1"), so paging stops at the count the footer declares.
 """
 
 import hashlib
+import html as entities
+import math
 import re
 import urllib.parse
 import weakref
@@ -59,6 +69,76 @@ FILE_LINK = re.compile(r"arquivo\.do\?_tj=([0-9a-fA-F]{16,512})$")
 FILE_LABEL = re.compile(r"^(\d+)\.(\d+)\s*Arquivo:\s*(.*)$", re.S)
 RECORDS = re.compile(r"(\d+)\s+registro\(s\) encontrado\(s\)")
 DOCUMENT_ID = re.compile(r"(\d{1,6})(\d{3})")
+MENU_ENTRY = re.compile(r'add_menu\(\s*"([^"]*)"\s*(?:,\s*"(/[^"]+)")?')
+CNJ = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
+DATE = re.compile(r"\d{2}/\d{2}/\d{4}")
+SHOWING = re.compile(r"(\d+)\s+registro\(s\) encontrado\(s\)(?:,\s*exibindo de\s+(\d+)\s+até\s+(\d+))?")
+# The list pages and the only actions posted to them: their own paging/instance form. Nothing else is requested.
+LIST_PAGES = {
+    "processosAdvogado.do",
+    "processo/recursal/recursoBusca.do",
+    "processo/intimacaoAdvogado.do",
+    "citacao/citacaoAdvogado.do",
+}
+INTIMACOES, CITACOES = "Intimações", "Citações"
+# key: (menu section, menu label). "novas" is the only list whose rows still await reading (ciência).
+INTIMATION_LISTS = {
+    "novas": (INTIMACOES, "Novas (Aguardando Leitura)"),
+    "ultimoDia": (INTIMACOES, "Último Dia Para Cumprimento"),
+    "prazoDecorrendo": (INTIMACOES, "Lidas e Com Prazo Decorrendo"),
+    "lidasSemPrazo": (INTIMACOES, "Já Lidas e Sem Prazo para Cumprimento"),
+    "cumpridas": (INTIMACOES, "Já Cumpridas"),
+    "prazoPerdido30": (INTIMACOES, "Prazo Perdido (Últimos 30 dias)"),
+    "prazoPerdido90": (INTIMACOES, "Prazo Perdido (Últimos 90 dias)"),
+    "prazoPerdido180": (INTIMACOES, "Prazo Perdido (Últimos 180 dias)"),
+    "citacoesPrazoAguardandoInicio": (CITACOES, "Já Lidas e com Prazo Aguardando Início"),
+    "citacoesPrazoDecorrendo": (CITACOES, "Lidas e Com Prazo Decorrendo"),
+    "citacoesUltimoDia": (CITACOES, "Último Dia Para Cumprimento"),
+    "citacoesLidasSemPrazo": (CITACOES, "Já Lidas e Sem Prazo para Cumprimento"),
+    "citacoesCumpridas": (CITACOES, "Já Cumpridas"),
+    "citacoesPrazoPerdido30": (CITACOES, "Prazo Perdido (Últimos 30 dias)"),
+    "citacoesPrazoPerdido90": (CITACOES, "Prazo Perdido (Últimos 90 dias)"),
+    "citacoesPrazoPerdido180": (CITACOES, "Prazo Perdido (Últimos 180 dias)"),
+}
+DEFAULT_INTIMATION_LISTS = (
+    "novas",
+    "ultimoDia",
+    "prazoDecorrendo",
+    "citacoesPrazoAguardandoInicio",
+    "citacoesPrazoDecorrendo",
+    "citacoesUltimoDia",
+)
+PROCESS_SECTIONS = {"1": "Ações 1º Grau", "2": "Ações 2º Grau"}
+PROCESS_LISTS = {
+    "todos": ("Processos (Todos)", "Recursos (Todos)"),
+    "ativos": ("Processos Ativos", "Recursos Ativos"),
+    "suspensos": ("Processos Suspensos", "Recursos Suspensos"),
+    "arquivadosProvisoriamente": ("Processos Arquivados Provisoriamente", "Recursos Arquivados Provisoriamente"),
+    "arquivadosSemDistribuicao": ("Processos Arquivados Sem Distribuição", None),
+    "arquivadosEmDefinitivo": ("Processos Arquivados em Definitivo", "Recursos Arquivados em Definitivo"),
+}
+INSTANCES = {"1": "primeiroGrau", "2": "segundoGrau"}
+# Header text (lowercase, no spaces/punctuation) -> output field.
+COLUMNS = {
+    "númerodoprocessorecurso": "processNumber",
+    "processo": "processNumber",
+    "recurso": "processNumber",
+    "parteintimada": "parte",
+    "partecitada": "parte",
+    "dtpostagem": "postagem",
+    "datadaintimação": "dataIntimacao",
+    "prazo": "prazo",
+    "tipo": "tipo",
+    "citaçãoautomática": "citacaoAutomatica",
+    "partes": "partes",
+    "dtdistribuiçãodtarquiv": "distribuicao",
+    "classeprocessualassuntoprincipal": "classe",
+    "classe": "classe",
+    "varadeorigem": "varaOrigem",
+}
+DESK_COUNTS = re.compile(
+    r"(Ativos|Suspensos|Arquivados provisoriamente|Arquivados sem distribuição|Arquivados em definitivo):\s*(\d+)"
+)
 # Per-session navigation state (menu tokens, the process last opened): Projudi keeps the "current process" on its side.
 _state = weakref.WeakKeyDictionary()
 
@@ -95,6 +175,110 @@ def menu_links(html):
     for label, path in MENU_ITEM.findall(html or ""):
         links.setdefault(" ".join(label.split()), path)
     return links
+
+
+def menu_entries(html):
+    """``[(section, label, path)]`` of the frameset's ``add_menu`` calls; a call without a path opens a section."""
+    entries, section = [], ""
+    for label, path in MENU_ENTRY.findall(html or ""):
+        label = " ".join(entities.unescape(label).split())
+        if not path:
+            section = label
+        else:
+            entries.append((section, label, path))
+    return entries
+
+
+def _column(header):
+    return COLUMNS.get(re.sub(r"[\s./()]", "", header.casefold()))
+
+
+def _parties(cell):
+    """``[{role, names}]`` of the nested parties table of a process row."""
+    parties = []
+    for row in cell.find_all("tr"):
+        cells = row.find_all("td", recursive=False)
+        names = [clean(item) for item in row.find_all("li")]
+        if len(cells) >= 2 and names:
+            parties.append({"role": clean(cells[0]).rstrip(":"), "names": names})
+    return parties
+
+
+def parse_list_page(html):
+    """One page of a desk list: ``{"total", "first", "last", "rows"}``. Rows carry what the columns show (process
+    number, party, dates, deadline, class) and never a link. A page with neither a result table nor the footer count is
+    an error, not an empty list."""
+    page = legacy.soup(html)
+    table = page.find("table", class_="resultTable")
+    counted = SHOWING.search(clean(page))
+    if table is None or counted is None:
+        raise base.ProjudiParseError("TJAM list page has no result table or record count")
+    header = table.find("thead")
+    columns = [_column(clean(cell)) for cell in (header.find_all("th") if header else [])]
+    body = table.find("tbody") or table
+    rows = []
+    for row in body.find_all("tr", recursive=False):
+        cells = row.find_all("td", recursive=False)
+        if len(cells) != len(columns) or not CNJ.search(clean(row)):
+            continue
+        item = {}
+        for column, cell in zip(columns, cells, strict=True):
+            if column == "processNumber":
+                number = CNJ.search(clean(cell))
+                item[column] = number.group(0) if number else clean(cell)
+            elif column == "partes":
+                item[column] = _parties(cell)
+            elif column == "distribuicao":
+                dates = DATE.findall(clean(cell))
+                item["distribuicao"] = dates[0] if dates else ""
+                item["arquivamento"] = dates[1] if len(dates) > 1 else ""
+            elif column:
+                item[column] = clean(cell)
+        if item.get("processNumber"):
+            rows.append(item)
+    total, first, last = (int(value) if value else None for value in counted.groups())
+    return {"total": total, "first": first, "last": last, "rows": rows}
+
+
+def list_form(html, config):
+    """``(action, fields)`` of the list page's own form: the fields a browser posts (no button or row checkbox)."""
+    form = next(
+        (form for form in legacy.soup(html).find_all("form") if form.find(attrs={"name": re.compile(r"PageNumber$")})),
+        None,
+    )
+    if form is None:
+        raise base.ProjudiParseError("TJAM list page has no paging form")
+    action = config.url((form.get("action") or "").removeprefix(config.root))
+    split = urllib.parse.urlsplit(action)
+    query = urllib.parse.parse_qs(split.query)
+    if split.path.removeprefix(config.root) not in LIST_PAGES or not query.get("actionType", [""])[0].startswith(
+        "listar"
+    ):
+        raise base.ProjudiParseError("TJAM list form posts somewhere other than its own list")
+    fields = []
+    for field in form.find_all(["input", "select"]):
+        name, kind = field.get("name"), (field.get("type") or "").lower()
+        if not name or kind in {"button", "submit", "image", "reset", "checkbox"}:
+            continue
+        if kind == "radio" and not field.has_attr("checked"):
+            continue
+        if field.name == "select":
+            chosen = field.find_all("option", selected=True) or field.find_all("option")[:1]
+            fields.append((name, chosen[-1].get("value", "") if chosen else ""))
+        else:
+            fields.append((name, field.get("value", "")))
+    return action, fields
+
+
+def desk_counts(html):
+    """``{"1": {...}, "2": {...}}`` of the desk's process counters (tab ``tabprefix0``)."""
+    tab = legacy.soup(html).find(id="tabprefix0")
+    counts = {}
+    for instance, part in zip(("1", "2"), re.split(r"2º Grau", clean(tab) if tab else ""), strict=False):
+        found = {label.casefold(): int(value) for label, value in DESK_COUNTS.findall(part)}
+        if found:
+            counts[instance] = found
+    return counts
 
 
 def clean(node):
@@ -277,6 +461,7 @@ class TjamAdapter(legacy.LegacyAdapter):
         menu = menu_links(text)
         if menu:
             self._state(session)["menu"] = menu
+            self._state(session)["entries"] = menu_entries(text)
         return session
 
     def refresh(self, portal, session):
@@ -299,6 +484,101 @@ class TjamAdapter(legacy.LegacyAdapter):
             _url, html = self._get_page(session, portal, portals.projudi(portal).url(POST_LOGON))
             state["menu"] = menu_links(html)
         return state["menu"]
+
+    def _entries(self, session, portal):
+        state = self._state(session)
+        if not state.get("entries"):
+            _url, html = self._get_page(session, portal, portals.projudi(portal).url(POST_LOGON))
+            state["entries"] = menu_entries(html)
+        return state["entries"]
+
+    def _read_list(self, session, portal, section, label, *, instance="1", max_pages=10):
+        """Every page of one desk list, up to ``max_pages``: ``{section, label, instance, total, returned, complete,
+        rows}``. Only the menu link and the list's own form are requested."""
+        config = portals.projudi(portal)
+        path = next((p for s, lbl, p in self._entries(session, portal) if (s, lbl) == (section, label)), None)
+        if path is None:
+            raise base.ProjudiParseError(f"Projudi menu has no '{section} / {label}' list for this session")
+        if urllib.parse.urlsplit(path).path.lstrip("/") not in LIST_PAGES:
+            raise base.ProjudiParseError(f"Projudi menu link '{label}' is not a list page")
+        _url, html = self._get_page(session, portal, config.url(path))
+        page = parse_list_page(html)
+        action, fields = list_form(html, config)
+        if instance != "1":
+            if not any(name == "instancia" for name, _ in fields):
+                raise ValueError(f"the '{label}' list has no instance choice")
+            fields = [(n, INSTANCES[instance] if n == "instancia" else v) for n, v in fields]
+            html = self._post_list(session, portal, action, fields)
+            page = parse_list_page(html)
+        rows = list(page["rows"])
+        size = next((int(v) for n, v in fields if n.endswith("PageSize") and v.isdigit()), 0) or len(rows) or 1
+        total = page["total"] or 0
+        pages = max(1, math.ceil(total / size))
+        for number in range(2, min(pages, max_pages) + 1):
+            fields = [(n, str(number) if n.endswith("PageNumber") else v) for n, v in fields]
+            rows.extend(parse_list_page(self._post_list(session, portal, action, fields))["rows"])
+        return {
+            "section": section,
+            "label": label,
+            "instance": instance,
+            "total": page["total"],
+            "returned": len(rows),
+            "complete": page["total"] is not None and len(rows) == page["total"],
+            "rows": rows,
+        }
+
+    def _post_list(self, session, portal, action, fields):
+        config = portals.projudi(portal)
+        response = self.request(session, portal, "POST", action[len(config.base_url) :], data=fields)
+        if response.status_code != 200:
+            raise RuntimeError(f"Projudi list page failed (HTTP {response.status_code})")
+        return parsers.decode(response.content)
+
+    def list_intimations(self, session, portal, *, lists=None, instances=("1",), max_pages=10):
+        """The desk's intimação and citação lists (default: the ones awaiting reading or with a running deadline),
+        per instance, without opening any. Rows of ``novas`` await reading: opening them registers the ciência."""
+        wanted = list(lists or DEFAULT_INTIMATION_LISTS)
+        unknown = [key for key in wanted if key not in INTIMATION_LISTS]
+        if unknown:
+            raise ValueError(f"unknown TJAM list(s) {unknown}; valid: {', '.join(INTIMATION_LISTS)}")
+        result = []
+        for key in wanted:
+            section, label = INTIMATION_LISTS[key]
+            for instance in instances:
+                read = self._read_list(session, portal, section, label, instance=instance, max_pages=max_pages)
+                for row in read["rows"]:
+                    row["cienciaPendente"] = key == "novas"
+                result.append({"list": key, **read})
+        response = self.request(session, portal, "POST", DESK, data={"selectedIcon": "tabIntimacoes"})
+        numbers, agenda_complete = pending_intimations(parsers.decode(response.content))
+        return {
+            "lists": result,
+            "awaitingCiencia": {"processNumbers": sorted(numbers), "complete": agenda_complete},
+            "complete": all(item["complete"] for item in result) and agenda_complete,
+        }
+
+    def list_processes(self, session, portal, *, situation="ativos", instances=("1", "2"), max_pages=10):
+        """The lawyer's processes (1st instance) and appeals (2nd) in one situation, with the desk's counters."""
+        if situation not in PROCESS_LISTS:
+            raise ValueError(f"unknown TJAM situation {situation!r}; valid: {', '.join(PROCESS_LISTS)}")
+        groups = []
+        for instance in instances:
+            label = PROCESS_LISTS[situation][int(instance) - 1]
+            if label is None:
+                continue
+            groups.append(
+                self._read_list(session, portal, PROCESS_SECTIONS[instance], label, max_pages=max_pages)
+                | {"instance": instance}
+            )
+        _url, desk = self._get_page(session, portal, portals.projudi(portal).url(DESK))
+        for group in groups:
+            group["processes"] = group.pop("rows")
+        return {
+            "situation": situation,
+            "groups": groups,
+            "deskCounts": desk_counts(desk),
+            "complete": all(group["complete"] for group in groups),
+        }
 
     def open_process(self, session, portal, process_number):
         config = portals.projudi(portal)

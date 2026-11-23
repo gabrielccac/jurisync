@@ -325,3 +325,186 @@ class SessionAndReadsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MENU = f"""<html><script>add_menu("A&ccedil;&otilde;es 1º Grau");
+add_menu("Processos Ativos", "/processosAdvogado.do?_tj={TJ}01", "userMainFrame", "");
+add_menu("A&ccedil;&otilde;es 2º Grau");
+add_menu("Recursos Ativos", "/processo/recursal/recursoBusca.do?_tj={TJ}02", "userMainFrame", "");
+add_menu("Intima&ccedil;&otilde;es");
+add_menu("Novas (Aguardando Leitura)", "/processo/intimacaoAdvogado.do?_tj={TJ}03", "userMainFrame", "");
+add_menu("Já Cumpridas", "/processo/intimacaoAdvogado.do?_tj={TJ}04", "userMainFrame", "");
+add_menu("Cita&ccedil;&otilde;es");
+add_menu("J&aacute; Cumpridas", "/citacao/citacaoAdvogado.do?_tj={TJ}05", "userMainFrame", "");
+add_menu("Outros");
+add_menu("Caixa de Mensagens", "/util/caixaMensagens.do?_tj={TJ}06", "userMainFrame", "");</script></html>"""
+OTHER = "0000002-34.2026.8.04.0001"
+
+
+def nav(total, first, last):
+    return (
+        f'<div id="navigator"><div class="navLeft">{total} registro(s) encontrado(s), exibindo de {first} até {last}'
+        "</div></div>"
+    )
+
+
+def intimation_page(rows, total, first, last, form="intimacaoAdvogadoForm", action="processo/intimacaoAdvogado.do"):
+    body = (
+        "".join(
+            f"""<tr class="even"><td><a href="/projudi/processo.do?_tj={TJ}a{n}" class="link"><em>{number}</em></a></td>
+<td> Parte Exemplo {n} ( Executado ) </td><td>27/07/2026</td><td>30/07/2026</td><td>15 dias úteis</td>
+<td><a href="/projudi/processo/intimacao.do?_tj={TJ}b{n}" class="link">Visualizar</a></td></tr>"""
+            for n, number in rows
+        )
+        or '<tr><td colspan="6">Nenhum registro encontrado</td></tr>'
+    )
+    return f"""<html><a href="/projudi/usuario/logon.do?actionType=logout">Sair</a>
+<form name="{form}" id="{form}" method="post" action="/projudi/{action}?actionType=listar">
+<input type="text" name="processo" value=""><select name="tipo"><option value="novas" selected>Novas</option>
+<option value="lidaECumprida">Já Cumpridas</option></select>
+<input type="radio" name="instancia" value="primeiroGrau" checked><input type="radio" name="instancia" value="segundoGrau">
+<input type="button" name="pesquisar" value="Pesquisar" onclick="filtrar();">
+<input type="hidden" name="{form[:-4]}PageSize" value="2"><input type="hidden" name="{form[:-4]}PageNumber" value="1">
+{nav(total, first, last)}
+<table class="resultTable"><thead><tr><th> Número do Processo/Recurso </th><th> Parte Intimada </th>
+<th><a href="javascript:void(0)">Dt. Postagem</a></th><th> Data da Intimação </th><th> Prazo </th><th></th></tr></thead>
+<tbody>{body}</tbody></table></form>
+<form name="anotacaoAssessoriaForm" action="/projudi/processo/anotacaoAssessoria.do?actionType=listar"></form></html>"""
+
+
+PROCESS_LIST = f"""<html><form name="processosAdvogadoForm" method="post" action="/projudi/processosAdvogado.do?actionType=listar">
+<select name="situacao"><option value="todos">Todos</option><option value="ativo" selected>Ativo</option></select>
+<input type="hidden" name="processosAdvogadoPageSize" value="20"><input type="hidden" name="processosAdvogadoPageNumber" value="1">
+<input type="hidden" name="tipo" value="1010">{nav(1, 1, 1)}
+<table class="resultTable"><thead><tr><th><input type="checkbox" name="checker" value="checker"></th><th>Processo</th>
+<th>Partes</th><th>Dt Distribuição<br/>Dt. Arquiv.</th><th>Classe Processual<br>(Assunto Principal)</th></tr></thead>
+<tbody><tr id="linha1"><td><input type="checkbox" name="processos" value="1"></td>
+<td><a href="/projudi/processo.do?_tj={TJ}c1" class="link"><em>{NUMBER}</em></a></td>
+<td><table class="form"><tr><td><font>Exequente:</font></td><td><ul><li>ENTE EXEMPLO</li></ul></td></tr>
+<tr><td colspan="2"></td></tr><tr><td><font>Executado:</font></td><td><ul><li>Empresa Exemplo Ltda</li>
+<li>Pessoa Exemplo</li></ul></td></tr></table></td><td>27/08/2020</td>
+<td>Execução Fiscal (Dívida Ativa)</td></tr></tbody></table>
+<input type="button" name="substabelecerButton" value="Substabelecer" onclick="substabelecer();"></form></html>"""
+APPEAL_LIST = f"""<html><form name="recursoBuscaForm" method="post"
+ action="/projudi/processo/recursal/recursoBusca.do?actionType=listarParaAdvogadoPoloSituacao">
+<input type="hidden" name="ativosPageSize" value="100"><input type="hidden" name="ativosPageNumber" value="1">
+{nav(0, 1, 0)}<table class="resultTable"><thead><tr><th></th><th>Recurso</th><th>Partes</th><th>Classe</th>
+<th>Dt Distribuição Dt. Arquiv.</th><th>Vara de Origem</th></tr></thead>
+<tbody><tr><td colspan="6">Nenhum registro encontrado</td></tr></tbody></table></form></html>"""
+DESK_HOME = """<html><div id="tabprefix0">1º Grau Ativos: 1 Suspensos: 0 Arquivados provisoriamente: 0
+Arquivados sem distribuição: 0 Arquivados em definitivo: 2 2º Grau Ativos: 0 Suspensos: 0</div></html>"""
+
+
+class ListsTest(unittest.TestCase):
+    """The desk's lists (observed live on 2026-11-23): menu link for page 1, the list's own form for the rest."""
+
+    def setUp(self):
+        wired(self)
+
+    def routes(self, *, pages=None, posts=None):
+        pages = {
+            APP + "usuario/postLogon.do?actionType=iniciar": MENU,
+            APP + f"processo/intimacaoAdvogado.do?_tj={TJ}03": intimation_page([(1, NUMBER), (2, OTHER)], 3, 1, 2),
+            APP + f"processo/intimacaoAdvogado.do?_tj={TJ}04": intimation_page([], 0, 1, 0),
+            APP + f"citacao/citacaoAdvogado.do?_tj={TJ}05": intimation_page(
+                [], 0, 1, 0, "citacaoAdvogadoForm", "citacao/citacaoAdvogado.do"
+            ),
+            APP + f"processosAdvogado.do?_tj={TJ}01": PROCESS_LIST,
+            APP + f"processo/recursal/recursoBusca.do?_tj={TJ}02": APPEAL_LIST,
+            DESK: DESK_HOME,
+            **(pages or {}),
+        }
+
+        def routes(method, url, kwargs):
+            if method == "GET" and url in pages:
+                return response(200, pages[url])
+            if method == "POST" and url == DESK:
+                return response(200, AGENDA_PENDING)
+            if method == "POST" and url == APP + "processo/intimacaoAdvogado.do?actionType=listar":
+                data = dict(kwargs["data"])
+                if data["instancia"] == "segundoGrau":
+                    return response(200, intimation_page([], 0, 1, 0))
+                # Past the end the portal answers the last rows again ("exibindo de 21 até 1").
+                return response(200, intimation_page([(3, NUMBER)], 3, 3, 3))
+            raise AssertionError(f"unexpected {method} {url}")
+
+        return routes
+
+    def test_menu_sections_tell_apart_lists_with_the_same_label(self):
+        entries = tjam.menu_entries(MENU)
+        self.assertIn(("Intimações", "Já Cumpridas", f"/processo/intimacaoAdvogado.do?_tj={TJ}04"), entries)
+        self.assertIn(("Citações", "Já Cumpridas", f"/citacao/citacaoAdvogado.do?_tj={TJ}05"), entries)
+
+    def test_intimations_read_every_page_and_never_open_one(self):
+        session = FakeSession(self.routes())
+        result = tjam.ADAPTER.list_intimations(session, KEY, lists=["novas", "cumpridas", "citacoesCumpridas"])
+        novas, cumpridas, citacoes = result["lists"]
+        self.assertEqual((novas["total"], novas["returned"], novas["complete"]), (3, 3, True))
+        self.assertEqual(
+            novas["rows"][0],
+            {
+                "processNumber": NUMBER,
+                "parte": "Parte Exemplo 1 ( Executado )",
+                "postagem": "27/07/2026",
+                "dataIntimacao": "30/07/2026",
+                "prazo": "15 dias úteis",
+                "cienciaPendente": True,
+            },
+        )
+        self.assertEqual((cumpridas["total"], cumpridas["rows"], citacoes["section"]), (0, [], "Citações"))
+        self.assertEqual(result["awaitingCiencia"], {"processNumbers": [NUMBER], "complete": True})
+        self.assertTrue(result["complete"])
+        page2 = dict(session.posts()[0][2]["data"])
+        self.assertEqual((page2["intimacaoAdvogadoPageNumber"], page2["tipo"]), ("2", "novas"))
+        self.assertNotIn("pesquisar", page2)
+        self.assertFalse(any("intimacao.do" in call[1] or "caixaMensagens" in call[1] for call in session.calls))
+        self.assertNotIn(TJ, str(result))
+
+    def test_the_second_instance_posts_the_list_form_with_its_radio(self):
+        session = FakeSession(self.routes())
+        result = tjam.ADAPTER.list_intimations(session, KEY, lists=["novas"], instances=("2",))
+        self.assertEqual(dict(session.posts()[0][2]["data"])["instancia"], "segundoGrau")
+        self.assertEqual((result["lists"][0]["instance"], result["lists"][0]["total"]), ("2", 0))
+
+    def test_max_pages_bounds_the_read_and_reports_it_incomplete(self):
+        session = FakeSession(self.routes())
+        result = tjam.ADAPTER.list_intimations(session, KEY, lists=["novas"], max_pages=1)
+        self.assertEqual((result["lists"][0]["returned"], result["complete"]), (2, False))
+
+    def test_processes_with_parties_by_role_and_the_desk_counters(self):
+        session = FakeSession(self.routes())
+        result = tjam.ADAPTER.list_processes(session, KEY)
+        first, appeals = result["groups"]
+        self.assertEqual(
+            first["processes"],
+            [
+                {
+                    "processNumber": NUMBER,
+                    "partes": [
+                        {"role": "Exequente", "names": ["ENTE EXEMPLO"]},
+                        {"role": "Executado", "names": ["Empresa Exemplo Ltda", "Pessoa Exemplo"]},
+                    ],
+                    "distribuicao": "27/08/2020",
+                    "arquivamento": "",
+                    "classe": "Execução Fiscal (Dívida Ativa)",
+                }
+            ],
+        )
+        self.assertEqual(
+            (first["instance"], first["complete"], appeals["instance"], appeals["total"]), ("1", True, "2", 0)
+        )
+        self.assertEqual(result["deskCounts"]["1"]["arquivados em definitivo"], 2)
+        self.assertEqual(result["deskCounts"]["2"], {"ativos": 0, "suspensos": 0})
+        self.assertFalse(session.posts())
+
+    def test_unknown_lists_and_a_form_posting_elsewhere_are_errors(self):
+        session = FakeSession(self.routes())
+        with self.assertRaises(ValueError):
+            tjam.ADAPTER.list_intimations(session, KEY, lists=["lidas"])
+        with self.assertRaises(ValueError):
+            tjam.ADAPTER.list_processes(session, KEY, situation="arquivados")
+        elsewhere = intimation_page([(1, NUMBER)], 1, 1, 1, action="processo/cumprirIntimacaoEmLote.do")
+        with self.assertRaises(base.ProjudiParseError):
+            tjam.list_form(elsewhere, portals.projudi(KEY))
+        with self.assertRaises(base.ProjudiParseError):
+            tjam.parse_list_page("<html>Erro</html>")

@@ -259,3 +259,59 @@ def viewer_documents(html, number):
                 )
         result.append(entry)
     return result
+
+
+FOUND = re.compile(r"(\d+)\s+Processos?\s+encontrados?", re.I)
+DATE = re.compile(r"\d{2}/\d{2}/\d{4}")
+
+
+def process_listing(html, prefix):
+    """``(items, total)`` of a consultation result list (``#listagemDeProcessos``, one ``divProcesso...`` per case).
+
+    Each item carries what the row shows: number, code and foro of its detail link, the party the search matched with
+    its role, class, main subject, the date it was received and where. ``total`` is the portal's own count
+    ("N Processos encontrados"), None when the page shows none. A page that is neither the list nor the consultation's
+    "no information" answer is an error, so an unexpected page is never read as an empty list.
+    """
+    page = soup(html)
+    listing = page.find(id="listagemDeProcessos")
+    if listing is None:
+        if not_found(html):
+            return [], 0
+        from jurisync.connectors.esaj.base import EsajParseError
+
+        raise EsajParseError("e-SAJ did not return a process list")
+    counter = page.find(id="contadorDeProcessos")
+    found = FOUND.search(counter.get_text(" ", strip=True)) if counter else None
+    items = []
+    for row in listing.find_all("div", id=re.compile(r"^divProcesso")):
+        link = row.select_one("a.linkProcesso[href]")
+        parts = urlsplit(link["href"]) if link else None
+        if parts is None or not parts.path.endswith(f"/{prefix}/show.do"):
+            continue
+        query = parse_qs(parts.query)
+        number = CNJ.search(link.get_text(" ", strip=True))
+
+        def text(selector, node=row):
+            found = node.select_one(selector)
+            return sanitize_diagnostics(" ".join(found.get_text(" ", strip=True).split())) if found else None
+
+        received = text(".dataLocalDistribuicaoProcesso") or ""
+        date = DATE.search(received)
+        place = received[date.end() :] if date else received
+        items.append(
+            {
+                "processNumber": number.group(0) if number else None,
+                "codigo": query.get("processo.codigo", [None])[0],
+                "foro": query.get("processo.foro", [None])[0],
+                "parte": {
+                    "papel": (text(".tipoDeParticipacao") or "").rstrip(":").strip() or None,
+                    "nome": text(".nomeParte"),
+                },
+                "classe": text(".classeProcesso"),
+                "assunto": text(".assuntoPrincipalProcesso"),
+                "recebidoEm": date.group(0) if date else None,
+                "local": place.strip(" -") or None,
+            }
+        )
+    return items, int(found.group(1)) if found else None

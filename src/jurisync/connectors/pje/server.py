@@ -16,6 +16,7 @@ from pydantic import Field, StringConstraints
 
 from jurisync import customers, portals
 from jurisync.connectors.pje import filing
+from jurisync.connectors.pje.acervo import read_acervo
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
@@ -355,6 +356,28 @@ def watched_processes(
         lambda name, session: read_push(
             name, session=session, limit=limit, offset=offset, process_number=processNumber or None
         ),
+    )
+
+
+@server.tool(
+    name="pje_list_processes",
+    title="List the lawyer's PJe processes (Acervo)",
+    description="List the lawyer's processes from the PJe panel's Acervo tab: jurisdiction by jurisdiction, each box (Caixa de entrada and the lawyer's own boxes, e.g. Arquivados) and every page up to maxPages. Each item has the process number, class, subject, parties as shown, órgão julgador, distribution date, last movement (date and text) when shown, the jurisdiction and box. On the PJe-JT portals (TRT/TST) it reads the panel's Acervo Geral and Arquivados buckets, whose rows carry number, class, parties, órgão julgador and the filing and archiving dates but no last movement. regions keeps the jurisdictions whose name contains one of the texts. complete is true only when every box was read to the total PJe shows and the boxes add up to each jurisdiction's counter. Not available on TRF5's PJe 1.x (trf5-legacy). Read-only: it never opens a process, an act or an expediente and takes no ciência; read a process with pje_get_process.",
+    annotations=READ_ONLY,
+)
+def list_processes(
+    portal: Portal,
+    regions: Annotated[
+        list[str] | None,
+        Field(
+            description='JSON list of texts; keeps jurisdictions whose name contains any of them, e.g. ["Belo Horizonte"]. Not a plain string.'
+        ),
+    ] = None,
+    maxPages: Annotated[int, Field(ge=1, le=50, description="Pages to read per box, 1 to 50; default 5.")] = 5,
+) -> dict[str, Any]:
+    return _notifications(
+        portal,
+        lambda name, session: read_acervo(name, session=session, regions=regions or None, max_pages=maxPages),
     )
 
 

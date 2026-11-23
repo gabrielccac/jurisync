@@ -73,6 +73,15 @@ Todo login falho traz um motivo fixo (`core/session_pool.REASONS`) com a explica
     diagnóstico no login.
   - `52a7970` Projudi TJBA: resolvedor do CAPTCHA Tencent (`core/tencent_captcha.py`) e adaptador cnj-servlet,
     **ainda não ligado** (`wired=False`) até um login real com senha válida (Thaile: senha expirada; Max: recusada).
+- Listagens que faltavam (branch `feat/listing-gaps`, validadas ao vivo em 23/11):
+  - PJe: `pje_list_processes` lista o Acervo do painel (jurisdição → caixa → páginas; no PJe-JT, Acervo Geral +
+    Arquivados pela API). Juliana: tjmg-pje-1g 197/197 em 53 jurisdições, tjce-1g 19/19, `complete`. PJe 1.x fora.
+  - Projudi TJAM: `projudi_list_intimations` (listas de intimações/citações da mesa, "Novas" com `cienciaPendente`)
+    e `projudi_list_processes` (1º/2º grau por situação). Thaile: 1 processo, 2 intimações com prazo perdido,
+    0 aguardando ciência.
+  - e-SAJ: `esaj_list_processes` lista os processos de 1º grau pela consulta por OAB de cada OAB da sessão
+    (paginada, `complete` por OAB). Juliana: TJAL 5, TJMS 1 (via token). TJAM sem suporte (portal antigo sem
+    auth/session); 2º grau fora.
 
 ## Próximas etapas (em ordem)
 

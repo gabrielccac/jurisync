@@ -101,6 +101,24 @@ def create_server(keys=None):
         return call(portal, lambda s: base.list_tasks(s, portal, kind, state))
 
     @server.tool(
+        title="List the lawyer's e-SAJ processes",
+        annotations=READ_ONLY,
+        description="List the account's first-instance processes: the court's consultation by each OAB of the logged-in "
+        "lawyer (esaj/api/auth/session), every page up to maxPages (25 cases a page) per OAB. Each item has the CNJ "
+        "number, class, main subject, the party the search matched with its role, the date received and where, and "
+        "the OABs that found it; oabs[] gives each search's total and complete, and complete is true only when every "
+        "OAB was read in full. Second-instance cases are not in this list. Read-only: it never opens a process, "
+        "document or intimação. Not available on TJAM (older portal without the account API: error not_supported).",
+    )
+    def esaj_list_processes(
+        portal: Annotated[Portal, portal_field] = default,
+        maxPages: Annotated[
+            int, Field(ge=1, le=base.MAX_LIST_PAGES, description="Pages of 25 to read per OAB, 1 to 40; default 10.")
+        ] = 10,
+    ) -> dict[str, Any]:
+        return call(portal, lambda s: base.list_processes(s, portal, maxPages))
+
+    @server.tool(
         title="Get e-SAJ process context",
         annotations=READ_ONLY,
         description="Read process fields, parties and movements. Stops at CAPTCHA/access flows; never acknowledges intimações.",

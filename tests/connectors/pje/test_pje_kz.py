@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from jurisync import portals
-from jurisync.connectors.pje import inbox, kz, process
+from jurisync.connectors.pje import acervo, inbox, kz, process
 from jurisync.connectors.pje.auth import certificate, sessions
 from jurisync.connectors.pje.expedientes import NoticeUnchecked, PendingNotice
 
@@ -556,3 +556,18 @@ def test_a_document_may_take_minutes_before_its_first_byte():
     session.get = recording
     kz.fetch_document(kz.Api(session, "trt7-1g"), "1000001", "9000005")
     assert seen[-1] == kz.DOCUMENT_TIMEOUT and kz.DOCUMENT_TIMEOUT[1] >= 120
+
+
+def test_acervo_listing_reads_acervo_geral_and_arquivados_once_per_process():
+    session = Session()
+    result = acervo.read_acervo("trt7-1g", session=session, max_pages=5)
+    listed = [params["idPainelAdvogadoEnum"] for path, params in session.calls if path.endswith("/processos")]
+    assert listed == [1, 5]  # Acervo Geral and Arquivados; never Meus Expedientes
+    assert result["complete"] and result["returned"] == 2
+    item = result["items"][0]
+    assert set(item) == {
+        "processNumber", "processId", "classe", "partes", "orgaoJulgador", "distribuidoEm", "arquivadoEm",
+        "jurisdicao", "caixa",
+    }  # fmt: skip
+    assert item["caixa"] == "Acervo Geral"
+    assert not any("expedientes" in path or "documento" in path for path, _ in session.calls)

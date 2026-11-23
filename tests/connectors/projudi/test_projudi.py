@@ -465,7 +465,8 @@ class ServerTest(unittest.TestCase):
                 return {tool.name: tool for tool in (await client.list_tools()).tools}
 
         listed = asyncio.run(tools())
-        self.assertNotIn("projudi_list_intimations", listed)
+        lists = listed["projudi_list_intimations"].input_schema["properties"]["portal"]
+        self.assertEqual((lists.get("default"), lists.get("enum", [lists.get("const")])), ("tjam-1g", ["tjam-1g"]))
         portal = listed["projudi_get_process"].input_schema["properties"]["portal"]
         self.assertEqual((portal.get("default"), portal.get("enum", [portal.get("const")])), ("tjam-1g", ["tjam-1g"]))
 
@@ -487,7 +488,6 @@ class ServerTest(unittest.TestCase):
             ],
         )
         reads = {"projudi_download_document", "projudi_read_documents"}
-        tjgo_only = {"projudi_list_intimations", "projudi_list_processes"}
         for tool in listed.values():
             with self.subTest(tool=tool.name):
                 # A download writes a file and, like a read, may register a ciência once acknowledged.
@@ -496,13 +496,27 @@ class ServerTest(unittest.TestCase):
                 self.assertTrue(tool.title)
                 portal = tool.input_schema["properties"]["portal"]
                 self.assertEqual(portal.get("default"), "tjgo-1g")
-                wired = ["tjgo-1g"] if tool.name in tjgo_only else ["tjgo-1g", "tjam-1g"]
-                self.assertEqual(portal.get("enum", [portal.get("const")]), wired)
+                self.assertEqual(portal.get("enum", [portal.get("const")]), ["tjgo-1g", "tjam-1g"])
                 self.assertNotIn("portal", tool.input_schema.get("required", []))
                 if tool.name in reads:
                     acknowledge = tool.input_schema["properties"]["acknowledgeCiencia"]
                     self.assertIsNone(acknowledge.get("default"))
                     self.assertNotIn("acknowledgeCiencia", tool.input_schema.get("required", []))
+
+    def test_list_options_are_tjam_only_and_reach_its_adapter(self):
+        refused = self.call("projudi_list_intimations", {"portal": "tjgo-1g", "lists": ["novas"]})
+        self.assertTrue(refused.is_error)
+        tjam_adapter = mock.Mock(flavor="legacy-local")
+        tjam_adapter.list_processes.return_value = {"situation": "todos", "groups": [], "complete": True}
+        with mock.patch.dict(server.ADAPTERS, {"legacy-local": tjam_adapter}):
+            result = self.call(
+                "projudi_list_processes",
+                {"portal": "tjam-1g", "situation": "todos", "instances": ["1", "1"], "maxPages": 3},
+            )
+        self.assertEqual(result.structured_content["portal"], "tjam-1g")
+        self.assertEqual(
+            tjam_adapter.list_processes.call_args.kwargs, {"situation": "todos", "instances": ("1",), "max_pages": 3}
+        )
 
     def test_get_process_hides_hashes_and_attaches_files_to_movements(self):
         result = self.call("projudi_get_process", {"process_number": NUMBER}).structured_content
