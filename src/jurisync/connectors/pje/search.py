@@ -9,7 +9,11 @@ Pesquisar button only calls the JS function submeterPesquisa(), so the action to
 declares (parsers.submit_function_search_action).
 """
 
+import copy
 import re
+import threading
+import time
+import weakref
 from html import unescape
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -18,7 +22,7 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.pje import acervo, jsf, kz
-from jurisync.connectors.pje.expedientes import ato_item, fetch_ato, fetch_expedientes
+from jurisync.connectors.pje.expedientes import ato_ciencia, ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
     matching_process_id,
@@ -32,8 +36,10 @@ from jurisync.connectors.pje.parsers import (
     response_html,
     submit_function_search_action,
 )
+from jurisync.core.session_pool import SessionExpired
 
 MAX_TIMELINE_PAGES = 5
+MEMO_SECONDS = 180
 DETAIL_PATH = "Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam"
 DETAIL_SUFFIX = {"1g": "&aba=", "2g": ""}
 DOWNLOAD_PATTERN = re.compile(
@@ -120,6 +126,29 @@ def _safe_page_url(candidate, detail_url):
     return url
 
 
+# get_process, read_documents and read_expediente_ato on one process each searched it and read its detail page
+# again (6-8 requests). The lookup and the detail page are kept a few minutes per session; the Expedientes tab is
+# read on every call, because opening a document or an act may register a ciência.
+_memo = weakref.WeakKeyDictionary()  # session -> {process number: (time, lookup, detail page)}
+_memo_guard = threading.Lock()
+
+
+def _recall(session, number):
+    with _memo_guard:
+        entry = _memo.get(session, {}).get(number)
+    if entry is None or time.monotonic() - entry[0] > MEMO_SECONDS:
+        return None, None
+    return entry[1], copy.deepcopy(entry[2])
+
+
+def _remember(session, number, lookup, page):
+    try:
+        with _memo_guard:
+            _memo.setdefault(session, {})[number] = (time.monotonic(), lookup, copy.deepcopy(page))
+    except TypeError:
+        pass  # a session that cannot be weakly referenced is not remembered
+
+
 def search_process(
     session,
     process_number,
@@ -141,20 +170,34 @@ def search_process(
             ato_text_limit=ato_text_limit,
             ato_allow_pending=ato_allow_pending,
         )
-    if config.pje1x:
-        from jurisync.connectors.pje import legacy
-
-        return legacy.search_process(
-            session,
-            process_number,
-            raw_html_path,
-            portal=portal,
-            ato_expediente=ato_expediente,
-            ato_text_limit=ato_text_limit,
-            ato_allow_pending=ato_allow_pending,
-        )
-    search_url = config.search_url
     parts = parse_process_number(process_number)
+    number = "{}-{}.{}.{}.{}.{}".format(*parts)
+    lookup, page = (None, None) if raw_html_path else _recall(session, number)
+    if lookup is None:
+        if config.pje1x:
+            from jurisync.connectors.pje import legacy
+
+            lookup = legacy.find_process(session, process_number, portal=portal)
+        else:
+            lookup = _find_process(session, config, process_number, parts)
+        if lookup.get("success") is False:
+            return lookup
+    return _read_detail(
+        session,
+        config,
+        lookup,
+        parts,
+        raw_html_path,
+        page=page,
+        ato_expediente=ato_expediente,
+        ato_text_limit=ato_text_limit,
+        ato_allow_pending=ato_allow_pending,
+    )
+
+
+def _find_process(session, config, process_number, parts):
+    """Search the process and select its row: its id, access key (ca), search summary and the detail page's referer."""
+    search_url = config.search_url
     response = jsf.get(session, search_url, label=f"{config.key} search page", referer=config.base_url)
     page_html = response_html(response)
     controls = discover_controls(page_html)
@@ -200,7 +243,7 @@ def search_process(
         # TJRN 1G (reCAPTCHA) and TJBA 1G (Tencent captcha): the search wants a token only a browser can produce.
         # TJMT 2G: the search answers an empty table for the lawyer's own appeals. The lawyer panel's Acervo opens
         # the same detail page with its own access key, so look the process up there.
-        found = acervo.find_process(session, process_number, portal=portal)
+        found = acervo.find_process(session, process_number, portal=config.key)
         if not found:
             return {
                 "success": False,
@@ -213,20 +256,12 @@ def search_process(
                 "timeline": [],
             }
         process_id, ca = found
-        search_results = {**search_results, "via": "acervo"}
-        return _read_detail(
-            session,
-            config,
-            process_id,
-            ca,
-            parts,
-            search_results,
-            raw_html_path,
-            referer=config.base_url + acervo.PANEL_SUFFIX,
-            ato_expediente=ato_expediente,
-            ato_text_limit=ato_text_limit,
-            ato_allow_pending=ato_allow_pending,
-        )
+        return {
+            "process_id": process_id,
+            "ca": ca,
+            "search_results": {**search_results, "via": "acervo"},
+            "referer": config.base_url + acervo.PANEL_SUFFIX,
+        }
     if not process_id:
         error = (
             "Search result table was not returned"
@@ -258,49 +293,103 @@ def search_process(
             "search_results": search_results,
             "timeline": [],
         }
-    return _read_detail(
-        session,
-        config,
-        process_id,
-        ca_match.group(1),
-        parts,
-        search_results,
-        raw_html_path,
-        referer=search_url,
-        ato_expediente=ato_expediente,
-        ato_text_limit=ato_text_limit,
-        ato_allow_pending=ato_allow_pending,
-    )
+    return {"process_id": process_id, "ca": ca_match.group(1), "search_results": search_results, "referer": search_url}
 
 
 def _read_detail(
     session,
     config,
-    process_id,
-    ca,
+    lookup,
     parts,
-    search_results,
     raw_html_path,
     *,
-    referer,
+    page=None,
     ato_expediente=None,
     ato_text_limit=20000,
     ato_allow_pending=False,
 ):
-    """Open the detail page of a process found by the search (or the Acervo) and read timeline and expedientes."""
+    """Read the detail page of a process found by the search (or the Acervo), its timeline and its expedientes.
+
+    ``page`` is the detail page an earlier call of this session read; only its Expedientes tab is read again.
+    """
+    process_id = lookup["process_id"]
+    detail_url = config.url(f"{DETAIL_PATH}?id={process_id}&ca={lookup['ca']}{DETAIL_SUFFIX[config.instance]}")
+    canonical_number = "{}-{}.{}.{}.{}.{}".format(*parts)
+    for kept in (True, False) if page is not None else (False,):
+        if not kept:
+            page = _detail_page(session, config, detail_url, canonical_number, lookup["referer"], raw_html_path)
+            if page is None:
+                return {
+                    "success": False,
+                    "error": "Detail page process number did not match requested process",
+                    "processo_id": process_id,
+                    "search_results": lookup["search_results"],
+                    "timeline": [],
+                }
+        diagnostics = []
+        try:
+            expedientes, expedientes_complete = fetch_expedientes(session, page["html"], detail_url)
+        except SessionExpired:
+            raise
+        except RuntimeError as error:
+            expedientes, expedientes_complete = None, False
+            diagnostics.append({"code": "expedientes_unavailable", "message": str(error)[:200]})
+        if expedientes_complete:
+            break  # a kept page whose tab no longer answers in full may have lost its ViewState: read it again
+    if expedientes is not None and not expedientes_complete:
+        diagnostics.append({"code": "expedientes_incomplete", "message": "the Expedientes tab was not read in full"})
+    _remember(session, canonical_number, lookup, page)
+    ato = ciencia = None
+    if ato_expediente:
+        item = None
+        if expedientes is not None:
+            ato = {"expedienteId": str(ato_expediente)}
+            try:
+                item = ato_item(expedientes, ato_expediente)
+                ato.update(fetch_ato(session, item, detail_url, ato_text_limit, allow_pending=ato_allow_pending))
+            except SessionExpired:
+                raise  # the portal did not serve the act, so nothing was opened: safe to repeat after a new login
+            except (RuntimeError, ValueError) as error:
+                ato["error"] = str(error)[:300]
+        ciencia = ato_ciencia(item, ato is not None and "error" not in ato)
+    timeline = page["timeline"]
+    documents = [doc for day in timeline for movement in day["movements"] for doc in movement["documents"]]
+    detail_html = page["html"]
+    return {
+        "success": page["status"] == 200,
+        "processo_id": process_id,
+        "numero_processo": canonical_number,
+        "detail_status": page["status"],
+        "download_pattern_found": bool(page["download_pattern"]),
+        "days": len(timeline),
+        "movements": sum(len(day["movements"]) for day in timeline),
+        "documents": len(documents),
+        "search_results": lookup["search_results"],
+        "process_details": parse_process_details(detail_html),
+        "parties": parse_parties(detail_html),
+        "timeline": timeline,
+        "first_timeline": page["first_timeline"],
+        "document_inventory": parse_document_inventory(
+            detail_html, timeline, page["download_pattern"], config.search_url
+        ),
+        "pagination": page["pagination"],
+        "latest_update": timeline[0] if timeline else None,
+        "expedientes": expedientes,
+        "expedientes_complete": expedientes_complete,
+        "ato": ato,
+        **({"ciencia": ciencia} if ciencia is not None else {}),
+        "diagnostics": diagnostics,
+        "viewer": _viewer(detail_html, detail_url),
+    }
+
+
+def _detail_page(session, config, detail_url, canonical_number, referer, raw_html_path):
+    """The detail page and the timeline pages it links, or None when it shows another process."""
     search_url = config.search_url
-    detail_url = config.url(f"{DETAIL_PATH}?id={process_id}&ca={ca}{DETAIL_SUFFIX[config.instance]}")
     response = jsf.get(session, detail_url, label=f"{config.key} detail page", referer=referer)
     detail_html = response_html(response)
-    canonical_number = "{}-{}.{}.{}.{}.{}".format(*parts)
     if not detail_matches_process_number(detail_html, canonical_number):
-        return {
-            "success": False,
-            "error": "Detail page process number did not match requested process",
-            "processo_id": process_id,
-            "search_results": search_results,
-            "timeline": [],
-        }
+        return None
     if raw_html_path:
         capture_path = Path(raw_html_path)
         capture_path.parent.mkdir(parents=True, exist_ok=True)
@@ -309,54 +398,14 @@ def _read_detail(
         capture_path.write_bytes(response.content)
     pattern_match = DOWNLOAD_PATTERN.search(detail_html)
     download_pattern = next((g for g in pattern_match.groups() if g), None) if pattern_match else None
-    first_timeline = parse_timeline(detail_html, download_pattern, search_url)
     timeline, pagination = fetch_timeline_pages(session, detail_html, detail_url, download_pattern, search_url)
-    documents = [doc for day in timeline for movement in day["movements"] for doc in movement["documents"]]
-    diagnostics = []
-    try:
-        expedientes, expedientes_complete = fetch_expedientes(session, detail_html, detail_url)
-    except RuntimeError as error:
-        expedientes, expedientes_complete = None, False
-        diagnostics.append({"code": "expedientes_unavailable", "message": str(error)[:200]})
-    if expedientes is not None and not expedientes_complete:
-        diagnostics.append({"code": "expedientes_incomplete", "message": "the Expedientes tab was not read in full"})
-    ato = None
-    if ato_expediente and expedientes is not None:
-        ato = {"expedienteId": str(ato_expediente)}
-        try:
-            ato.update(
-                fetch_ato(
-                    session,
-                    ato_item(expedientes, ato_expediente),
-                    detail_url,
-                    ato_text_limit,
-                    allow_pending=ato_allow_pending,
-                )
-            )
-        except (RuntimeError, ValueError) as error:
-            ato["error"] = str(error)[:300]
     return {
-        "success": response.status_code == 200,
-        "processo_id": process_id,
-        "numero_processo": canonical_number,
-        "detail_status": response.status_code,
-        "download_pattern_found": bool(download_pattern),
-        "days": len(timeline),
-        "movements": sum(len(day["movements"]) for day in timeline),
-        "documents": len(documents),
-        "search_results": search_results,
-        "process_details": parse_process_details(detail_html),
-        "parties": parse_parties(detail_html),
+        "html": detail_html,
+        "status": response.status_code,
+        "download_pattern": download_pattern,
+        "first_timeline": parse_timeline(detail_html, download_pattern, search_url),
         "timeline": timeline,
-        "first_timeline": first_timeline,
-        "document_inventory": parse_document_inventory(detail_html, timeline, download_pattern, search_url),
         "pagination": pagination,
-        "latest_update": timeline[0] if timeline else None,
-        "expedientes": expedientes,
-        "expedientes_complete": expedientes_complete,
-        "ato": ato,
-        "diagnostics": diagnostics,
-        "viewer": _viewer(detail_html, detail_url),
     }
 
 

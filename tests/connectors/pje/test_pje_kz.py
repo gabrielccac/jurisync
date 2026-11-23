@@ -243,9 +243,10 @@ def test_act_of_a_pending_expediente_is_refused_without_acknowledgement(monkeypa
     # The pending expediente's document (9100003) is not requested at all: the guard fires first.
     result = kz.search_process(session, NUMBER, portal="trt7-1g", ato_expediente="7000003")
     assert "ato" not in result["ato"] and "error" in result["ato"]
+    assert result["ciencia"]["estado"] == "pendente" and result["ciencia"]["intimacoes"][0]["expedienteId"] == "7000003"
     assert not any("/documentos/id/" in path for path, _ in session.calls)
     allowed = kz.search_process(Session(), NUMBER, portal="trt7-1g", ato_expediente="7000003", ato_allow_pending=True)
-    assert allowed["ato"]["texto"] == "ato" and allowed["ato"]["ciencia"]["pendenteAoLer"]
+    assert allowed["ato"]["texto"] == "ato" and allowed["ciencia"]["estado"] == "dada"
 
 
 def test_pending_document_is_refused_by_read_documents(monkeypatch):
@@ -335,7 +336,7 @@ def test_an_attachment_of_a_pending_act_is_refused_like_the_act(monkeypatch):
         process.read_documents(NUMBER, ["9000008"], portal="trt7-1g", session=session)
     assert not any("/documentos/id/" in path for path, _ in session.calls)
     allowed = process.read_documents(NUMBER, ["9000008"], portal="trt7-1g", session=session, acknowledge_ciencia=True)
-    assert allowed["ciencia"]["pendenteAoLer"][0]["expedienteId"] == "7000013"
+    assert allowed["ciencia"]["estado"] == "dada" and allowed["ciencia"]["intimacoes"][0]["expedienteId"] == "7000013"
 
 
 @pytest.mark.parametrize(
@@ -357,7 +358,7 @@ def test_expedientes_that_cannot_be_proven_complete_refuse_every_document_read(m
     assert result["expedientes"]["complete"] is False
     assert any(d.get("code") == "expedientes_incomplete" for d in result["diagnostics"])
     allowed = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=session, acknowledge_ciencia=True)
-    assert allowed["success"] and allowed["cienciaChecked"] is False
+    assert allowed["success"] and allowed["ciencia"]["estado"] == "desconhecida"
 
 
 def test_unreadable_expedientes_refuse_the_document_read(monkeypatch):

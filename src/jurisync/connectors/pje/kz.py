@@ -24,6 +24,7 @@ from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import MAX_DOCUMENT_BYTES, validate_document_ids
 from jurisync.core.documents_dir import save_document
 from jurisync.core.http import IMPERSONATE, TIMEOUT, log_request
+from jurisync.core.session_pool import SessionExpired
 
 API = "/pje-comum-api/api"
 TOKEN = "/pje-seguranca/api/token/refresh"
@@ -63,8 +64,10 @@ class Api:
 
     def get(self, path, params=None, *, label):
         response = self._get(API + path, params, label=label)
-        if response.status_code in (401, 403):
-            raise RuntimeError(f"{label} refused (HTTP {response.status_code}); session may have expired")
+        if response.status_code == 401:
+            raise SessionExpired(f"{label} refused (HTTP 401); the session expired")
+        if response.status_code == 403:
+            raise RuntimeError(f"{label} refused (HTTP 403); session may have expired")
         if response.status_code != 200:
             code = ""
             try:
@@ -367,6 +370,8 @@ def _enrich_rows(api, rows):
     for process_id, items in by_process.items():
         try:
             expedientes, _ = read_expedientes(api, process_id)
+        except SessionExpired:
+            raise
         except RuntimeError:
             for row in items:
                 row["detalhesIndisponiveis"] = True
@@ -539,7 +544,7 @@ def search_process(
     ato_allow_pending=False,
 ):
     """The ``search.search_process`` result for a KZ portal. ``raw_html_path`` is ignored: there is no HTML."""
-    from jurisync.connectors.pje.expedientes import PendingNotice, ato_item, pending_message
+    from jurisync.connectors.pje.expedientes import PendingNotice, ato_ciencia, ato_item, pending_message
 
     parts = parse_process_number(process_number)
     canonical = "{}-{}.{}.{}.{}.{}".format(*parts)
@@ -577,21 +582,28 @@ def search_process(
         count += len(day["movements"])
     try:
         expedientes, expedientes_complete = read_expedientes(api, process_id)
+    except SessionExpired:
+        raise
     except RuntimeError as error:
         expedientes, expedientes_complete = None, False
         diagnostics.append({"code": "expedientes_unavailable", "message": str(error)[:200]})
     if expedientes is not None and not expedientes_complete:
         diagnostics.append({"code": "expedientes_incomplete", "message": "the expedientes list was not read in full"})
-    ato = None
-    if ato_expediente and expedientes is not None:
-        ato = {"expedienteId": str(ato_expediente)}
-        try:
-            item = ato_item(expedientes, ato_expediente)
-            if not item.get("ciencia") and not ato_allow_pending:
-                raise PendingNotice(pending_message([item]))
-            ato.update(_ato(api, process_id, canonical, item, ato_text_limit))
-        except (RuntimeError, ValueError) as error:
-            ato["error"] = str(error)[:300]
+    ato = ciencia = None
+    if ato_expediente:
+        item = None
+        if expedientes is not None:
+            ato = {"expedienteId": str(ato_expediente)}
+            try:
+                item = ato_item(expedientes, ato_expediente)
+                if not item.get("ciencia") and not ato_allow_pending:
+                    raise PendingNotice(pending_message([item]))
+                ato.update(_ato(api, process_id, canonical, item, ato_text_limit))
+            except SessionExpired:
+                raise
+            except (RuntimeError, ValueError) as error:
+                ato["error"] = str(error)[:300]
+        ciencia = ato_ciencia(item, ato is not None and "error" not in ato)
     documents = sum(len(m["documents"]) for d in timeline for m in d["movements"])
     movements = sum(len(d["movements"]) for d in timeline)
     return {
@@ -621,6 +633,7 @@ def search_process(
         "expedientes": expedientes,
         "expedientes_complete": expedientes_complete,
         "ato": ato,
+        **({"ciencia": ciencia} if ciencia is not None else {}),
         "diagnostics": diagnostics,
     }
 
@@ -636,18 +649,13 @@ def _ato(api, process_id, number, item, limit):
         if read["content"] is not None
         else (read["status"], "")
     )
-    result = {
+    return {
         "expediente": item,
         "anexos": [],
         "texto": text[:limit],
         "truncado": len(text) > limit,
         "extractionStatus": status,
     }
-    if not item.get("ciencia"):
-        from jurisync.connectors.pje.expedientes import ciencia_report
-
-        result["ciencia"] = ciencia_report([item])
-    return result
 
 
 # -- documents -----------------------------------------------------------------

@@ -21,7 +21,15 @@ from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.connectors.pje.push import read_push
 from jurisync.core import credentials
-from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, sanitize_diagnostics, serve, tool_errors
+from jurisync.core.mcp import (
+    READ_ONLY,
+    load_env_file,
+    offer_portals,
+    require_success,
+    sanitize_diagnostics,
+    serve,
+    tool_errors,
+)
 from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
@@ -60,8 +68,7 @@ ERRORS = (ValueError, RuntimeError, OSError, KeyError)
 
 def configured_portals():
     """PJe portals this account can log in to: an authenticator plus the A1 (or the A3 token) where the portal takes
-    it, else a username and password. All portals when none is configured (a fresh install), as the Eproc server does."""
-    keys = portals.keys("pje")
+    it, else a username and password. Empty when none is; read through the credential scope (the office, hosted)."""
 
     def ready(key):
         config, method = portals.pje(key), auth_method(key)
@@ -74,33 +81,16 @@ def configured_portals():
             return credentials.has("PJE_A1_P12")
         return bool(config.env("USERNAME") and config.env("PASSWORD"))
 
-    return tuple(key for key in keys if ready(key)) or keys
+    return tuple(key for key in portals.keys("pje") if ready(key))
 
 
-_offered = None  # the portals a local server lists (set at startup); None serves every portal (hosted)
-
-
-def offer_only(keys):
-    """List only ``keys`` as the portal choices of every tool, and refuse a login anywhere else: an agent shown all
-    47 portals tries the ones the account has no login for."""
-    global _offered
-    _offered = tuple(keys)
-    names = ", ".join(f"'{key}' ({portals.pje(key).tribunal} {portals.pje(key).instance})" for key in _offered)
-    for tool in server._tool_manager.list_tools():
-        field = tool.parameters.get("properties", {}).get("portal")
-        if field is not None:
-            field["enum"] = list(_offered)
-            field["description"] = f"PJe portal key, one of the portals configured for this account: {names}."
-
-
-def _login(portal):
-    if _offered is not None and portal not in _offered:
-        raise ValueError(f"No login is configured for {portal} on this account; configured: {', '.join(_offered)}")
-    return login_portal(portal)[0]
+def describe(keys):
+    names = ", ".join(f"'{key}' ({portals.pje(key).tribunal} {portals.pje(key).instance})" for key in keys)
+    return f"PJe portal key, one of the portals configured for this account: {names}."
 
 
 sessions = SessionPool(
-    login=_login,
+    login=lambda portal: login_portal(portal)[0],
     refresh=lambda portal, session: session if is_authenticated(session, portal) else None,
     close=lambda session: session.close(),
 )
@@ -118,8 +108,8 @@ def _allow_ciencia(requested):
 
 
 def _notifications(portal, read):
-    with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
-        return require_success("PJe", read(portal, session=session))
+    with tool_errors("PJe", *ERRORS):
+        return require_success("PJe", sessions.run(portal, lambda session: read(portal, session=session)))
 
 
 @server.tool(
@@ -140,8 +130,10 @@ def get_process(
         ),
     ] = "page",
 ) -> dict[str, Any]:
-    with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
-        result = fetch_process(processNumber, scope, portal=portal, session=session)
+    with tool_errors("PJe", *ERRORS):
+        result = sessions.run(
+            portal, lambda session: fetch_process(processNumber, scope, portal=portal, session=session)
+        )
     result["movement_candidates"] = movement_candidates(result)
     return require_success("PJe", result)
 
@@ -149,8 +141,9 @@ def get_process(
 @server.tool(
     name="pje_read_documents",
     title="Read PJe documents",
-    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except what may belong to a communication whose ciência is not registered yet: its act, the documents attached to that act, and any document of a process that has a pending communication with no document id. Reading those may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. The read is also refused, with nothing opened, when the process' expedientes could not be read or not in full (the error starts with 'ciência not checked'): retry later, or ask the user before using acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. When such a read happens the result has ciencia.pendenteAoLer and an aviso (and cienciaChecked=false when the expedientes were unreadable): tell the user and note it in the task.",
-    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except what may belong to a communication whose ciência is not registered yet: its act, the documents attached to that act, and any document of a process that has a pending communication with no document id. Reading those may register the party's ciência and start the deadline, so it is refused until the user explicitly agrees; then repeat the call with acknowledgeCiencia=true. The read is also refused, with nothing opened, when the process' expedientes could not be read or not in full (the error starts with 'ciência not checked'): retry later, or ask the user before using acknowledgeCiencia=true. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. Every result has a ciencia block: estado 'nenhuma' (nothing read was pending), 'dada' (a communication whose ciência was pending was read, so it may now be registered and its deadline started; intimacoes lists it) or 'desconhecida' (read with acknowledgeCiencia although the expedientes could not be checked), with an aviso in Portuguese: unless it is 'nenhuma', tell the user and note it in the task.",
+    # With acknowledgeCiencia a read may register the ciência and start a deadline, and save=true writes a file.
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
 def read_documents_tool(
     processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
@@ -177,14 +170,19 @@ def read_documents_tool(
         ),
     ] = None,
 ) -> dict[str, Any]:
-    with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
-        result = read_documents(
-            processNumber,
-            documentIds,
-            portal=portal,
-            session=session,
-            save=save,
-            acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
+    # A repeat after an expired session only re-runs the search and the ciência check: read_documents does not
+    # report an expiry once documents are being opened.
+    with tool_errors("PJe", *ERRORS):
+        result = sessions.run(
+            portal,
+            lambda session: read_documents(
+                processNumber,
+                documentIds,
+                portal=portal,
+                session=session,
+                save=save,
+                acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
+            ),
         )
     for document in result.get("documents", []):
         text = document.get("text", "")
@@ -196,7 +194,7 @@ def read_documents_tool(
 @server.tool(
     name="pje_read_expediente_ato",
     title="Read the act behind a PJe expediente",
-    description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Communications whose notice (ciência) is already registered are opened by default. A pending one is refused (error in ato.error) because opening it may register the party's ciência and start the deadline: ask the user, and only with their explicit yes repeat the call with acknowledgeCiencia=true (customers with ciencia_on_read = 'allow' in settings.toml open them by default). When a pending one is opened, ato.ciencia lists it with an aviso: tell the user and note it in the task.",
+    description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Communications whose notice (ciência) is already registered are opened by default. A pending one is refused (error in ato.error) because opening it may register the party's ciência and start the deadline: ask the user, and only with their explicit yes repeat the call with acknowledgeCiencia=true (customers with ciencia_on_read = 'allow' in settings.toml open them by default). Every result has a ciencia block: estado 'nenhuma' (the ciência was already registered, or nothing was opened), 'dada' (a pending one was opened now: its ciência may be registered and the deadline started) or 'pendente' (pending and not opened), with intimacoes (the communication) and an aviso in Portuguese: unless it is 'nenhuma', tell the user and note it in the task.",
     # Opening a pending act registers the ciência and starts a deadline: not a read-only, repeatable call.
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
@@ -220,15 +218,19 @@ def read_expediente_ato_tool(
         ),
     ] = None,
 ) -> dict[str, Any]:
-    with tool_errors("PJe", *ERRORS), sessions.session(portal) as session:
-        result = fetch_process(
-            processNumber,
-            "latest",
-            portal=portal,
-            session=session,
-            ato_expediente=expedienteId,
-            ato_text_limit=textLimit,
-            ato_allow_pending=_allow_ciencia(acknowledgeCiencia),
+    # An expired session shows up before the act is served, so a repeat never opens it twice.
+    with tool_errors("PJe", *ERRORS):
+        result = sessions.run(
+            portal,
+            lambda session: fetch_process(
+                processNumber,
+                "latest",
+                portal=portal,
+                session=session,
+                ato_expediente=expedienteId,
+                ato_text_limit=textLimit,
+                ato_allow_pending=_allow_ciencia(acknowledgeCiencia),
+            ),
         )
     if result.get("success") and result.get("ato") is None:
         # The expedientes could not be read, so the ciência state of this one is unknown: nothing was opened.
@@ -238,7 +240,7 @@ def read_expediente_ato_tool(
         }
     return require_success(
         "PJe",
-        {k: result[k] for k in ("success", "source", "portal", "processNumber", "ato", "diagnostics")}
+        {k: result[k] for k in ("success", "source", "portal", "processNumber", "ato", "ciencia", "diagnostics")}
         | {
             "expediente": next(
                 (i for i in (result.get("expedientes") or {}).get("items", []) if i["expedienteId"] == expedienteId),
@@ -426,9 +428,13 @@ def _draft_stage(label, stage, run_id=None, **options):
     if stage == "status":  # reads local files only: no login needed
         with tool_errors(label, *ERRORS):
             result = filing.run_stage(stage, **options)
-    else:
+    elif stage in filing.WRITE_STAGES:
+        # A write is never repeated on its own: a second create would leave two drafts.
         with tool_errors(label, *ERRORS), sessions.session("trf5-1g") as session:
             result = filing.run_stage(stage, session=session, **options)
+    else:
+        with tool_errors(label, *ERRORS):
+            result = sessions.run("trf5-1g", lambda session: filing.run_stage(stage, session=session, **options))
     return {**({"runId": run_id} if run_id is not None else {}), "success": True, "stage": stage, "result": result}
 
 
@@ -527,7 +533,9 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
 
 def main():
     load_env_file()
-    offer_only(configured_portals())
+    keys = configured_portals() or portals.keys("pje")
+    offer_portals(server, keys, describe)
+    sessions.only(keys)
     serve(server, on_exit=sessions.close)
 
 

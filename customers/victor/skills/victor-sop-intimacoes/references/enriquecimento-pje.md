@@ -77,13 +77,14 @@ por destinatário e é a ponte entre a comunicação DJEN e o PJe:
    `acknowledgeCiencia=true` depois de um sim explícito.** Sem o sim, use apenas o texto DJEN.
    O cliente pode liberar a leitura sem perguntar em `customers/<cliente>/settings.toml`
    (`[pje] ciencia_on_read = "allow"`). Nesse caso, e também quando o usuário disse sim, o
-   resultado traz `ciencia.pendenteAoLer` (expedientes que estavam pendentes quando foram lidos):
-   **avise no chat e registre na descrição da tarefa** a linha `Ciência possivelmente registrada
+   resultado traz `ciencia.estado: "dada"` e `ciencia.intimacoes` (expedientes que estavam
+   pendentes quando foram lidos), com o `ciencia.aviso`: **avise no chat e registre na descrição da tarefa** a linha `Ciência possivelmente registrada
    na leitura em {data}: expediente {id}, prazo {limite}`.
    Se a aba Expedientes não puder ser lida (ou não por inteiro), a leitura também é recusada
    sem abrir nada (erro começando por `ciência not checked`): tente de novo mais tarde ou
    pergunte ao usuário como acima. Lido com `acknowledgeCiencia=true` nessa situação, o
-   resultado traz `cienciaChecked: false` (a verificação não pôde ser feita): diga isso na nota.
+   resultado traz `ciencia.estado: "desconhecida"` (a verificação não pôde ser feita): diga isso na nota.
+   `ciencia.estado: "nenhuma"` (nada pendente foi lido) não pede aviso.
 
 Limites (verificados em 09/10/2026): a aba mostra só comunicações de 1º grau (Turma
 Recursal não aparece); processo sigiloso ou sem expediente gerado volta vazio

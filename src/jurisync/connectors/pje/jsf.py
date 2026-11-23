@@ -15,9 +15,11 @@ from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje.parsers import jsf_data, response_html
 from jurisync.core.http import IMPERSONATE, TIMEOUT, log_request, same_endpoint
+from jurisync.core.session_pool import SessionExpired
 
 NO_SELECTION = "org.jboss.seam.ui.NoSelectionConverter.noSelectionValue"
 LOGIN_MARKERS = ('id="loginform"', "id='loginform'", "/pje/login.seam")
+LOGIN_LOCATION = re.compile(r"login|/auth/realms/", re.I)  # PJe's own login.seam or the national SSO
 PARTIAL_UPDATE = re.compile(r"<update\b[^>]*\bid=[\"']([^\"']+)[\"'][^>]*>(.*?)</update>", re.I | re.S)
 
 
@@ -150,15 +152,20 @@ def parse_partial_response(payload):
 
 
 def check_page(response, expected_url, label, *, require_state=False):
-    """Fail unless the portal answered 200 on the expected page with a live session."""
+    """Fail unless the portal answered 200 on the expected page with a live session.
+
+    A session sent back to the login page raises ``SessionExpired``, which the session pool answers with one new login.
+    """
     location = (getattr(response, "headers", {}) or {}).get("Location", "")
     if 300 <= response.status_code < 400 or location:
+        if LOGIN_LOCATION.search(location):
+            raise SessionExpired(f"{label} redirected to the login page; the session expired")
         raise RuntimeError(f"{label} redirected; session may have expired")
     if not same_endpoint(getattr(response, "url", expected_url) or expected_url, expected_url):
         raise RuntimeError(f"{label} returned an unexpected URL")
     body = response_html(response)
     if any(marker in body.lower() for marker in LOGIN_MARKERS):
-        raise RuntimeError(f"{label} indicates an expired session")
+        raise SessionExpired(f"{label} indicates an expired session")
     if response.status_code != 200:
         raise RuntimeError(f"{label} returned HTTP {response.status_code}")
     if require_state and "javax.faces.ViewState" not in body:

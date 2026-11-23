@@ -21,8 +21,10 @@ from jurisync.connectors.pje.expedientes import (
     unchecked_message,
 )
 from jurisync.connectors.pje.parsers import parse_process_number
+from jurisync.core import ciencia
 from jurisync.core.http import enable_request_logging
 from jurisync.core.redaction import drop_keys
+from jurisync.core.session_pool import SessionExpired
 from jurisync.core.totp import accounts_from_image, parse_accounts, portal_account
 
 
@@ -137,6 +139,7 @@ def fetch_process(
             "documentInventory": inventory,
             "expedientes": _expedientes(result.get("expedientes"), complete=_expedientes_complete(result)),
             "ato": result.get("ato"),
+            **({"ciencia": result.get("ciencia") or ciencia_report(ciencia.NONE)} if ato_expediente else {}),
             "pagination": pagination,
             "diagnostics": list(result.get("diagnostics") or []),
             # Minimal compatibility for movement_candidates and old callers.
@@ -195,9 +198,14 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
                 raise NoticeUnchecked(unchecked_message(unchecked))
             if pending:
                 raise PendingNotice(pending_message(pending))
-        documents = read_selected_documents(
-            {**result, "portal": portal, "timeline": timeline}, document_ids, session=session, save=save
-        )
+        try:
+            documents = read_selected_documents(
+                {**result, "portal": portal, "timeline": timeline}, document_ids, session=session, save=save
+            )
+        except SessionExpired as error:
+            # A document may already have been opened: a repeat would find its ciência registered and report
+            # nothing pending, so the expiry is reported instead of retried.
+            raise RuntimeError(str(error)) from error
     finally:
         if owned_session:
             session.close()
@@ -211,9 +219,18 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
         "processNumber": process_number,
         "processId": result.get("processo_id"),
         "documents": documents,
-        **({"cienciaChecked": False} if unchecked else {}),
-        **({"ciencia": ciencia_report(pending)} if pending else {}),
+        "ciencia": _read_ciencia(pending, unchecked),
     }
+
+
+def _read_ciencia(pending, unchecked):
+    """The ``ciencia`` block of a document read: ``pending`` was read (acknowledged), or the check was not possible."""
+    if not pending:
+        return ciencia_report(ciencia.UNKNOWN if unchecked else ciencia.NONE)
+    block = ciencia_report(ciencia.GIVEN, pending)
+    if unchecked:
+        block["aviso"] += " A lista de expedientes não pôde ser lida por inteiro: pode haver outras comunicações."
+    return block
 
 
 def _expedientes_complete(result):

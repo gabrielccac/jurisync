@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from jurisync.connectors.pje import jsf
 from jurisync.connectors.pje.parsers import response_html
+from jurisync.core import ciencia
 
 TABLE_ID = "processoParteExpedienteMenuGridList:tb"
 TAB_CONTROL = "navbar:linkAbaExpedientes1"
@@ -281,14 +282,33 @@ def unchecked_message(reason):
     )
 
 
-def ciencia_report(items):
-    """What a read may have done: the communications whose ciência was pending when it was read."""
-    return {
-        "pendenteAoLer": [
-            {k: item.get(k) for k in ("expedienteId", "tipo", "parte", "prazoDias", "limite")} for item in items
-        ],
-        "aviso": "Ler este conteúdo pode ter registrado a ciência da parte e iniciado o prazo; informe o usuário.",
-    }
+AVISOS = {
+    ciencia.GIVEN: "Ler este conteúdo pode ter registrado a ciência da parte e iniciado o prazo; informe o usuário.",
+    ciencia.PENDING: (
+        "A ciência desta comunicação está pendente e o ato não foi aberto: abri-lo registra a ciência da parte e "
+        "inicia o prazo. Só com a concordância expressa do usuário (acknowledgeCiencia=true)."
+    ),
+    ciencia.UNKNOWN: (
+        "Não foi possível verificar se havia ciência pendente: ler este conteúdo pode ter registrado a ciência da "
+        "parte e iniciado o prazo; informe o usuário."
+    ),
+}
+
+
+def ciencia_report(state, items=()):
+    """The ``ciencia`` block of a read (``core.ciencia``); ``items`` are the communications whose ciência was pending."""
+    return ciencia.report(
+        state,
+        AVISOS.get(state, ""),
+        [{k: item.get(k) for k in ("expedienteId", "tipo", "parte", "prazoDias", "limite")} for item in items],
+    )
+
+
+def ato_ciencia(item, opened):
+    """The ``ciencia`` block of an act request: ``item`` is its communication (None when not found)."""
+    if item is None or item.get("ciencia"):
+        return ciencia_report(ciencia.NONE)
+    return ciencia_report(ciencia.GIVEN if opened else ciencia.PENDING, [item])
 
 
 def pending_message(items):
@@ -326,10 +346,7 @@ def fetch_ato(session, item, detail_url, text_limit=20000, *, allow_pending=Fals
     if not item.get("ciencia") and not allow_pending:
         raise PendingNotice(pending_message([item]))
     response = jsf.get(session, base_url(detail_url) + path, label="PJe expediente act", referer=detail_url)
-    ato = parse_ato(response_html(response), text_limit)
-    if not item.get("ciencia"):
-        ato["ciencia"] = ciencia_report([item])
-    return ato
+    return parse_ato(response_html(response), text_limit)
 
 
 def base_url(detail_url):

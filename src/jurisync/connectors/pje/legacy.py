@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.pje import jsf
-from jurisync.connectors.pje.parsers import parse_process_number, response_html
+from jurisync.connectors.pje.parsers import response_html
 
 PANEL_PATH = "Painel/painel_usuario/advogado.seam"
 SEARCH_FORM = "consultarProcessoForm"
@@ -226,21 +226,9 @@ def parse_search_rows(html):
     ]
 
 
-def search_process(
-    session,
-    process_number,
-    raw_html_path=None,
-    *,
-    portal,
-    ato_expediente=None,
-    ato_text_limit=20000,
-    ato_allow_pending=False,
-):
-    """Search a process number in the consultarProcessoForm and, when it is listed, read its detail page."""
-    from jurisync.connectors.pje import search
-
+def find_process(session, process_number, *, portal):
+    """Search a process number in the consultarProcessoForm: its id, access key (ca), search summary and referer."""
     config = portals.pje(portal)
-    parts = parse_process_number(process_number)
     previous = jsf.TIMEOUT
     jsf.TIMEOUT = LEGACY_TIMEOUT
     try:
@@ -278,16 +266,4 @@ def search_process(
             "search_results": summary,
             "timeline": [],
         }
-    return search._read_detail(
-        session,
-        config,
-        row["processId"],
-        row["ca"],
-        parts,
-        summary,
-        raw_html_path,
-        referer=config.search_url,
-        ato_expediente=ato_expediente,
-        ato_text_limit=ato_text_limit,
-        ato_allow_pending=ato_allow_pending,
-    )
+    return {"process_id": row["processId"], "ca": row["ca"], "search_results": summary, "referer": config.search_url}

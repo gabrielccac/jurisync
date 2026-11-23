@@ -135,7 +135,11 @@ def test_ato_of_a_pending_communication_opens_only_with_permission():
         get.assert_not_called()
         ato = expedientes.fetch_ato(session, item, "https://pje1g.trf5.jus.br/pje/x", allow_pending=True)
         get.assert_called_once()
-    assert ato["ciencia"]["pendenteAoLer"][0]["expedienteId"] == "1"
+    assert "ciencia" not in ato
+    given = expedientes.ato_ciencia(item, opened=True)
+    assert given["estado"] == "dada" and given["intimacoes"][0]["expedienteId"] == "1"
+    assert expedientes.ato_ciencia(item, opened=False)["estado"] == "pendente"
+    assert expedientes.ato_ciencia({**item, "ciencia": {"em": "2026-10-06"}}, opened=True) == {"estado": "nenhuma"}
 
 
 def test_tab_is_complete_only_when_every_row_was_parsed_and_there_is_one_page():

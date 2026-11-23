@@ -212,10 +212,11 @@ class ReadDocumentsTest(unittest.TestCase):
             }
         ]
         _, result = self.read_with(pending, acknowledge_ciencia=True)
-        self.assertEqual(result["ciencia"]["pendenteAoLer"][0]["expedienteId"], "9")
+        self.assertEqual(result["ciencia"]["estado"], "dada")
+        self.assertEqual(result["ciencia"]["intimacoes"][0]["expedienteId"], "9")
         self.assertIn("informe o usuário", result["ciencia"]["aviso"])
         noticed = [{"expedienteId": "9", "documentId": "456", "ciencia": {"por": "x", "em": "2026-10-06"}}]
-        self.assertNotIn("ciencia", self.read_with(noticed)[1])
+        self.assertEqual(self.read_with(noticed)[1]["ciencia"], {"estado": "nenhuma"})
 
     def test_documents_with_registered_notice_or_unrelated_to_expedientes_are_read(self):
         noticed = [{"expedienteId": "9", "documentId": "456", "ciencia": {"por": "O sistema", "em": "2026-10-06"}}]
@@ -232,7 +233,7 @@ class ReadDocumentsTest(unittest.TestCase):
         session.get.assert_not_called()
         session, result = self.read_with(None, acknowledge_ciencia=True)
         self.assertTrue(result["success"])
-        self.assertIs(result["cienciaChecked"], False)
+        self.assertEqual(result["ciencia"]["estado"], "desconhecida")
         session.get.assert_called()
 
     def test_expedientes_not_read_in_full_refuse_the_read(self):
@@ -244,7 +245,7 @@ class ReadDocumentsTest(unittest.TestCase):
             session.get.assert_not_called()
             session.get.return_value = response(CERTIDAO)
             result = client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session, acknowledge_ciencia=True)
-        self.assertIs(result["cienciaChecked"], False)
+        self.assertEqual(result["ciencia"]["estado"], "desconhecida")
 
     def refused(self, expedientes, document_ids=("456",), timeline=None):
         session = Mock()
@@ -263,7 +264,7 @@ class ReadDocumentsTest(unittest.TestCase):
         self.assertIn("7 (Citação", message)
         self.assertIn("no document id", message)
         _, result = self.read_with(unlinked, acknowledge_ciencia=True)
-        self.assertEqual(result["ciencia"]["pendenteAoLer"][0]["expedienteId"], "7")
+        self.assertEqual(result["ciencia"]["intimacoes"][0]["expedienteId"], "7")
 
     def test_documents_attached_to_a_pending_act_are_refused_with_it(self):
         def document(identifier):
@@ -281,7 +282,7 @@ class ReadDocumentsTest(unittest.TestCase):
         with patch.object(client.search, "search_process", return_value=found):
             result = client.read_documents(NUMBER, ["457"], portal="trf5-1g", session=session)
         self.assertTrue(result["success"])
-        self.assertNotIn("ciencia", result)
+        self.assertEqual(result["ciencia"], {"estado": "nenhuma"})
 
     def test_a_document_the_timeline_does_not_show_is_refused_while_a_ciencia_is_pending(self):
         pending = [{"expedienteId": "9", "documentId": "900", "tipo": "Intimação", "parte": "A", "ciencia": None}]

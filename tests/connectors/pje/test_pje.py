@@ -531,10 +531,14 @@ if __name__ == "__main__":
 
 
 def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(monkeypatch):
+    import copy
+
     from jurisync.connectors.pje import server
+    from jurisync.core.mcp import offer_portals
 
     for name in [n for n in os.environ if n.startswith(("PJE_", "TJ", "TRF", "TRT", "TST"))]:
         monkeypatch.delenv(name)
+    assert server.configured_portals() == ()  # no login anywhere: nothing is claimed as configured
     monkeypatch.setenv("PJE_A1_P12", "/tmp/a1.p12")
     monkeypatch.setenv("PJE_1G_CERT", "true")  # TRF1 1G opts in to the A1
     monkeypatch.setenv("TJAP_1G_USERNAME", "user")
@@ -545,20 +549,22 @@ def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(mo
     assert {"trf1-1g", "trf5-1g", "tjap-1g"} <= set(keys)  # opted in, certificate portal, password
     assert "trf1-2g" not in keys and "tjpe-1g" not in keys  # no authenticator / password portal without a login
     assert "trt7-1g" not in keys  # the A1 alone is not enough: the SSO asks the code
-    import copy
 
     saved = {t.name: copy.deepcopy(t.parameters) for t in server.server._tool_manager.list_tools()}
     try:
-        server.offer_only(keys)
+        offer_portals(server.server, keys, server.describe)
+        server.sessions.only(keys)
         schema = {
             t.name: t.parameters["properties"]["portal"]
             for t in server.server._tool_manager.list_tools()
             if "portal" in t.parameters.get("properties", {})
         }
         assert all(field["enum"] == list(keys) for field in schema.values())
+        assert all("'trf5-1g' (TRF5 1g)" in field["description"] for field in schema.values())
         with pytest.raises(ValueError, match="No login is configured for trf1-2g"):
-            server._login("trf1-2g")
+            with server.sessions.session("trf1-2g"):
+                pass
     finally:
-        server._offered = None
+        server.sessions._only = None
         for tool in server.server._tool_manager.list_tools():
             tool.parameters = saved[tool.name]
