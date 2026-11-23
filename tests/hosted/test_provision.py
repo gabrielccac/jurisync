@@ -279,6 +279,24 @@ class ApplyTest(ProvisionCase):
         self.assertEqual(len(passwords.read_text().splitlines()), 3)
         self.assertEqual(len(store.users()), 3)
 
+    def test_apply_again_replaces_the_vault_and_keeps_what_the_server_renewed(self):
+        self.export()
+        store, vault = self.apply()
+        values, files = vault.get("alfa")
+        values.update(ADVBOX_DEVICE_ID="renewed-device", PJE_2G_PASSWORD="dropped-portal")
+        vault.put("alfa", values, {**files, "OLD_P12": b"x"})
+        store.save_check("alfa", "trf1-2g", True, "login OK")
+        store.save_check("alfa", "trf5-1g", True, "login OK")
+        self.said.clear()
+        store, vault = self.apply()
+        values, files = vault.get("alfa")
+        self.assertEqual(values["ADVBOX_DEVICE_ID"], "renewed-device")
+        self.assertNotIn("PJE_2G_PASSWORD", values)
+        self.assertEqual(set(files), {"PJE_A1_P12"})
+        self.assertEqual(set(store.checks("alfa")), {"trf5-1g"})
+        self.assertIn("alfa: removidos do cofre: OLD_P12, PJE_2G_PASSWORD", self.said)
+        self.assertNotIn("dropped-portal", "\n".join(self.said))
+
     def test_serve_refuses_an_office_whose_profile_is_not_installed(self):
         self.export()
         store, _ = self.apply()
@@ -389,14 +407,19 @@ class LocalOfficeEndpointTest(OfficeCase):
 
 class JuridiqWritesTest(unittest.TestCase):
     def test_hosted_juridiq_registers_writes_and_marks_them_granted(self):
+        from jurisync import registry
         from jurisync.hosted import app
 
         server, _ = app.hosted_load("juridiq")
         grant, tools = app.GRANTED_WRITES["juridiq"]
         self.assertEqual(grant, "JURIDIQ_ALLOW_WRITES")
-        self.assertIn("juridiq_create_task", tools)
-        self.assertNotIn("juridiq_list_tasks", tools)
-        self.assertTrue(tools <= {tool.name for tool in server._tool_manager.list_tools()})
+        connector = registry.get("juridiq")
+        built = {
+            allowed: {tool.name for tool in connector.load(allow_writes=allowed)[0]._tool_manager.list_tools()}
+            for allowed in (True, False)
+        }
+        self.assertEqual(tools, built[True] - built[False])  # a new write tool must be listed in the registry
+        self.assertEqual({tool.name for tool in server._tool_manager.list_tools()}, built[True])
         with credentials.scope("office-a"):
             self.assertFalse(app.granted("juridiq", "juridiq_create_task"))
             self.assertTrue(app.granted("juridiq", "juridiq_list_tasks"))

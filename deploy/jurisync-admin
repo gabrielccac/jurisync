@@ -11,7 +11,8 @@ set -euo pipefail
 
 args=(--quiet --wait --collect --uid=jurisync --gid=jurisync
   -p EnvironmentFile=/etc/jurisync/jurisync.env -p EnvironmentFile=-/etc/jurisync/base-url.env
-  -p WorkingDirectory=/var/lib/jurisync -p UMask=0077)
+  -p WorkingDirectory=/var/lib/jurisync -p UMask=0077
+  -p Environment=JURISYNC_STATE_DIR=/var/lib/jurisync -p Environment=PYTHONDONTWRITEBYTECODE=1)
 if [ -f /etc/jurisync/credential-properties ]; then
   while IFS= read -r property; do
     [ -n "$property" ] && args+=(-p "$property")

@@ -124,6 +124,23 @@ def rpc(client, token, payload, session=None):
     return response, body
 
 
+class StoreConcurrencyTest(unittest.TestCase):
+    def test_a_second_process_reads_while_one_writes(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "store.sqlite")
+            self.assertEqual(store._run("pragma journal_mode")[0][0], "wal")
+            self.assertEqual(store._run("pragma busy_timeout")[0][0], 5000)
+            store._run("begin immediate")
+            store._run("insert into tenants (id, name, created) values ('office-a', 'A', 0)")
+            other = sqlite3.connect(Path(directory) / "store.sqlite")
+            self.assertEqual(other.execute("select count(*) from tenants").fetchone(), (0,))  # not blocked
+            store._run("commit")
+            self.assertEqual(other.execute("select count(*) from tenants").fetchone(), (1,))
+            other.close()
+
+
 class HostedAppTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

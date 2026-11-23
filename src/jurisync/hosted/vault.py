@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import tempfile
+import threading
 from pathlib import Path
 
 FORMAT = "jurisync-vault"
@@ -55,6 +56,12 @@ class Vault:
     def __init__(self, root, key):
         self.root = Path(root)
         self._key = key
+        self._locks = {}
+        self._locks_guard = threading.Lock()
+
+    def _lock(self, tenant):
+        with self._locks_guard:
+            return self._locks.setdefault(tenant, threading.Lock())
 
     def _path(self, tenant):
         return self.root / f"{require_tenant_id(tenant)}.vault"
@@ -87,6 +94,13 @@ class Vault:
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
+
+    def update(self, tenant, name, value):
+        """Set one value, keeping the rest; updates of one tenant in this process run one at a time."""
+        with self._lock(tenant):
+            values, files = self.get(tenant)
+            values[name] = value
+            self.put(tenant, values, files)
 
     def get(self, tenant):
         """``(values, files)`` for the tenant; empty when it has nothing stored."""

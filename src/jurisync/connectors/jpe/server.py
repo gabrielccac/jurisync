@@ -19,7 +19,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.jpe import client, process
 from jurisync.core import ciencia
 from jurisync.core.documents import MAX_DOCUMENTS
@@ -49,7 +49,7 @@ def configured_portals():
     portal = client.config()
     own = portal.env("LOGIN") and portal.env("LOGIN_PASSWORD")
     pdpj = portal.env("USERNAME") and portal.env("PASSWORD") and (portal.env("2FA_DATA") or portal.env("2FA_QR"))
-    return (portal.key,) if own or pdpj else ()
+    return customers.profile_portals((portal.key,) if own or pdpj else ())
 
 
 def call(read):

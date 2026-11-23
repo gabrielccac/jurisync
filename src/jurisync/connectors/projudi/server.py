@@ -19,7 +19,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.projudi import base, legacy, tjam, tjgo
 from jurisync.connectors.projudi.base import ProjudiParseError, public_file
 from jurisync.core import ciencia
@@ -153,7 +153,7 @@ def has_login(config):
 
 def configured_portals():
     """Wired Projudi portals whose login is set in the current credentials; ``()`` when none is."""
-    return tuple(key for key in portals.keys("projudi") if has_login(portals.projudi(key)))
+    return customers.profile_portals(key for key in portals.keys("projudi") if has_login(portals.projudi(key)))
 
 
 def create_server(keys=None):

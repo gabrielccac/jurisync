@@ -14,7 +14,6 @@ import importlib
 import inspect
 import logging
 import os
-import threading
 import time
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from urllib.parse import urlsplit
@@ -56,8 +55,7 @@ TENANT_READY = tuple(registry.CONNECTORS)
 LOCAL_ONLY_TOOLS = {name: set(connector.local_only_tools) for name, connector in registry.CONNECTORS.items()}
 # Writes an office gets only with its own grant (vault entry or customer profile, never the server's environment):
 # connector -> (grant variable, tools). Without the grant the office does not see them and a call is refused before
-# the connector runs; the connector checks the same grant again. A connector that registers its writes only when
-# allowed (Juridiq) lists none: ``hosted_load`` finds them by comparing both builds.
+# the connector runs; the connector checks the same grant again.
 GRANTED_WRITES = {
     name: (connector.write_grant, set(connector.write_tools))
     for name, connector in registry.CONNECTORS.items()
@@ -89,20 +87,16 @@ def hosted_load(name):
     """``Connector.load`` with every portal wired (``Office`` narrows them per office), and with the writes a connector
     registers only when allowed: each office's grant decides who sees and calls them."""
     connector = registry.get(name)
-    if connector.write_grant and not connector.write_tools:
-        server, close = connector.load(allow_writes=True)
-        reads = {tool.name for tool in connector.load(allow_writes=False)[0]._tool_manager.list_tools()}
-        GRANTED_WRITES[name] = (
-            connector.write_grant,
-            {tool.name for tool in server._tool_manager.list_tools()} - reads,
-        )
-        return server, close
-    if connector.portals() and connector.attribute == "create_server()":
-        create = importlib.import_module(connector.module).create_server
-        if "keys" in inspect.signature(create).parameters:
-            # Built at start, outside any office: its own choice would be the server's (empty) environment.
-            return connector.load(keys=connector.portals())
-    return connector.load()
+    if connector.attribute != "create_server()":
+        return connector.load()
+    parameters = inspect.signature(importlib.import_module(connector.module).create_server).parameters
+    options = {}
+    if connector.portals() and "keys" in parameters:
+        # Built at start, outside any office: its own choice would be the server's (empty) environment.
+        options["keys"] = connector.portals()
+    if connector.write_grant and "allow_writes" in parameters:
+        options["allow_writes"] = True
+    return connector.load(**options)
 
 
 def offered_portals(connector):
@@ -137,6 +131,9 @@ def offer(tool, field, offered, label):
         "description": f"{label} portal key, one of the portals configured for this office: {', '.join(keys)}.",
     }
     schema = {**tool.input_schema, "properties": {**tool.input_schema["properties"], "portal": field}}
+    if "default" not in field:
+        # The connector's default is not this office's: the model has to name one of its portals.
+        schema["required"] = [*(name for name in schema.get("required", []) if name != "portal"), "portal"]
     return tool.model_copy(update={"input_schema": schema})
 
 
@@ -213,7 +210,11 @@ class Office(MCPServer):
         field = portal_field(self.servers[connector], name)
         if field is None:
             return
-        portal = arguments.get("portal") or field.get("const") or field.get("default")
+        portal = arguments.get("portal") or field.get("const")
+        if portal is None and field.get("default") not in (None, *offered):
+            raise NotEnabled(
+                f"{name}: give the portal, one of the portals configured for this office: {', '.join(offered)}"
+            )
         if portal is not None and portal not in offered:
             raise NotEnabled(
                 f"{name}: no login is configured for {portal} on this office; configured: {', '.join(offered)}"
@@ -232,7 +233,6 @@ class TenantGate:
         self.open_tenant = open_tenant
         self.require_resource = require_resource
         self._logged = set()
-        self._saving = threading.Lock()
 
     def _note_missing_resource(self, token, tenant_id):
         """Once per client and office: tells the operator whether real clients send the resource."""
@@ -254,10 +254,7 @@ class TenantGate:
         """``credentials.save`` for this office: a value a connector renewed (ADVBOX device id) goes to its vault."""
 
         def save(name, value):
-            with self._saving:
-                values, files = self.vault.get(tenant_id)
-                values[name] = value
-                self.vault.put(tenant_id, values, files)
+            self.vault.update(tenant_id, name, value)
             self.store.log(tenant_id, "conector", "credencial renovada", name)
 
         return save

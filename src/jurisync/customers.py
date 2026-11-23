@@ -80,6 +80,17 @@ def load_setup(name):
 RESERVED_TABLE = "env"  # [env] lists variables that belong to no portal (ADVBOX login, CPF, API keys)
 
 
+def profile_portals(keys):
+    """``keys`` narrowed to the portals the current customer's ``portals.toml`` declares (local process or hosted
+    office); all of them when there is no profile. Chosen at setup: a login that also opens another portal does not
+    offer it."""
+    name = customer_name()
+    if not name or not (customer_dir(name) / "portals.toml").is_file():
+        return tuple(keys)
+    declared = load_setup(name)
+    return tuple(key for key in keys if key in declared)
+
+
 def extra_variables(name):
     """Variables declared in the customer's ``[env]`` table: ``(required, optional)`` name lists."""
     path = customer_dir(name) / "portals.toml"

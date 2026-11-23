@@ -22,7 +22,7 @@ class Connector:
     settings: tuple = ()  # other variables of that service an office may set
     local_only_tools: frozenset = frozenset()  # tools that only work on the office's computer
     write_grant: str = ""  # variable that lets an office see and call the connector's writes
-    write_tools: frozenset = frozenset()  # empty with a grant: the connector registers them only when allowed
+    write_tools: frozenset = frozenset()  # the tools that grant opens
 
     @property
     def module(self):
@@ -55,9 +55,16 @@ CONNECTORS = {
             "pje",
             "PJe",
             attribute="server",
-            # The filing run folders these read are on the computer that wrote the drafts; writes stay local too.
+            # The filing run folders these read are on the computer that wrote the drafts; writes stay local too, and
+            # so does the draft search of the same TRF5 filing workflow.
             local_only_tools=frozenset(
-                {"pje_draft_write", "pje_draft_delete", "pje_draft_status", "pje_draft_inspect"}
+                {
+                    "pje_draft_write",
+                    "pje_draft_delete",
+                    "pje_draft_status",
+                    "pje_draft_inspect",
+                    "pje_search_pending_drafts",
+                }
             ),
         ),
         Connector("eproc", "Eproc"),
@@ -92,6 +99,25 @@ CONNECTORS = {
             close=None,
             login=("JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"),
             write_grant="JURIDIQ_ALLOW_WRITES",
+            # Registered only with allow_writes=True; a test compares both builds with this list.
+            write_tools=frozenset(
+                {
+                    "juridiq_create_event",
+                    "juridiq_create_lawsuit",
+                    "juridiq_create_tag",
+                    "juridiq_create_task",
+                    "juridiq_create_task_template",
+                    "juridiq_delete_lawsuit",
+                    "juridiq_delete_tag",
+                    "juridiq_delete_task",
+                    "juridiq_delete_task_template",
+                    "juridiq_mark_publications_read",
+                    "juridiq_update_lawsuit",
+                    "juridiq_update_tag",
+                    "juridiq_update_task",
+                    "juridiq_update_task_template",
+                }
+            ),
         ),
     )
 }

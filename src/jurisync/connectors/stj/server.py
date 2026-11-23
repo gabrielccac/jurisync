@@ -16,7 +16,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.djen import client as djen
 from jurisync.connectors.djen.normalize import normalize_item
 from jurisync.connectors.stj import client, parsers
@@ -45,7 +45,7 @@ sessions = SessionPool(
 
 def configured_portals():
     """``("stj",)`` when the account has the A1 and its PIN; () otherwise."""
-    return (KEY,) if certificate.is_configured(client.config().env_prefix) else ()
+    return customers.profile_portals((KEY,) if certificate.is_configured(client.config().env_prefix) else ())
 
 
 def call(read):

@@ -117,6 +117,10 @@ class Store:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
+        # serve, jurisync-admin and backup.sh open this file from separate processes: readers never block the writer,
+        # and a writer waits for another instead of failing with "database is locked".
+        self._db.execute("pragma busy_timeout = 5000")
+        self._db.execute("pragma journal_mode = wal")
         self._db.execute("pragma foreign_keys = on")
         self._db.executescript(SCHEMA)
         columns = {row["name"] for row in self._db.execute("pragma table_info(tenants)")}

@@ -9,16 +9,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Mutable state (sessions, downloads). A repository checkout keeps it beside the code; an installed package
-# (uvx, pip) has no writable repository, so it uses the user's home instead.
-STATE_DIR = REPO_ROOT if (REPO_ROOT / "pyproject.toml").exists() else Path.home() / ".local" / "share" / "jurisync"
-# Default location of the shared secrets file when JURISYNC_ENV_FILE is not set.
-USER_ENV_FILE = Path.home() / ".config" / "jurisync" / ".env"
-
 
 def _override(variable):
     value = os.environ.get(variable, "").strip() if variable else ""
     return Path(value).expanduser() if value else None
+
+
+# Mutable state (sessions, downloads). A repository checkout keeps it beside the code; an installed package
+# (uvx, pip) has no writable repository, so it uses the user's home instead. JURISYNC_STATE_DIR moves it (the hosted
+# server: its code is read-only).
+STATE_DIR = _override("JURISYNC_STATE_DIR") or (
+    REPO_ROOT if (REPO_ROOT / "pyproject.toml").exists() else Path.home() / ".local" / "share" / "jurisync"
+)
+# Default location of the shared secrets file when JURISYNC_ENV_FILE is not set.
+USER_ENV_FILE = Path.home() / ".config" / "jurisync" / ".env"
 
 
 def user_cache(name, override=None):

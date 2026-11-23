@@ -13,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
     QUEUE_KINDS,
@@ -56,12 +56,14 @@ sessions = SessionPool(login=authenticate, refresh=refresh_panel, close=lambda v
 
 def configured_portals():
     """Eproc portals whose login is set in the current credentials; ``()`` when none is."""
-    return tuple(
-        key
-        for key in portals.keys("eproc")
-        if (portals.eproc(key).env("2FA_DATA") or portals.eproc(key).env("2FA_QR"))
-        and (portals.eproc(key).env("USERNAME") or portals.eproc(key).uses_certificate() or uses_a3(key))
-    )
+
+    def ready(config):
+        password = config.env("USERNAME") and config.env("PASSWORD")
+        return (config.env("2FA_DATA") or config.env("2FA_QR")) and (
+            password or config.uses_certificate() or uses_a3(config.key)
+        )
+
+    return customers.profile_portals(key for key in portals.keys("eproc") if ready(portals.eproc(key)))
 
 
 def describe(keys):

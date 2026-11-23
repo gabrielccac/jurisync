@@ -113,7 +113,13 @@ def pkce():
 
 
 # Tools only an office's own computer serves (registry ``local_only_tools``).
-LOCAL_ONLY = {"pje_draft_write", "pje_draft_delete", "pje_draft_status", "pje_draft_inspect"}
+LOCAL_ONLY = {
+    "pje_draft_write",
+    "pje_draft_delete",
+    "pje_draft_status",
+    "pje_draft_inspect",
+    "pje_search_pending_drafts",
+}
 
 
 def public_checks(client, base):

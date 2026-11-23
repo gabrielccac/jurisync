@@ -208,9 +208,11 @@ class PortalChoicesTest(OfficeCase):
         self.assertEqual(field["enum"], ["tjam-1g"])
         self.assertNotIn("default", field)  # tjgo-1g: no login there
         self.assertIn("tjam-1g", field["description"])
+        self.assertEqual(office_a["projudi_get_process"]["inputSchema"]["required"], ["number", "portal"])
         self.assertEqual(set(office_b), {"projudi_get_process", "projudi_list_intimations", "stj_get_process"})
         self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["properties"]["portal"]["enum"],
                          ["tjgo-1g", "tjam-1g"])  # fmt: skip
+        self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["required"], ["number"])
         shared = self.servers["projudi"]._tool_manager.get_tool("projudi_get_process").parameters
         self.assertEqual(shared["properties"]["portal"]["enum"], ["tjgo-1g", "tjam-1g"])  # never changed in place
 
@@ -221,13 +223,21 @@ class PortalChoicesTest(OfficeCase):
                 self.data(self.call(send, "projudi_get_process", {"number": "1", "portal": "tjam-1g"})),
                 {"portal": "tjam-1g"},
             )
-            for arguments in ({"number": "1", "portal": "tjgo-1g"}, {"number": "1"}):
-                refused = self.call(send, "projudi_get_process", arguments)
-                self.assertTrue(refused["isError"])
-                self.assertIn("no login is configured for tjgo-1g", refused["content"][0]["text"])
+            refused = self.call(send, "projudi_get_process", {"number": "1", "portal": "tjgo-1g"})
+            self.assertTrue(refused["isError"])
+            self.assertIn("no login is configured for tjgo-1g", refused["content"][0]["text"])
+            refused = self.call(send, "projudi_get_process", {"number": "1"})  # the default is not this office's
+            self.assertTrue(refused["isError"])
+            self.assertIn("give the portal", refused["content"][0]["text"])
+            self.assertIn("tjam-1g", refused["content"][0]["text"])
             refused = self.call(send, "stj_get_process", {"number": "1"})
             self.assertTrue(refused["isError"])
             self.assertIn("no STJ login is configured", refused["content"][0]["text"])
+
+    def test_the_default_portal_stands_when_the_office_has_it(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            send = self.mcp(client, self.token(client, "user@office-b.test", resource=f"{BASE}/mcp"))
+            self.assertEqual(self.data(self.call(send, "projudi_get_process", {"number": "1"})), {"portal": "tjgo-1g"})
 
 
 class HealthTest(OfficeCase):
@@ -340,6 +350,14 @@ class PooledCheckTest(unittest.TestCase):
             with self.assertRaises(LoginRejected):
                 access.check_login("trf1-1g")
             self.assertEqual(login.call_count, 2)
+
+    def test_the_password_login_names_its_portal(self):
+        from jurisync.connectors.pje.auth import sso
+
+        values = {name.replace("PJE_1G", "TRT19_1G"): value for name, value in self.VALUES.items()}
+        with credentials.scope("named-portal", values), mock.patch.object(sso, "login_session") as login:
+            access.fresh_pje_login("trt19-1g")
+        self.assertEqual(login.call_args.kwargs["portal"], "trt19-1g")
 
     def forget(self, tenant):
         from jurisync.connectors.pje.server import sessions

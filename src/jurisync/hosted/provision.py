@@ -22,7 +22,7 @@ sealed with the rollout passphrase, and ``profiles/<customer>/`` (``portals.toml
 ``JURISYNC_CUSTOMERS_DIR``: five customer folders are not in the repository. Users listed in an earlier ``plan.json``
 are kept, so the plan can be edited and exported again.
 
-``apply`` creates or updates each tenant, stores its bundle in the vault (portal by portal names, without a login:
+``apply`` creates or updates each tenant, replaces its vault content with its bundle (without a login:
 the first login of each portal is ``jurisync-hosted portal check``, run one at a time), installs the profiles and adds
 the plan's users with generated passwords written to a 0600 file.
 """
@@ -45,6 +45,8 @@ PROFILE_FILES = ("portals.toml", "settings.toml")
 SYSTEM_ORDER = tuple(registry.CONNECTORS)
 SERVICES = {name: registry.get(name).login for name in registry.SERVICES}
 WRITE_GRANTS = tuple(connector.write_grant for connector in registry.CONNECTORS.values() if connector.write_grant)
+# Values the server renews itself (``credentials.save``): an apply keeps them unless the bundle brings its own.
+SERVER_RENEWED = ("ADVBOX_DEVICE_ID",)
 # Portals whose login meets a CAPTCHA the server answers with JURISYNC_CAPTCHA_API_KEY (or the captcha-ocr extra).
 CAPTCHA_PORTALS = {"tjes-1g": "AWS WAF"}
 
@@ -387,7 +389,7 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=pri
         for variable, name in opened["file_vars"].items():
             values.pop(variable, None)
             files[variable] = opened["files"][name]
-        cli.merge(vault, tenant, values, files, say, portal_keys=office["portals"], customer=customer, store=store)
+        replace_vault(store, vault, tenant, values, files, office["portals"], customer, say)
         existing = {row["email"] for row in store.users()}
         for email in office.get("users", []):
             email = email.strip().lower()
@@ -405,6 +407,27 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, say=pri
         write_private(user_passwords, previous + "\n".join(created_users) + "\n")
         say(f"Senhas iniciais dos {len(created_users)} usuário(s) novos em {user_passwords} (0600, não impressas)")
     say("Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)")
+
+
+def replace_vault(store, vault, tenant, values, files, portal_keys, customer, say):
+    """The office's vault becomes the bundle: names the plan dropped go, the values the server renews stay."""
+    from jurisync.hosted import cli
+
+    current_values, current_files = vault.get(tenant)
+    kept = {name: current_values[name] for name in SERVER_RENEWED if name in current_values and name not in values}
+    values = {**values, **kept}
+    removed = sorted((set(current_values) - set(values)) | (set(current_files) - set(files)))
+    vault.put(tenant, values, files)
+    store.log(tenant, "operador", "credenciais importadas", ", ".join(sorted(values) + sorted(files)))
+    say(f"{tenant}: {len(values)} valor(es) e {len(files)} arquivo(s) gravados no cofre.")
+    if removed:
+        store.log(tenant, "operador", "credenciais removidas", ", ".join(removed))
+        say(f"{tenant}: removidos do cofre: {', '.join(removed)}")
+    for portal in sorted(set(store.checks(tenant)) - set(portal_keys)):
+        store.forget_check(tenant, portal)
+        say(f"{tenant}: teste de login de {portal} apagado (portal fora do plano)")
+    for portal, groups in cli.missing_groups(portal_keys, customer, values, files).items():
+        say(f"Atenção: {portal} ainda precisa de {', '.join(groups)}")
 
 
 def apply_local(store, vault, office, say):

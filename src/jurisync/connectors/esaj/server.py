@@ -11,7 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.esaj import base, parsers
 from jurisync.core import ciencia
 from jurisync.core.mcp import READ_ONLY, load_env_file, sanitize_diagnostics, serve, tool_errors
@@ -31,7 +31,9 @@ NOT_RECEIVED = (
 def configured_portals():
     """e-SAJ portals whose login is set in the current credentials, as ``base.login`` picks it: the A1 certificate
     (every portal) or, without one, login and password; ``()`` when none is."""
-    return tuple(key for key in portals.keys("esaj") if base.has_certificate() or base.uses_password(portals.esaj(key)))
+    return customers.profile_portals(
+        key for key in portals.keys("esaj") if base.has_certificate() or base.uses_password(portals.esaj(key))
+    )
 
 
 def call(portal, read):

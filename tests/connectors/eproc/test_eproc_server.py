@@ -20,12 +20,14 @@ class EprocServerTest(unittest.TestCase):
         return asyncio.run(run())
 
     def test_portal_argument_lists_only_configured_portals(self):
-        env = {"JFSC_USUARIO": "u", "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
+        env = {"JFSC_USUARIO": "u", "JFSC_SENHA": "p", "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(server.configured_portals(), ("trf4-1g-sc",))
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(server.configured_portals(), ())
-        shared = {"TRF6_USUARIO": "u", "TRF6_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
+        with mock.patch.dict(os.environ, {"JFSC_USUARIO": "u", "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}, clear=True):
+            self.assertEqual(server.configured_portals(), ())  # no password
+        shared = {"TRF6_USUARIO": "u", "TRF6_SENHA": "p", "TRF6_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
         with mock.patch.dict(os.environ, shared, clear=True):
             self.assertEqual(server.configured_portals(), ("trf6-1g", "trf6-2g"))
 
@@ -39,7 +41,7 @@ class EprocServerTest(unittest.TestCase):
 
     def test_main_offers_and_logs_in_only_where_a_login_is_set(self):
         served = []
-        env = {"JFSC_USUARIO": "u", "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
+        env = {"JFSC_USUARIO": "u", "JFSC_SENHA": "p", "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP"}
         with (
             mock.patch.dict(os.environ, env, clear=True),
             mock.patch.object(server, "load_env_file"),

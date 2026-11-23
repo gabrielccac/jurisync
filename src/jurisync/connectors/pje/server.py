@@ -14,7 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
@@ -81,7 +81,7 @@ def configured_portals():
             return credentials.has("PJE_A1_P12")
         return bool(config.env("USERNAME") and config.env("PASSWORD"))
 
-    return tuple(key for key in portals.keys("pje") if ready(key))
+    return customers.profile_portals(key for key in portals.keys("pje") if ready(key))
 
 
 def describe(keys):

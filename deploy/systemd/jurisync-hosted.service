@@ -12,6 +12,8 @@ EnvironmentFile=/etc/jurisync/jurisync.env
 # Written by quick-tunnel.sh while the server runs on a temporary trycloudflare.com address.
 EnvironmentFile=-/etc/jurisync/base-url.env
 WorkingDirectory=/var/lib/jurisync
+# The code in /opt/jurisync/app is root's and read-only here: sessions and downloads go to the state folder.
+Environment=JURISYNC_STATE_DIR=/var/lib/jurisync PYTHONDONTWRITEBYTECODE=1
 # The vault key (and the CAPTCHA key) come as systemd credentials: install.sh adds
 # jurisync-hosted.service.d/credentials.conf with LoadCredentialEncrypted= (or LoadCredential= without systemd-creds).
 # They are read from $CREDENTIALS_DIRECTORY, never from the environment or this file.
@@ -30,7 +32,7 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-ReadWritePaths=/var/lib/jurisync /opt/jurisync/app
+ReadWritePaths=/var/lib/jurisync
 UMask=0077
 
 [Install]

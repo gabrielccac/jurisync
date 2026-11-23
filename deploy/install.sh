@@ -52,24 +52,37 @@ echo "== user and folders"
 id jurisync >/dev/null 2>&1 || useradd --system --home-dir "$STATE" --create-home --shell /usr/sbin/nologin jurisync
 install -d -m 0750 -o jurisync -g jurisync "$STATE" "$STATE/hosted" "$STATE/customers"
 install -d -m 0755 /opt/jurisync
-install -d -m 0750 -o jurisync -g jurisync "$APP"
+# The code and its virtualenv are root's, readable by the service's group: the service cannot change them.
+install -d -m 0750 -o root -g jurisync "$APP"
 install -d -m 0755 /etc/jurisync
 
 echo "== code"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 tar -C "$WORK" -xzf "$ARCHIVE"
-# Keep the virtualenv and runtime state (ADVBOX session cookies, downloads) across updates.
+# Runtime state (ADVBOX session cookies, downloads) lives in $STATE (JURISYNC_STATE_DIR); an older install kept it in
+# the code folder: move it once.
+for dir in data downloaded_files; do
+  if [ -d "$APP/$dir" ] && [ ! -e "$STATE/$dir" ]; then mv "$APP/$dir" "$STATE/$dir"; fi
+done
+install -d -m 0700 -o jurisync -g jurisync "$STATE/data"
+chown -R jurisync:jurisync "$STATE/data" "$STATE/downloaded_files" 2>/dev/null || true
+# Keep the virtualenv across updates.
 rsync -a --delete --exclude .venv/ --exclude data/ --exclude downloaded_files/ --exclude conversions/ "$WORK"/ "$APP"/
-chown -R jurisync:jurisync "$APP"
-install -d -m 0700 -o jurisync -g jurisync "$APP/data"
 
-echo "== uv $UV_VERSION and the virtualenv (with the captcha-ocr extra)"
-if ! runuser -u jurisync -- test -x "$STATE/.local/bin/uv" || \
-   ! runuser -u jurisync -- "$STATE/.local/bin/uv" --version | grep -q "$UV_VERSION"; then
-  runuser -u jurisync -- env HOME="$STATE" sh -c "curl -LsSf https://astral.sh/uv/$UV_VERSION/install.sh | env UV_NO_MODIFY_PATH=1 sh"
+echo "== uv $UV_VERSION and the virtualenv (with the captcha-ocr extra), as root"
+UV=/opt/jurisync/bin/uv
+if ! [ -x "$UV" ] || ! "$UV" --version | grep -q "$UV_VERSION"; then
+  curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | env UV_INSTALL_DIR=/opt/jurisync/bin UV_NO_MODIFY_PATH=1 sh
 fi
-runuser -u jurisync -- env HOME="$STATE" sh -c "cd $APP && $STATE/.local/bin/uv sync --frozen --no-dev --extra captcha-ocr"
+# A virtualenv an older install built as jurisync (its Python under $STATE) is rebuilt as root.
+if [ -e "$APP/.venv/bin/python" ] && readlink -f "$APP/.venv/bin/python" | grep -q "^$STATE/"; then rm -rf "$APP/.venv"; fi
+# A Python uv downloads goes under /opt/jurisync too: /root is hidden from the service (ProtectHome).
+(cd "$APP" && env UV_PYTHON_INSTALL_DIR=/opt/jurisync/python UV_CACHE_DIR=/var/cache/jurisync-uv \
+  "$UV" sync --frozen --no-dev --extra captcha-ocr)
+chown -R root:jurisync "$APP"
+chmod -R u=rwX,g=rX,o= "$APP"
+[ -d /opt/jurisync/python ] && chmod -R go+rX /opt/jurisync/python
 
 echo "== settings"
 if [ ! -f /etc/jurisync/jurisync.env ]; then

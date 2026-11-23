@@ -221,7 +221,7 @@ def fresh_pje_login(portal):
     from jurisync.connectors.pje.process import credentials as password_credentials
 
     config = portals.pje(portal)
-    return login_session(*password_credentials(portal), config.login_url, config.host)[0]
+    return login_session(*password_credentials(portal), config.login_url, config.host, portal=portal)[0]
 
 
 def check_login(portal):

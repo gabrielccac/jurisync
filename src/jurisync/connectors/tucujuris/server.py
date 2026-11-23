@@ -13,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.tucujuris import client, process
 from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
@@ -30,7 +30,7 @@ def configured_portals():
     """``("tjap-tucujuris",)`` when the account has the user, password and authenticator; () otherwise."""
     portal = client.config()
     ready = portal.env("USERNAME") and portal.env("PASSWORD") and (portal.env("2FA_DATA") or portal.env("2FA_QR"))
-    return (portal.key,) if ready else ()
+    return customers.profile_portals((portal.key,) if ready else ())
 
 
 def call(read):

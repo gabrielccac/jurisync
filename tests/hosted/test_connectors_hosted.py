@@ -127,6 +127,22 @@ class PortalAccessTest(unittest.TestCase):
         forget.assert_called_once_with("tjam-1g")
 
 
+class PendingDraftsTest(unittest.TestCase):
+    def test_the_trf5_draft_search_stays_local_and_the_smoke_test_knows_it(self):
+        import ast
+
+        from jurisync.hosted.app import LOCAL_ONLY_TOOLS
+
+        self.assertIn("pje_search_pending_drafts", LOCAL_ONLY_TOOLS["pje"])
+        source = (Path(__file__).parents[2] / "deploy" / "smoke_test.py").read_text(encoding="utf-8")
+        listed = next(
+            node.value
+            for node in ast.parse(source).body
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "LOCAL_ONLY"
+        )
+        self.assertEqual(ast.literal_eval(listed), LOCAL_ONLY_TOOLS["pje"])
+
+
 class ServerGuardsTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -202,3 +218,92 @@ class CredentialSaverTest(unittest.TestCase):
                 vault.get("office-a"), ({"ADVBOX_DEVICE_ID": "new", "ADVBOX_EMAIL": "a@x.br"}, {"cert.pfx": b"x"})
             )
             self.assertEqual(vault.get("office-b")[0], {"ADVBOX_DEVICE_ID": "other"})
+
+    def test_saves_from_two_endpoints_do_not_lose_each_other(self):
+        import secrets
+        import threading
+        import time
+
+        with tempfile.TemporaryDirectory() as directory:
+            store, vault = (
+                Store(Path(directory) / "store.sqlite"),
+                Vault(Path(directory) / "vault", secrets.token_bytes(32)),
+            )
+            vault.put("office-a", {"ADVBOX_EMAIL": "a@x.br"})
+            read = vault.get
+
+            def slow_get(tenant):
+                values = read(tenant)
+                time.sleep(0.05)  # both reads would see the same old values without the vault's lock
+                return values
+
+            gates = [
+                TenantGate(None, connector=name, store=store, vault=vault, resource=f"https://mcp.test/{name}")
+                for name in (None, "advbox")
+            ]
+            with mock.patch.object(vault, "get", side_effect=slow_get):
+                threads = [
+                    threading.Thread(target=gate._saver("office-a"), args=(f"NAME_{index}", "v"))
+                    for index, gate in enumerate(gates)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            self.assertEqual(set(vault.get("office-a")[0]), {"ADVBOX_EMAIL", "NAME_0", "NAME_1"})
+
+
+class ProfilePortalsTest(unittest.TestCase):
+    """A login that opens more portals than the office's ``portals.toml`` declares offers only the declared ones."""
+
+    PROFILE = "\n".join(
+        f'[{key}]\nmethod = "{method}"\nsecrets = []\n'
+        for key, method in (
+            ("trf1-1g", "password_totp"),
+            ("trf4-1g-sc", "browser_totp"),
+            ("tjms-esaj", "certificate_challenge"),
+            ("tjam-1g", "password_totp"),
+        )
+    )
+    VALUES = {
+        **{f"PJE_{grade}_{name}": "x" for grade in ("1G", "2G") for name in ("USERNAME", "PASSWORD")},
+        "PJE_1G_2FA_DATA": "JBSWY3DPEHPK3PXP",
+        "PJE_2G_2FA_DATA": "JBSWY3DPEHPK3PXP",
+        **{f"{prefix}_{name}": "x" for prefix in ("JFSC", "TRF6") for name in ("USUARIO", "SENHA")},
+        "JFSC_EXPORT_DATA": "JBSWY3DPEHPK3PXP",
+        "TRF6_EXPORT_DATA": "JBSWY3DPEHPK3PXP",
+        "PJE_A1_P12": "/a1.p12",
+        "PJE_A1_PIN": "pin",
+        "TJAM_1G_USERNAME": "AM000",
+        "TJAM_1G_PASSWORD": "x",
+    }
+    DECLARED = {"pje": ("trf1-1g",), "eproc": ("trf4-1g-sc",), "esaj": ("tjms-esaj",), "projudi": ("tjam-1g",)}
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        (Path(directory.name) / "office").mkdir()
+        (Path(directory.name) / "office" / "portals.toml").write_text(self.PROFILE, encoding="utf-8")
+        self.root = directory.name
+
+    def configured(self):
+        import importlib
+
+        return {
+            name: importlib.import_module(f"jurisync.connectors.{name}.server").configured_portals()
+            for name in self.DECLARED
+        }
+
+    def test_a_profile_keeps_only_its_portals_locally_and_hosted(self):
+        customer = {"JURISYNC_CUSTOMER": "office"}
+        with mock.patch.dict(os.environ, {**self.VALUES, "JURISYNC_CUSTOMERS_DIR": self.root}, clear=True):
+            everything = self.configured()
+            for name, declared in self.DECLARED.items():
+                self.assertLess(set(declared), set(everything[name]))
+            with mock.patch.dict(os.environ, customer):
+                self.assertEqual(self.configured(), self.DECLARED)
+        with mock.patch.dict(os.environ, {"JURISYNC_CUSTOMERS_DIR": self.root}, clear=True):
+            with credentials.scope("office", {**self.VALUES, **customer}):
+                self.assertEqual(self.configured(), self.DECLARED)
+            with credentials.scope("other", {**self.VALUES, "JURISYNC_CUSTOMER": "no-profile"}):
+                self.assertEqual(self.configured(), everything)

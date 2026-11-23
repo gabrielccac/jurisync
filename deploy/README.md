@@ -7,7 +7,7 @@ inputs are the VPS address, the domain (or none yet) and the CAPTCHA key.
 | File | Runs on | Does |
 |---|---|---|
 | `push.sh` | our machine | `git archive HEAD` → VPS, then `install.sh` there. Only committed files travel. |
-| `install.sh` | VPS (root) | packages, Google Chrome, LibreOffice, user `jurisync`, code in `/opt/jurisync/app`, `uv sync --extra captcha-ocr`, vault key, systemd units, proxy. Idempotent: run again to update. |
+| `install.sh` | VPS (root) | packages, Google Chrome, LibreOffice, user `jurisync`, code in `/opt/jurisync/app` (root's, read-only for the service), `uv sync --extra captcha-ocr` as root, vault key, systemd units, proxy. Idempotent: run again to update. |
 | `set-secret.sh` | VPS (root) | stores `JURISYNC_VAULT_KEY` / `JURISYNC_CAPTCHA_API_KEY` as systemd credentials (`systemd-creds` encrypted when available). |
 | `jurisync-admin` | VPS (root) | `jurisync-hosted` as user `jurisync` with the service's settings and credentials (installed in `/usr/local/bin`). |
 | `check-office.sh` | VPS (root) | the first login of each portal of one office, one at a time, stopping at the first failure. |
@@ -16,9 +16,12 @@ inputs are the VPS address, the domain (or none yet) and the CAPTCHA key.
 | `caddy/Caddyfile`, `cloudflared/config.yml.example` | VPS | HTTPS with a domain: Caddy (ports 80/443) or a named Cloudflare Tunnel (no open port). |
 | `smoke_test.py` | anywhere | OAuth metadata, 401, sign-in, tools per office, isolation. No portal login. |
 
-Layout on the VPS: code `/opt/jurisync/app` (with `.venv`), settings `/etc/jurisync/jurisync.env` (no secrets),
-state `/var/lib/jurisync/hosted` (`store.sqlite`, `vault/`), customer profiles `/var/lib/jurisync/customers`,
-credentials `/etc/credstore.encrypted/` (or `/etc/credstore/`), backups `/var/backups/jurisync`.
+Layout on the VPS: code `/opt/jurisync/app` (with `.venv`; `root:jurisync`, the service only reads it), uv and any
+Python it downloads in `/opt/jurisync/bin` and `/opt/jurisync/python`, settings `/etc/jurisync/jurisync.env` (no
+secrets), state `/var/lib/jurisync/hosted` (`store.sqlite` in WAL mode, `vault/`), connector sessions and downloads
+`/var/lib/jurisync/data` and `/var/lib/jurisync/downloaded_files` (`JURISYNC_STATE_DIR`), customer profiles
+`/var/lib/jurisync/customers`, credentials `/etc/credstore.encrypted/` (or `/etc/credstore/`), backups
+`/var/backups/jurisync`. The service writes only under `/var/lib/jurisync`.
 
 ## 1. Server (once; again for each update)
 
@@ -103,6 +106,7 @@ Skills that use filing or PJe draft writes (`victor-pje-filing`) are flagged: th
 ```bash
 sudo systemctl stop jurisync-hosted
 sudo tar -xzf /var/backups/jurisync/jurisync-<stamp>.tar.gz -C /tmp
+sudo rm -f /var/lib/jurisync/hosted/store.sqlite-wal /var/lib/jurisync/hosted/store.sqlite-shm  # the old WAL is not the backup's
 sudo rsync -a /tmp/jurisync-<stamp>/store.sqlite /tmp/jurisync-<stamp>/vault /var/lib/jurisync/hosted/
 sudo rsync -a /tmp/jurisync-<stamp>/customers/ /var/lib/jurisync/customers/
 sudo chown -R jurisync:jurisync /var/lib/jurisync && sudo systemctl start jurisync-hosted

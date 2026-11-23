@@ -17,7 +17,8 @@ install -d -m 0700 "$DEST"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/jurisync-$STAMP"
-sqlite3 "$HOSTED/store.sqlite" ".backup '$WORK/jurisync-$STAMP/store.sqlite'"
+# .backup reads through SQLite (the WAL included) while the server writes; a plain cp of store.sqlite would miss the WAL.
+sqlite3 -cmd ".timeout 5000" "$HOSTED/store.sqlite" ".backup '$WORK/jurisync-$STAMP/store.sqlite'"
 sqlite3 "$WORK/jurisync-$STAMP/store.sqlite" "pragma integrity_check" | grep -qx ok
 [ -d "$HOSTED/vault" ] && cp -a "$HOSTED/vault" "$WORK/jurisync-$STAMP/vault"
 [ -d "$PROFILES" ] && cp -a "$PROFILES" "$WORK/jurisync-$STAMP/customers"
