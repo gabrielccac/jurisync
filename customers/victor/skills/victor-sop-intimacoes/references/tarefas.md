@@ -229,7 +229,9 @@ resultado da checagem).
 - `guests[]` SEMPRE inclui **CONTROLADORIA (`216759`)**, senão a tarefa some das
   listagens da integração.
 - Todo POST: `lawsuits_id`, `tasks_id` (átomo, nunca workflow como tipo), `date`
-  DD/MM/YYYY, `hour`, `comments`, `create=1`, `v2=1`. Template: some
+  DD/MM/YYYY, `hour`, `comments`, `create=1`, `v2=1`. As ferramentas (`advbox_create_task`,
+  `advbox_update_task`, `advbox_search_tasks`, `advbox_list_publications`) recebem as datas
+  em AAAA-MM-DD (`2026-10-09`) e as convertem para o ADVBOX. Template: some
   `workflow_id`/`workflow_sequence` (um POST por etapa, encadeado via `sequence`).
 - Anexos: `POST /s3` (stage: `root=posts`, `folder=files/temp/{userId}`) imediatamente
   antes do `POST /posts`. Em aborto, delete o staged via `POST s3 {id, type: file,

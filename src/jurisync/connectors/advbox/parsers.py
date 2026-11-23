@@ -355,6 +355,55 @@ def parse_hidden_inputs(html):
     return fields
 
 
+_CODE_INPUT_TYPES = ("text", "number", "tel", "password")
+
+
+def parse_verification_form(html, page_url):
+    """The device-verification form: where it posts, its hidden fields and the input that takes the code.
+
+    The page is read generically (its exact markup is not known): the form with a visible text-like input; among
+    several, the one named like code/codigo/token/otp. A checked checkbox (e.g. "trust this device") is sent as a
+    browser would.
+    """
+    seen, choices = [], []
+    for form in re.finditer(r"<form\b([^>]*)>([\s\S]*?)</form>", str(html), re.I):
+        attributes, inner = form[1], form[2]
+        fields, inputs = parse_hidden_inputs(inner), []
+        for tag in re.finditer(r"<input\b[^>]*>", inner, re.I):
+            tag = tag[0]
+            name = _group(r"""name=["']([^"']+)["']""", tag, flags=re.I)
+            kind = (_group(r"""type=["']?([\w-]+)""", tag, flags=re.I) or "text").lower()
+            if not name:
+                continue
+            seen.append(name)
+            if kind in _CODE_INPUT_TYPES:
+                inputs.append(name)
+            elif kind == "checkbox" and re.search(r"\schecked\b", tag, re.I):
+                fields[name] = unescape(_group(r"""value=["']([^"']*)["']""", tag, flags=re.I) or "on")
+        for name in inputs:
+            preferred = bool(re.search(r"code|codigo|token|otp", name, re.I))
+            choices.append((not preferred, len(choices), name, attributes, fields))
+    if not choices:
+        names = ", ".join(dict.fromkeys(seen)) or "none"
+        raise RuntimeError(f"ADVBOX device verification page has no code field (fields seen: {names})")
+    _, _, name, attributes, fields = min(choices)
+    action = unescape(_group(r"""action=["']([^"']*)["']""", attributes, flags=re.I) or "")
+    method = (_group(r"""method=["']?(\w+)""", attributes, flags=re.I) or "GET").upper()
+    return {
+        "action": urljoin(page_url, action) if action else page_url,
+        "method": method,
+        "fields": fields,
+        "codeField": name,
+    }
+
+
+def parse_verification_recipient(html):
+    """The e-mail the verification page says the code went to, exactly as shown (ADVBOX may mask it), or None."""
+    text = re.sub(r"<(script|style)\b[\s\S]*?</\1>", " ", str(html or ""), flags=re.I)
+    text = unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", text)))
+    return _group(r"(?:envi|c[oó]digo|e-?mail)[^@]{0,160}?([\w.+*•-]+@[\w*•-]+(?:\.[\w*•-]+)+)", text, flags=re.I)
+
+
 def parse_csrf_token(html):
     return _group(r"""name=["']csrf-token["'][^>]*content=["']([^"']+)["']""", html, flags=re.I) or _group(
         r"""content=["']([^"']+)["'][^>]*name=["']csrf-token["']""", html, flags=re.I

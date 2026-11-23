@@ -3,22 +3,34 @@
 The session is cached in a private file and reused until it expires. Reads
 retry once on 429; writes are never replayed. All calls on one server share
 one session and are serialized, matching ADVBOX's per-account rate limits.
+
+When ADVBOX does not trust the device it sends a code to the account holder and the login stops on /user/2fa. That
+attempt is kept per office and account until the code comes back (``verify_device``) or it expires; meanwhile no new
+login is tried, so ADVBOX does not send a code on every call.
 """
 
 import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from curl_cffi import CurlMime, requests
 
-from jurisync.connectors.advbox.parsers import BASE_URL, parse_csrf_token, parse_hidden_inputs
+from jurisync.connectors.advbox.parsers import (
+    BASE_URL,
+    parse_csrf_token,
+    parse_hidden_inputs,
+    parse_verification_form,
+    parse_verification_recipient,
+)
 from jurisync.core import credentials
 from jurisync.paths import STATE_DIR
 
@@ -29,6 +41,62 @@ class SessionExpiredError(RuntimeError):
 
 class CsrfStaleError(RuntimeError):
     pass
+
+
+class AdvboxDeviceVerification(RuntimeError):
+    """ADVBOX sent a code to verify this device; the login waits for it."""
+
+    def __init__(self, sent_to):
+        self.sent_to = sent_to
+        super().__init__(
+            f"ADVBOX asked to verify this device and sent a code to {sent_to}. "
+            "Ask the client for the code and call advbox_verify_device with it."
+        )
+
+
+class CodeRefused(RuntimeError):
+    def __init__(self, left):
+        self.left = left
+        super().__init__(f"ADVBOX refused the code; check it with the client ({left} attempt(s) left)")
+
+
+VERIFICATION_SECONDS = 15 * 60
+VERIFICATION_TRIES = 3
+
+
+@dataclass
+class _Verification:
+    jar: dict
+    form: dict | None
+    device: str
+    sent_to: str
+    started: float
+    problem: str = ""
+    tries: int = 0
+
+
+_pending = {}
+_pending_lock = threading.Lock()
+
+
+def _account_key():
+    return credentials.tenant(), (credentials.env("ADVBOX_EMAIL") or "").strip().lower()
+
+
+def pending_verification():
+    """The device verification waiting for a code for this office and account, or None."""
+    key = _account_key()
+    with _pending_lock:
+        pending = _pending.get(key)
+        if pending and time.time() - pending.started > VERIFICATION_SECONDS:
+            del _pending[key]
+            return None
+        return pending
+
+
+def _drop_verification():
+    with _pending_lock:
+        _pending.pop(_account_key(), None)
 
 
 def require_writes():
@@ -151,26 +219,110 @@ class AdvboxSession:
             break
         return response, current
 
-    def _login(self):
-        email, password, device = _required("ADVBOX_EMAIL"), _required("ADVBOX_PASSWORD"), _required("ADVBOX_DEVICE_ID")
+    def _login(self, device=None):
+        email, password = _required("ADVBOX_EMAIL"), _required("ADVBOX_PASSWORD")
+        device = device or _required("ADVBOX_DEVICE_ID")
+        pending = pending_verification()
+        if pending:
+            self.jar = None
+            if pending.problem:
+                raise RuntimeError(pending.problem)
+            raise AdvboxDeviceVerification(pending.sent_to)
         self.jar = {}
         page, _ = self._send_following(f"{BASE_URL}/login")
         if not _ok(page):
             raise RuntimeError(f"ADVBOX login page returned HTTP {page.status_code}")
         body = urlencode({**parse_hidden_inputs(page.text), "email": email, "password": password, "_device": device})
-        _, final_url = self._send_following(
+        response, final_url = self._send_following(
             f"{BASE_URL}/login", method="POST", data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
         pathname = urlsplit(final_url).path
         if pathname.startswith("/user/2fa"):
-            raise RuntimeError(
-                "ADVBOX requires device verification; approve this machine in ADVBOX and update ADVBOX_DEVICE_ID"
-            )
+            self._hold_verification(response.text, final_url, device, email)
         if pathname.startswith("/login"):
             raise RuntimeError("ADVBOX login failed; verify ADVBOX_EMAIL and ADVBOX_PASSWORD")
         if "advbox_session" not in self.jar:
             raise RuntimeError(f"ADVBOX login did not return a session cookie (landed on {pathname})")
         self._save()
+
+    def _hold_verification(self, html, page_url, device, email):
+        sent_to = parse_verification_recipient(html) or email
+        form, problem = None, ""
+        try:
+            form = parse_verification_form(html, page_url)
+        except RuntimeError as error:
+            # Kept anyway: logging in again would only make ADVBOX send another code.
+            problem = str(error)
+        with _pending_lock:
+            _pending[_account_key()] = _Verification(dict(self.jar), form, device, sent_to, time.time(), problem)
+        self.jar = None
+        if problem:
+            raise RuntimeError(problem)
+        raise AdvboxDeviceVerification(sent_to)
+
+    def verify_device(self, code):
+        """Send the code ADVBOX sent for the pending verification; on success keep the session and the device id.
+
+        A refused code raises ``CodeRefused`` and the attempt stays for another try, up to ``VERIFICATION_TRIES``.
+        """
+        with self.lock:
+            pending = pending_verification()
+            if pending is None:
+                raise RuntimeError("No ADVBOX device verification is pending for this account")
+            if pending.problem:
+                raise RuntimeError(pending.problem)
+            code = re.sub(r"\s+", "", code or "")
+            if not code:
+                raise ValueError("Pass the code ADVBOX sent")
+            form = pending.form
+            fields = urlencode({**form["fields"], form["codeField"]: code})
+            self.jar, self.csrf = dict(pending.jar), None
+            if form["method"] == "GET":
+                response, final_url = self._send_following(f"{form['action'].split('?')[0]}?{fields}")
+            else:
+                response, final_url = self._send_following(
+                    form["action"],
+                    method=form["method"],
+                    data=fields,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+            pathname = urlsplit(final_url).path
+            if not pathname.startswith(("/login", "/user/2fa")) and "advbox_session" in self.jar:
+                _drop_verification()
+                self._save()
+                changed = pending.device != (credentials.env("ADVBOX_DEVICE_ID") or "").strip()
+                if changed:
+                    try:
+                        credentials.save("ADVBOX_DEVICE_ID", pending.device)
+                    except (RuntimeError, OSError) as error:
+                        raise RuntimeError(
+                            f"ADVBOX verified this device, but its id could not be stored ({error}); "
+                            "the session works until it expires"
+                        ) from error
+                return {"verified": True, "deviceSaved": changed}
+            jar, self.jar = self.jar, None
+            pending.tries += 1
+            if pathname.startswith("/login") or pending.tries >= VERIFICATION_TRIES:
+                _drop_verification()
+                raise RuntimeError(
+                    "ADVBOX refused the code and ended the verification; try again later to receive a new code"
+                )
+            pending.jar = jar
+            if pathname.startswith("/user/2fa"):
+                try:
+                    pending.form = parse_verification_form(response.text, final_url)
+                except RuntimeError:
+                    pass
+            raise CodeRefused(VERIFICATION_TRIES - pending.tries)
+
+    def start_new_device(self):
+        """Log in with a fresh device id, so ADVBOX sends a code to verify it. A login it accepts at once keeps it."""
+        with self.lock:
+            device = secrets.token_hex(16)
+            self.jar, self.csrf = None, None
+            self._login(device=device)
+            credentials.save("ADVBOX_DEVICE_ID", device)
+            return {"verified": True, "deviceSaved": True}
 
     def _save(self):
         expiries = [entry["expiresAt"] for entry in self.jar.values() if entry.get("expiresAt") is not None]

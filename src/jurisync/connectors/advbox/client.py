@@ -432,7 +432,7 @@ class AdvboxClient:
         ``allResponsibles`` overrides that. Completed tasks need a date range: ADVBOX refuses them otherwise.
         """
         if completed == "concluidas" and not (dateFrom and dateTo):
-            raise ValueError("Completed tasks need dateFrom and dateTo (DD/MM/YYYY); ADVBOX refuses them otherwise")
+            raise ValueError("Completed tasks need dateFrom and dateTo; ADVBOX refuses them otherwise")
         everyone = bool(search) if allResponsibles is None else allResponsibles
         responsible_ids = list(
             responsible or ([user["id"] for user in self.list_members()["users"]] if everyone else [])

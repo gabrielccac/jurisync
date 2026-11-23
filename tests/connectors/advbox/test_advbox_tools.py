@@ -1,5 +1,6 @@
 """Offline tests for the task finder, compact reports, attach-by-reference and dry-run creation."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -151,7 +152,7 @@ class CreateTaskToolTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    ARGS = dict(lawsuitId="1", tasksId="2", guests=[216759], date="09/10/2026")
+    ARGS = dict(lawsuitId="1", tasksId="2", guests=[216759], date="2026-10-09")
 
     def test_saved_files_are_read_by_name_with_their_type(self):
         save_document("a_1.pdf", b"%PDF-1.7 body")
@@ -179,6 +180,28 @@ class CreateTaskToolTest(unittest.TestCase):
         self.assertEqual(result, {"dryRun": True})
         create.assert_not_called()
         self.assertEqual(preview.call_args.args[1][0]["filename"], "a_1.pdf")
+        self.assertEqual(preview.call_args.args[0]["date"], "09/10/2026")  # ISO in, ADVBOX's DD/MM/YYYY out
+
+    def test_date_parameters_are_iso_and_reach_advbox_as_dd_mm_yyyy(self):
+        with (
+            mock.patch.object(server.client, "search_tasks", return_value={}) as search,
+            mock.patch.object(server.client, "list_publications", return_value={}) as publications,
+            mock.patch.object(server.client, "list_lawsuits", return_value={}) as lawsuits,
+        ):
+            server.search_tasks(dateFrom="2026-11-01", dateTo="2026-11-30")
+            server.list_publications(dateFrom="2026-10-01", dateTo="2026-10-09")
+            server.list_lawsuits(dateFrom="2026-10-01")
+            with self.assertRaises(Exception):
+                server.search_tasks(dateFrom="2026-02-30", dateTo="2026-03-01")
+        self.assertEqual(
+            (search.call_args.kwargs["dateFrom"], search.call_args.kwargs["dateTo"]), ("01/11/2026", "30/11/2026")
+        )
+        self.assertEqual(publications.call_args.kwargs["dateFrom"], "01/10/2026")
+        self.assertEqual(
+            (lawsuits.call_args.kwargs["dateFrom"], lawsuits.call_args.kwargs["dateUntil"]), ("01/10/2026", "")
+        )
+        schema = server.server._tool_manager.get_tool("advbox_search_tasks").parameters["properties"]["dateFrom"]
+        self.assertIn("YYYY-MM-DD", json.dumps(schema))
 
     def test_real_creation_still_needs_the_write_gate(self):
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "false"}):

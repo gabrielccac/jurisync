@@ -2,23 +2,34 @@
 
 import base64
 import binascii
+import datetime
 import json
 import mimetypes
 from typing import Annotated, Any, Literal
 
+import anyio.to_thread
 from curl_cffi.requests.exceptions import RequestException
-from mcp.server.mcpserver import MCPServer
+from mcp.server.elicitation import AcceptedElicitation
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.shared.exceptions import MCPError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
 from jurisync.connectors.advbox.client import AdvboxClient
 from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.connectors.advbox.parsers import compact_lawsuit_report
-from jurisync.connectors.advbox.session import require_writes
+from jurisync.connectors.advbox.session import (
+    VERIFICATION_TRIES,
+    AdvboxDeviceVerification,
+    CodeRefused,
+    pending_verification,
+    require_writes,
+)
 from jurisync.core.documents_dir import resolve_saved_document
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 from jurisync.core.tenant_local import TenantLocal
+from jurisync.registry import CONNECTORS
 
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
@@ -34,14 +45,11 @@ Search = Annotated[str, Field(max_length=255, description="Free text to match; e
 OptionalDate = Annotated[
     str,
     Field(
-        pattern=r"^(\d{2}/\d{2}/\d{4})?$",
-        description="Date as DD/MM/YYYY (e.g. '16/10/2026', not ISO); empty string means none.",
+        pattern=r"^(\d{4}-\d{2}-\d{2})?$",
+        description="Date as ISO YYYY-MM-DD (e.g. '2026-10-16'); empty string means none.",
     ),
 ]
-Date = Annotated[
-    str,
-    Field(pattern=r"^\d{2}/\d{2}/\d{4}$", description="Date as DD/MM/YYYY (e.g. '16/10/2026', not ISO 2026-10-16)."),
-]
+Date = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="Date as ISO YYYY-MM-DD (e.g. '2026-10-16').")]
 Hour = Annotated[
     str, Field(pattern=r"^(\d{2}:\d{2})?$", description="Time as HH:MM, 24h (e.g. '14:30'); empty string means none.")
 ]
@@ -66,7 +74,78 @@ client = TenantLocal(AdvboxClient, close=lambda value: value.close())
 # The file tools reach the session through the tenant's current client on every call, so they follow a client that
 # was replaced after a credential change instead of keeping the previous account's session.
 documents = AdvboxDocuments(client)
-server = MCPServer("advbox", version="1.0.0")
+
+
+class DeviceCode(BaseModel):
+    codigo: Annotated[
+        str,
+        Field(min_length=1, max_length=32, title="Código", description="Código de verificação enviado pelo ADVBOX."),
+    ]
+
+
+def _device_check(error):
+    while error is not None and not isinstance(error, AdvboxDeviceVerification):
+        error = error.__cause__
+    return error
+
+
+def _can_elicit(context):
+    try:
+        capabilities = context.session.client_capabilities
+    except (AttributeError, ValueError):  # no request behind the context
+        return False
+    return bool(capabilities and capabilities.elicitation)
+
+
+async def elicit_device_code(context, sent_to):
+    """Ask the user for ADVBOX's device code in the client's own input and send it; the verification result, or None
+    when the user declined or the client cannot ask (the agent then uses advbox_verify_device)."""
+    if context is None or not _can_elicit(context):
+        return None
+    session = client.session
+    message = (
+        f"O ADVBOX pediu a verificação deste dispositivo e enviou um código para {sent_to}. Digite o código recebido."
+    )
+    for _ in range(VERIFICATION_TRIES):
+        try:
+            answer = await context.elicit(message, DeviceCode)
+        except (MCPError, ValueError):
+            return None
+        if not isinstance(answer, AcceptedElicitation):
+            return None
+        with tool_errors("ADVBOX", *ERRORS):
+            try:
+                return await anyio.to_thread.run_sync(session.verify_device, answer.data.codigo)
+            except CodeRefused as refused:
+                message = (
+                    f"O ADVBOX recusou o código ({refused.left} tentativa(s) restante(s)). "
+                    f"Confira o código enviado para {sent_to} e digite de novo."
+                )
+    return None
+
+
+class AdvboxServer(MCPServer):
+    """When a call stops on ADVBOX's device verification, asks the user for the code (MCP elicitation) and repeats the
+    call with the new session. Writes are never repeated: the agent calls them again."""
+
+    async def call_tool(self, name, arguments, context=None):
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as error:
+            check = _device_check(error)
+            if check is None or name == "advbox_verify_device" or not await elicit_device_code(context, check.sent_to):
+                raise
+        if name in CONNECTORS["advbox"].write_tools:
+            raise ToolError(f"ADVBOX verified this device; {name} was not repeated, call it again")
+        return await super().call_tool(name, arguments, context)
+
+
+server = AdvboxServer("advbox", version="1.0.0")
+
+
+def advbox_date(value):
+    """An ISO ``YYYY-MM-DD`` parameter as ADVBOX takes it (``DD/MM/YYYY``); empty and None pass through."""
+    return datetime.date.fromisoformat(value).strftime("%d/%m/%Y") if value else value
 
 
 def call(handler):
@@ -91,6 +170,40 @@ def ensure_session() -> dict[str, Any]:
 
 
 @server.tool(
+    name="advbox_verify_device",
+    title="Verify ADVBOX device",
+    description="Finish ADVBOX's device verification: when a call says ADVBOX sent a code to verify this device, ask the client for it and pass it as code. A refused code can be typed again (3 attempts). Only when the user says the stored device stopped working and ADVBOX did not ask for a code by itself, call it with newDevice=true and no code: it starts a verification with a new device id, ADVBOX sends a code, and the next call passes it. Changes the account's trusted devices; never needs the write permission.",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
+)
+async def verify_device(
+    code: Annotated[
+        str,
+        Field(max_length=32, description="The code ADVBOX sent, as the client typed it; empty with newDevice=true."),
+    ] = "",
+    newDevice: Annotated[
+        bool, Field(description="true starts a verification with a new device id; only when the user asks for it.")
+    ] = False,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    session = client.session
+    with tool_errors("ADVBOX", *ERRORS):
+        pending = pending_verification()
+        if pending is None and not newDevice:
+            return {"verified": False, "message": "Nothing to verify: ADVBOX has not asked to verify this device."}
+        if pending is None:
+            try:
+                return await anyio.to_thread.run_sync(session.start_new_device)
+            except AdvboxDeviceVerification as check:
+                return await elicit_device_code(ctx, check.sent_to) or {"verified": False, "message": str(check)}
+        if not code.strip():
+            result = await elicit_device_code(ctx, pending.sent_to)
+            if result is None:
+                raise ValueError(f"Pass the code ADVBOX sent to {pending.sent_to}")
+            return result
+        return await anyio.to_thread.run_sync(session.verify_device, code)
+
+
+@server.tool(
     name="advbox_list_customers",
     title="List ADVBOX customers",
     description="Search and paginate customers in ADVBOX. Read-only.",
@@ -103,7 +216,7 @@ def list_customers(page: Page = 1, pageSize: PageSize = 50, search: Search = "")
 @server.tool(
     name="advbox_list_lawsuits",
     title="List ADVBOX lawsuits",
-    description="Search and paginate lawsuits in ADVBOX. Supports sorting (created = lawsuits.created_at, movement = date_last_movement — often unpopulated upstream, prefer created) and a created-date range (DD/MM/YYYY). Read-only.",
+    description="Search and paginate lawsuits in ADVBOX. Supports sorting (created = lawsuits.created_at, movement = date_last_movement — often unpopulated upstream, prefer created) and a created-date range (YYYY-MM-DD). Read-only.",
     annotations=READ_ONLY,
 )
 def list_lawsuits(
@@ -119,10 +232,10 @@ def list_lawsuits(
     sortDir: Annotated[Literal["asc", "desc"], Field(description="'asc' or 'desc'.")] = "asc",
     dateFrom: Annotated[
         OptionalDate,
-        Field(description="Created-date range start, DD/MM/YYYY (e.g. '01/10/2026'); empty string for none."),
+        Field(description="Created-date range start, YYYY-MM-DD (e.g. '2026-10-01'); empty string for none."),
     ] = "",
     dateUntil: Annotated[
-        OptionalDate, Field(description="Created-date range end, DD/MM/YYYY; empty string for none.")
+        OptionalDate, Field(description="Created-date range end, YYYY-MM-DD; empty string for none.")
     ] = "",
 ) -> dict[str, Any]:
     sort = {"parties": 0, "type": 1, "created": 3, "movement": 5}[sortBy]
@@ -133,8 +246,8 @@ def list_lawsuits(
             search=search,
             sortColumn=sort,
             sortDir=sortDir,
-            dateFrom=dateFrom,
-            dateUntil=dateUntil,
+            dateFrom=advbox_date(dateFrom),
+            dateUntil=advbox_date(dateUntil),
         )
     )
 
@@ -168,10 +281,8 @@ def search_tasks(
             description="true: every member; false: only the logged-in user. Default: every member when search is given."
         ),
     ] = None,
-    dateFrom: Annotated[
-        Date | None, Field(description="Start-date range start DD/MM/YYYY, e.g. '15/10/2026'. ISO is refused.")
-    ] = None,
-    dateTo: Annotated[Date | None, Field(description="Start-date range end DD/MM/YYYY, e.g. '15/10/2026'.")] = None,
+    dateFrom: Annotated[Date | None, Field(description="Start-date range start YYYY-MM-DD, e.g. '2026-10-15'.")] = None,
+    dateTo: Annotated[Date | None, Field(description="Start-date range end YYYY-MM-DD, e.g. '2026-10-15'.")] = None,
     taskType: Annotated[
         str,
         Field(
@@ -206,8 +317,8 @@ def search_tasks(
             completed=completed,
             responsible=responsible,
             allResponsibles=allResponsibles,
-            dateFrom=dateFrom or "",
-            dateTo=dateTo or "",
+            dateFrom=advbox_date(dateFrom) or "",
+            dateTo=advbox_date(dateTo) or "",
             taskType=taskType,
             stage=stage,
             groups=groups or (),
@@ -243,10 +354,8 @@ def list_publications(
             description="Shortcut window ending today: 'today', '3d', '7d' or '30d'. Use it alone, or use dateFrom/dateTo instead."
         ),
     ] = None,
-    dateFrom: Annotated[
-        Date | None, Field(description="Start date DD/MM/YYYY, e.g. '01/10/2026'. ISO is refused.")
-    ] = None,
-    dateTo: Annotated[Date | None, Field(description="End date DD/MM/YYYY, e.g. '15/10/2026'.")] = None,
+    dateFrom: Annotated[Date | None, Field(description="Start date YYYY-MM-DD, e.g. '2026-10-01'.")] = None,
+    dateTo: Annotated[Date | None, Field(description="End date YYYY-MM-DD, e.g. '2026-10-15'.")] = None,
     tribunal: Annotated[
         str, Field(max_length=40, description="Court acronym, e.g. 'TRF5' or 'TJPE'. Empty for all courts.")
     ] = "",
@@ -267,8 +376,8 @@ def list_publications(
     return call(
         lambda: client.list_publications(
             period=period,
-            dateFrom=dateFrom or "",
-            dateTo=dateTo or "",
+            dateFrom=advbox_date(dateFrom) or "",
+            dateTo=advbox_date(dateTo) or "",
             tribunal=tribunal,
             processNumber=processNumber,
             responsibleId=responsible or "",
@@ -575,7 +684,7 @@ def upload_files(
 @server.tool(
     name="advbox_create_task",
     title="Create ADVBOX task",
-    description="Create a task on a lawsuit with a task-type ID (tasksId), responsible guest IDs (guests: a JSON list of 1 or more user IDs from advbox_list_members; a task cannot be created with no responsible), a date in DD/MM/YYYY, and comments. Attachments can be given inline as base64 (attachments) or by file name from the shared documents folder (attachmentFiles, the savedAs names returned by pje_read_documents with save=true); at most 5 files in total. With dryRun=true nothing is sent: the task body and files are validated and returned. dedupeKey (e.g. the DJEN communication id) makes a retry safe: a pending task of this lawsuit already marked [ref:<dedupeKey>] is returned with duplicate=true and nothing is created; otherwise the marker becomes the last line of the comment. If ADVBOX does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search the lawsuit's tasks before retrying, the call is never replayed. Creating requires ADVBOX_ALLOW_WRITES=true; attachments also need ADVBOX_UPLOAD_FOLDER.",
+    description="Create a task on a lawsuit with a task-type ID (tasksId), responsible guest IDs (guests: a JSON list of 1 or more user IDs from advbox_list_members; a task cannot be created with no responsible), a date in YYYY-MM-DD, and comments. Attachments can be given inline as base64 (attachments) or by file name from the shared documents folder (attachmentFiles, the savedAs names returned by pje_read_documents with save=true); at most 5 files in total. With dryRun=true nothing is sent: the task body and files are validated and returned. dedupeKey (e.g. the DJEN communication id) makes a retry safe: a pending task of this lawsuit already marked [ref:<dedupeKey>] is returned with duplicate=true and nothing is created; otherwise the marker becomes the last line of the comment. If ADVBOX does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search the lawsuit's tasks before retrying, the call is never replayed. Creating requires ADVBOX_ALLOW_WRITES=true; attachments also need ADVBOX_UPLOAD_FOLDER.",
     annotations=WRITE,
 )
 def create_task(
@@ -653,9 +762,9 @@ def create_task(
             "workflowId": workflowId,
             "workflowSequence": workflowSequence,
             "workflowLimit": workflowLimit,
-            "date": date,
+            "date": advbox_date(date),
             "hour": hour,
-            "deadline": deadline,
+            "deadline": advbox_date(deadline),
             "comments": comments,
         }
         if dryRun:
@@ -681,13 +790,13 @@ def update_task(
         Field(max_length=5000, description="Adds a paragraph to the end of the comment without replacing it."),
     ] = None,
     date: Annotated[
-        Date | None, Field(description="New date DD/MM/YYYY, e.g. '20/10/2026'. Leave empty to keep it.")
+        Date | None, Field(description="New date YYYY-MM-DD, e.g. '2026-10-20'. Leave empty to keep it.")
     ] = None,
     hour: Annotated[
         Hour | None, Field(description="New time HH:MM, 24h. Empty string clears it; leave out to keep it.")
     ] = None,
     deadline: Annotated[
-        OptionalDate | None, Field(description="New deadline DD/MM/YYYY. Empty string clears it; leave out to keep it.")
+        OptionalDate | None, Field(description="New deadline YYYY-MM-DD. Empty string clears it; leave out to keep it.")
     ] = None,
     guests: Annotated[
         UserIds | None,
@@ -739,9 +848,9 @@ def update_task(
         changes = {
             "comments": comments,
             "append_comments": appendComments,
-            "date": date,
+            "date": advbox_date(date),
             "hour": hour,
-            "deadline": deadline,
+            "deadline": advbox_date(deadline),
             "guests": guests,
         }
         if dryRun:

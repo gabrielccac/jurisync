@@ -254,7 +254,7 @@ class DuplicateCreation(WriteCase):
 
     def test_tool_passes_the_key(self):
         with mock.patch.object(server.client, "create_task", return_value={"postId": "1"}) as create:
-            server.create_task(lawsuitId="9", tasksId="2", guests=[1], date="09/10/2026", dedupeKey="747498033")
+            server.create_task(lawsuitId="9", tasksId="2", guests=[1], date="2026-10-09", dedupeKey="747498033")
         self.assertEqual(create.call_args.kwargs, {"dedupe_key": "747498033"})
 
 
