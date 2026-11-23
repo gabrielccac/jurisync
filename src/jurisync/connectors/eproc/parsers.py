@@ -195,8 +195,10 @@ def _list_pagination(soup, items):
         page = int(values.get("hdnInfraPaginaAtual", "0"))
     except (TypeError, ValueError):
         page = None
+    pager = soup.select_one("select#selInfraPaginacaoSuperior, select#selInfraPaginacaoInferior")
     return {
         "page": page,
+        "totalPages": len(pager.select("option")) if pager else None,
         "totalItems": total_items,
         "itemCount": len(items),
         "complete": total_items is not None and len(items) >= total_items,
@@ -269,6 +271,46 @@ def parse_lawyer_process_report(html, base_url):
         },
         "diagnostics": [],
     }
+
+
+def form_fields(form):
+    """The ``(name, value)`` pairs a browser submits for ``form`` (no submit button pressed)."""
+    fields = []
+    for node in form.select("input[name], select[name], textarea[name]"):
+        if node.has_attr("disabled"):
+            continue
+        name = node["name"]
+        if node.name == "select":
+            options = node.select("option")
+            chosen = [option for option in options if option.has_attr("selected")]
+            if not chosen and not node.has_attr("multiple") and options:
+                chosen = options[:1]
+            fields.extend((name, option.get("value", text(option))) for option in chosen)
+        elif node.name == "textarea":
+            fields.append((name, node.get_text()))
+        else:
+            kind = (node.get("type") or "text").lower()
+            if kind in ("submit", "button", "image", "reset", "file"):
+                continue
+            if kind in ("checkbox", "radio") and not node.has_attr("checked"):
+                continue
+            fields.append((name, node.get("value", "on" if kind in ("checkbox", "radio") else "")))
+    return fields
+
+
+def report_page_request(html, base_url, page):
+    """``(url, fields)`` that ask Relação de Processos for ``page`` (0-based), as its pager does; ``None`` without one.
+
+    The pager (``infraAcaoPaginar('=', page, 'Infra')``) sets ``hdnInfraPaginaAtual`` and re-posts the list form with
+    the same criteria, so the portal keeps the filters and the ordering of the first page.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.select_one("form#frmProcessoLista[action]")
+    if form is None or not form.select_one('input[name="hdnInfraPaginaAtual"]'):
+        return None
+    fields = [(name, value) for name, value in form_fields(form) if name not in ("hdnInfraPaginaAtual", "hdnExcel")]
+    fields += [("hdnInfraPaginaAtual", str(page)), ("hdnExcel", "0")]
+    return _href(form["action"], base_url), fields
 
 
 def _document(anchor, base_url):

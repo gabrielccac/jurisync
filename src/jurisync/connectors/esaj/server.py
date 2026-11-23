@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 
 from curl_cffi.requests.exceptions import RequestException
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
@@ -36,28 +37,45 @@ def configured_portals():
     )
 
 
+def refusal(error):
+    """A portal refusal (``EsajBlocked``) as a tool error tagged with its reason: ``[password_required]``.
+
+    It is an error result, not a ``success: false`` payload: a client that checks only the tool's error flag must not
+    take a folder the viewer never listed for an empty one.
+    """
+    message = sanitize_diagnostics(parsers.redact_text(error)) or "unknown"
+    return ToolError(f"e-SAJ request failed [{error.reason}]: {message}")
+
+
 def call(portal, read):
     with tool_errors("e-SAJ", ValueError, RuntimeError, OSError, RequestException):
         key = portals.esaj(portal).key
         try:
             value = sessions.run(key, read)
         except base.EsajBlocked as error:
+            raise refusal(error) from None
+        return {"success": True, "portal": key, **value, "notice": UNTRUSTED}
+
+
+def open_document(portal, read):
+    """``call`` plus the ``ciencia`` block. The receipt check stopping the read is the ciência report itself
+    (``pendente``, nothing opened), so it comes back as a result; any other refusal is a tool error."""
+    with tool_errors("e-SAJ", ValueError, RuntimeError, OSError, RequestException):
+        key = portals.esaj(portal).key
+        try:
+            value = sessions.run(key, read)
+        except base.EsajBlocked as error:
+            if error.reason != "intimacao_pending":
+                raise refusal(error) from None
             return {
                 "success": False,
                 "portal": key,
                 "error": error.reason,
                 "reason": sanitize_diagnostics(parsers.redact_text(error)),
                 "notice": UNTRUSTED,
+                "ciencia": ciencia.report(ciencia.PENDING, NOT_RECEIVED),
             }
-        return {"success": True, "portal": key, **value, "notice": UNTRUSTED}
-
-
-def open_document(portal, read):
-    """``call`` plus the ``ciencia`` block: ``pendente`` when the portal's receipt check stopped the read."""
-    result = call(portal, read)
-    if result.get("error") == "intimacao_pending":
-        return {**result, "ciencia": ciencia.report(ciencia.PENDING, NOT_RECEIVED)}
-    return {**result, "ciencia": ciencia.report(ciencia.NONE)}
+        return {"success": True, "portal": key, **value, "notice": UNTRUSTED, "ciencia": ciencia.report(ciencia.NONE)}
 
 
 def create_server(keys=None):
@@ -131,7 +149,7 @@ def create_server(keys=None):
     @server.tool(
         title="List e-SAJ process documents",
         annotations=READ_ONLY,
-        description="List documents from the account-authorized digital folder. Stops when no authenticated viewer link is available.",
+        description="List documents from the account-authorized digital folder. When the portal does not list the folder (no viewer link, process password, CAPTCHA, pending intimação) the call fails with the reason in brackets, e.g. [password_required]; an empty items list means the viewer listed the folder and it was empty.",
     )
     def esaj_list_documents(
         processNumber: Annotated[str, number_field], portal: Annotated[Portal, portal_field] = default

@@ -258,6 +258,9 @@ def viewer_documents(html, number):
                     parameters=params, pageCount=page.get("nuPaginas"), accessStatus="permission_check_required"
                 )
         result.append(entry)
+    if nodes and not result:
+        # Folders or nodes in a shape this parser does not know: the folder was not listed, it is not empty.
+        raise EsajParseError("The document viewer listed no document this connector recognizes")
     return result
 
 

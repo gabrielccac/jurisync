@@ -122,6 +122,75 @@ class ProcessReportTests(unittest.TestCase):
                 client.list_processes(session=session, panel_html=panel, panel_url=BASE, portal="trf6-1g")
             self.assertFalse(session.calls)
 
+    def test_report_pages_are_posted_like_the_pager_and_counted_truthfully(self):
+        """ "(3 registros - 1 a 1)": later pages re-post the list form with hdnInfraPaginaAtual, criteria intact."""
+
+        def page(number, index, caption="(3 registros - {0} a {0})", criteria="c1"):
+            row = REPORT.replace("0000001-23.2026.4.06.3800", number).replace("(1 registro)", caption.format(index + 1))
+            pager = "".join(
+                f'<option value="{i}"{" selected" if i == index else ""}>{i + 1}</option>' for i in range(3)
+            )
+            return (
+                '<form id="frmProcessoLista" method="post" '
+                'action="controlador.php?acao=relatorio_processo_procurador_listar&amp;hash=form">'
+                + row.replace('<input name="hdnInfraPaginaAtual" value="0">', "")
+                + f'<select id="selInfraPaginacaoSuperior">{pager}</select>'
+                + f'<input type="hidden" name="hdnInfraPaginaAtual" value="{index}">'
+                + f'<input type="hidden" name="hdnInfraHashCriterios" value="{criteria}">'
+                + '<select name="selStatusProcesso"><option value="">Todos</option><option value="B">B</option></select>'
+                + '<select name="assuntoField[]" multiple><option value="1">um</option></select>'
+                + '<input type="checkbox" name="chkInfraItem0" value="x"></form>'
+            )
+
+        numbers = ["0000001-23.2026.4.06.3800", "0000002-23.2026.4.06.3800", "0000003-23.2026.4.06.3800"]
+
+        class Pages(Session):
+            def __init__(self, bodies):
+                super().__init__()
+                self.bodies = iter(bodies)
+                self.posted = []
+
+            def request(self, method, url, **kwargs):
+                self.calls.append((method, url))
+                self.posted.append(kwargs.get("data"))
+                return Response(next(self.bodies))
+
+        session = Pages([page(n, i) for i, n in enumerate(numbers)])
+        result = client.list_processes(session=session, panel_html=PANEL, panel_url=BASE, portal="trf6-1g", max_pages=5)
+        self.assertTrue(result["success"])
+        self.assertEqual([item["number"] for item in result["items"]], numbers)
+        self.assertEqual(result["pagination"]["totalItems"], 3)
+        self.assertEqual(result["pagination"]["totalPages"], 3)
+        self.assertEqual(result["pagination"]["pagesRead"], 3)
+        self.assertTrue(result["pagination"]["complete"])
+        self.assertEqual([method for method, _ in session.calls], ["GET", "POST", "POST"])
+        self.assertIn("hash=form", session.calls[1][1])
+        sent = dict(session.posted[2])
+        self.assertEqual(sent["hdnInfraPaginaAtual"], "2")
+        self.assertEqual(sent["hdnInfraHashCriterios"], "c1")
+        self.assertEqual(sent["selStatusProcesso"], "")  # a single select sends its first option, as a browser does
+        self.assertNotIn("assuntoField[]", sent)  # a multiple select with nothing selected sends nothing
+        self.assertNotIn("chkInfraItem0", sent)
+        self.assertNotIn("hash", str(result))
+
+        # maxPages stops early and says so; the list is not complete.
+        session = Pages([page(n, i) for i, n in enumerate(numbers)])
+        result = client.list_processes(session=session, panel_html=PANEL, panel_url=BASE, portal="trf6-1g", max_pages=2)
+        self.assertEqual(result["pagination"]["itemCount"], 2)
+        self.assertFalse(result["pagination"]["complete"])
+        self.assertEqual(result["notes"], ["stopped at maxPages=2 of 3"])
+
+        # A page that answers another page number (the portal reset the criteria) is not mixed in.
+        session = Pages([page(numbers[0], 0), page(numbers[0], 0)])
+        result = client.list_processes(session=session, panel_html=PANEL, panel_url=BASE, portal="trf6-1g", max_pages=3)
+        self.assertEqual(result["pagination"]["itemCount"], 1)
+        self.assertEqual(result["pagination"]["pagesRead"], 1)
+        self.assertFalse(result["pagination"]["complete"])
+        self.assertEqual(result["notes"], ["report_page_2_mismatch"])
+
+        with self.assertRaises(ValueError):
+            client.list_processes(session=Session(), panel_html=PANEL, panel_url=BASE, portal="trf6-1g", max_pages=0)
+
     def test_mcp_exposes_listing_and_reuses_session(self):
         session = Session()
 

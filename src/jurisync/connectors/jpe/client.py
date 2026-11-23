@@ -9,9 +9,14 @@ wired, picked by configuration, never by trying one after the other (``auth_rout
   (``j_username``/``j_password``). No second factor.
 - **PDPJ SSO** (``<PREFIX>_USERNAME`` = CPF, ``<PREFIX>_PASSWORD``, ``<PREFIX>_2FA_DATA|_2FA_QR``): the "Login por
   credencial do PJE" button posts ``formLoginSSO`` to ``/rupe/loginSsoKeycloakServlet``, which redirects to
-  ``sso.cloud.pje.jus.br`` (realm ``pje``, client ``jpe-tjmg-2g``). On 19/11/2026 the SSO answered that redirect with
-  HTTP 400 "Parâmetro inválido: redirect_uri" in a real browser too (the client exists but does not accept the JPe
-  callback), before asking for any credential. ``SsoRefused`` reports it; nothing is retried.
+  ``sso.cloud.pje.jus.br`` (realm ``pje``, client ``jpe-tjmg-2g``). The JPe servlet, not the connector, writes that
+  authorize URL: its ``redirect_uri`` is built from the form's ``origemURL``, which the page's script fills with the
+  page address (``window.location.href``). Posted empty, the servlet sends a relative ``redirect_uri``
+  (``/rupe/loginSsoKeycloakServlet/callback``); posted as the browser does, the absolute
+  ``https://jpe.tjmg.jus.br/rupe/loginSsoKeycloakServlet/callback``. On 19/11 and 23/11/2026 the SSO answered both with
+  HTTP 400 "Parâmetro inválido: redirect_uri", in a real browser too, before asking for any credential: the client
+  ``jpe-tjmg-2g`` does not accept the JPe's own callback. That is the court's SSO configuration; ``SsoRefused``
+  (``portal_unavailable``) reports it and nothing is retried.
 
 ``<PREFIX>`` is ``TJMG_JPE_2G``; the older ``TJMG_THEMIS_2G`` names are read too (``portals.py``).
 
@@ -46,8 +51,9 @@ PORTAL = "tjmg-jpe-2g"
 ROOT = "/rupe/"
 SSO_SERVLET = "loginSsoKeycloakServlet"
 SSO_REFUSED = (
-    "o JPe recusou o login pelo PDPJ do lado do tribunal; use o login próprio do JPe ou peça ao TJMG que corrija o "
-    "client jpe-tjmg-2g"
+    "o JPe recusou o login pelo PDPJ do lado do tribunal: o SSO do PDPJ não aceita o endereço de retorno que o "
+    "próprio JPe envia para o client jpe-tjmg-2g (acontece também no navegador, antes de qualquer credencial). Use o "
+    "login próprio do JPe (TJMG_JPE_2G_LOGIN) ou peça ao TJMG que corrija o client jpe-tjmg-2g"
 )
 CPF = re.compile(r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}")
 ROUTES = {"pdpj": "sso", "sso": "sso", "jpe": "jpe", "proprio": "jpe", "own": "jpe"}
@@ -62,9 +68,13 @@ class JpeSessionExpired(SessionExpired):
 
 
 class SsoRefused(LoginRejected):
-    """The PDPJ SSO refused to start the JPe login (client ``jpe-tjmg-2g``); no credential was sent."""
+    """The PDPJ SSO refused to start the JPe login (client ``jpe-tjmg-2g``); no credential was sent.
 
-    reason = "unexpected"
+    The court's SSO configuration, not the account: the login is unavailable until the TJMG fixes it. A
+    ``LoginRejected`` so that the pool does not try again at every call.
+    """
+
+    reason = "portal_unavailable"
 
 
 class MissingCredentials(MissingLogin):
@@ -430,8 +440,11 @@ def _sso_login(http, portal, html, page_url, username, password, account, *, clo
     if form is None:
         raise JpeError("JPe login page has no PDPJ button (formLoginSSO)")
     action = require_jpe(portal, urljoin(page_url, form.get("action")))
-    # The button's script submits the form with origemURL empty (only the silent check fills its own field).
+    # The page's script fills origemURL with the page address on load (``window.location.href``); the servlet builds
+    # the SSO redirect_uri from it, and posted empty it sends a relative one (seen live 23/11/2026).
     fields = {element.get("name"): "" for element in form.find_all("input") if element.get("name")}
+    if "origemURL" in fields:
+        fields["origemURL"] = page_url
     response = _send(http, portal, "POST", action, data=fields, referer=page_url)
     response = _follow(http, portal, response, check=check)
     sso_html = response_html(response)

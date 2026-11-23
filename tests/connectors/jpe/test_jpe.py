@@ -182,7 +182,13 @@ class LoginTests(unittest.TestCase):
         self.assertIn("o JPe recusou o login pelo PDPJ do lado do tribunal", str(raised.exception))
         self.assertIn("jpe-tjmg-2g", str(raised.exception))
         self.assertIsInstance(raised.exception, LoginRejected)  # the pool never retries it
-        self.assertEqual([item["data"] for item in http.posted()], [{"origemURL": [""]}])  # no username or password
+        self.assertEqual(raised.exception.reason, "portal_unavailable")  # the court's SSO, not the account
+        # No username or password; origemURL is the page address, as the page's script fills it (the servlet builds
+        # the redirect_uri from it).
+        posted = [item["data"] for item in http.posted()]
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(list(posted[0]), ["origemURL"])
+        self.assertTrue(posted[0]["origemURL"][0].startswith(HOST + ENTRY))
 
     def test_sso_login_sends_cpf_digits_on_pdpj_theme(self):
         login_page = (

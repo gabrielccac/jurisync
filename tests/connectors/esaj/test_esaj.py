@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, utils
+from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync import portals
 from jurisync.connectors.esaj import base, parsers, server
@@ -141,9 +142,11 @@ def test_server_block_and_tenant_session_usage(monkeypatch):
         "Need captcha token=secret https://private?token=secret", "captcha_required"
     )
     monkeypatch.setattr(server, "sessions", pool)
-    result = server.call("tjsp-esaj", lambda s: {})
-    assert result["error"] == "captcha_required"
-    assert "secret" not in str(result)
+    # A refusal is a tool error tagged with its reason, never a payload a client could read as success.
+    with pytest.raises(ToolError) as error:
+        server.call("tjsp-esaj", lambda s: {})
+    assert "[captcha_required]" in str(error.value)
+    assert "secret" not in str(error.value)
     assert pool.run.call_args.args[0] == "tjsp-esaj"
 
 
@@ -193,6 +196,20 @@ async def test_server_offers_only_the_given_portals():
     assert field["default"] == "tjms-esaj"
 
 
+@pytest.mark.anyio
+async def test_a_folder_the_viewer_did_not_list_is_an_error_result(monkeypatch):
+    """TJAM 23/11: password_required came back as a success-shaped payload and read as "0 documents"."""
+    from mcp.client.client import Client
+
+    pool = Mock()
+    pool.run.side_effect = base.EsajBlocked("The portal asks for the process password", "password_required")
+    monkeypatch.setattr(server, "sessions", pool)
+    async with Client(server.create_server(["tjam-esaj"])) as mcp:
+        result = await mcp.call_tool("esaj_list_documents", {"portal": "tjam-esaj", "processNumber": NUMBER})
+    assert result.is_error
+    assert "[password_required]" in result.content[0].text
+
+
 def test_main_logs_in_only_where_a_login_is_set(monkeypatch):
     built = []
     monkeypatch.setattr(server, "load_env_file", lambda: None)
@@ -218,8 +235,9 @@ def test_document_tools_always_report_the_ciencia(monkeypatch):
     assert result["success"] is False and result["error"] == "intimacao_pending"
     assert result["ciencia"]["estado"] == "pendente"
     assert "nada foi aberto" in result["ciencia"]["aviso"]
-    pool.run.side_effect = base.EsajBlocked("captcha", "captcha_required")
-    assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == {"estado": "nenhuma"}
+    pool.run.side_effect = base.EsajBlocked("needs the process password", "password_required")
+    with pytest.raises(ToolError, match=r"\[password_required\]"):
+        server.open_document("tjsp-esaj", lambda s: {})
 
 
 def viewer_html(number=NUMBER, document_id="38", restricted=False):
@@ -243,6 +261,10 @@ def test_viewer_inventory_process_binding_and_privacy(monkeypatch):
     assert "parameters" not in parsers.viewer_documents(viewer_html(restricted=True), NUMBER)[0]
     with pytest.raises(base.EsajBlocked):
         parsers.viewer_documents("<html>password</html>", NUMBER)
+    assert parsers.viewer_documents("var requestScope = [];", NUMBER) == []  # listed, and empty
+    folder = 'var requestScope = [{"data": {"title": "Pasta"}, "children": []}];'
+    with pytest.raises(base.EsajParseError):  # listed nodes, none a document: not an empty folder
+        parsers.viewer_documents(folder, NUMBER)
     monkeypatch.setattr(base, "document_inventory", lambda *a: items)
     assert "parameters" not in str(base.list_documents(None, "tjsp-esaj", NUMBER))
 

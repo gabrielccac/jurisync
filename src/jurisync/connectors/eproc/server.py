@@ -16,6 +16,7 @@ from pydantic import Field
 from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
+    MAX_REPORT_PAGES,
     QUEUE_KINDS,
     _response_error,
     authenticate,
@@ -120,19 +121,29 @@ def create_server(keys=None):
         name="eproc_list_processes",
         title="List Eproc lawyer processes",
         description=(
-            "Read the first page of Relação de Processos for the authenticated lawyer, using the portal's "
-            "default filters (TRF6 excludes baixados by default). No CNJ required. Returns case numbers, "
-            "parties, class, subject, last event, dates and claim value. Check filters and pagination.complete; "
-            "this is not an unrestricted court-wide search and does not fetch subsequent pages. "
-            "Use eproc_get_process for details/documents. Requires the report link in the authenticated panel. "
-            f"Portals: {describe(keys)}. Read-only."
+            "Read Relação de Processos for the authenticated lawyer, using the portal's default filters (TRF6 "
+            "excludes baixados by default). No CNJ required. Returns case numbers, parties, class, subject, last "
+            "event, dates and claim value. The portal shows 50 rows a page (500 on TJSC); maxPages (default 1, up to "
+            f"{MAX_REPORT_PAGES}) reads that many pages of its pager. pagination.totalItems is the portal's own count "
+            "of the whole list, pagination.pagesRead/totalPages say how far it was read, and pagination.complete is "
+            "true only when every row was read: when it is false, call again with a larger maxPages. This is not an "
+            "unrestricted court-wide search. Use eproc_get_process for details/documents. Requires the report link in "
+            f"the authenticated panel. Portals: {describe(keys)}. Read-only."
         ),
         annotations=READ_ONLY,
     )
     def eproc_list_processes(
         portal: Annotated[Portal, Field(description="Portal key from the list above, e.g. 'trf6-1g'.")],
+        maxPages: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=MAX_REPORT_PAGES,
+                description="How many pages of the portal's list to read (50 rows each, 500 on TJSC). Default 1.",
+            ),
+        ] = 1,
     ) -> dict[str, Any]:
-        return call(portal, list_processes)
+        return call(portal, lambda **context: list_processes(max_pages=maxPages, **context))
 
     @server.tool(
         name="eproc_get_process",
@@ -168,7 +179,7 @@ def create_server(keys=None):
             list[Annotated[str, Field(min_length=1)]],
             Field(
                 max_length=5,
-                description="Optional JSON list of up to 5 document ids from the documentInventory of the process; empty means no texts.",
+                description="Optional JSON list of up to 5 document ids from the documentInventory of the process; empty means no texts. Works with either scope: the ids are looked up in the whole inventory, not only in the events the scope returns.",
             ),
         ] = [],
         save: Annotated[

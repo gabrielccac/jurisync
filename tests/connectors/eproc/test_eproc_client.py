@@ -252,6 +252,51 @@ class EprocClientTests(unittest.TestCase):
         self.assertEqual(session.calls[3][2]["data"]["pagina"], "1")
         self.assertTrue(all("controlador_ajax.php" in call[1] for call in session.calls[2:]))
 
+    def test_latest_scope_reads_selected_documents_from_the_whole_inventory(self):
+        """documentIds with scope=latest: the timeline keeps the newest date, the ids come from every event."""
+        old_document = "711786363359989443565919639536"  # eproc ids run to 30 digits
+        session = Session(
+            [
+                Response(302, url=BASE, headers={"Location": "controlador.php?acao=processo_selecionar&hash=p"}),
+                Response(200, "detail"),
+            ]
+        )
+        panel = {
+            "quickSearch": {
+                "action": "controlador.php?acao=processo_pesquisa_rapida&hash=q",
+                "method": "post",
+                "numberField": "n",
+                "submitField": "s",
+                "submitValue": "",
+                "returnField": "r",
+                "returnValue": "p",
+            }
+        }
+        detail = {
+            "number": NUMBER,
+            "parties": [],
+            "documents": [],
+            "events": [
+                {"id": "2", "dateTime": "10/11/2026 10:00", "documents": []},
+                {"id": "1", "dateTime": "01/10/2026 09:00", "documents": [{"id": old_document}]},
+            ],
+            "eventRequest": None,
+        }
+        with (
+            patch.object(client, "parse_panel", return_value=panel),
+            patch.object(client, "parse_process_detail", return_value=detail),
+            patch.object(client, "pending_notices", return_value=([], None)),
+            patch.object(client, "read_selected_documents", return_value=[{"id": old_document}]) as read,
+        ):
+            result = client.fetch_process(
+                NUMBER, "latest", [old_document], session=session, panel_html="", panel_url=BASE, portal="jfsc"
+            )
+        self.assertEqual([event["id"] for event in result["timeline"]], ["2"])
+        self.assertEqual(read.call_args.args[0]["documents"], [{"id": old_document}])
+        self.assertEqual(read.call_args.args[1], [old_document])
+        self.assertEqual(result["attachments"], [{"id": old_document}])
+        self.assertEqual(result["ciencia"]["estado"], "nenhuma")
+
     def test_document_tokens_are_not_exposed(self):
         session = Session(
             [

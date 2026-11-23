@@ -28,6 +28,7 @@ from jurisync.connectors.eproc.parsers import (
     parse_panel,
     parse_process_detail,
     parse_process_list_page,
+    report_page_request,
 )
 from jurisync.core import credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
@@ -435,9 +436,19 @@ def pending_notices(session, panel, process_number, *, panel_url, portal):
     return rows, problem
 
 
-def list_processes(*, session=None, panel_html=None, panel_url=None, portal):
-    """Read the first lawyer-report page with the portal's default filters."""
+MAX_REPORT_PAGES = 20
+
+
+def list_processes(*, session=None, panel_html=None, panel_url=None, portal, max_pages=1):
+    """Read Relação de Processos with the portal's default filters, up to ``max_pages`` pages of its pager.
+
+    The portal shows 50 rows a page (500 on TJSC). Later pages are asked for the way the pager does it: the list form
+    is posted again with the same criteria and ``hdnInfraPaginaAtual``. ``pagination.complete`` is true only when
+    every row the caption counts was read.
+    """
     portal = portals.eproc(portal).key
+    if not isinstance(max_pages, int) or isinstance(max_pages, bool) or not 1 <= max_pages <= MAX_REPORT_PAGES:
+        raise ValueError(f"max_pages must be between 1 and {MAX_REPORT_PAGES}")
     owned = session is None
     if owned:
         session, panel_html, panel_url = authenticate(portal)
@@ -451,11 +462,12 @@ def list_processes(*, session=None, panel_html=None, panel_url=None, portal):
         require_route(endpoint, {PROCESS_REPORT_ACTION}, portal=portal)
         response, body = request(session, "GET", endpoint, portal=portal)
         error = _response_error(response, body)
-        parsed = (
-            {"items": [], "pagination": {}, "diagnostics": [error]}
-            if error
-            else parse_lawyer_process_report(body, base_url)
-        )
+        if error:
+            parsed = {"items": [], "pagination": {}, "diagnostics": [error]}
+        else:
+            parsed = parse_lawyer_process_report(body, base_url)
+            if not parsed["diagnostics"]:
+                parsed = _report_pages(session, body, parsed, endpoint, max_pages=max_pages, portal=portal)
         return _redact(
             {
                 "success": not parsed["diagnostics"],
@@ -468,6 +480,48 @@ def list_processes(*, session=None, panel_html=None, panel_url=None, portal):
     finally:
         if owned:
             session.close()
+
+
+def _report_pages(session, body, first, endpoint, *, max_pages, portal):
+    """``first`` plus the following report pages, at most ``max_pages`` in all, with truthful pagination."""
+    base_url = portals.eproc(portal).base_url
+    items = list(first["items"])
+    pagination = dict(first["pagination"])
+    total, total_pages = pagination.get("totalItems"), pagination.get("totalPages")
+    notes = []
+    page = 0
+    while (total is None or len(items) < total) and page + 1 < max_pages and total_pages and page + 1 < total_pages:
+        page += 1
+        following = report_page_request(body, base_url, page)
+        if following is None:
+            notes.append("report_pager_unavailable")
+            break
+        url, fields = following
+        url = urljoin(endpoint, url)
+        require_route(url, {PROCESS_REPORT_ACTION}, portal=portal)
+        response, body = request(session, "POST", url, data=fields, portal=portal)
+        error = _response_error(response, body)
+        if error == "session_expired":
+            raise SessionExpired("eproc session expired")  # a list read can be repeated
+        parsed = {"diagnostics": [error]} if error else parse_lawyer_process_report(body, base_url)
+        if parsed["diagnostics"]:
+            notes.append(f"report_page_{page + 1}_failed")
+            break
+        if parsed["pagination"].get("page") != page or parsed["pagination"].get("totalItems") != total:
+            # The portal answered another page or a different list: stop rather than mix lists.
+            notes.append(f"report_page_{page + 1}_mismatch")
+            break
+        items.extend(parsed["items"])
+    pagination.update(
+        {
+            "pagesRead": page + 1 - (1 if notes else 0),
+            "itemCount": len(items),
+            "complete": total is not None and len(items) >= total,
+        }
+    )
+    if not pagination["complete"] and not notes and total_pages and total_pages > max_pages:
+        notes.append(f"stopped at maxPages={max_pages} of {total_pages}")
+    return {**first, "items": items, "pagination": pagination, "notes": notes}
 
 
 def _latest(events):
@@ -577,8 +631,6 @@ def fetch_process(
         raise ValueError("process_number must be a formatted CNJ number")
     if scope not in ("latest", "page"):
         raise ValueError("scope must be latest or page")
-    if document_ids is not None and scope != "page":
-        raise ValueError("document_ids requires scope=page")
     owned = session is None
     if owned:
         session, panel_html, panel_url = authenticate(portal)
@@ -706,8 +758,9 @@ def main():
     queue = subparsers.add_parser("queue")
     queue.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     queue.add_argument("--queue", choices=tuple(QUEUE_KINDS), required=True)
-    processes = subparsers.add_parser("processes", help="List the first Relação de Processos page with default filters")
+    processes = subparsers.add_parser("processes", help="List Relação de Processos with default filters")
     processes.add_argument("--portal", choices=portals.keys("eproc"), required=True)
+    processes.add_argument("--max-pages", type=int, default=1)
     process = subparsers.add_parser("process")
     process.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     process.add_argument("--process-number", required=True)
@@ -720,7 +773,7 @@ def main():
         if args.command == "queue":
             result = list_notices(args.queue, portal=args.portal)
         elif args.command == "processes":
-            result = list_processes(portal=args.portal)
+            result = list_processes(portal=args.portal, max_pages=args.max_pages)
         else:
             result = fetch_process(
                 args.process_number,
