@@ -41,7 +41,7 @@ class Portal:
     wired: bool = True  # False: recognized, but no connector yet
     guess_by_number: bool = True  # False: never suggested from a process number alone (only a link host picks it)
     login_path: str = ""  # Projudi: the page that starts the login when the flavor's default entry is not it
-    flavor: str = ""  # Projudi/e-SAJ generation (adapter), Eproc "infra-captcha" (TJTO): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "kz" (PJe-JT REST) | "pje1x" (PJe 1.x)
+    flavor: str = ""  # Projudi/e-SAJ generation (adapter), Eproc "infra-captcha" (TJTO): "tjgo-servlet" | "legacy-keycloak" | "legacy-local" | "tjpi-publico" | "cnj-servlet" | "kz" (PJe-JT REST) | "pje1x" (PJe 1.x)
     impersonate: str = ""  # curl_cffi profile override; "" keeps the global default (see core.http.IMPERSONATE)
 
     @property
@@ -449,6 +449,12 @@ PORTALS = {
         Portal("tjpi-projudi-1g", "projudi", "TJPI", "1g", "projudi.tjpi.jus.br", "/projudi/", "password",
                "TJPI_PROJUDI_1G", region="18", justice="8", wired=False, guess_by_number=False,
                flavor="tjpi-publico"),
+        # TJBA Projudi: CNJ 1.x servlets (the TJPI line), local form behind a Tencent CAPTCHA that the login solves
+        # (core/tencent_captcha.py). Login observed live on 2026-11-23, but no account got in (expired / refused
+        # passwords), so the desk is unmapped and the portal stays unwired. Not TJBA's PJe (tjba-1g).
+        Portal("tjba-projudi-1g", "projudi", "TJBA", "1g", "projudi.tjba.jus.br", "/projudi/", "password",
+               "TJBA_PROJUDI", region="05", justice="8", wired=False, guess_by_number=False, flavor="cnj-servlet",
+               login_path="PaginaPrincipal.jsp"),
         # e-SAJ (Softplan): the CAS (/sajcas) asks the A1 certificate to sign a challenge in the login form, with no
         # mutual TLS and no authenticator. Keys carry "esaj" because TJSP already has an Eproc portal (tjsp-1g).
         Portal("tjsp-esaj", "esaj", "TJSP", "1g", "esaj.tjsp.jus.br", "/", "certificate_challenge", "TJSP_ESAJ",
