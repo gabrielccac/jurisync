@@ -49,7 +49,7 @@ class PjeSessionCacheChecks(unittest.TestCase):
             one.close()
             five.close()
 
-    def test_account_and_project_changes_cannot_reuse_another_cache(self):
+    def test_account_and_customer_changes_cannot_reuse_another_cache(self):
         with (
             tempfile.TemporaryDirectory() as temporary,
             patch.dict(
@@ -73,9 +73,23 @@ class PjeSessionCacheChecks(unittest.TestCase):
                 self.assertNotEqual(first, session_cache.cache_path("trf1-1g"))
                 self.assertIsNone(session_cache.load_session("trf1-1g"))
                 network.assert_not_called()
-            with patch.object(session_cache.Path, "cwd", return_value=session_cache.Path(temporary)):
+            with patch.dict(os.environ, {"JURISYNC_CUSTOMER": "another-office"}):
                 self.assertNotEqual(first, session_cache.cache_path("trf1-1g"))
             session.close()
+
+    def test_the_working_directory_is_not_part_of_the_identity(self):
+        """The server and jurisync-admin (or two local clients) started elsewhere share one cache file."""
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"XDG_CACHE_HOME": temporary, "PJE_1G_USERNAME": "account-a"}, clear=True),
+        ):
+            first = session_cache.cache_path("trf1-1g")
+            previous = os.getcwd()
+            try:
+                os.chdir(temporary)
+                self.assertEqual(first, session_cache.cache_path("trf1-1g"))
+            finally:
+                os.chdir(previous)
 
     def test_cache_identity_is_checked_even_when_file_is_copied(self):
         with (

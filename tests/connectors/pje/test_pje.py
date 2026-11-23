@@ -548,6 +548,9 @@ def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(mo
     assert server.configured_portals() == ()  # no login anywhere: nothing is claimed as configured
     monkeypatch.setenv("PJE_A1_P12", "/tmp/a1.p12")
     monkeypatch.setenv("PJE_1G_CERT", "true")  # TRF1 1G opts in to the A1
+    monkeypatch.setenv("PJE_TRF5_1G_2FA_DATA", "JBSWY3DPEHPK3PXP")
+    assert server.configured_portals() == ()  # the A1 file without its PIN cannot log in anywhere
+    monkeypatch.setenv("PJE_A1_PIN", "1234")
     monkeypatch.setenv("TJAP_1G_USERNAME", "user")
     monkeypatch.setenv("TJAP_1G_PASSWORD", "secret")
     for prefix in ("PJE_1G", "PJE_TRF5_1G", "TJAP_1G", "TJPE_1G"):
@@ -556,6 +559,7 @@ def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(mo
     assert {"trf1-1g", "trf5-1g", "tjap-1g"} <= set(keys)  # opted in, certificate portal, password
     assert "trf1-2g" not in keys and "tjpe-1g" not in keys  # no authenticator / password portal without a login
     assert "trt7-1g" not in keys  # the A1 alone is not enough: the SSO asks the code
+    assert "trf5-legacy" in keys  # PJe 1.x: no SSO, the A1 alone logs in
 
     saved = {t.name: copy.deepcopy(t.parameters) for t in server.server._tool_manager.list_tools()}
     try:
@@ -575,3 +579,20 @@ def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(mo
         server.sessions._only = None
         for tool in server.server._tool_manager.list_tools():
             tool.parameters = saved[tool.name]
+
+
+def test_pje1x_needs_only_the_a1_and_never_the_password(monkeypatch):
+    """customers/max: TRF5's PJe 1.x (trf5-legacy) with the A1 and no authenticator."""
+    from jurisync.connectors.pje import server
+
+    for name in [n for n in os.environ if n.startswith(("PJE_", "TJ", "TRF", "TRT", "TST"))]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("PJE_TRF5_LEGACY_USERNAME", "user")
+    monkeypatch.setenv("PJE_TRF5_LEGACY_PASSWORD", "secret")
+    monkeypatch.setenv("PJE_TRF5_LEGACY_2FA_DATA", "JBSWY3DPEHPK3PXP")
+    assert "trf5-legacy" not in server.configured_portals()  # PJe 1.x has no password login
+    for name in ("USERNAME", "PASSWORD", "2FA_DATA"):
+        monkeypatch.delenv(f"PJE_TRF5_LEGACY_{name}")
+    monkeypatch.setenv("PJE_A1_P12", "/tmp/a1.p12")
+    monkeypatch.setenv("PJE_A1_PIN", "1234")
+    assert server.configured_portals() == ("trf5-legacy",)

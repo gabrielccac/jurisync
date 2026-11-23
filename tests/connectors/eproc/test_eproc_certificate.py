@@ -145,8 +145,11 @@ class CertificateLoginTest(unittest.TestCase):
         self.assertNotIn("chkLiberarDispositivo", submitted)
 
     def test_a_portal_opts_into_the_certificate_with_its_own_flag(self):
-        with mock.patch.dict("os.environ", {"PJE_A1_P12": "/a1.p12", "TRF4_2G_CERT": "true"}, clear=True):
+        a1 = {"PJE_A1_P12": "/a1.p12", "PJE_A1_PIN": "1234"}
+        with mock.patch.dict("os.environ", {**a1, "TRF4_2G_CERT": "true"}, clear=True):
             self.assertTrue(self.config.uses_certificate())
+        with mock.patch.dict("os.environ", {"PJE_A1_P12": "/a1.p12", "TRF4_2G_CERT": "true"}, clear=True):
+            self.assertFalse(self.config.uses_certificate())  # the file without its PIN cannot log in
         with mock.patch.dict("os.environ", {"TRF4_2G_CERT": "true"}, clear=True):
             self.assertFalse(self.config.uses_certificate())
         with mock.patch.dict("os.environ", {"PJE_A1_P12": "/a1.p12"}, clear=True):

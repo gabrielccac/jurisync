@@ -70,7 +70,7 @@ chown -R jurisync:jurisync "$STATE/data" "$STATE/downloaded_files" 2>/dev/null |
 # Keep the virtualenv across updates.
 rsync -a --delete --exclude .venv/ --exclude data/ --exclude downloaded_files/ --exclude conversions/ "$WORK"/ "$APP"/
 
-echo "== uv $UV_VERSION and the virtualenv (with the captcha-ocr extra), as root"
+echo "== uv $UV_VERSION and the virtualenv (with the captcha-ocr and pdf-ocr extras), as root"
 UV=/opt/jurisync/bin/uv
 if ! [ -x "$UV" ] || ! "$UV" --version | grep -q "$UV_VERSION"; then
   curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | env UV_INSTALL_DIR=/opt/jurisync/bin UV_NO_MODIFY_PATH=1 sh
@@ -79,10 +79,20 @@ fi
 if [ -e "$APP/.venv/bin/python" ] && readlink -f "$APP/.venv/bin/python" | grep -q "^$STATE/"; then rm -rf "$APP/.venv"; fi
 # A Python uv downloads goes under /opt/jurisync too: /root is hidden from the service (ProtectHome).
 (cd "$APP" && env UV_PYTHON_INSTALL_DIR=/opt/jurisync/python UV_CACHE_DIR=/var/cache/jurisync-uv \
-  "$UV" sync --frozen --no-dev --extra captcha-ocr)
+  "$UV" sync --frozen --no-dev --extra captcha-ocr --extra pdf-ocr)
 chown -R root:jurisync "$APP"
 chmod -R u=rwX,g=rX,o= "$APP"
 [ -d /opt/jurisync/python ] && chmod -R go+rX /opt/jurisync/python
+
+echo "== OCR models for scanned PDFs, root's and read-only for the service (PDF_INSPECTOR_MODEL_CACHE in the unit)"
+# A read never downloads them (core/ocr.py runs offline): without them a scanned PDF stays ocr_needed.
+MODELS=/opt/jurisync/models
+install -d -m 0755 -o root -g root "$MODELS"
+if ! env PDF_INSPECTOR_MODEL_CACHE="$MODELS" "$APP/.venv/bin/python" -I -m jurisync.core.ocr; then
+  echo "warning: OCR models not ready in $MODELS; scanned PDFs stay ocr_needed until install.sh runs again" >&2
+fi
+chown -R root:root "$MODELS"
+chmod -R u=rwX,go=rX "$MODELS"
 
 echo "== settings"
 if [ ! -f /etc/jurisync/jurisync.env ]; then

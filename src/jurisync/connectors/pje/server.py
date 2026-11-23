@@ -20,7 +20,7 @@ from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
 from jurisync.connectors.pje.push import read_push
-from jurisync.core import ciencia, credentials
+from jurisync.core import certificate, ciencia, credentials
 from jurisync.core.mcp import (
     READ_ONLY,
     load_env_file,
@@ -74,11 +74,14 @@ def configured_portals():
         config, method = portals.pje(key), auth_method(key)
         if method == "a3_totp":
             return True
+        if config.pje1x:
+            # PJe 1.x (no SSO): the A1 signs the login page's challenge and no authenticator code is asked.
+            return method == "certificate_totp" and certificate.is_configured()
         # The national SSO asks the authenticator code on every login, with the A1 or the password alike.
         if not (config.env("2FA_DATA") or config.env("2FA_QR")):
             return False
         if method == "certificate_totp":
-            return credentials.has("PJE_A1_P12")
+            return certificate.is_configured()
         return bool(config.env("USERNAME") and config.env("PASSWORD"))
 
     return customers.profile_portals(key for key in portals.keys("pje") if ready(key))

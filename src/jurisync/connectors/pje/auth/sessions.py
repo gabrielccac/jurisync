@@ -1,17 +1,16 @@
-"""Private PJe cookies scoped to the project, account, and portal."""
+"""Private PJe cookies scoped to the tenant (or local customer), account, and portal."""
 
 import hashlib
 import json
 import os
 import tempfile
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
-from jurisync import portals
-from jurisync.core import credentials
+from jurisync import customers, portals
+from jurisync.core import certificate, credentials
 from jurisync.core.http import IMPERSONATE
 from jurisync.paths import user_cache
 
@@ -20,10 +19,11 @@ def auth_method(portal):
     """How this install logs in to the portal.
 
     A portal registered with a certificate (TRF5, TRTs) also accepts its own username, password and TOTP: the
-    password flow is used when no A1 certificate is configured (``PJE_A1_P12``) and the username and password are.
+    password flow is used when no A1 certificate is configured (``PJE_A1_P12`` and its PIN) and the username and
+    password are.
     Without the authenticator that login then says so, instead of asking for a certificate the account never had.
 
-    Any other PJe portal uses the certificate when one is configured (``PJE_A1_P12``) and the portal
+    Any other PJe portal uses the certificate when one is configured (``PJE_A1_P12`` and its PIN) and the portal
     opts in with ``<PREFIX>_CERT=true``; the certificate flow asks for TOTP only if the SSO does.
     """
     config = portals.pje(portal)
@@ -31,10 +31,10 @@ def auth_method(portal):
     # PJE_AUTH=a3 for all of them.
     if (config.env("AUTH") or credentials.env("PJE_AUTH")).strip().lower() == "a3":
         return "a3_totp"
-    certificate = credentials.has("PJE_A1_P12")
+    certificate_ready = certificate.is_configured()
     password = all(config.env(name) for name in ("USERNAME", "PASSWORD"))
     if config.auth == "certificate_totp":
-        return "password_totp" if password and not certificate else "certificate_totp"
+        return "password_totp" if password and not certificate_ready else "certificate_totp"
     if config.uses_certificate():
         return "certificate_totp"
     return config.auth
@@ -55,7 +55,9 @@ def cache_identity(portal):
         # The certificate is not part of the identity. Reuse is safe only
         # when the caller identifies that account; fresh login still works.
         return None
-    identity = json.dumps([str(Path.cwd().resolve()), credentials.tenant(), config.host, username, account])
+    # Not the working directory: the server and jurisync-admin (or two local clients) share one cache. Hosted, the
+    # tenant keeps offices apart; locally, the customer does when one machine serves two.
+    identity = json.dumps([credentials.tenant(), customers.customer_name(), config.host, username, account])
     return hashlib.sha256(identity.encode()).hexdigest()
 
 

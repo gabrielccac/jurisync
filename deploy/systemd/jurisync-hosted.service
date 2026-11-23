@@ -14,6 +14,9 @@ EnvironmentFile=-/etc/jurisync/base-url.env
 WorkingDirectory=/var/lib/jurisync
 # The code in /opt/jurisync/app is root's and read-only here: sessions and downloads go to the state folder.
 Environment=JURISYNC_STATE_DIR=/var/lib/jurisync PYTHONDONTWRITEBYTECODE=1
+# OCR of scanned PDFs: the models install.sh fetched, root's and read-only here (reads never download).
+# JURISYNC_OCR=off in /etc/jurisync/jurisync.env switches OCR off.
+Environment=PDF_INSPECTOR_MODEL_CACHE=/opt/jurisync/models
 # The vault key (and the CAPTCHA key) come as systemd credentials: install.sh adds
 # jurisync-hosted.service.d/credentials.conf with LoadCredentialEncrypted= (or LoadCredential= without systemd-creds).
 # They are read from $CREDENTIALS_DIRECTORY, never from the environment or this file.

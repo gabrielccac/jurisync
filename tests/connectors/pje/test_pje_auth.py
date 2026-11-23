@@ -13,8 +13,10 @@ class AuthMethodTest(unittest.TestCase):
         }
         with mock.patch.dict("os.environ", password, clear=True):
             self.assertEqual(auth_method("trf5-1g"), "password_totp")
-        with mock.patch.dict("os.environ", {**password, "PJE_A1_P12": "/x/a1.p12"}, clear=True):
+        with mock.patch.dict("os.environ", {**password, "PJE_A1_P12": "/x/a1.p12", "PJE_A1_PIN": "1234"}, clear=True):
             self.assertEqual(auth_method("trf5-1g"), "certificate_totp")
+        with mock.patch.dict("os.environ", {**password, "PJE_A1_P12": "/x/a1.p12"}, clear=True):
+            self.assertEqual(auth_method("trf5-1g"), "password_totp")  # the file without its PIN cannot log in
         with mock.patch.dict("os.environ", {}, clear=True):
             self.assertEqual(auth_method("trf5-1g"), "certificate_totp")
         with mock.patch.dict("os.environ", {"PJE_1G_USERNAME": "u"}, clear=True):
@@ -23,6 +25,7 @@ class AuthMethodTest(unittest.TestCase):
     def test_other_pje_portals_use_the_certificate_only_when_they_opt_in(self):
         certificate = {
             "PJE_A1_P12": "/x/a1.p12",
+            "PJE_A1_PIN": "1234",
             "PJE_1G_USERNAME": "u",
             "PJE_1G_PASSWORD": "p",
             "PJE_1G_2FA_DATA": "s",
@@ -43,7 +46,7 @@ class PasswordWithoutAuthenticatorTest(unittest.TestCase):
     def test_a_password_without_authenticator_is_still_the_password_login(self):
         with mock.patch.dict("os.environ", self.ENV, clear=True):
             self.assertEqual(auth_method("trt7-1g"), "password_totp")
-        with mock.patch.dict("os.environ", {**self.ENV, "PJE_A1_P12": "/x/a1.p12"}, clear=True):
+        with mock.patch.dict("os.environ", {**self.ENV, "PJE_A1_P12": "/x/a1.p12", "PJE_A1_PIN": "1234"}, clear=True):
             self.assertEqual(auth_method("trt7-1g"), "certificate_totp")
 
     def test_the_login_names_the_missing_authenticator_variables(self):

@@ -7,7 +7,7 @@ inputs are the VPS address, the domain (or none yet) and the CAPTCHA key.
 | File | Runs on | Does |
 |---|---|---|
 | `push.sh` | our machine | `git archive HEAD` → VPS, then `install.sh` there. Only committed files travel. |
-| `install.sh` | VPS (root) | packages, Google Chrome, LibreOffice, user `jurisync`, code in `/opt/jurisync/app` (root's, read-only for the service), `uv sync --extra captcha-ocr` as root, vault key, systemd units, proxy. Idempotent: run again to update. |
+| `install.sh` | VPS (root) | packages, Google Chrome, LibreOffice, user `jurisync`, code in `/opt/jurisync/app` (root's, read-only for the service), `uv sync --extra captcha-ocr --extra pdf-ocr` as root, the OCR models in `/opt/jurisync/models`, vault key, systemd units, proxy. Idempotent: run again to update. |
 | `set-secret.sh` | VPS (root) | stores `JURISYNC_VAULT_KEY` / `JURISYNC_CAPTCHA_API_KEY` as systemd credentials (`systemd-creds` encrypted when available). |
 | `jurisync-admin` | VPS (root) | `jurisync-hosted` as user `jurisync` with the service's settings and credentials (installed in `/usr/local/bin`). |
 | `check-office.sh` | VPS (root) | the first login of each portal of one office, one at a time, stopping at the first failure. |
@@ -17,7 +17,8 @@ inputs are the VPS address, the domain (or none yet) and the CAPTCHA key.
 | `smoke_test.py` | anywhere | OAuth metadata, 401, sign-in, tools per office, isolation. No portal login. |
 
 Layout on the VPS: code `/opt/jurisync/app` (with `.venv`; `root:jurisync`, the service only reads it), uv and any
-Python it downloads in `/opt/jurisync/bin` and `/opt/jurisync/python`, settings `/etc/jurisync/jurisync.env` (no
+Python it downloads in `/opt/jurisync/bin` and `/opt/jurisync/python`, OCR models `/opt/jurisync/models` (root's,
+read-only for the service), settings `/etc/jurisync/jurisync.env` (no
 secrets), state `/var/lib/jurisync/hosted` (`store.sqlite` in WAL mode, `vault/`), connector sessions and downloads
 `/var/lib/jurisync/data` and `/var/lib/jurisync/downloaded_files` (`JURISYNC_STATE_DIR`), customer profiles
 `/var/lib/jurisync/customers`, credentials `/etc/credstore.encrypted/` (or `/etc/credstore/`), backups
@@ -46,6 +47,15 @@ journalctl -u jurisync-quicktunnel -n 5                                  # the t
 The vault key is generated on the server and never leaves it except through `--reveal`. Without that copy a backup
 cannot be opened elsewhere. Moving from the quick tunnel to the domain is `push.sh ... --proxy caddy --domain ...`:
 the base URL changes, so each office adds the connector again.
+
+### OCR of scanned PDFs
+
+On by default. `install.sh` installs the `pdf-ocr` extra and fetches pdf-inspector's models once into
+`/opt/jurisync/models` (`python -m jurisync.core.ocr`, checked by an offline read); the unit points
+`PDF_INSPECTOR_MODEL_CACHE` there, and a document read never downloads. A scanned document is read up to
+`JURISYNC_OCR_MAX_PAGES` pages (30) and `JURISYNC_OCR_SECONDS` (90). Kill switch: `JURISYNC_OCR=off` in
+`/etc/jurisync/jurisync.env` and `systemctl restart jurisync-hosted`; scanned documents then come back as
+`ocr_needed`, as they do when the models are missing (install.sh warns and goes on).
 
 ## 2. Offices
 

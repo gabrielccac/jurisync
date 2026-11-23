@@ -95,3 +95,64 @@ def test_a_partial_ocr_has_its_own_status(monkeypatch):
     with patch.object(ocr, "PAGES_PER_CALL", 1):
         status, text = extract_document_text(scanned_pdf(pages=2), "application/pdf")
     assert (status, text) == ("extracted_ocr_partial", "TEXTO 1")
+
+
+def test_the_runtime_is_located_once_under_a_lock(monkeypatch):
+    """Reads run in worker threads: os.environ is written once per process, not on every call."""
+    import os
+    import threading
+
+    calls = []
+
+    def library(package, pattern):
+        calls.append(package)
+        return f"/wheel/{package}.so"
+
+    monkeypatch.setattr(ocr, "_package_library", library)
+    monkeypatch.setattr(ocr, "_runtime_located", False)
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("PDFIUM_LIB_PATH", None)
+        os.environ.pop("ORT_DYLIB_PATH", None)
+        threads = [threading.Thread(target=ocr._locate_runtime) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(calls) == ["onnxruntime", "pypdfium2_raw"]
+        assert os.environ["PDFIUM_LIB_PATH"] == "/wheel/pypdfium2_raw.so"
+        assert os.environ["ORT_DYLIB_PATH"] == "/wheel/onnxruntime.so"
+        ocr._locate_runtime()
+        assert len(calls) == 2
+
+
+def test_the_switch_accepts_the_usual_off_values(monkeypatch):
+    for value in ("off", "OFF", "0", "false", "no"):
+        monkeypatch.setenv("JURISYNC_OCR", value)
+        assert not ocr.enabled()
+        assert ocr.ocr_pdf(b"%PDF-", 1) is None
+    for value in ("on", "1", ""):
+        monkeypatch.setenv("JURISYNC_OCR", value)
+        assert ocr.enabled()
+    monkeypatch.delenv("JURISYNC_OCR")
+    assert ocr.enabled()  # on by default
+
+
+def test_install_time_fetch_downloads_once_and_checks_offline(monkeypatch):
+    pytest.importorskip("PIL.Image")
+    seen = []
+
+    def process(content, *, mode, page_numbers, offline):
+        seen.append((mode, page_numbers, offline))
+        return SimpleNamespace(markdown="PODER JUDICIARIO" if offline else None)
+
+    monkeypatch.setitem(sys.modules, "pdf_inspector", SimpleNamespace(process_pdf_with_ocr_bytes=process))
+    monkeypatch.setattr(ocr, "_runtime_located", True)
+    assert ocr.main() == 0
+    assert seen == [("force", [1], False), ("force", [1], True)]  # the download, then a read that cannot download
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pdf_inspector",
+        SimpleNamespace(process_pdf_with_ocr_bytes=lambda content, **kwargs: SimpleNamespace(markdown="")),
+    )
+    assert ocr.main() == 1

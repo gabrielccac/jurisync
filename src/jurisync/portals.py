@@ -15,7 +15,7 @@ it instead of assuming ``/pje/``.
 import re
 from dataclasses import dataclass, field
 
-from jurisync.core import credentials
+from jurisync.core import certificate, credentials
 
 CNJ = re.compile(r"^\d{7}-\d{2}\.\d{4}\.(\d)\.(\d{2})\.(\d{4})$")
 
@@ -108,8 +108,9 @@ class Portal:
         return default
 
     def uses_certificate(self):
-        """Whether this customer logs in here with the A1 certificate: PJE_A1_P12 is set and <PREFIX>_CERT is on."""
-        return credentials.has("PJE_A1_P12") and self.env("CERT").lower() in {"1", "true", "yes", "on"}
+        """Whether this customer logs in here with the A1 certificate: PJE_A1_P12 and its PIN are set and <PREFIX>_CERT
+        is on."""
+        return self.env("CERT").lower() in {"1", "true", "yes", "on"} and certificate.is_configured()
 
     def env_name(self, name):
         return f"{self.env_prefix}_{name}"

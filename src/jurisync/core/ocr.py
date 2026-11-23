@@ -3,14 +3,18 @@
 The engine is the one the ADVBOX downloads use (``core.pdf.analyze_document(..., ocr=True)``): pdf-inspector's
 selective OCR, which needs a PDFium library (``PDFIUM_LIB_PATH``, else the one in the ``pypdfium2`` wheel), the ONNX
 runtime (``ORT_DYLIB_PATH``, else the one in the ``onnxruntime`` wheel; the ``pdf-ocr`` extra installs both) and its
-models already cached (``PDF_INSPECTOR_MODEL_CACHE``, default ``~/.cache/pdf-inspector``). Models are never
-downloaded during a read. Without any of them, or with ``JURISYNC_OCR=off``, ``ocr_pdf`` returns None and the
+models already cached (``PDF_INSPECTOR_MODEL_CACHE``, default ``~/.cache/pdf-inspector/models``). Models are never
+downloaded during a read: ``python -m jurisync.core.ocr`` fetches them ahead (deploy/install.sh does, into
+``/opt/jurisync/models``). Without any of them, or with ``JURISYNC_OCR=off``, ``ocr_pdf`` returns None and the
 caller keeps its ``ocr_needed`` status.
 """
 
 import importlib.util
+import io
 import logging
 import os
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -42,14 +46,26 @@ def _package_library(package, pattern):
     return None
 
 
+_runtime_lock = threading.Lock()
+_runtime_located = False
+
+
 def _locate_runtime():
-    """Point pdf-inspector at the wheels' libraries when the environment names none."""
-    for variable, package, pattern in (
-        ("PDFIUM_LIB_PATH", "pypdfium2_raw", "libpdfium.*"),
-        ("ORT_DYLIB_PATH", "onnxruntime", "capi/libonnxruntime.so*"),
-    ):
-        if not os.environ.get(variable) and (path := _package_library(package, pattern)):
-            os.environ[variable] = path
+    """Point pdf-inspector at the wheels' libraries when the environment names none.
+
+    Once per process, under a lock: reads run in worker threads, and ``os.environ`` is the process's.
+    """
+    global _runtime_located
+    with _runtime_lock:
+        if _runtime_located:
+            return
+        for variable, package, pattern in (
+            ("PDFIUM_LIB_PATH", "pypdfium2_raw", "libpdfium.*"),
+            ("ORT_DYLIB_PATH", "onnxruntime", "capi/libonnxruntime.so*"),
+        ):
+            if not os.environ.get(variable) and (path := _package_library(package, pattern)):
+                os.environ[variable] = path
+        _runtime_located = True
 
 
 def enabled():
@@ -89,3 +105,44 @@ def ocr_pdf(content, page_count, *, max_pages=None, seconds=None, clock=time.mon
         parts.append(result.markdown or "")
         done += len(pages)
     return " ".join(parts), done >= page_count
+
+
+def _sample_page():
+    """A one-page PDF of a page image (no text layer), so the OCR models are loaded to read it."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        face = ImageFont.truetype("DejaVuSans.ttf", 40)
+    except OSError:
+        face = ImageFont.load_default(size=40)
+    sheet = Image.new("L", (1240, 1754), 255)
+    ImageDraw.Draw(sheet).text((100, 150), "PODER JUDICIARIO 0800001-23.2025.8.14.0301", fill=0, font=face)
+    buffer = io.BytesIO()
+    sheet.save(buffer, "PDF", resolution=150)
+    return buffer.getvalue()
+
+
+def fetch_models():
+    """Download the OCR models into pdf-inspector's cache (``PDF_INSPECTOR_MODEL_CACHE``) and return the text an
+    offline read of a sample page then finds. Install time only: ``ocr_pdf`` never downloads."""
+    import pdf_inspector
+
+    _locate_runtime()
+    page = _sample_page()
+    pdf_inspector.process_pdf_with_ocr_bytes(page, mode="force", page_numbers=[1], offline=False)
+    return pdf_inspector.process_pdf_with_ocr_bytes(page, mode="force", page_numbers=[1], offline=True).markdown or ""
+
+
+def main():
+    """``python -m jurisync.core.ocr``: fetch the models; exit 1 when the offline read finds no text."""
+    cache = os.environ.get("PDF_INSPECTOR_MODEL_CACHE") or "~/.cache/pdf-inspector/models"
+    text = fetch_models()
+    if "JUDICIARIO" not in text.upper():
+        print(f"OCR models in {cache}, but the offline check read {text!r}", file=sys.stderr)
+        return 1
+    print(f"OCR models ready in {cache}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
