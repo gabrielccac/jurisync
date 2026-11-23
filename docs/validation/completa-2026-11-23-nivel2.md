@@ -171,3 +171,88 @@ Por isso a fonte foi o passo 3: processo público do mesmo tribunal e da mesma i
 - `tjpr-2g`: falta um processo no eproc 2º grau do TJPR.
 
 Scripts e logs (sem segredos): `/tmp/claude-1000/-home-gabriel-orca-jurisync/9c86fc6a-8f2f-4b15-beb8-88573e49d6f7/scratchpad/fullval/level2/`. Lá estão `run2.py`, `cands.json`, `{fernanda,herica,denis,max}.log`, `results.jsonl`, `djen_*.log` e `trt20_followup.log`.
+
+## Rodada 2 (23/11/2026, à tarde): os 7 portais que ficaram incompletos
+
+Código: o mesmo worktree, agora em `7fcee69` (o KZ já preenche `failure` no `http_error`). Mesmo modo de chamada (`await server.call_tool(...)`), mesmas regras:
+- **Um login por portal e conta.** O 1º login foi a própria chamada de processo.
+- **Intervalos:** 40 s entre os portais de uma conta. As três contas (fernanda, max, herica) rodaram em paralelo.
+- **Sem falhas de acesso:** nenhuma recusa, nenhum CAPTCHA, nenhuma repetição.
+- **Só leitura:** `acknowledgeCiencia=false`. No Eproc, o documento só foi pedido depois de um `eproc_get_process` (`scope=latest`, sem documentos) com `ciencia.estado="nenhuma"`. A trava "AGUARD. ABERTURA" do roteiro anterior foi retirada: em processo de terceiro, quem decide é o bloco `ciencia` da conta.
+- **Nada alterado:** nenhum código, teste ou `.env`, e nada commitado.
+
+### Resumo
+
+| Conta | Portal | Fonte do número | Processo | Documento lido | Resultado |
+|---|---|---|---|---|---|
+| fernanda | `tjmg-2g` | DJEN público (rodada 1) | 5258603-82.2023.8.13.0024: 11,0 s, 17 req (login), `nenhuma` | Decisão, `extracted`, 3.423 car., 5,6 s, `nenhuma` | ✅ |
+| fernanda | `tjms-eproc-1g` | DJEN público (rodada 1) | 5001671-31.2026.8.12.0008: 22,2 s (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.734 car., 2,5 s, `nenhuma` | ✅ |
+| fernanda | `trf6-2g` | DJEN público (rodada 1) | 6009736-57.2025.4.06.0000: 18,2 s (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.998 car., 7,8 s, `nenhuma` | ✅ |
+| max | `tjrj-eproc-2g` | DJEN público (rodada 1) | 3019804-87.2026.8.19.0000: 9,8 s (login), `nenhuma` | Decisão monocrática, `extracted`, 6.709 car., 4,2 s, `nenhuma` | ✅ |
+| max | `trt20-2g` | lista própria (Acervo) | 0000185-40.2023.5.20.0005: 6,8 s, 227 docs, 20 exp. (0 pendentes) | 3 de 5 lidos. Os 2 Acórdãos de 2º grau: `http_error`, `failure="HTTP 500"` | ⚠️ (ver abaixo) |
+| herica | `tjpr-2g` | **DJEN por número gerado** (ver abaixo) | 6000016-20.2026.8.16.0000 (3ª Câmara Cível): 9,8 s, 18 req (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.806 car., 3,5 s, `nenhuma` | ✅ |
+| max | `trf5-legacy` | DJEN público (rodada 1). Não há outro número | 3 × "Process not found in the PJe 1.x search" | — | ⚠️ sem processo no sistema |
+
+**Resultado:**
+- Os 4 Eproc pendentes e o `tjpr-2g` fecharam o ciclo: processo, inventário, leitura e `ciencia`.
+- Nenhuma leitura no Eproc teve `failure`, e todas deram `ciencia=nenhuma` antes e depois.
+
+### `trt20-2g` (PJe-JT/KZ): por que o Acórdão não lê
+
+A correção do `failure` está confirmada ao vivo: o documento 9365013 agora volta com `extractionStatus="http_error"`, `status=500`, `failure="HTTP 500"` e `content_type=application/json`, em 0,8 s e 3 req.
+
+Comparação no mesmo processo e na mesma sessão. Os 5 documentos não são de expediente, e todos deram `ciencia=nenhuma`.
+
+| Documento | `tipo` | `instancia` (cód.) | Resultado |
+|---|---|---|---|
+| 9365013 | Acórdão (`idTipo` 119) | 2º Grau (2) | ❌ HTTP 500, JSON |
+| 9260220 | Acórdão (`idTipo` 119) | 2º Grau (2) | ❌ HTTP 500, JSON |
+| 9150582 | Sentença (`idTipo` 62) | 1º Grau (1) | ✅ PDF, `extracted` |
+| 11884803 | Manifestação (`idTipo` 38) | TST (3) | ✅ PDF, `extracted` |
+| 11884823 | Certidão de trânsito (`idTipo` 57) | TST (3) | ✅ PDF, `extracted` |
+
+O registro da linha do tempo, comparado só pela estrutura:
+- **Iguais nos que leem e nos que falham:** `documentoSigiloso=false`, `ativo=true`, `pendenciaDocInstanciaOrigem=false`, `dataJuntadaFutura=false`.
+- **Só nos 2 Acórdãos:** `idSignatario`, `papelUsuarioDocumento`, `participacaoProcesso`, `tipoPolo="Magistrado"` e `nomeResponsavel`. São atos assinados por magistrado na instância do próprio portal.
+
+**Conclusão:**
+- Não é sigilo nem permissão. Um 403/401 seria o esperado nesses casos, e aqui é 500 com corpo JSON.
+- Não é a rota em geral: a mesma `…/processos/id/{id}/documentos/id/{doc}/conteudo` serve 1º grau e TST no portal de 2º grau.
+- A falha está no conteúdo de ato de magistrado do 2º grau, pedido com `incluirAssinatura=false&incluirCapa=false`. Pode ser o PDF de acórdão que o portal gera na hora, ou outra rota para esse tipo.
+
+Ficou sem teste um documento de 2º grau que não seja ato de magistrado, como o Parecer do MPT ou os Embargos de Declaração. Ele separaria "instância 2º grau" de "ato de magistrado". O corpo JSON do erro também não foi lido. Os dois pedem um 2º login no `trt20-2g`, e não há sessão KZ salva em disco (`load_session('trt20-2g')` é `None`).
+
+### `tjpr-2g` (herica): como saiu o número
+
+- **(b) DJEN por texto (365 dias, TJPR):** "eproc2g" deu 1 resultado (Projudi) e "acórdão eproc" deu 0. A busca por texto não vê o host do link. Por isso a rodada 1 concluiu, sem razão, que não havia comunicação.
+- **(c) DJEN por número gerado:** o Eproc do TJPR numera a partir de 6000000, como mostra o 1º grau da herica (6000139-92.2026.8.16.0137, host `eproc1g.tjpr`). Gerei 6000001 a 6000030 de 2026, origem `.8.16.0000`, com o dígito verificador CNJ, e busquei `numeroProcesso` no DJEN entre 23/11/2025 e 23/11/2026. **26 de 30 existem, todos com host `eproc2g.tjpr.jus.br`.** As comunicações são de 10/08 a 26/10/2026, de Câmaras Cíveis e de Gabinetes de desembargador.
+  - Ou seja, o eproc 2º grau do TJPR publica no DJEN desde agosto de 2026.
+  - A varredura por texto da rodada 1 (10 a 23/11) só não pegou essas comunicações.
+- **(a) Não usada:** não foi preciso logar no `tjpr-1g`. O único processo da herica lá é de 2026 e não tem remessa.
+
+### `trf5-legacy` (PJe 1.x, max): o que a busca responde
+
+- **Processo do próprio max:** o DJEN pela OAB BA 32060 com `tribunal=TRF5`, de 01/11/2024 a 23/11/2026 em janelas de 60 dias, deu **0 comunicações**. O max tem de 600 a 1.200 comunicações por mês, mas no TRT5, TJBA, TST e TRT20. No próprio PJe 1.x, os 19 contadores do painel (Acervo Geral incluído) já eram 0 na rodada 1.
+- **Processo público com link para `pje.trf5.jus.br`:**
+  - Busquei o TRF5 por janelas de 3 dias de 2023 a 2026 ("acórdão", "Desembargador", "precatório", "requisição de pagamento", "Presidência"). Os hosts foram só `pje1g`, `pje2g` e `pjett`. **Nenhum link aponta para `pje.trf5.jus.br`.**
+  - As comunicações sem link e com número `4.05.0000` são processos físicos antigos (`0xxxxxx`, editais de eliminação do Arquivo), e não PJe.
+- **Busca do PJe 1.x (`consultarProcessoForm`), com os mesmos 3 números da rodada 1:**
+  - A busca roda: a tabela `consultaProcessoList` vem na resposta, de 203 kB.
+  - O sistema responde **"Foram encontrados: 0 resultados"**, com 0 linhas e nenhuma mensagem de erro.
+  - Cada chamada leva de 2,9 a 5,6 s e de 2 a 5 req.
+  - Os 3 números estão hoje no `pjett`. O PJe 1.x não acha número migrado.
+- **Campos do formulário (estrutura):**
+  - Disponíveis: `numeroProcesso`, `numeroProcessoPesqsuisaOriginario`, `nomeParte`, CPF/CNPJ, OAB (número, UF e letra), órgão julgador, órgão colegiado, classe, assunto e data de distribuição.
+  - O conector manda `numeroProcesso`, `searchButton` e `consultarProcessoForm:j_id330=1`. **`j_id330` não está entre os campos que o formulário traz.** Pode ser um rádio sem valor padrão ou um id antigo. A busca respondeu normalmente mesmo assim.
+- **O que segue sem validação ao vivo:** o detalhe do processo e a leitura de documento no PJe 1.x. Não há processo visível para esta conta, e nenhum número público aponta para esse host.
+
+### Falhas e ressalvas desta rodada
+
+1. **⚠️ `trt20-2g`: Acórdão de 2º grau dá HTTP 500 na rota de conteúdo do KZ.** Não está claro se a causa é do portal ou da nossa rota para esse tipo de ato. Tudo o que se sabe está na seção acima. O `failure` agora diz `HTTP 500` (correção `7fcee69` confirmada).
+2. **⚠️ "Process not found in the PJe 1.x search" sai sem `[motivo]` (`no-tag`).** A busca devolveu de fato 0 resultados, e a mensagem está correta.
+3. Nenhuma outra falha do nosso código.
+
+Scripts e logs (sem segredos): `/tmp/claude-1000/-home-gabriel-orca-jurisync/9c86fc6a-8f2f-4b15-beb8-88573e49d6f7/scratchpad/fullval/level2b/`:
+- `run3.py`, `djwin.py`, `djnum.py`;
+- `{fernanda,max,herica}.log`, `results.jsonl`;
+- `djnum_tjpr2g_2026.log`, `djen_*.log`.
