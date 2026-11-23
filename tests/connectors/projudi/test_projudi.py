@@ -140,7 +140,7 @@ class PortalRegistryTest(unittest.TestCase):
             ("projudi.tjgo.jus.br", "/", "certificate_mtls", "09", "8"),
         )
         self.assertEqual(tjgo_portal.login_url, "https://projudi.tjgo.jus.br/LogOn")
-        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjpi-projudi-1g"):
+        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjpi-projudi-1g", "tjba-projudi-1g"):
             with self.subTest(key=key):
                 self.assertFalse(portals.PORTALS[key].wired)
                 with self.assertRaisesRegex(ValueError, "portal must be one of"):
@@ -562,9 +562,10 @@ class ServerTest(unittest.TestCase):
 
 class UnwiredGenerationTest(unittest.TestCase):
     def test_tjgo_and_tjam_have_adapters_and_the_other_generations_say_not_implemented(self):
-        self.assertEqual(set(server.ADAPTERS), {"tjgo-servlet", "legacy-local"})
+        self.assertEqual(set(server.ADAPTERS), {"tjgo-servlet", "legacy-local", "cnj-servlet"})
         self.assertIs(server.adapter_for("tjgo-1g"), tjgo.ADAPTER)
-        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjpi-projudi-1g"):
+        # TJBA has an adapter but stays unwired until its desk is proven live: no tool reaches it.
+        for key in ("tjpr-projudi-1g", "tjrr-1g", "tjpi-projudi-1g", "tjba-projudi-1g"):
             with self.subTest(key=key):
                 with self.assertRaisesRegex(
                     NotImplementedError, f"{key}.*not implemented yet; wired: tjgo-1g, tjam-1g"
