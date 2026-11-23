@@ -841,7 +841,10 @@ def read_documents(process, document_ids, *, session, save=False):
             read = fetch_document(api, process_id, doc_id)
             item.update(status=read["status"], content_type=read["content_type"], bytes=read["bytes"])
             if read["content"] is None:
-                item["extractionStatus"] = "too_large" if read["status"] == "too_large" else "http_error"
+                if read["status"] == "too_large":
+                    item["extractionStatus"] = "too_large"
+                else:
+                    item.update(extractionStatus="http_error", failure=f"HTTP {read['status']}")
             else:
                 content = read["content"]
                 item["sha256"] = hashlib.sha256(content).hexdigest()

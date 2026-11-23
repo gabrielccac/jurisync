@@ -260,6 +260,12 @@ def test_a_failed_document_read_names_the_step_and_error_class_only(monkeypatch)
     ]
     assert (document["failure"], document["text"]) == ("save failed: PermissionError", "")
 
+    monkeypatch.setattr(
+        kz, "fetch_document", lambda *args: {"status": 403, "content_type": "", "bytes": 0, "content": None}
+    )
+    document = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=Session())["documents"][0]
+    assert (document["extractionStatus"], document["failure"]) == ("http_error", "HTTP 403")
+
 
 def test_act_of_a_pending_expediente_is_refused_without_acknowledgement(monkeypatch):
     monkeypatch.setattr(kz, "extract_document_text", lambda *a, **k: ("extracted", "ato"))
