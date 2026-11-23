@@ -24,15 +24,15 @@ class CertificateLoginChecks(unittest.TestCase):
         self.assertEqual((signer.key, signer.cert, signer.chain), ("key", "cert", []))
 
     def test_redirects_and_authenticated_page_are_origin_bound(self):
-        redirect = SimpleNamespace(
-            status_code=302,
-            url="https://sso.cloud.pje.jus.br/auth",
-            headers={"Location": "https://evil.example/collect"},
-        )
-        session = Mock()
-        with self.assertRaises(RuntimeError):
-            cert_login._follow(session, redirect)
-        session.get.assert_not_called()
+        for location in ("https://evil.example/collect", "http://evil.example/collect"):
+            with self.subTest(location=location):
+                redirect = SimpleNamespace(
+                    status_code=302, url="https://sso.cloud.pje.jus.br/auth", headers={"Location": location}
+                )
+                session = Mock()
+                with self.assertRaises(RuntimeError):
+                    cert_login._follow(session, redirect)
+                session.get.assert_not_called()
 
     def test_legacy_login_names_an_unknown_certificate(self):
         config, page, signer, session, _ = self._legacy(
@@ -109,15 +109,6 @@ class CertificateLoginChecks(unittest.TestCase):
         self.assertIs(cert_login._follow(session, redirect), final)
         called_url = session.get.call_args.args[0]
         self.assertTrue(called_url.startswith("https://pje.trt7.jus.br/pjekz/"))
-
-    def test_http_redirect_off_portal_hosts_still_fails(self):
-        redirect = SimpleNamespace(
-            status_code=302,
-            url="https://sso.cloud.pje.jus.br/auth",
-            headers={"Location": "http://evil.example/collect"},
-        )
-        with self.assertRaises(RuntimeError):
-            cert_login._follow(Mock(), redirect)
 
     def test_legacy_challenge_extraction(self):
         html = (
@@ -255,10 +246,6 @@ class Pje1xGuards(unittest.TestCase):
         page.text = '<form id="loginForm"><input name="javax.faces.ViewState" value="j"></form>'
         self.assertFalse(sessions.is_authenticated(session, "trf5-legacy"))
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def test_aws_waf_captcha_is_solved_before_the_login_page(self):
         waf = SimpleNamespace(
             status_code=405,
@@ -266,13 +253,33 @@ if __name__ == "__main__":
             headers={},
             text='<title>Human Verification</title><script src="https://x.captcha.awswaf.com/captcha.js"></script>',
         )
+        config = cert_login.portals.pje("tjes-1g")
+        token = [{"name": "aws-waf-token", "value": "t"}, {"name": "other", "value": "x"}]
+
         session = Mock()
         session.get.side_effect = [waf, waf]
         with (
-            patch.object(cert_login.awswaf, "solve", return_value=[{"name": "aws-waf-token", "value": "t"}]) as solve,
-            self.assertRaisesRegex(RuntimeError, "still asks for a CAPTCHA"),
+            patch.object(cert_login.awswaf, "solve", return_value=token) as solve,
+            self.assertRaisesRegex(RuntimeError, "still asks for a CAPTCHA") as raised,
         ):
-            cert_login._login(session, cert_login.portals.pje("tjes-1g"), None, "key", "cert", [])
-        solve.assert_called_once_with("https://pje.tjes.jus.br/pje/login.seam")
+            cert_login._login(session, config, None, Mock())
+        self.assertEqual(raised.exception.reason, "captcha")
+        solve.assert_called_once_with(config.login_url)
         session.cookies.set.assert_called_once_with("aws-waf-token", "t", domain="", path="/")
         self.assertEqual(session.get.call_count, 2)
+
+        # Once the token is accepted, the login goes on with the real PJe page.
+        portal = SimpleNamespace(status_code=200, url=config.login_url, headers={}, text="<html>PJe</html>")
+        session = Mock()
+        session.get.side_effect = [waf, portal]
+        with (
+            patch.object(cert_login.awswaf, "solve", return_value=token),
+            patch.object(cert_login, "_require_available", side_effect=LookupError("reached")) as available,
+            self.assertRaisesRegex(LookupError, "reached"),
+        ):
+            cert_login._login(session, config, None, Mock())
+        self.assertIs(available.call_args.args[0], portal)
+
+
+if __name__ == "__main__":
+    unittest.main()

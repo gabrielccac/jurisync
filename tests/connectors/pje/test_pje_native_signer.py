@@ -74,8 +74,15 @@ class NativeSignerChecks(unittest.TestCase):
             native_signer.post_result(session, {"uuid": "t1"})
 
     def test_chain64_includes_intermediates(self):
-        chain64 = native_signer.certificate_chain64(self.cert, self.chain)
-        self.assertTrue(base64.b64decode(chain64).startswith(b"0\x82"))
+        from cryptography.hazmat.primitives.serialization import Encoding
+
+        intermediate = certificate.load_a1(make_p12("5678"), "5678")[1]
+        path = base64.b64decode(native_signer.certificate_chain64(self.cert, [intermediate]))
+        blobs = self.cert.public_bytes(Encoding.DER) + intermediate.public_bytes(Encoding.DER)
+        # One DER SEQUENCE (Java's PkiPath, not concatenated certificates): the leaf first, then its issuers.
+        self.assertEqual(path[:2], b"0\x82")
+        self.assertEqual(int.from_bytes(path[2:4], "big"), len(blobs))
+        self.assertEqual(path[4:], blobs)
 
 
 def _issued(subject, issuer_name, issuer_key, ca):

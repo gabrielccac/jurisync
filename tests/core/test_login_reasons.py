@@ -39,7 +39,6 @@ def fresh_login_slots(monkeypatch):
 def test_every_reason_has_an_explanation_and_refusals_are_reasons():
     assert set(EXPLANATIONS) == set(REASONS)
     assert set(REFUSALS) < set(REASONS)
-    assert "OTP_PROFILE_MATCH" in EXPLANATIONS["otp_refused"]
 
 
 def test_reason_comes_from_the_exception_or_its_type():

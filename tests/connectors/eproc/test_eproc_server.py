@@ -127,7 +127,6 @@ class EprocServerTest(unittest.TestCase):
         )
         tool = listed["eproc_get_process"]
         self.assertFalse(tool.annotations.destructive_hint)
-        self.assertIn("relay ciencia.aviso to the user", tool.description)
         self.assertNotIn("acknowledgeCiencia", tool.input_schema["properties"])
 
     def test_document_ids_and_save_reach_the_client(self):

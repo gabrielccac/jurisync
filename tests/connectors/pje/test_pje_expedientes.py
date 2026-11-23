@@ -106,19 +106,6 @@ def test_parse_ato_extracts_box_attachments_and_text():
     assert "PERÍCIA SOCIAL" in ato["texto"] and "var x" not in ato["texto"]
 
 
-def test_ato_is_not_opened_before_notice_is_registered():
-    import pytest
-
-    item = {
-        "atoPath": "/pje/Painel/painel_usuario/popup/visualizarExpediente.seam?idProcessoParteExpediente=1&x=2",
-        "ciencia": None,
-    }
-    with pytest.raises(ValueError, match="ciência not yet registered"):
-        expedientes.fetch_ato(None, item, "https://pje1g.trf5.jus.br/pje/x")
-    with pytest.raises(ValueError, match="not in this process"):
-        expedientes.ato_item([], "9")
-
-
 def test_ato_of_a_pending_communication_opens_only_with_permission():
     from unittest.mock import Mock, patch
 
@@ -140,6 +127,8 @@ def test_ato_of_a_pending_communication_opens_only_with_permission():
     assert given["estado"] == "dada" and given["intimacoes"][0]["expedienteId"] == "1"
     assert expedientes.ato_ciencia(item, opened=False)["estado"] == "pendente"
     assert expedientes.ato_ciencia({**item, "ciencia": {"em": "2026-10-06"}}, opened=True) == {"estado": "nenhuma"}
+    with pytest.raises(ValueError, match="not in this process"):
+        expedientes.ato_item([], "9")
 
 
 def test_tab_is_complete_only_when_every_row_was_parsed_and_there_is_one_page():

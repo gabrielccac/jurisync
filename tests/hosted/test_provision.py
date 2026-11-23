@@ -431,6 +431,77 @@ class LocalOfficeEndpointTest(OfficeCase):
             self.assertEqual(self.names(office_b), {"alpha_whoami", "alpha_fail", "beta_whoami"})
 
 
+class JuridiqGrantTest(OfficeCase):
+    """The real Juridiq server as hosted builds it (writes registered); only office-b has JURIDIQ_ALLOW_WRITES."""
+
+    TASK = {"title": "Réplica", "priority": "Alta", "columnId": "00000000-0000-4000-8000-000000000001",
+            "initialDate": "2026-10-07"}  # fmt: skip
+
+    def setUp(self):
+        import base64
+        import time
+
+        from jurisync.connectors.juridiq.api import JuridiqApi
+        from jurisync.connectors.juridiq.server import create_server
+
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        root = Path(self.directory.name)
+        self.sent = []
+
+        def send(method, url, headers, body):
+            expiry = base64.urlsafe_b64encode(json.dumps({"exp": int(time.time()) + 3600}).encode()).decode()
+            if url.endswith("/auth/login"):
+                email = json.loads(body)["email"]
+                payload = {"token": f"x.{expiry.rstrip('=')}.{email}"}
+            else:
+                self.sent.append((method, url, headers.get("authorization")))
+                payload = {"id": "task-1"}
+            return mock.Mock(status_code=200, text=json.dumps(payload), json=lambda: payload)
+
+        self.store = Store(root / "store.sqlite")
+        self.vault = Vault(root / "vault", load_key(generate_key()))
+        for tenant, grant in (("office-a", ""), ("office-b", "true")):
+            self.store.add_tenant(tenant, tenant, connectors=["juridiq"])
+            self.store.add_user(f"user@{tenant}.test", tenant, PASSWORD)
+            entry = {
+                "JURIDIQ_EMAIL": f"{tenant}@example.invalid",
+                "JURIDIQ_PASSWORD": "offline-only",
+                "JURIDIQ_API_BASE_URL": "https://api.example.invalid",
+                "JURIDIQ_LOGIN_URL": "https://api.example.invalid/auth/login",
+            }
+            self.vault.put(tenant, {**entry, "JURIDIQ_ALLOW_WRITES": grant} if grant else entry)
+        juridiq = create_server(allow_writes=True, api=JuridiqApi(send=send))
+        environment = {REQUIRE_RESOURCE_FLAG: "", "JURIDIQ_ALLOW_WRITES": "true", "LOCALAPPDATA": str(root / "cache")}
+        patcher = mock.patch.dict(os.environ, environment)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with mock.patch("jurisync.hosted.app.TENANT_READY", ("juridiq",)):
+            self.app, _ = build_app(BASE, self.store, self.vault, ["juridiq"], load=lambda name: (juridiq, None))
+
+    def test_an_office_without_the_grant_neither_sees_nor_calls_juridiq_writes(self):
+        from jurisync import registry
+
+        writes = registry.CONNECTORS["juridiq"].write_tools
+        with TestClient(self.app, base_url=BASE) as client:
+            office_a = self.mcp(client, self.token(client, resource=f"{BASE}/mcp"))
+            office_b = self.mcp(client, self.token(client, "user@office-b.test", resource=f"{BASE}/mcp"))
+            self.assertFalse(self.names(office_a) & writes)
+            self.assertLessEqual(writes, self.names(office_b))
+            for name in sorted(writes):
+                with self.subTest(tool=name):
+                    refused = self.call(office_a, name, {})
+                    self.assertTrue(refused["isError"])
+                    self.assertIn("writes are not enabled", refused["content"][0]["text"])
+            self.assertEqual(self.sent, [])
+            created = self.call(office_b, "juridiq_create_task", {"payload": self.TASK})
+            self.assertFalse(created.get("isError"), created)
+        self.assertEqual(len(self.sent), 1)
+        method, url, token = self.sent[0]
+        self.assertEqual((method, url), ("POST", "https://api.example.invalid/task/"))
+        self.assertTrue(token.endswith("office-b@example.invalid"))
+
+
 class JuridiqWritesTest(unittest.TestCase):
     def test_hosted_juridiq_registers_writes_and_marks_them_granted(self):
         from jurisync import registry

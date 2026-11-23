@@ -310,6 +310,52 @@ def test_login_sets_the_token_header_and_its_expiry(e_cpf):
     ]
 
 
+def test_each_office_logs_in_with_its_own_a1_and_keeps_its_own_token(e_cpf, monkeypatch):
+    from jurisync.core import credentials
+
+    offices = {
+        tenant: (a1(f"ADVOGADA {tenant.upper()}:{cpf}", pin=f"pin-{tenant}"), cpf)
+        for tenant, cpf in (("office-a", "00000000002"), ("office-b", "00000000003"))
+    }
+    made = []
+
+    def login(_key):
+        cpf = offices[credentials.tenant()][1]
+        token = jwt(1_900_000_000 + len(made))
+        http = FakeHttp(
+            {
+                ("GET", f"/api/credenciado/isCredenciado/{cpf}"): FakeResponse(payload=True),
+                ("POST", "/api/auth/cert"): FakeResponse(payload={"username": cpf, "token": token}),
+            }
+        )
+        made.append((credentials.tenant(), http))
+        return client.login(http=http)
+
+    # The operator's own A1 in the server's environment is never used for an office.
+    monkeypatch.setenv("STJ_A1_P12", e_cpf)
+    monkeypatch.setenv("STJ_A1_PIN", "pin")
+    monkeypatch.setattr(server.sessions, "_login", login)
+    seen = {}
+    try:
+        for tenant in ("office-a", "office-b", "office-a"):
+            p12, _ = offices[tenant]
+            with credentials.scope(tenant, {"STJ_A1_PIN": f"pin-{tenant}"}, {"STJ_A1_P12": p12}):
+                seen.setdefault(tenant, []).append(server.sessions.run("stj", lambda session: session))
+    finally:
+        server.sessions.close()
+    assert seen["office-a"][0] is seen["office-a"][1]
+    assert [tenant for tenant, _ in made] == ["office-a", "office-b"]
+    assert seen["office-a"][0].token != seen["office-b"][0].token
+    for tenant, http in made:
+        cpf = offices[tenant][1]
+        assert [request[:2] for request in http.sent] == [
+            ("GET", f"/api/credenciado/isCredenciado/{cpf}"),
+            ("POST", "/api/auth/cert"),
+        ]
+        assert seen[tenant][0].cpf == cpf
+        assert http.headers["authorization"] == seen[tenant][0].token
+
+
 def test_an_unregistered_lawyer_never_reaches_the_certificate_login(e_cpf):
     http = FakeHttp(login_routes(registered=False))
     with pytest.raises(client.StjNotRegistered, match="never registers"):
@@ -523,18 +569,37 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((data["vistas"], data["notices"]), ([], []))
 
     def test_no_tool_ever_sends_a_write(self):
+        checked, refused = [], []
+        guard = client.require_read
+
+        def spy(method, path):
+            checked.append((method, path))
+            try:
+                guard(method, path)
+            except PermissionError:
+                refused.append((method, path))
+                raise
+
         self.vista_routes([VISTA])
-        with mock.patch.object(server.djen, "fetch_page", return_value={"count": 0, "items": []}):
-            self.call("stj_list_inbox", {})
-        self.call("stj_get_counters", {})
-        for name, arguments in (
-            ("stj_get_process", {"process": CNJ}),
-            ("stj_read_documents", {"process": REGISTRO, "document_ids": ["1", "2"]}),
-            ("stj_list_processes", {}),
-        ):
-            self.call(name, arguments)
-        for method, path, _params, _body in self.session.http.sent:
-            client.require_read(method, path)
+        with mock.patch.object(client, "require_read", side_effect=spy):
+            with mock.patch.object(server.djen, "fetch_page", return_value={"count": 0, "items": []}):
+                results = {"stj_list_inbox": self.call("stj_list_inbox", {})}
+            for name, arguments in (
+                ("stj_get_counters", {}),
+                ("stj_get_process", {"process": CNJ}),
+                ("stj_read_documents", {"process": REGISTRO, "document_ids": ["1", "2"]}),
+                ("stj_list_processes", {}),
+            ):
+                results[name] = self.call(name, arguments)
+        for name, (data, error) in results.items():
+            self.assertFalse(error, f"{name}: {data}")
+        self.assertEqual(refused, [])
+        sent = [(method, path) for method, path, _params, _body in self.session.http.sent]
+        self.assertTrue(sent)
+        # Every request on the wire went through the guard first, and none of them is a write.
+        self.assertLessEqual(set(sent), set(checked))
+        for method, path in sent:
+            self.assertTrue(method == "GET" or path in client.READ_POSTS, (method, path))
             self.assertNotIn("ciencia", path.lower())
 
 

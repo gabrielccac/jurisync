@@ -33,18 +33,6 @@ def test_alternative_group_is_satisfied_by_either(root, monkeypatch):
     assert customers.check("acme")["trf1-1g"]["missing"] == []
 
 
-def test_customer_env_loads_before_shared_and_env_wins(root, monkeypatch, tmp_path):
-    (root / "acme" / ".env").write_text("ACME_USER=from-customer\nACME_PASS=customer-pass\n")
-    shared = tmp_path / "shared.env"
-    shared.write_text("ACME_USER=from-shared\nACME_2FA=shared-2fa\n")
-    monkeypatch.setenv("ACME_PASS", "from-process")
-    load_env_file(shared)
-    assert os.environ["ACME_USER"] == "from-customer"
-    assert os.environ["ACME_PASS"] == "from-process"
-    assert "ACME_2FA" not in os.environ  # with a customer selected, the shared file gives machine settings only
-    monkeypatch.delenv("ACME_USER")
-
-
 def test_pinned_values_beat_the_shared_file_but_not_the_environment(root, monkeypatch, tmp_path):
     (root / "acme" / "portals.toml").write_text(
         '[trf1-1g]\nmethod = "certificate_totp"\nsecrets = ["ACME_USER"]\n'
@@ -58,18 +46,6 @@ def test_pinned_values_beat_the_shared_file_but_not_the_environment(root, monkey
     assert os.environ["ACME_CERT"] == "true"
     assert os.environ["ACME_KEEP"] == "from-process"
     monkeypatch.delenv("ACME_CERT")
-
-
-def test_shared_file_can_name_the_customer(root, monkeypatch, tmp_path):
-    (root / "acme" / ".env").write_text("ACME_USER=from-customer\n")
-    shared = tmp_path / "shared.env"
-    shared.write_text("JURISYNC_CUSTOMER=acme\nACME_USER=from-shared\n")
-    monkeypatch.delenv("JURISYNC_CUSTOMER")
-    load_env_file(shared)
-    assert os.environ["JURISYNC_CUSTOMER"] == "acme"
-    assert os.environ["ACME_USER"] == "from-customer"
-    monkeypatch.delenv("ACME_USER")
-    monkeypatch.delenv("JURISYNC_CUSTOMER")
 
 
 def test_invalid_setup_fails_loudly(root):

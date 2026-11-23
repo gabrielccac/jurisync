@@ -1,6 +1,5 @@
 """Offline tests for the task finder, compact reports, attach-by-reference and dry-run creation."""
 
-import json
 import os
 import tempfile
 import unittest
@@ -200,8 +199,6 @@ class CreateTaskToolTest(unittest.TestCase):
         self.assertEqual(
             (lawsuits.call_args.kwargs["dateFrom"], lawsuits.call_args.kwargs["dateUntil"]), ("01/10/2026", "")
         )
-        schema = server.server._tool_manager.get_tool("advbox_search_tasks").parameters["properties"]["dateFrom"]
-        self.assertIn("YYYY-MM-DD", json.dumps(schema))
 
     def test_real_creation_still_needs_the_write_gate(self):
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "false"}):

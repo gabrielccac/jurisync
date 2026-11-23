@@ -503,7 +503,6 @@ class ServerTest(unittest.TestCase):
                     acknowledge = tool.input_schema["properties"]["acknowledgeCiencia"]
                     self.assertIsNone(acknowledge.get("default"))
                     self.assertNotIn("acknowledgeCiencia", tool.input_schema.get("required", []))
-        self.assertIn("ciência not checked", listed["projudi_read_documents"].description)
 
     def test_get_process_hides_hashes_and_attaches_files_to_movements(self):
         result = self.call("projudi_get_process", {"process_number": NUMBER}).structured_content

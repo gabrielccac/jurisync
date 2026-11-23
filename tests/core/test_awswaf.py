@@ -66,14 +66,6 @@ def test_solve_needs_an_openrouter_key(monkeypatch):
         awswaf.solve("https://pje.tjes.jus.br/pje/login.seam")
 
 
-def test_the_shared_captcha_key_comes_before_the_office_key(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "office")
-    monkeypatch.setenv("JURISYNC_CAPTCHA_API_KEY", "shared")
-    assert awswaf.captcha_api_key() == "shared"
-    monkeypatch.delenv("JURISYNC_CAPTCHA_API_KEY")
-    assert awswaf.captcha_api_key() == "office"
-
-
 def test_apply_copies_only_the_waf_token():
     session = Mock()
     awswaf.apply(

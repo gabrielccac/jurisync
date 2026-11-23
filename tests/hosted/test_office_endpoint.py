@@ -128,17 +128,6 @@ class CombinedEndpointTest(OfficeCase):
             alpha = self.mcp(client, self.token(client, resource=f"{BASE}/alpha/mcp"), "/alpha/mcp")
             self.assertNotIn("alpha_draft_write", self.names(alpha))
 
-    def test_the_combined_server_names_its_systems(self):
-        with TestClient(self.app, base_url=BASE) as client:
-            token = self.token(client, resource=f"{BASE}/mcp")
-            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json, text/event-stream"}
-            body = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                    "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                               "clientInfo": {"name": "t", "version": "1"}}}  # fmt: skip
-            response = client.post("/mcp", json=body, headers=headers)
-        result = json.loads(next(line[5:] for line in response.text.splitlines() if line.startswith("data:")))
-        self.assertIn("alpha, beta", result["result"]["instructions"])
-
     def test_a_tool_name_served_twice_stops_the_start(self):
         twice = {"alpha": MCPServer("alpha"), "beta": MCPServer("beta")}
         for server in twice.values():

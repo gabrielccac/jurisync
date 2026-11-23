@@ -8,7 +8,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import date
 from io import StringIO
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 from jurisync.connectors.djen import client, documents, normalize, poll, store
 
@@ -210,15 +210,25 @@ class DjenChecks(unittest.TestCase):
             client.search_page({"dataDisponibilizacaoInicio": "2026-09-03", "dataDisponibilizacaoFim": "2026-10-03"})
 
     def test_search_page_passa_params(self):
-        payload = {"status": "success", "count": 1, "items": [{"id": 7}]}
-        with patch.object(client, "_read_json", return_value=(payload, 200)):
-            result = client.search_page({"nomeAdvogado": "ELISANDRA BECKER", "ufOab": "RS"})
-        self.assertEqual(result["count"], 1)
+        from urllib.parse import parse_qs, urlsplit
 
-    def test_list_tribunals(self):
-        rows = [{"uf": "", "nomeEstado": "Nacional", "instituicoes": [{"sigla": "STJ"}]}]
-        with patch.object(client, "_read_json", return_value=(rows, 200)):
-            self.assertEqual(client.list_tribunals(), rows)
+        payload = {"status": "success", "count": 1, "items": [{"id": 7}]}
+        with patch.object(client, "_read_json", return_value=(payload, 200)) as read:
+            result = client.search_page({"nomeAdvogado": "ELISANDRA BECKER", "ufOab": "RS"}, pagina=2)
+        self.assertEqual(result["count"], 1)
+        url = urlsplit(read.call_args.args[0])
+        self.assertEqual(url._replace(query="").geturl(), client.BASE_URL)
+        self.assertEqual(
+            parse_qs(url.query),
+            {
+                "nomeAdvogado": ["ELISANDRA BECKER"],
+                "ufOab": ["RS"],
+                "pagina": ["2"],
+                "itensPorPagina": [str(client.DEFAULT_PAGE_SIZE)],
+            },
+        )
+
+    def test_list_tribunals_fails_loudly(self):
         with patch.object(client, "_read_json", return_value=({"status": "error"}, 500)):
             with self.assertRaises(client.DjenError):
                 client.list_tribunals()
@@ -296,15 +306,20 @@ class DjenChecks(unittest.TestCase):
             documents.format_mascara("123")
 
     def test_fetch_link_document_guards(self):
-        with self.assertRaises(ValueError):
+        with patch("urllib.request.urlopen") as urlopen, self.assertRaises(ValueError):
             documents.fetch_link_document("http://evil.example/doc.pdf")
-        with self.assertRaises(ValueError):
+        urlopen.assert_not_called()
+        refused = HTTPError("https://eproc.jfrs.jus.br/x", 404, "Not Found", {}, None)
+        with (
+            patch("urllib.request.urlopen", side_effect=refused),
+            self.assertRaisesRegex(ValueError, "HTTP 404"),
+        ):
             documents.fetch_link_document("https://eproc.jfrs.jus.br/x")
 
     def test_fetch_link_document_ok(self):
         class FakeResp:
-            url = "https://eproc.jfrs.jus.br/eprocV2/doc"
-            headers = {"Content-Type": "text/html"}
+            def __init__(self, url, body):
+                self.url, self.headers, self._body = url, {"Content-Type": "text/html"}, body
 
             def __enter__(self):
                 return self
@@ -312,17 +327,24 @@ class DjenChecks(unittest.TestCase):
             def __exit__(self, *a):
                 return False
 
-            def read(self, _n):
-                data, self._done = getattr(self, "_d", b"<html><body>doc</body></html>"), True
-                if getattr(self, "_done", False) and not hasattr(self, "_x"):
-                    self._x = 1
-                    return data
-                return b""
+            def read(self, n):
+                chunk, self._body = self._body[:n], self._body[n:]
+                return chunk
 
-        with patch("urllib.request.urlopen", return_value=FakeResp()):
-            ctype, blob = documents.fetch_link_document("https://eproc.jfrs.jus.br/eprocV2/doc")
-        self.assertEqual(ctype, "text/html")
-        self.assertIn(b"doc", blob)
+        page = b"<html><body>doc</body></html>"
+        url = "https://eproc.jfrs.jus.br/eprocV2/doc"
+        with patch("urllib.request.urlopen", return_value=FakeResp(url, page)):
+            self.assertEqual(documents.fetch_link_document(url), ("text/html", page))
+        with (
+            patch("urllib.request.urlopen", return_value=FakeResp("https://evil.example/doc", page)),
+            self.assertRaisesRegex(ValueError, "redirect"),
+        ):
+            documents.fetch_link_document(url)
+        with (
+            patch("urllib.request.urlopen", return_value=FakeResp(url, page)),
+            self.assertRaisesRegex(ValueError, "limite"),
+        ):
+            documents.fetch_link_document(url, max_bytes=len(page) - 1)
 
 
 if __name__ == "__main__":

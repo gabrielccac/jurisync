@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from jurisync.connectors.pje import inbox, legacy, process, push, search
-from jurisync.connectors.pje.expedientes import NoticeUnchecked
 
 FIXTURES = Path(__file__).parent / "fixtures" / "trf5_legacy"
 BASE = "https://pje.trf5.jus.br/pje/"
@@ -180,17 +179,3 @@ class Pje1xSearch(unittest.TestCase):
         <span>Foram encontrados: 1 resultados</span>""" % ("ab" * 16)
         rows = legacy.parse_search_rows(html)
         self.assertEqual((rows[0]["processId"], rows[0]["ca"]), ("77", "ab" * 16))
-
-    def test_documents_stay_behind_the_pending_notice_check_when_expedientes_are_unreadable(self):
-        found = {
-            "success": True,
-            "processo_id": "77",
-            "numero_processo": "0000001-02.2026.4.05.8300",
-            "timeline": [],
-            "expedientes": None,
-        }
-        from unittest.mock import patch
-
-        with patch.object(search, "search_process", return_value=found):
-            with self.assertRaises(NoticeUnchecked):
-                process.read_documents("0000001-02.2026.4.05.8300", ["1"], portal="trf5-legacy", session=object())

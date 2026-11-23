@@ -143,11 +143,6 @@ class Cli(unittest.TestCase):
         self.assertEqual(code, cli.EXIT_PARTIAL)
         self.assertIn("aviso: faltam 2 itens", out)
 
-    def test_missing_search_key_is_a_usage_error(self):
-        code, out, err, calls = self.run_cli(["buscar", "--dia", "2026-10-28", "--tribunal", "TRF5"], [])
-        self.assertEqual((code, out, calls), (cli.EXIT_USAGE, "", []))
-        self.assertTrue(err.startswith("erro codigo=uso"))
-
     def test_saida_writes_full_jsonl_and_prints_only_checks(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "dia.jsonl")
@@ -199,8 +194,10 @@ class CliAgentContract(unittest.TestCase):
             self.assertIn(f"djen-cli {command}", out)
 
     def test_usage_errors_carry_a_working_example(self):
-        code, _, err = self.run_cli(["buscar", "--dia", "2026-10-28", "--tribunal", "TRF5"])
-        self.assertEqual(code, cli.EXIT_USAGE)
+        no_search = AssertionError("a usage error must not search")
+        code, out, err = self.run_cli(["buscar", "--dia", "2026-10-28", "--tribunal", "TRF5"], raises=no_search)
+        self.assertEqual((code, out), (cli.EXIT_USAGE, ""))
+        self.assertTrue(err.startswith("erro codigo=uso"))
         self.assertIn("exemplo=djen-cli buscar --dia", err)
         code, _, err = self.run_cli(["prazo", "--dias", "5"])  # argparse's own error uses the same contract
         self.assertEqual(code, cli.EXIT_USAGE)

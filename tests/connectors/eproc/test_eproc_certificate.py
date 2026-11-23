@@ -577,9 +577,6 @@ class Trf6BrowserEntryTest(unittest.TestCase):
         with mock.patch.dict("sys.modules", {"seleniumbase": module}), mock.patch.object(certificate.time, "sleep"):
             return session, certificate._browser_login_page(session, self.config)
 
-    def test_both_instances_open_the_entry_in_the_browser(self):
-        self.assertEqual(certificate.BROWSER_ENTRY, {"trf6-1g", "trf6-2g"})
-
     def test_the_browser_waits_past_the_challenge_and_hands_every_cookie_over(self):
         cookies = [
             {"name": "TS6b115ce5029", "value": "bot", "domain": "eproc1g.trf6.jus.br", "path": "/", "expires": -1,

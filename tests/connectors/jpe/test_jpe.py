@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from jurisync import portals
 from jurisync.connectors.jpe import client, parsers, process, server
-from jurisync.core.session_pool import LoginRejected, SessionPool
+from jurisync.core.session_pool import LoginRejected
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HOST = "https://jpe.tjmg.jus.br"
@@ -246,13 +246,6 @@ class LoginTests(unittest.TestCase):
             client.login(http_factory=lambda: http)
         self.assertEqual(len(http.posted()), 1)
 
-    def test_pool_does_not_retry_a_refusal(self):
-        pool = SessionPool(login=mock.Mock(side_effect=client.SsoRefused("no")), refresh=None, close=None)
-        for _ in range(2):
-            with self.assertRaises(LoginRejected):
-                pool.run(client.PORTAL, lambda session: session)
-        self.assertEqual(pool._login.call_count, 1)
-
 
 class ReadTests(unittest.TestCase):
     def test_counters(self):
@@ -410,6 +403,94 @@ class ServerTests(unittest.TestCase):
         for name in ("jpe_read_documents", "jpe_download_document"):
             self.assertFalse(tools[name].annotations.read_only_hint)
             self.assertIn("acknowledgeCiencia", tools[name].input_schema["properties"])
+
+
+class TenantTests(unittest.TestCase):
+    """Two offices on one hosted server: each logs in with its own CPF and authenticator, and keeps its own session."""
+
+    OFFICES = {
+        "office-a": ("000.000.001-91", "JBSWY3DPEHPK3PXP"),
+        "office-b": ("000.000.002-72", "GEZDGNBVGY3TQOJQ"),
+    }
+    NOW = 1_000_000_005.0
+
+    def setUp(self):
+        self.made = []
+
+        def http():
+            login_page = (
+                b'<form id="kc-form-login" action="https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/'
+                b'authenticate?session_code=x"><input name="username"/><input name="password"/></form>'
+            )
+            otp_page = (
+                b'<form id="kc-otp-login-form" action="https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/'
+                b'authenticate?step=otp"><input name="otp"/></form>'
+            )
+            callback = HOST + "/rupe/loginSsoKeycloakServlet/callback?code=x"
+            made = FakeHttp(
+                {
+                    **home_routes(),
+                    ("GET", HOST + ENTRY): Response(body=fixture("portal_principal.html"), content_type="text/html"),
+                    ("POST", HOST + "/rupe/loginSsoKeycloakServlet"): redirect(SSO_AUTH),
+                    ("GET", SSO + "/auth/realms/pje/protocol/openid-connect/auth"): Response(body=login_page),
+                    ("POST", SSO + "/auth/realms/pje/login-actions/authenticate"): [
+                        Response(body=otp_page),
+                        redirect(callback),
+                    ],
+                    ("GET", HOST + "/rupe/loginSsoKeycloakServlet/callback"): redirect(
+                        HOST + "/rupe/portaljus/jpe/inicio.rupe"
+                    ),
+                    ("GET", HOST + "/rupe/portaljus/jpe/inicio.rupe"): Response(body=fixture("synthetic_home.html")),
+                }
+            )
+            self.made.append(made)
+            return made
+
+        login = mock.patch.object(
+            server.sessions,
+            "_login",
+            lambda key: client.login(key, http_factory=http, clock=lambda: self.NOW, sleep=lambda _: None),
+        )
+        login.start()
+        self.addCleanup(login.stop)
+        self.addCleanup(server.sessions.close)
+
+    def scope(self, tenant):
+        from jurisync.core import credentials
+
+        cpf, secret = self.OFFICES[tenant]
+        return credentials.scope(
+            tenant,
+            {
+                "TJMG_JPE_2G_USERNAME": cpf,
+                "TJMG_JPE_2G_PASSWORD": f"password-{tenant}",
+                "TJMG_JPE_2G_2FA_DATA": f"otpauth://totp/PDPJ?secret={secret}",
+            },
+        )
+
+    def test_each_office_logs_in_with_its_own_account_and_keeps_its_session(self):
+        from jurisync.core.totp import fresh_code
+
+        server_env = {**SSO_ENV, "TJMG_THEMIS_2G_USERNAME": "000.000.003-53"}  # the operator's own, never used
+        sessions, expected = {}, {}
+        with mock.patch.dict(os.environ, server_env, clear=True):
+            for tenant in ("office-a", "office-b", "office-a"):
+                with self.scope(tenant):
+                    session = server.sessions.run(client.PORTAL, lambda session: session)
+                    portal = portals.jpe(client.PORTAL)
+                    code = fresh_code(client.otp_account(portal), clock=lambda: self.NOW, sleep=lambda _: None)
+                sessions.setdefault(tenant, []).append(session)
+                expected[tenant] = code
+        self.assertIs(sessions["office-a"][0], sessions["office-a"][1])  # reused, not a second login
+        self.assertIsNot(sessions["office-a"][0], sessions["office-b"][0])
+        self.assertEqual(len(self.made), 2)
+        self.assertNotEqual(expected["office-a"], expected["office-b"])
+        for tenant, http in zip(("office-a", "office-b"), self.made, strict=True):
+            sent, otp = http.posted()[1]["data"], http.posted()[2]["data"]
+            cpf = self.OFFICES[tenant][0].replace(".", "").replace("-", "")
+            self.assertEqual((sent["username"], sent["password"]), ([cpf], [f"password-{tenant}"]))
+            self.assertEqual(otp["otp"], [expected[tenant]])
+            self.assertIs(sessions[tenant][0].http, http)
 
 
 if __name__ == "__main__":

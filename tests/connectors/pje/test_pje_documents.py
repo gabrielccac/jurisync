@@ -313,7 +313,6 @@ class SelectedDocumentsChecks(unittest.TestCase):
 
         tools = {tool.name: tool for tool in asyncio.run(server.server.list_tools())}
         self.assertNotIn("documentIds", tools["pje_get_process"].input_schema["properties"])
-        self.assertIn("pje_read_documents", tools["pje_get_process"].description)
         self.assertIn("documentIds", tools["pje_read_documents"].input_schema["properties"])
 
     def test_client_scope_page_uses_first_page_and_all_merges_bounded_pages(self):

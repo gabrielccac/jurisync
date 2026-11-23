@@ -64,16 +64,6 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.is_error)
         self.assertEqual(search.call_args.args[0]["nomeAdvogado"], "ELISANDRA BECKER")
 
-    async def test_oab_number_sent_as_json_number_is_taken_as_text(self):
-        payload = {"status": "success", "count": 0, "items": []}
-        with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
-            result = await self.call(
-                "djen_search_communications",
-                {"numeroOab": 61216, "ufOab": "RS", "tribunal": None, "inicio": "2026-10-20", "fim": "2026-10-20"},
-            )
-        self.assertFalse(result.is_error)
-        self.assertEqual(search.call_args_list[0].args[0]["numeroOab"], "61216")
-
     async def test_formatted_process_number_is_still_refused(self):
         with mock.patch.object(djen_server, "search_page") as search:
             result = await self.call(

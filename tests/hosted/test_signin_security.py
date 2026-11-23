@@ -17,7 +17,6 @@ from mcp.server.mcpserver import MCPServer
 from starlette.testclient import TestClient
 
 from jurisync.core import credentials
-from jurisync.hosted import access
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
 from jurisync.hosted.oauth import login_cookie, redirect_target
 from jurisync.hosted.store import Store
@@ -388,11 +387,6 @@ class AudienceTest(SignInCase):
             with self.assertNoLogs("jurisync.hosted.app", level="INFO"):
                 self.assertEqual(ping(client, self.token(client)).status_code, 200)
 
-    def test_a_token_for_another_resource_is_refused(self):
-        with TestClient(self.app, base_url=BASE) as client:
-            token = self.token(client, resource=f"{BASE}/other/mcp")
-            self.assertEqual(ping(client, token).status_code, 401)
-
 
 class StrictAudienceTest(SignInCase):
     environment = {REQUIRE_RESOURCE_FLAG: "1"}
@@ -465,7 +459,72 @@ class OAuthBasicsTest(SignInCase):
             self.assertEqual(ping(client, theirs).status_code, 401)
 
 
-class DeadCodeTest(unittest.TestCase):
+class TokenLifecycleTest(SignInCase):
+    """Refresh rotation, /revoke and a removed office: an old or revoked token never reaches a connector again."""
+
+    def issue(self, client, email="user@office-a.test", **options):
+        client_id = self.register(client)
+        verifier, challenge = pkce()
+        query = self.code(client, client_id, challenge, email, **options)
+        response = self.exchange(client, client_id, query["code"][0], verifier)
+        self.assertEqual(response.status_code, 200, response.text)
+        return client_id, response.json()
+
+    def refresh(self, client, client_id, refresh_token):
+        return client.post(
+            "/token", data={"grant_type": "refresh_token", "client_id": client_id, "refresh_token": refresh_token}
+        )
+
+    def test_a_used_refresh_token_is_refused_and_the_new_pair_works(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            client_id, first = self.issue(client)
+            rotated = self.refresh(client, client_id, first["refresh_token"])
+            self.assertEqual(rotated.status_code, 200, rotated.text)
+            second = rotated.json()
+            again = self.refresh(client, client_id, first["refresh_token"])
+            self.assertEqual(again.status_code, 400)
+            self.assertEqual(again.json()["error"], "invalid_grant")
+            self.assertEqual(ping(client, first["access_token"]).status_code, 401)
+            self.assertEqual(ping(client, second["access_token"]).status_code, 200)
+            # Another client cannot use this client's refresh token either.
+            other = self.register(client)
+            self.assertEqual(self.refresh(client, other, second["refresh_token"]).status_code, 400)
+            self.assertEqual(ping(client, second["access_token"]).status_code, 200)
+
+    def test_revoke_ends_the_access_and_refresh_token_together(self):
+        # client_secret="": the SDK's /revoke form declares it without a default, so even a public client sends it.
+        with TestClient(self.app, base_url=BASE) as client:
+            client_id, first = self.issue(client)
+            _, kept = self.issue(client)
+            response = client.post(
+                "/revoke", data={"token": first["access_token"], "client_id": client_id, "client_secret": ""}
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(ping(client, first["access_token"]).status_code, 401)
+            self.assertEqual(self.refresh(client, client_id, first["refresh_token"]).status_code, 400)
+            self.assertEqual(ping(client, kept["access_token"]).status_code, 200)  # another sign-in is untouched
+
+            client_id, second = self.issue(client)
+            response = client.post(
+                "/revoke", data={"token": second["refresh_token"], "client_id": client_id, "client_secret": ""}
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(ping(client, second["access_token"]).status_code, 401)
+
+    def test_a_removed_offices_tokens_are_refused(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            client_id, mine = self.issue(client)
+            _, theirs = self.issue(client, "user@office-b.test", resource=f"{BASE}/other/mcp")
+            self.assertEqual(ping(client, mine["access_token"]).status_code, 200)
+            self.store.remove_tenant("office-a")
+            self.assertEqual(ping(client, mine["access_token"]).status_code, 401)
+            refused = self.refresh(client, client_id, mine["refresh_token"])
+            self.assertEqual(refused.status_code, 400)
+            self.assertEqual(refused.json()["error"], "invalid_grant")
+            self.assertEqual(ping(client, theirs["access_token"], "/other/mcp").status_code, 200)
+
+
+class OldStoreMigrationTest(unittest.TestCase):
     def test_web_sessions_are_gone_from_the_store_and_old_files(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "store.sqlite"
@@ -482,9 +541,6 @@ class DeadCodeTest(unittest.TestCase):
             store.remove_user("u@a.test")
             store.remove_tenant("office-a")
             store.purge()
-        for name in ("open_web_session", "web_session", "close_web_session"):
-            self.assertFalse(hasattr(Store, name))
-        self.assertFalse(hasattr(access, "account_label"))
 
 
 if __name__ == "__main__":

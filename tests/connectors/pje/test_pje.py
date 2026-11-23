@@ -70,7 +70,11 @@ class PjeChecks(unittest.TestCase):
                 auth.form_action(f"<form id='loginForm' action='{action}'></form>", action, "loginForm")
 
     def test_portal_routing_and_session_reuse(self):
-        for portal in ("trf1-1g", "trf1-2g"):
+        for portal, number in (
+            ("trf1-1g", "1024853-70.2023.4.01.3400"),
+            ("trf1-2g", "1024853-70.2023.4.01.3400"),
+            ("trf5-1g", "1024853-70.2023.4.05.3400"),
+        ):
             with self.subTest(portal=portal):
                 session = Mock()
                 result = {
@@ -81,26 +85,14 @@ class PjeChecks(unittest.TestCase):
                     patch.object(client.search, "search_process", return_value=result) as search,
                     patch.object(client, "login_portal") as login,
                 ):
-                    actual = client.fetch_process(
-                        "1024853-70.2023.4.01.3400", portal=portal, scope="latest", session=session
-                    )
-                search.assert_called_once_with(session, "1024853-70.2023.4.01.3400", None, portal=portal)
+                    actual = client.fetch_process(number, portal=portal, scope="latest", session=session)
+                search.assert_called_once_with(session, number, None, portal=portal)
                 login.assert_not_called()
                 session.close.assert_not_called()
                 self.assertEqual(actual["portal"], portal)
                 self.assertEqual(len(actual["timeline"]), 1)
 
-    def test_trf5_searches_its_own_portal(self):
-        session = Mock()
-        result = {"success": True, "timeline": []}
-        number = "1024853-70.2023.4.05.3400"
-        with patch.object(client.search, "search_process", return_value=result) as search:
-            actual = client.fetch_process(number, portal="trf5-1g", session=session)
-        search.assert_called_once_with(session, number, None, portal="trf5-1g")
-        self.assertTrue(actual["success"])
-
-    def test_detail_url_differs_only_by_instance_suffix(self):
-        self.assertEqual(search.DETAIL_SUFFIX, {"1g": "&aba=", "2g": ""})
+    def test_download_pattern_finds_every_viewer_shape(self):
         self.assertTrue(search.DOWNLOAD_PATTERN.search("window.open('/pje/documento/download/TRF5/x/1/'"))
         legacy = "var url = '/1g/seam/resource/rest/pje-legacy/documento/download/-1/1g/7878703/' + idDocumento"
         match = search.DOWNLOAD_PATTERN.search(legacy)

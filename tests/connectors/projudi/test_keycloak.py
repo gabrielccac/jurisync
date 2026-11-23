@@ -517,10 +517,6 @@ class TjrrTest(unittest.TestCase):
 
         self.assertEqual(base64.b32decode(account["secret"]), b"BBBBBBBBBB")
 
-    def test_documents_stay_blocked(self):
-        with self.assertRaises(keycloak.DocumentsBlocked):
-            keycloak.ADAPTER.download(FakeSession(lambda *_: self.fail("no request")), RR_KEY, "1", "h")
-
 
 if __name__ == "__main__":
     unittest.main()

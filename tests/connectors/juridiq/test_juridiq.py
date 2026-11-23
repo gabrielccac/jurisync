@@ -538,5 +538,109 @@ class ServerTest(JuridiqTestCase):
         self.assertEqual(asyncio.run(run()).structured_content, {"result": [{"id": "law-1", "processNumber": "1"}]})
 
 
+UUID = "00000000-0000-4000-8000-000000000001"
+WRITE_CALLS = {
+    "juridiq_create_lawsuit": {
+        "payload": {
+            "serviceStep": "Inicial",
+            "responsibleIds": [UUID],
+            "persons": [{"name": "A", "personOrigin": "Cliente"}],
+        }
+    },
+    "juridiq_update_lawsuit": {"lawSuitId": UUID, "patch": {"serviceStep": "Recurso"}},
+    "juridiq_delete_lawsuit": {"lawSuitId": UUID},
+    "juridiq_create_task": {
+        "payload": {"title": "Réplica", "priority": "Alta", "columnId": UUID, "initialDate": "2026-10-07"}
+    },
+    "juridiq_update_task": {"taskId": UUID, "patch": {"title": "Réplica"}},
+    "juridiq_delete_task": {"taskId": UUID},
+    "juridiq_create_tag": {"payload": {"name": "X"}},
+    "juridiq_update_tag": {"tagId": UUID, "patch": {"name": "Y"}},
+    "juridiq_delete_tag": {"tagId": UUID},
+    "juridiq_create_task_template": {"payload": {"title": "Modelo"}},
+    "juridiq_update_task_template": {"templateId": UUID, "patch": {"title": "Modelo"}},
+    "juridiq_delete_task_template": {"templateId": UUID},
+    "juridiq_create_event": {
+        "payload": {
+            "title": "A",
+            "date": "2026-10-07",
+            "initialHour": "09:00",
+            "finalHour": "10:00",
+            "responsibleIds": [UUID],
+        }
+    },
+    "juridiq_mark_publications_read": {"publicationIds": ["publication-1"]},
+}
+
+
+class WriteGateTest(JuridiqTestCase):
+    def call_all(self, allow_writes):
+        fake = FakeJuridiq()
+
+        async def run():
+            async with Client(create_server(allow_writes=allow_writes, api=JuridiqApi(send=fake))) as client:
+                listed = {tool.name for tool in (await client.list_tools()).tools}
+                return listed, {name: await client.call_tool(name, args) for name, args in WRITE_CALLS.items()}
+
+        listed, results = asyncio.run(run())
+        return listed, results, [r for r in fake.requests if r["method"] not in ("GET", "HEAD")]
+
+    def test_every_write_tool_is_covered(self):
+        from jurisync import registry
+
+        self.assertEqual(set(WRITE_CALLS), registry.CONNECTORS["juridiq"].write_tools)
+
+    def test_without_the_grant_no_write_tool_is_offered_or_sends_anything(self):
+        listed, results, sent = self.call_all(allow_writes=False)
+        self.assertFalse(listed & set(WRITE_CALLS))
+        for name, result in results.items():
+            self.assertTrue(result.is_error, name)
+        self.assertEqual(sent, [])
+
+    def test_a_server_built_with_writes_still_refuses_them_without_the_grant(self):
+        # The hosted build registers the writes for every office; an office without JURIDIQ_ALLOW_WRITES=true is
+        # refused at call time, before anything is sent.
+        listed, results, sent = self.call_all(allow_writes=True)
+        self.assertLessEqual(set(WRITE_CALLS), listed)
+        for name, result in results.items():
+            with self.subTest(tool=name):
+                self.assertTrue(result.is_error)
+                self.assertIn("JURIDIQ_ALLOW_WRITES", result.content[0].text)
+        self.assertEqual(sent, [])
+        # The same calls with the grant do reach Juridiq: the refusals above came from the gate, not the arguments.
+        with mock.patch.dict(os.environ, {"JURIDIQ_ALLOW_WRITES": "true"}):
+            _, results, sent = self.call_all(allow_writes=True)
+        self.assertEqual({name for name, result in results.items() if result.is_error}, set())
+        self.assertGreaterEqual(len(sent), len(WRITE_CALLS))
+
+
+class TenantTest(JuridiqTestCase):
+    def test_two_offices_with_the_same_login_never_share_a_token(self):
+        from jurisync.core import credentials
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        fake = FakeJuridiq()
+        api = JuridiqApi(send=fake)
+        office = {
+            "JURIDIQ_EMAIL": "same@example.invalid",  # the same account name: only the office tells them apart
+            "JURIDIQ_API_BASE_URL": "https://api.example.invalid",
+            "JURIDIQ_LOGIN_URL": "https://api.example.invalid/auth/login",
+        }
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": directory.name}):
+            for tenant in ("office-a", "office-b", "office-a", "office-b"):
+                with credentials.scope(tenant, {**office, "JURIDIQ_PASSWORD": f"password-{tenant}"}):
+                    api.request("/user/me")
+        tokens = [request["auth"] for request in fake.requests]
+        self.assertEqual(fake.logins, 2)
+        self.assertEqual(tokens[0], tokens[2])
+        self.assertEqual(tokens[1], tokens[3])
+        self.assertNotEqual(tokens[0], tokens[1])
+        files = sorted(Path(directory.name).rglob("*.json"))
+        self.assertEqual([path.relative_to(directory.name).parts[:3] for path in files],
+                         [("Juridiq", "tenants", "office-a"), ("Juridiq", "tenants", "office-b")])  # fmt: skip
+        self.assertFalse(self.session_file.exists())  # the local install's own token file is not touched
+
+
 if __name__ == "__main__":
     unittest.main()

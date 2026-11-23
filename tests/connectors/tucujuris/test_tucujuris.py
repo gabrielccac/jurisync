@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from jurisync import portals
 from jurisync.connectors.tucujuris import client, process, server
+from jurisync.core import credentials
 from jurisync.core.session_pool import LoginRejected, SessionPool
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -438,6 +439,65 @@ class ServerTest(Base):
                 with self.assertRaises(Exception):
                     server.call(lambda session: server.list_processes(session, False, None))
         self.assertEqual(len(http.calls(api("publico/login"))), 1)
+
+
+class TenantTest(unittest.TestCase):
+    """Two offices on one hosted server: each logs in with its own OAB and authenticator and keeps its own token."""
+
+    OFFICES = {"office-a": ("1111AP", "JBSWY3DPEHPK3PXP"), "office-b": ("2222AP", "GEZDGNBVGY3TQOJQ")}
+    NOW = 1_800_000_010.0
+
+    def setUp(self):
+        self.made = []
+
+        def http():
+            tenant = credentials.tenant()
+            data = json.loads(fixture("login"))
+            data["dados"]["token"] = f"tok-{tenant}"
+            made = FakeHttp(routes({("POST", api("publico/login")): Response(body=json.dumps(data).encode())}))
+            self.made.append((tenant, made))
+            return made
+
+        login = mock.patch.object(
+            server.sessions,
+            "_login",
+            lambda key: client.login(key, http_factory=http, clock=lambda: self.NOW, sleep=lambda _: None),
+        )
+        login.start()
+        self.addCleanup(login.stop)
+        self.addCleanup(server.sessions.close)
+
+    def scope(self, tenant):
+        oab, secret = self.OFFICES[tenant]
+        return credentials.scope(
+            tenant,
+            {
+                "TJAP_TUCUJURIS_USERNAME": oab,
+                "TJAP_TUCUJURIS_PASSWORD": f"password-{tenant}",
+                "TJAP_TUCUJURIS_2FA_DATA": f"otpauth://totp/Tucujuris?secret={secret}",
+            },
+        )
+
+    def test_each_office_logs_in_with_its_own_account_and_keeps_its_token(self):
+        sessions, codes = {}, {}
+        with mock.patch.dict(os.environ, ENV):  # the operator's own account, never used for an office
+            for tenant in ("office-a", "office-b", "office-a"):
+                with self.scope(tenant):
+                    sessions.setdefault(tenant, []).append(server.sessions.run(client.PORTAL, lambda s: s))
+                    account = client.otp_account(client.config())
+                    codes[tenant] = client.fresh_code(account, clock=lambda: self.NOW, sleep=lambda _: None)
+        self.assertIs(sessions["office-a"][0], sessions["office-a"][1])
+        self.assertEqual([tenant for tenant, _ in self.made], ["office-a", "office-b"])
+        self.assertNotEqual(codes["office-a"], codes["office-b"])
+        for tenant, http in self.made:
+            (login,) = http.calls(api("publico/login"))
+            self.assertEqual(
+                (login["json"]["login"], login["json"]["senha"]), (self.OFFICES[tenant][0], f"password-{tenant}")
+            )
+            (code,) = http.calls(api("usuario/segundo-fator-verificar"))
+            self.assertEqual(code["json"]["codigo"], codes[tenant])
+            self.assertEqual(code["headers"]["Auth-Token"], f"tok-{tenant}")
+            self.assertEqual(sessions[tenant][0].token, f"tok-{tenant}")
 
 
 if __name__ == "__main__":

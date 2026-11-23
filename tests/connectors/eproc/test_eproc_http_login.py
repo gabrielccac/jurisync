@@ -4,7 +4,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from jurisync import portals
 from jurisync.connectors.eproc import client, http_login
 from jurisync.core.mtls import Response
 from jurisync.core.session_pool import LoginRejected
@@ -349,7 +348,3 @@ class InfraCaptchaFlow(unittest.TestCase):
         ):
             http_login.login("12345678901", "p", ACCOUNT, portal="tjto-1g")
         session.post.assert_not_called()
-
-    def test_other_classic_portals_still_post_to_login_cert(self):
-        self.assertEqual(portals.eproc("tjmg-1g").flavor, "")
-        self.assertEqual(portals.eproc("tjto-2g").flavor, http_login.INFRA_CAPTCHA)

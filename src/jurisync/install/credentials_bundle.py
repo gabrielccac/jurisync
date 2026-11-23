@@ -20,6 +20,8 @@ FORMAT = "jurisync-credentials"
 VERSION = 1
 HEADER = b"jurisync-credentials-v1"
 MIN_PASSPHRASE = 12
+# scrypt cost of the bundle key (the "n15" in the header's kdf label). The test suite lowers it to stay fast.
+SCRYPT_N = 2**15
 
 
 def _b64(raw):
@@ -29,7 +31,7 @@ def _b64(raw):
 def _derive(passphrase, salt):
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-    return Scrypt(salt=salt, length=32, n=2**15, r=8, p=1).derive(passphrase.encode("utf-8"))
+    return Scrypt(salt=salt, length=32, n=SCRYPT_N, r=8, p=1).derive(passphrase.encode("utf-8"))
 
 
 def generate_passphrase():

@@ -284,8 +284,7 @@ def portal_list(args, say):
         if key not in offered:
             status = "não oferecido: falta login no cofre" + ("" if key not in checks else f" (último teste: {status})")
         say(
-            f"{key:<16} {registry.label(config.system):<9} {methods[state.method]:<16} 2FA={authenticator:<4} "
-            + status
+            f"{key:<16} {registry.label(config.system):<9} {methods[state.method]:<16} 2FA={authenticator:<4} " + status
         )
     for service in registry.SERVICES:
         if all(values.get(name) for name in registry.get(service).login):

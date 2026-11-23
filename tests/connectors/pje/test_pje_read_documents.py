@@ -193,12 +193,6 @@ class ReadDocumentsTest(unittest.TestCase):
                 client.read_documents(NUMBER, ["456"], portal="trf5-1g", session=session)
         session.get.assert_not_called()
 
-    def test_pending_communication_is_read_once_the_user_agreed(self):
-        pending = [{"expedienteId": "9", "documentId": "456", "ciencia": None}]
-        session, result = self.read_with(pending, acknowledge_ciencia=True)
-        self.assertTrue(result["success"])
-        session.get.assert_called()
-
     def test_read_of_a_pending_communication_reports_that_ciencia_may_be_registered(self):
         pending = [
             {
@@ -211,7 +205,9 @@ class ReadDocumentsTest(unittest.TestCase):
                 "ciencia": None,
             }
         ]
-        _, result = self.read_with(pending, acknowledge_ciencia=True)
+        session, result = self.read_with(pending, acknowledge_ciencia=True)
+        self.assertTrue(result["success"])
+        session.get.assert_called()
         self.assertEqual(result["ciencia"]["estado"], "dada")
         self.assertEqual(result["ciencia"]["intimacoes"][0]["expedienteId"], "9")
         self.assertIn("informe o usuário", result["ciencia"]["aviso"])
