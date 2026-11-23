@@ -199,6 +199,19 @@ def tool_errors(label, *anticipated):
         raise ToolError(f"{label} request failed: {sanitize_diagnostics(error) or 'unknown'}") from error
 
 
+def offer_portals(server, keys, describe):
+    """List only ``keys`` as the ``portal`` choices of the server's tools; ``describe(keys)`` is the field's text.
+
+    An agent shown every wired portal tries the ones the account has no login for.
+    """
+    keys = list(keys)
+    for tool in server._tool_manager.list_tools():
+        field = tool.parameters.get("properties", {}).get("portal")
+        if field is not None:
+            field["enum"] = keys
+            field["description"] = describe(keys)
+
+
 def http_settings():
     """Streamable HTTP for local test installs reached through a tunnel.
 

@@ -6,6 +6,7 @@ inside it every read comes from those values only. A name the tenant does not ha
 environment, so one office can never log in with another's (or the operator's) credentials.
 
 Files (the A1 certificate) travel as bytes in the scope and are read with ``read_file``; nothing is written to disk.
+A connector that learns a new value of its own (ADVBOX's device id) stores it with ``save``.
 """
 
 import contextvars
@@ -20,17 +21,21 @@ class Scope:
     tenant: str
     values: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)
+    saver: object = None
 
 
 _current = contextvars.ContextVar("jurisync_credentials", default=None)
 
 
 @contextmanager
-def scope(tenant, values=None, files=None):
-    """Read every credential from ``values`` (name -> text) and ``files`` (name -> bytes) inside the block."""
+def scope(tenant, values=None, files=None, saver=None):
+    """Read every credential from ``values`` (name -> text) and ``files`` (name -> bytes) inside the block.
+
+    ``saver(name, value)``, when given, stores one value in the tenant's vault entry for later requests (see ``save``).
+    """
     if not tenant:
         raise ValueError("A credentials scope needs a tenant id")
-    token = _current.set(Scope(tenant, dict(values or {}), dict(files or {})))
+    token = _current.set(Scope(tenant, dict(values or {}), dict(files or {}), saver))
     try:
         yield
     finally:
@@ -97,3 +102,59 @@ def read_file(name):
     if not path:
         raise RuntimeError(f"Set {name}")
     return Path(path).expanduser().read_bytes()
+
+
+def save(name, value):
+    """Store a new value of one credential and use it from now on in this process.
+
+    Hosted: calls the scope's ``saver(name, value)``, which must persist it in the tenant's vault entry (or raise), then
+    updates the scope so the rest of the request reads it. A scope without a saver cannot store anything. Locally:
+    rewrites that one line of the env file the process loaded (the customer's own file when it has one, else the shared
+    file), keeping it private (0600), and sets ``os.environ``. The value is never printed.
+    """
+    current = _current.get()
+    if current is not None:
+        if current.saver is None:
+            raise RuntimeError("This office cannot store credentials")
+        current.saver(name, value)
+        current.values[name] = value
+        return
+    _rewrite_env_line(_loaded_env_file(), name, value)
+    os.environ[name] = value
+
+
+def _loaded_env_file():
+    from jurisync.customers import customer_env_path
+    from jurisync.paths import USER_ENV_FILE
+
+    own = customer_env_path()
+    if own and own.exists():
+        return own
+    shared = os.environ.get("JURISYNC_ENV_FILE") or (USER_ENV_FILE if USER_ENV_FILE.exists() else None)
+    if not shared:
+        raise RuntimeError("No env file to store the credential in; set JURISYNC_ENV_FILE")
+    return Path(shared).expanduser()
+
+
+def _rewrite_env_line(path, name, value):
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    quote = "'" if '"' in value else '"'
+    quoted = f"{quote}{value}{quote}" if any(character in value for character in " #'\"") else value
+    replaced = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.removeprefix("export ").split("=", 1)[0].strip() == name and "=" in stripped:
+            lines[index] = f"{'export ' if stripped.startswith('export ') else ''}{name}={quoted}"
+            replaced = True
+    if not replaced:
+        lines.append(f"{name}={quoted}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write("\n".join(lines) + "\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)

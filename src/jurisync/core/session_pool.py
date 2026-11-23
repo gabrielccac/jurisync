@@ -86,6 +86,7 @@ class SessionPool:
         self._rejected = {}  # key -> (clock time, wall time) of the last LoginRejected
         self._locks = {}
         self._guard = threading.Lock()
+        self._only = None  # the portals a local server offers; None logs in anywhere (hosted: the office decides)
 
     def _cooldown(self):
         if self._login_cooldown is not None:
@@ -165,7 +166,15 @@ class SessionPool:
             f"{max(1, round(remaining / 60))} min before trying again; no new login was attempted"
         )
 
+    def only(self, portals):
+        """Refuse a login outside ``portals``: the account has no login configured there."""
+        self._only = tuple(portals)
+
     def _new_login(self, key, portal, login=None):
+        if self._only is not None and portal not in self._only:
+            raise ValueError(
+                f"No login is configured for {portal} on this account; configured: {', '.join(self._only)}"
+            )
         self._check_cooldown(key)
         with login_slots():
             try:
@@ -178,6 +187,10 @@ class SessionPool:
     def fresh_login(self, portal, login=None):
         """A new login under the pool's rules (cool-down, login slots) that the pool does not keep; the caller closes it."""
         return self._new_login((credentials.tenant(), portal), portal, login)
+
+    def check(self, portal):
+        """Prove the current credentials with a fresh login under the pool's rules; nothing is kept."""
+        self._close(self.fresh_login(portal))
 
     @contextmanager
     def session(self, portal):
