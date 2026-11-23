@@ -765,6 +765,7 @@ def _ato(api, process_id, number, item, limit):
         "texto": text[:limit],
         "truncado": len(text) > limit,
         "extractionStatus": status,
+        **({"failure": f"HTTP {read['status']} ({read['error']})"} if read.get("error") else {}),
     }
 
 
@@ -773,34 +774,94 @@ def _ato(api, process_id, number, item, limit):
 
 # As ``documents._download``: a portal may render a large PDF for a minute before its first byte.
 DOCUMENT_TIMEOUT = (15, 150)
+PDF_ACCEPT = "application/pdf,text/html,*/*"
+# What the web viewer sends for a document whose metadata says ``tipoArquivo="HTML"`` (an acórdão written in the
+# 2º grau editor): the answer is JSON ``{"conteudoBase64": <the HTML>}``. A PDF document answers this request with
+# the PDF itself. Live on TRT20 2G (2026-11-23), an HTML acórdão asked for as PDF gave HTTP 500 ``ARQ-512``
+# ("Erro de mapeamento de objetos") and read through this request.
+HTML_ACCEPT = "application/json, text/plain, */*"
+HTML_ATTEMPTS = ({"incluirAssinatura": "false"}, {"incluirAssinatura": "true"})  # the viewer's default is "true"
+ERROR_BODY_BYTES = 4096
 
 
-def fetch_document(api, process_id, document_id):
-    """GET the PDF of a joined document, capped at ``MAX_DOCUMENT_BYTES``; ``content`` is None when not read."""
+def _portal_error(content):
+    """``"ARQ-512: Erro de mapeamento de objetos"`` from the API's JSON error body; ``""`` when it has none."""
+    try:
+        body = json.loads(content)
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(body, dict):
+        return ""
+    parts = [_text(body.get(key))[:120] for key in ("codigoErro", "mensagem") if isinstance(body.get(key), str)]
+    return ": ".join(part for part in parts if part)
+
+
+def _fetch(api, process_id, document_id, params, accept):
     out = {"status": None, "content_type": "", "bytes": 0, "content": None}
     response = api._get(
         f"{API}/processos/id/{process_id}/documentos/id/{document_id}/conteudo",
-        {"incluirAssinatura": "false", "incluirCapa": "false"},
+        params,
         label="PJe document",
-        headers={"Accept": "application/pdf,text/html,*/*"},
+        headers={"Accept": accept},
         stream=True,
         timeout=DOCUMENT_TIMEOUT,
     )
     try:
         out.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
-        if response.status_code != 200:
-            return out
+        limit = MAX_DOCUMENT_BYTES if response.status_code == 200 else ERROR_BODY_BYTES
         content = bytearray()
         for chunk in response.iter_content():
             out["bytes"] += len(chunk)
-            if out["bytes"] > MAX_DOCUMENT_BYTES:
-                out["status"] = "too_large"
-                return out
+            if out["bytes"] > limit:
+                if response.status_code == 200:
+                    out["status"] = "too_large"
+                    return out
+                break
             content.extend(chunk)
+        if response.status_code != 200:
+            out["bytes"] = 0
+            if "json" in out["content_type"].casefold():
+                error = _portal_error(bytes(content[:ERROR_BODY_BYTES]))
+                if error:
+                    out["error"] = error
+            return out
         out["content"] = bytes(content)
         return out
     finally:
         response.close()
+
+
+def _html_document(read):
+    """The HTML inside a viewer answer ``{"conteudoBase64": ...}``; any other 200 answer is returned as it came."""
+    if read["content"] is None or "json" not in read["content_type"].casefold():
+        return read
+    try:
+        encoded = json.loads(read["content"]).get("conteudoBase64")
+        html = base64.b64decode(encoded, validate=True) if isinstance(encoded, str) else None
+    except (ValueError, AttributeError, UnicodeDecodeError):
+        html = None
+    if html is None:
+        return {**read, "content": None, "error": "the portal answered JSON without the document's content"}
+    return {**read, "content_type": "text/html; charset=utf-8", "bytes": len(html), "content": html}
+
+
+def fetch_document(api, process_id, document_id):
+    """GET a joined document, capped at ``MAX_DOCUMENT_BYTES``; ``content`` is None when not read.
+
+    A PDF document is read with one request. An HTTP 500 is retried as the web viewer reads an HTML document (see
+    ``HTML_ACCEPT``); when that fails too, ``error`` carries the portal's own code and message.
+    """
+    read = _fetch(api, process_id, document_id, {"incluirAssinatura": "false", "incluirCapa": "false"}, PDF_ACCEPT)
+    if read["status"] != 500:
+        return read
+    first = read
+    for params in HTML_ATTEMPTS:
+        read = _html_document(_fetch(api, process_id, document_id, params, HTML_ACCEPT))
+        if read["content"] is not None or read["status"] != 500:
+            break
+    if read["content"] is None and not read.get("error") and first.get("error"):
+        read["error"] = first["error"]
+    return read
 
 
 def read_documents(process, document_ids, *, session, save=False):
@@ -844,7 +905,8 @@ def read_documents(process, document_ids, *, session, save=False):
                 if read["status"] == "too_large":
                     item["extractionStatus"] = "too_large"
                 else:
-                    item.update(extractionStatus="http_error", failure=f"HTTP {read['status']}")
+                    failure = f"HTTP {read['status']}" + (f" ({read['error']})" if read.get("error") else "")
+                    item.update(extractionStatus="http_error", failure=failure)
             else:
                 content = read["content"]
                 item["sha256"] = hashlib.sha256(content).hexdigest()

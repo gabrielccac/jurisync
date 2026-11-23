@@ -577,3 +577,69 @@ def test_acervo_listing_reads_acervo_geral_and_arquivados_once_per_process():
     }  # fmt: skip
     assert item["caixa"] == "Acervo Geral"
     assert not any("expedientes" in path or "documento" in path for path, _ in session.calls)
+
+
+ARQ_512 = {"codigoErro": "ARQ-512", "mensagem": "Erro de mapeamento de objetos"}
+
+
+def arq_512():
+    return Response(500, ARQ_512, content=json.dumps(ARQ_512).encode())
+
+
+def html_session(answers):
+    """A session whose document requests are answered, in order, by ``answers(accept, params)``."""
+    session = Session()
+    original = session.get
+    seen = []
+
+    def get(url, params=None, headers=None, **kwargs):
+        if "/documentos/id/" not in url:
+            return original(url, params, headers, **kwargs)
+        seen.append(((headers or {}).get("Accept"), dict(params or {})))
+        return answers(*seen[-1])
+
+    session.get = get
+    return session, seen
+
+
+def test_an_html_acordao_that_fails_as_pdf_is_read_as_the_web_viewer_reads_it():
+    html = f"<html><body><p>ACÓRDÃO</p><p>Processo {NUMBER}</p><p>{'Fundamentação. ' * 40}</p></body></html>"
+
+    def answers(accept, params):
+        if "pdf" in accept:
+            return arq_512()  # TRT20 2G, 2026-11-23: an HTML acórdão asked for as PDF
+        return Response(content=json.dumps({"conteudoBase64": base64.b64encode(html.encode()).decode()}).encode())
+
+    session, seen = html_session(answers)
+    document = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=session)["documents"][0]
+    assert document["extractionStatus"] == "extracted" and "Fundamentação" in document["text"]
+    assert document["content_type"].startswith("text/html") and document["bytes"] == len(html.encode())
+    assert "failure" not in document
+    assert seen == [
+        ("application/pdf,text/html,*/*", {"incluirAssinatura": "false", "incluirCapa": "false"}),
+        ("application/json, text/plain, */*", {"incluirAssinatura": "false"}),
+    ]
+
+
+def test_a_document_the_portal_cannot_serve_names_the_portal_error():
+    session, seen = html_session(lambda accept, params: arq_512())
+    document = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=session)["documents"][0]
+    assert document["extractionStatus"] == "http_error"
+    assert document["failure"] == "HTTP 500 (ARQ-512: Erro de mapeamento de objetos)"
+    assert [params for _, params in seen][1:] == [{"incluirAssinatura": "false"}, {"incluirAssinatura": "true"}]
+
+
+def test_a_pdf_document_and_a_refusal_take_one_request():
+    for answer in (Response(content=b"%PDF-1.4 x", content_type="application/pdf"), Response(403, {"codigoErro": "X"})):
+        session, seen = html_session(lambda accept, params, answer=answer: answer)
+        read = kz.fetch_document(kz.Api(session, "trt7-1g"), "1000001", "9000005")
+        assert len(seen) == 1 and read["status"] in (200, 403)
+
+
+def test_a_json_answer_without_content_is_not_a_document():
+    def answers(accept, params):
+        return arq_512() if "pdf" in accept else Response(content=b'{"outro": 1}')
+
+    session, _ = html_session(answers)
+    read = kz.fetch_document(kz.Api(session, "trt7-1g"), "1000001", "9000005")
+    assert read["content"] is None and "without the document's content" in read["error"]

@@ -256,6 +256,25 @@ def parse_search_rows(html):
     ]
 
 
+def search_parameters(html):
+    """The A4J parameters the "Pesquisar" button sends, read from its ``onclick`` on the page just loaded.
+
+    The 2026 form declares ``consultarProcessoForm:j_id330 = 1`` there, not as a form field. The generated id changes when
+    the page is rebuilt, so it is taken from the page and never sent when the button no longer declares it.
+    """
+    button = f"{SEARCH_FORM}:searchButton"
+    element = _soup(html).find("input", attrs={"name": button})
+    values = {}
+    if element is not None:
+        try:
+            values = jsf.a4j_submit(element.get("onclick", ""))[2]
+        except RuntimeError:
+            values = {}
+    values = {key: value for key, value in values.items() if key.startswith(f"{SEARCH_FORM}:")}
+    values[button] = button
+    return values
+
+
 def find_process(session, process_number, *, portal):
     """Search a process number in the consultarProcessoForm: its id, access key (ca), search summary and referer."""
     config = portals.pje(portal)
@@ -271,8 +290,7 @@ def find_process(session, process_number, *, portal):
             SEARCH_FORM,
             {
                 "AJAXREQUEST": "_viewRoot",
-                f"{SEARCH_FORM}:j_id330": "1",
-                f"{SEARCH_FORM}:searchButton": f"{SEARCH_FORM}:searchButton",
+                **search_parameters(html),
                 f"{SEARCH_FORM}:numeroProcessoDecoration:numeroProcesso": process_number,
             },
             f"{config.key} search",
@@ -284,7 +302,8 @@ def find_process(session, process_number, *, portal):
     if not found:
         return {
             "success": False,
-            "error": "Process not found in the PJe 1.x search (the account may not see it)",
+            "error": "[process_not_found] Process not found in the PJe 1.x search (the account may not see it)",
+            "reason": "process_not_found",
             "search_results": summary,
             "timeline": [],
         }

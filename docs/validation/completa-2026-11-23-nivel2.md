@@ -256,3 +256,38 @@ Scripts e logs (sem segredos): `/tmp/claude-1000/-home-gabriel-orca-jurisync/9c8
 - `run3.py`, `djwin.py`, `djnum.py`;
 - `{fernanda,max,herica}.log`, `results.jsonl`;
 - `djnum_tjpr2g_2026.log`, `djen_*.log`.
+
+## Rodada 3 — TRT20 2G
+
+Um login no `trt20-2g` (max), 3,3 s, com `instancia=2` no token. Só GETs, sem ciência. Processo 0000185-40.2023.5.20.0005, nenhum documento de expediente pendente.
+
+**De onde veio a pista:** o bundle público do `pjekz` (`main.*.js`). O visualizador do portal primeiro lê os metadados do documento (`…/documentos/id/{doc}?incluirAssinatura&incluirAnexos`) e escolhe a rota pelo `tipoArquivo`:
+- `PDF`: `…/conteudo?incluirCapa=…&incluirAssinatura=…` com `Accept: application/pdf`.
+- `HTML`: `…/conteudo?incluirAssinatura=…` com `Accept` JSON. A resposta é `{"conteudoBase64": <HTML>}`.
+
+O conector pedia tudo como PDF.
+
+| Documento | `tipoArquivo` | Pedido como PDF (o nosso) | Pedido como o visualizador lê HTML |
+|---|---|---|---|
+| 9260220 Acórdão (2º grau) | HTML (lido na rodada 2; nesta, os metadados deram 408 uma vez) | ❌ 500 (rodada 2) | ✅ 200, JSON com `conteudoBase64` de 89 kB |
+| 9365013 Acórdão (2º grau) | HTML | ❌ 500 `ARQ-512` "Erro de mapeamento de objetos" | ❌ 500 `ARQ-512` |
+| 9150582 Sentença (1º grau) | PDF | ✅ PDF | ✅ o mesmo PDF (mesmos bytes) |
+| 9630461 Certidão (2º grau, não é ato de magistrado) | PDF | ✅ PDF | ✅ o mesmo PDF |
+
+Variantes também testadas no 9365013, todas com 500 `ARQ-512`: `grau=1`, `grau=2`, `incluirCapa=true`, `incluirAssinatura=true` (pedido como PDF), e JSON com `grau=1`/`grau=2`. A rota de pesquisa textual `/documentos/{doc}/conteudo` dá 404 `ARQ-013` (não existe para este perfil).
+
+**Causa:**
+- **Nossa, no 9260220.** O acórdão de 2º grau é um documento HTML do editor, e o portal não o entrega como PDF. Não é "instância 2º grau" nem "ato de magistrado": a Certidão de 2º grau lê, e o que separa é o `tipoArquivo`.
+- **Do portal, no 9365013.** Ele falha também no pedido que o próprio visualizador faz. Ficou sem teste só o JSON com `incluirAssinatura=true`, o padrão do visualizador. A sessão de certificado+TOTP não fica salva em disco (`cache_path` é `None`), e não fiz 2º login.
+
+**Correção (`kz.fetch_document`):**
+- Um PDF continua sendo 1 pedido, igual a antes.
+- Um HTTP 500 é repetido como o visualizador lê HTML: JSON com `incluirAssinatura=false` e, se ainda der 500, com `incluirAssinatura=true`. O `conteudoBase64` vira o HTML (`text/html`), e o texto é extraído dele.
+- Quando nada lê, `failure` traz o código e a mensagem do portal: `HTTP 500 (ARQ-512: Erro de mapeamento de objetos)`. O ato de expediente (`_ato`) recebe o mesmo `failure`.
+- O caminho do 9260220 (500 no PDF, depois 200 no JSON) foi confirmado ao vivo, pedido a pedido, mas não pela ferramenta inteira depois da correção: isso pediria outro login.
+
+**PJe 1.x (`legacy.py`), sem login:**
+- "Process not found in the PJe 1.x search" agora sai como `[process_not_found] …`, com `reason="process_not_found"`.
+- `consultarProcessoForm:j_id330` não é campo do formulário. É um parâmetro A4J que o próprio botão "Pesquisar" declara no `onclick`, e está na página salva do TRF5. Agora os parâmetros são lidos do botão da página carregada: o `j_id330` só vai se o botão ainda o declarar, e um id novo vai no lugar dele.
+
+**Testes:** 4 novos no KZ (HTML lido após o 500; falha com `ARQ-512` e as 3 tentativas; PDF e 403 com 1 pedido; JSON sem conteúdo) e 1 no PJe 1.x (parâmetros do botão, com e sem `j_id330`). A suíte sem `advbox` deu 1462 passed e 1 skipped. Os 3 testes `advbox` que falham são do trabalho em andamento do outro agente. O `ruff` passou.

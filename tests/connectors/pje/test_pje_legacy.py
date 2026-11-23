@@ -192,8 +192,36 @@ class Pje1xSearch(unittest.TestCase):
         result = search.search_process(session, "0000001-02.2026.4.05.0000", portal="trf5-legacy")
         self.assertFalse(result["success"])
         self.assertIn("not found", result["error"])
+        self.assertTrue(result["error"].startswith("[process_not_found] "))
+        self.assertEqual(result["reason"], "process_not_found")
         self.assertEqual(result["search_results"]["count"], 0)
         self.assertIn("0000001-02.2026.4.05.0000", session.posts[0].replace("%2D", "-").replace("%2E", "."))
+
+    def test_the_search_sends_the_parameters_its_button_declares(self):
+        form = page("consulta_form.html")
+        self.assertEqual(
+            legacy.search_parameters(form),
+            {
+                "consultarProcessoForm:j_id330": "1",
+                "consultarProcessoForm:searchButton": "consultarProcessoForm:searchButton",
+            },
+        )
+        session = self.search_session(page("consulta_vazia.html"))
+        search.search_process(session, "0000001-02.2026.4.05.0000", portal="trf5-legacy")
+        self.assertIn("j_id330", session.posts[0])
+        rebuilt = form.replace("'consultarProcessoForm:j_id330':'1',", "")
+        self.assertEqual(
+            legacy.search_parameters(rebuilt),
+            {"consultarProcessoForm:searchButton": "consultarProcessoForm:searchButton"},
+        )
+        session = FakeSession(
+            [("consultarProcessoForm", page("consulta_vazia.html"))],
+            {"Processo/ConsultaProcesso/listView.seam": rebuilt},
+        )
+        result = search.search_process(session, "0000001-02.2026.4.05.0000", portal="trf5-legacy")
+        self.assertNotIn("j_id330", session.posts[0])
+        self.assertIn("searchButton", session.posts[0])
+        self.assertEqual(result["search_results"]["count"], 0)
 
     def test_fetch_process_reports_the_search_summary_for_a_missing_process(self):
         session = self.search_session(page("consulta_vazia.html"))
