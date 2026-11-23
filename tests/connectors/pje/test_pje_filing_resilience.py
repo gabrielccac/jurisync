@@ -423,10 +423,12 @@ class CheckpointTests(unittest.TestCase):
 
 
 class LoginRetryTests(unittest.TestCase):
+    """cert_login never repeats a whole login: what stopped it is reported (herica tjmt-1g, 23/11: "twice")."""
+
     def run_login(self, outcomes, account="otp"):
         attempts, waits = [], []
 
-        def fake_login(*args):
+        def fake_login(*args, **kwargs):
             attempts.append(1)
             outcome = outcomes.pop(0)
             if isinstance(outcome, Exception):
@@ -446,27 +448,17 @@ class LoginRetryTests(unittest.TestCase):
                 result = error
         return result, len(attempts), waits
 
-    def test_a_login_that_stops_short_is_repeated_once_in_the_next_totp_window(self):
-        result, attempts, waits = self.run_login(
-            [RuntimeError("trf5-1g login did not reach an authenticated PJe page"), "session"]
-        )
-        self.assertEqual((result, attempts), ("session", 2))
-        self.assertEqual(waits, [certificate._seconds_to_next_window(100.0)])
-        self.assertEqual(waits, [21.0])
-
-    def test_a_second_failure_and_other_errors_are_not_repeated_again(self):
-        stop = "trf5-1g login did not reach an authenticated PJe page"
-        result, attempts, _ = self.run_login([RuntimeError(stop), RuntimeError(stop)])
-        self.assertEqual(attempts, 2)
-        self.assertIsInstance(result, RuntimeError)
-        result, attempts, waits = self.run_login([RuntimeError("PJe is unavailable (HTTP 503); try again later")])
+    def test_a_login_that_stops_short_is_reported_not_repeated(self):
+        stop = certificate.LoginFailed("trf5-1g: the SSO accepted the authenticator code, but ...", reason="unexpected")
+        result, attempts, waits = self.run_login([stop, "session"])
+        self.assertIs(result, stop)
         self.assertEqual((attempts, waits), (1, []))
 
-    def test_a_login_without_totp_is_not_repeated(self):
-        _, attempts, _ = self.run_login(
-            [RuntimeError("SSO did not advance after the certificate callback")], account=None
-        )
-        self.assertEqual(attempts, 1)
+    def test_a_success_is_returned(self):
+        self.assertEqual(self.run_login(["session"])[:2], ("session", 1))
+
+    def test_the_next_window_is_still_computed_for_waiting_callers(self):
+        self.assertEqual(certificate._seconds_to_next_window(100.0), 21.0)
 
 
 class ServerResumeTests(unittest.TestCase):

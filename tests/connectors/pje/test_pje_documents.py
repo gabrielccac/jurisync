@@ -483,5 +483,73 @@ class ViewerSelectionChecks(unittest.TestCase):
         self.assertNotIn("viewer_action", str(redacted))
 
 
+COVER = "<html><head></head><p>Petição Inicial</p></html>".encode()
+
+
+def covered_process(anexos=2):
+    """TJRJ 1G, 15/10: a "Petição Inicial" of 100 bytes of HTML and the petition attached in the same entry."""
+    data = process()
+    entry = [{"id": "456", "title": "Petição Inicial", "download_url": URL}]
+    entry += [
+        {"id": str(500 + n), "title": "Outros Anexos", "download_url": URL[: -len("456")] + str(500 + n)}
+        for n in range(anexos)
+    ]
+    data["timeline"][0]["movements"][0]["documents"] = entry
+    return data
+
+
+def pdf_like(text):
+    return f"<html><p>PROCESSO: {NUMBER}</p><p>{text}</p></html>".encode()
+
+
+class CoverPageChecks(unittest.TestCase):
+    def test_a_short_cover_comes_with_the_documents_attached_to_it(self):
+        session = Mock()
+        session.get.side_effect = [response(COVER), response(pdf_like("DOS FATOS")), response(pdf_like("PEDIDOS"))]
+        item = documents.read_selected_documents(covered_process(), ["456"], session=session)[0]
+        self.assertEqual((item["extractionStatus"], item["text"]), ("short_html", "Petição Inicial"))
+        self.assertIn("cover", item["cover_note"])
+        self.assertEqual([a["id"] for a in item["anexos"]], ["500", "501"])
+        self.assertEqual([a["extractionStatus"] for a in item["anexos"]], ["extracted", "extracted"])
+        self.assertIn("DOS FATOS", item["anexos"][0]["text"])
+        self.assertTrue(session.get.call_args_list[1].args[0].endswith("/500"))
+        self.assertNotIn("anexos_not_read", item)
+
+    def test_only_three_anexos_are_read_and_the_rest_are_named(self):
+        session = Mock()
+        session.get.side_effect = [response(COVER)] + [response(pdf_like("x")) for _ in range(3)]
+        item = documents.read_selected_documents(covered_process(5), ["456"], session=session)[0]
+        self.assertEqual(len(item["anexos"]), 3)
+        self.assertEqual([a["id"] for a in item["anexos_not_read"]], ["503", "504"])
+        self.assertEqual(session.get.call_count, 4)
+
+    def test_anexos_already_selected_are_not_read_twice_and_a_real_document_is_not_followed(self):
+        session = Mock()
+        session.get.side_effect = [response(COVER), response(pdf_like("a")), response(pdf_like("b"))]
+        first, second = documents.read_selected_documents(covered_process(2), ["456", "500"], session=session)
+        self.assertEqual([a["id"] for a in first["anexos"]], ["501"])
+        self.assertNotIn("anexos", second)
+        self.assertEqual(session.get.call_count, 3)
+
+    def test_a_cover_alone_in_its_entry_is_returned_as_before(self):
+        session = Mock()
+        session.get.return_value = response(COVER)
+        item = documents.read_selected_documents(covered_process(0), ["456"], session=session)[0]
+        self.assertEqual(item["extractionStatus"], "short_html")
+        self.assertNotIn("anexos", item)
+        session.get.assert_called_once()
+
+    def test_an_anexo_outside_the_read_route_is_not_requested(self):
+        data = covered_process(1)
+        data["timeline"][0]["movements"][0]["documents"][1]["download_url"] = "https://evil.example/500"
+        session = Mock()
+        session.get.return_value = response(COVER)
+        item = documents.read_selected_documents(data, ["456"], session=session)[0]
+        self.assertEqual(
+            item["anexos"], [{"id": "500", "title": "Outros Anexos", "extractionStatus": "no_download_location"}]
+        )
+        session.get.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

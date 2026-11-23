@@ -19,9 +19,16 @@ from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.acervo import read_acervo
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
-from jurisync.connectors.pje.process import fetch_process, login_portal, movement_candidates, read_documents
+from jurisync.connectors.pje.process import (
+    fetch_process,
+    login_portal,
+    movement_candidates,
+    read_documents,
+    require_own_number,
+)
 from jurisync.connectors.pje.push import read_push
 from jurisync.core import certificate, ciencia, credentials
+from jurisync.core.documents import validate_document_ids
 from jurisync.core.mcp import (
     READ_ONLY,
     load_env_file,
@@ -111,8 +118,10 @@ def _allow_ciencia(requested):
     return ciencia_on_read() == "allow" if requested is None else requested
 
 
-def _notifications(portal, read):
+def _notifications(portal, read, process_number=None):
     with tool_errors("PJe", *ERRORS):
+        if process_number:
+            require_own_number(portal, process_number)  # before the session: a wrong court never costs a login
         return require_success("PJe", sessions.run(portal, lambda session: read(portal, session=session)))
 
 
@@ -135,6 +144,7 @@ def get_process(
     ] = "page",
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS):
+        require_own_number(portal, processNumber)  # before the session: a wrong court never costs a login
         result = sessions.run(
             portal, lambda session: fetch_process(processNumber, scope, portal=portal, session=session)
         )
@@ -145,7 +155,7 @@ def get_process(
 @server.tool(
     name="pje_read_documents",
     title="Read PJe documents",
-    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text, and for one not read a failure saying why (no download link, HTTP status or redirect, the request step that failed, or what was served instead) (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except what may belong to a communication whose ciência is not registered yet: its act, the documents attached to that act, and any document of a process that has a pending communication with no document id. Reading those may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
+    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text, and for one not read a failure saying why (no download link, HTTP status or redirect, the request step that failed, or what was served instead) (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A short cover (a petição typed in the PJe editor as only its title) comes with anexos: the documents attached to it in the same timeline entry, read in the same call (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except what may belong to a communication whose ciência is not registered yet: its act, the documents attached to that act, and any document of a process that has a pending communication with no document id. Reading those may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
     + ciencia.AUTHORIZATION
     + ". The read is also refused, with nothing opened, when the process' expedientes could not be read or not in full (the error starts with 'ciência not checked'): retry later, or use acknowledgeCiencia=true under the same authorization. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. Every result has a ciencia block: estado 'nenhuma' (nothing read was pending), 'dada' (a communication whose ciência was pending was read, so it may now be registered and its deadline started; intimacoes lists it) or 'desconhecida' (read with acknowledgeCiencia although the expedientes could not be checked), with an aviso in Portuguese: unless it is 'nenhuma', tell the user and note it in the task.",
     # With acknowledgeCiencia a read may register the ciência and start a deadline, and save=true writes a file.
@@ -177,6 +187,8 @@ def read_documents_tool(
     # A repeat after an expired session only re-runs the search and the ciência check: read_documents does not
     # report an expiry once documents are being opened.
     with tool_errors("PJe", *ERRORS):
+        require_own_number(portal, processNumber)
+        validate_document_ids(documentIds)
         result = sessions.run(
             portal,
             lambda session: read_documents(
@@ -189,9 +201,10 @@ def read_documents_tool(
             ),
         )
     for document in result.get("documents", []):
-        text = document.get("text", "")
-        document["textTruncated"] = len(text) > textLimit
-        document["text"] = text[:textLimit]
+        for read in (document, *document.get("anexos", [])):
+            text = read.get("text", "")
+            read["textTruncated"] = len(text) > textLimit
+            read["text"] = text[:textLimit]
     return require_success("PJe", result)
 
 
@@ -224,6 +237,7 @@ def read_expediente_ato_tool(
 ) -> dict[str, Any]:
     # An expired session shows up before the act is served, so a repeat never opens it twice.
     with tool_errors("PJe", *ERRORS):
+        require_own_number(portal, processNumber)
         result = sessions.run(
             portal,
             lambda session: fetch_process(
@@ -334,13 +348,14 @@ def list_inbox(
         lambda name, session: read_inbox(
             name, bucket=bucket, regions=regions, filters=filters or None, max_pages=maxPages, session=session
         ),
+        processNumber,
     )
 
 
 @server.tool(
     name="pje_list_watched_processes",
     title="List PJe Push watched processes",
-    description="Read the authenticated PJe Push watched-process registry: limit rows (default 100) starting at offset, with total and hasMore; call again with offset += limit while hasMore is true. processNumber returns only that process' registrations (total 0 means it is not watched). It reports registered processes, not movement or publication email text; no page replay or watch mutations are performed.",
+    description="Read the authenticated PJe Push watched-process registry (the 'Processos cadastrados' list; the page's 'Processos relacionados' tab is not registrations and is not listed): limit rows (default 100) starting at offset, reading the registry's pages as needed, with total and hasMore; call again with offset += limit while hasMore is true. total is null when pages were left unread and the portal shows no count; complete is true only when the whole registry was read. processNumber reads the whole registry and returns only that process' registrations (total 0 means it is not watched). It reports registered processes, not movement or publication email text; no page replay or watch mutations are performed.",
     annotations=READ_ONLY,
 )
 def watched_processes(
@@ -356,6 +371,7 @@ def watched_processes(
         lambda name, session: read_push(
             name, session=session, limit=limit, offset=offset, process_number=processNumber or None
         ),
+        processNumber,
     )
 
 

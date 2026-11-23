@@ -138,9 +138,37 @@ class Pje1xPanel(unittest.TestCase):
         buckets = [{"index": "0", "label": "Acervo / Acervo Geral", "count": 3, "kind": "acervo"}]
         from unittest.mock import patch
 
-        with patch.object(legacy, "read_panel", return_value=("u", buckets)):
+        with patch.object(legacy, "_find_bucket", return_value=(buckets[0], "<html></html>")):
             with self.assertRaisesRegex(ValueError, "not supported"):
                 legacy.read_inbox(session, "trf5-legacy", bucket="0")
+
+    def test_the_default_inbox_does_not_open_the_later_tabs(self):
+        # max, 23/11: "Intimações de Pauta de Julgamento" took 27-37 s, and every inbox call opened it.
+        session = panel_session()
+        inbox.read_inbox("trf5-legacy", session=session)
+        self.assertFalse([p for p in session.posts if "IntimacaoRpv" in p or "IntimacaoPendente" in p])
+        self.assertEqual(len(session.posts), 2)  # Acervo Geral, then the Intimações tab
+
+    def test_a_bucket_with_rows_opens_its_toggle_from_the_tab_page_already_read(self):
+        session = panel_session()
+        session.post_pages[3] = (
+            "tabProcAdvPainelIntimacao=",
+            page("aba_intimacoes.html").replace("Pendentes - 0", "Pendentes - 2", 1),
+        )
+        gets = []
+        original = session.get
+        session.get = lambda url, **kwargs: gets.append(url) or original(url, **kwargs)
+        result = inbox.read_inbox("trf5-legacy", session=session)
+        self.assertEqual(result["bucket"]["count"], 2)
+        self.assertEqual(len(gets), 1)  # the panel, once
+        self.assertIn("expedientesPendentesAdvogadoToogle=", session.posts[-1])
+        self.assertEqual(len(session.posts), 3)
+
+    def test_a_partial_label_still_reads_every_tab_to_be_sure_it_names_one_bucket(self):
+        session = panel_session()
+        result = inbox.read_inbox("trf5-legacy", bucket="Pauta de Julgamento / Pendentes", session=session)
+        self.assertEqual(result["bucket"]["label"], "Intimações de Pauta de Julgamento / Pendentes")
+        self.assertTrue([p for p in session.posts if "IntimacaoPendente" in p])
 
 
 class Pje1xPush(unittest.TestCase):

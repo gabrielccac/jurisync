@@ -82,7 +82,6 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             known[doc_id] = merged
         else:
             known[doc_id] = document
-    host = config.host
     process_id = process.get("processo_id")
     if not isinstance(process_id, str) or not re.fullmatch(r"[0-9]+", process_id):
         raise ValueError("The adapter's numeric process ID is required")
@@ -90,118 +89,179 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     for doc_id in document_ids:
         if doc_id not in known:
             raise ValueError("Selected document ID is not in this process")
-        document = known[doc_id]
-        url = document.get("download_url") or document.get("url")
-        if not isinstance(url, str):
-            selected.append((document, None))
-            continue
-        parsed = urlsplit(url)
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname != host
-            or parsed.port not in (None, 443)
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-            or not re.fullmatch(
-                re.escape(config.root)
-                + r"seam/resource/rest/pje-legacy/documento/download/(?:[A-Za-z0-9-]+/[A-Za-z0-9_-]+/"
-                + process_id
-                + r"/)?"
-                + re.escape(doc_id),
-                parsed.path,
-            )
-        ):
-            raise ValueError("Document download location is outside the supported read route")
-        selected.append((document, url))
+        selected.append((known[doc_id], _route(known[doc_id], config, process_id)))
     viewer = process.get("viewer")
-    results = []
     call_deadline = time.monotonic() + CALL_SECONDS
+
+    def read(document, url):
+        return _read_one(session, config, process, document, url, viewer, number, save, call_deadline)
+
+    results = []
     for document, url in selected:
-        item = {
-            "id": document["id"],
-            "title": document.get("title", ""),
-            "status": None,
-            "content_type": "",
-            "bytes": 0,
-            "extractionStatus": "request_failed",
-            "text": "",
-        }
-        if url is None:
-            failure = NO_ROUTE if process.get("download_pattern_found") is False else NO_LINK
-            item.update(extractionStatus="no_download_location", failure=failure)
-            results.append(item)
-            continue
-        if time.monotonic() > call_deadline:
-            item.update(extractionStatus="not_attempted", failure=OUT_OF_TIME)
-            results.append(item)
-            continue
-        response = None
-        step = "request"
-        deadline = time.monotonic() + DOCUMENT_SECONDS
-        try:
-            response = _download_patiently(session, config, url)
-            action = document.get("viewer_action")
-            # TJMT serves a document only once the process page shows it in its viewer, as a click does.
-            if response.status_code != 200 and action and _show_in_viewer(session, config, viewer, action):
-                response.close()
-                response = None
-                response = _download(session, config, url)
-            item.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
-            if response.status_code != 200:
-                # The first-instance copy of a second-instance document is not served here: read the visible one.
-                item["extractionStatus"] = (
-                    "first_instance_copy" if document.get("first_instance_copy") else "http_error"
-                )
-                item["failure"] = _http_failure(response, config)
-            else:
-                step = "body"
-                content = bytearray()
-                for chunk in response.iter_content():
-                    item["bytes"] += len(chunk)
-                    if item["bytes"] > MAX_DOCUMENT_BYTES:
-                        item["extractionStatus"] = "too_large"
-                        break
-                    if time.monotonic() > deadline:
-                        item.update(failure=f"body failed: not received within {DOCUMENT_SECONDS} s")
-                        break
-                    content.extend(chunk)
-                else:
-                    item["sha256"] = hashlib.sha256(content).hexdigest()
-                    item["extractionStatus"], item["text"] = extract_document_text(
-                        bytes(content), item["content_type"], number, allow_unnumbered=True
-                    )
-                    if item["extractionStatus"] in NOT_A_DOCUMENT:
-                        item["failure"] = (
-                            f"the portal served {item['content_type'] or 'no Content-Type'}, not the document "
-                            f"({item['extractionStatus']})"
-                        )
-                    step = "save"
-                    if save:
-                        item["savedAs"] = save_document(_saved_name(number, document["id"], content, item), content)
-        except (RequestException, OSError) as error:
-            # Exception messages can include session-bearing request URLs: only the step and the error's class.
-            failure = f"{step} failed: {type(error).__name__}"
-            if isinstance(error, Timeout):
-                failure += (
-                    f" (the portal sent nothing for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s, twice; it may still be "
-                    "preparing the document: read it again in a few minutes)"
-                    if step == "request"
-                    else f" (the portal stopped sending for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s)"
-                )
-            item.update(extractionStatus="request_failed", text="", failure=failure)
-        finally:
-            if response is not None:
-                try:
-                    response.close()
-                except RequestException as error:
-                    # Only when nothing was concluded: a close failure never hides "too_large", an HTTP error or a
-                    # read document, nor the step that failed first.
-                    if item["extractionStatus"] == "request_failed" and "failure" not in item:
-                        item.update(text="", failure=f"close failed: {type(error).__name__}")
+        item = read(document, url)
+        if item["extractionStatus"] == "short_html":
+            _follow_cover(item, process, known, config, process_id, set(document_ids), read)
         results.append(item)
     return results
+
+
+def _route(document, config, process_id):
+    """The document's download URL when it is the exact adapter route of this process, None without a link."""
+    url = document.get("download_url") or document.get("url")
+    if not isinstance(url, str):
+        return None
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != config.host
+        or parsed.port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not re.fullmatch(
+            re.escape(config.root)
+            + r"seam/resource/rest/pje-legacy/documento/download/(?:[A-Za-z0-9-]+/[A-Za-z0-9_-]+/"
+            + process_id
+            + r"/)?"
+            + re.escape(document["id"]),
+            parsed.path,
+        )
+    ):
+        raise ValueError("Document download location is outside the supported read route")
+    return url
+
+
+# A petição filed through the PJe editor is often only a cover ("Petição Inicial", 100 bytes of HTML on TJRJ and
+# TJBA 2G) with the petition itself attached to it: the documents listed in the same timeline entry. They are read
+# with the cover, at most this many, under the call's own ciência check (an entry's documents are checked together).
+COVER_ANEXOS = 3
+COVER_NOTE = (
+    "This document is only a cover page typed in the PJe editor; its content is in the documents attached to it "
+    "(anexos, read below)."
+)
+
+
+def _cover_anexos(process, document_id):
+    """The other documents of the timeline entry that lists ``document_id`` (its attachments), in portal order."""
+    for day in process.get("timeline", []):
+        for movement in day.get("movements", []):
+            ids = [str(document.get("id")) for document in movement.get("documents", [])]
+            if str(document_id) in ids:
+                return [identifier for identifier in ids if identifier != str(document_id)]
+    return []
+
+
+def _follow_cover(item, process, known, config, process_id, requested, read):
+    """Read a short cover's anexos into ``item["anexos"]`` (the ones the caller did not select already)."""
+    anexos = [identifier for identifier in _cover_anexos(process, item["id"]) if identifier not in requested]
+    if not anexos:
+        return
+    item["cover_note"] = COVER_NOTE
+    item["anexos"] = []
+    for identifier in anexos[:COVER_ANEXOS]:
+        document = known.get(identifier)
+        try:
+            url = _route(document, config, process_id) if document else None
+        except ValueError:
+            url = None
+        if document is None or url is None:
+            item["anexos"].append(
+                {
+                    "id": identifier,
+                    "title": (document or {}).get("title", ""),
+                    "extractionStatus": "no_download_location",
+                }
+            )
+            continue
+        item["anexos"].append(read(document, url))
+    if len(anexos) > COVER_ANEXOS:
+        item["anexos_not_read"] = [
+            {"id": identifier, "title": (known.get(identifier) or {}).get("title", "")}
+            for identifier in anexos[COVER_ANEXOS:]
+        ]
+
+
+def _read_one(session, config, process, document, url, viewer, number, save, call_deadline):
+    """Fetch and extract one document; a failure is reported in the item, never raised."""
+    item = {
+        "id": document["id"],
+        "title": document.get("title", ""),
+        "status": None,
+        "content_type": "",
+        "bytes": 0,
+        "extractionStatus": "request_failed",
+        "text": "",
+    }
+    if url is None:
+        failure = NO_ROUTE if process.get("download_pattern_found") is False else NO_LINK
+        item.update(extractionStatus="no_download_location", failure=failure)
+        return item
+    if time.monotonic() > call_deadline:
+        item.update(extractionStatus="not_attempted", failure=OUT_OF_TIME)
+        return item
+    response = None
+    step = "request"
+    deadline = time.monotonic() + DOCUMENT_SECONDS
+    try:
+        response = _download_patiently(session, config, url)
+        action = document.get("viewer_action")
+        # TJMT serves a document only once the process page shows it in its viewer, as a click does.
+        if response.status_code != 200 and action and _show_in_viewer(session, config, viewer, action):
+            response.close()
+            response = None
+            response = _download(session, config, url)
+        item.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
+        if response.status_code != 200:
+            # The first-instance copy of a second-instance document is not served here: read the visible one.
+            item["extractionStatus"] = "first_instance_copy" if document.get("first_instance_copy") else "http_error"
+            item["failure"] = _http_failure(response, config)
+        else:
+            step = "body"
+            content = bytearray()
+            for chunk in response.iter_content():
+                item["bytes"] += len(chunk)
+                if item["bytes"] > MAX_DOCUMENT_BYTES:
+                    item["extractionStatus"] = "too_large"
+                    break
+                if time.monotonic() > deadline:
+                    item.update(failure=f"body failed: not received within {DOCUMENT_SECONDS} s")
+                    break
+                content.extend(chunk)
+            else:
+                item["sha256"] = hashlib.sha256(content).hexdigest()
+                item["extractionStatus"], item["text"] = extract_document_text(
+                    bytes(content), item["content_type"], number, allow_unnumbered=True
+                )
+                if item["extractionStatus"] in NOT_A_DOCUMENT:
+                    item["failure"] = (
+                        f"the portal served {item['content_type'] or 'no Content-Type'}, not the document "
+                        f"({item['extractionStatus']})"
+                    )
+                step = "save"
+                if save:
+                    item["savedAs"] = save_document(_saved_name(number, document["id"], content, item), content)
+    except (RequestException, OSError) as error:
+        # Exception messages can include session-bearing request URLs: only the step and the error's class.
+        failure = f"{step} failed: {type(error).__name__}"
+        if isinstance(error, Timeout):
+            failure += (
+                f" (the portal sent nothing for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s, twice; it may still be "
+                "preparing the document: read it again in a few minutes)"
+                if step == "request"
+                else f" (the portal stopped sending for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s)"
+            )
+        item.update(extractionStatus="request_failed", text="", failure=failure)
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except RequestException as error:
+                # Only when nothing was concluded: a close failure never hides "too_large", an HTTP error or a
+                # read document, nor the step that failed first.
+                if item["extractionStatus"] == "request_failed" and "failure" not in item:
+                    item.update(text="", failure=f"close failed: {type(error).__name__}")
+    return item
 
 
 # TJBA, 23/11: the first byte of an 860 KB petição came after 67 s, 11.7 s, 2.3 s, and twice not within 165 s; a

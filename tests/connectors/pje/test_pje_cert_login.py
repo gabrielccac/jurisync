@@ -77,7 +77,7 @@ class CertificateLoginChecks(unittest.TestCase):
 
         attempts = []
 
-        def login(*args):
+        def login(*args, **kwargs):
             attempts.append(args)
             cert_login._require_registered(
                 SimpleNamespace(url="https://pje.tjce.jus.br/pje2grau/publico/usuario/ssoCadastroCallback.seam"),
@@ -279,6 +279,106 @@ class Pje1xGuards(unittest.TestCase):
         ):
             cert_login._login(session, config, None, Mock())
         self.assertIs(available.call_args.args[0], portal)
+
+
+SSO = "https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/authenticate"
+OTP_FORM = (
+    "<html><head><title>PJe SSO</title></head><body>{alert}"
+    f'<form id="kc-otp-login-form" action="{SSO}?execution=otp"><input name="otp"></form></body></html>'
+)
+REFUSED = OTP_FORM.format(alert='<span id="input-error">Código inválido.</span>')
+
+
+class FakeSso:
+    """The tjmt-1g login: the login page's challenge, the SSO's OTP form, then what each code gets."""
+
+    def __init__(self, otp_answers, landing=None, probe=None):
+        self.otp_answers, self.otp_posts, self.gets = list(otp_answers), [], []
+        self.landing = landing
+        self.probe = probe
+
+    @staticmethod
+    def page(url, text="", status=200, location=None):
+        return SimpleNamespace(
+            status_code=status, url=url, text=text, headers={"Location": location} if location else {}
+        )
+
+    def get(self, url, **kwargs):
+        self.gets.append(url)
+        if url == "https://pje.tjmt.jus.br/pje/login.seam":
+            return self.page(url, f"<script>autenticar('a', 'challenge')</script><form id='loginForm' action='{SSO}'>")
+        if url.startswith("https://pje.tjmt.jus.br/pje/Processo/ConsultaProcesso"):
+            return self.page(url, *self.probe)
+        return self.page(url, *self.landing)
+
+    def post(self, url, data=None, **kwargs):
+        if "otp" in (data or {}):
+            self.otp_posts.append(data["otp"])
+            return self.otp_answers.pop(0)
+        return self.page(SSO, OTP_FORM.format(alert=""))
+
+
+class OtpClassification(unittest.TestCase):
+    def login(self, sso):
+        from jurisync import portals
+
+        signer = Mock()
+        signer.sign.return_value = b"sig"
+        signer.chain64.return_value = "chain"
+        codes = iter(["111111", "222222"])
+        with (
+            patch.object(cert_login.native_signer, "post_result"),
+            patch.object(cert_login, "fresh_code", side_effect=lambda *a, **k: next(codes)),
+            patch.object(cert_login, "next_code", side_effect=lambda *a, **k: next(codes)),
+        ):
+            return cert_login._login(sso, portals.pje("tjmt-1g"), {"secret": "x"}, signer, sleep=Mock())
+
+    def test_the_sso_refusing_both_codes_is_otp_refused_with_its_message(self):
+        from jurisync.core.session_pool import LoginRejected
+
+        sso = FakeSso([FakeSso.page(SSO, REFUSED), FakeSso.page(SSO, REFUSED)])
+        with self.assertRaises(LoginRejected) as caught:
+            self.login(sso)
+        self.assertEqual(caught.exception.reason, "otp_refused")
+        self.assertIn('SSO message: "Código inválido."', str(caught.exception))
+        self.assertEqual(sso.otp_posts, ["111111", "222222"])
+
+    def test_a_code_refused_once_is_answered_in_the_next_window_and_logs_in(self):
+        home = '<a href="/pje/logout.seam">Sair</a><input name="javax.faces.ViewState" value="1">'
+        accepted = FakeSso.page(SSO, status=302, location="https://pje.tjmt.jus.br/pje/Painel/home.seam")
+        sso = FakeSso([FakeSso.page(SSO, REFUSED), accepted], landing=(home,))
+        self.assertIs(self.login(sso), sso)
+        self.assertEqual(len(sso.otp_posts), 2)
+
+    def test_an_unrecognised_landing_is_unexpected_with_where_and_no_second_code(self):
+        from jurisync.core.session_pool import LoginRejected
+
+        accepted = FakeSso.page(SSO, status=302, location="https://pje.tjmt.jus.br/pje/Painel/aviso.seam?cid=9")
+        sso = FakeSso(
+            [accepted],
+            landing=("<html><head><title>Quadro de avisos</title></head><body>Bem-vindo</body></html>",),
+            probe=("<html><head><title>Consulta</title></head></html>",),
+        )
+        with self.assertRaises(cert_login.LoginFailed) as caught:
+            self.login(sso)
+        self.assertNotIsInstance(caught.exception, LoginRejected)
+        self.assertEqual(caught.exception.reason, "unexpected")
+        message = str(caught.exception)
+        self.assertIn("accepted the authenticator code", message)
+        self.assertIn("/pje/Painel/aviso.seam", message)
+        self.assertIn("'Quadro de avisos'", message)
+        self.assertNotIn("cid=9", message)
+        self.assertEqual(sso.otp_posts, ["111111"])
+
+    def test_no_otp_form_after_the_certificate_is_unexpected_with_the_page(self):
+        sso = FakeSso([])
+        sso.post = lambda url, data=None, **kwargs: FakeSso.page(
+            SSO, '<html><head><title>Erro</title></head><div id="kc-error-message">Sessão expirada</div></html>'
+        )
+        with self.assertRaises(cert_login.LoginFailed) as caught:
+            self.login(sso)
+        self.assertEqual(caught.exception.reason, "unexpected")
+        self.assertIn('SSO message "Sessão expirada"', str(caught.exception))
 
 
 if __name__ == "__main__":

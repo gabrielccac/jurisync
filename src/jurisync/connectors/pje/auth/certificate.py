@@ -16,13 +16,13 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
-from jurisync.connectors.pje.auth.sso import https_pje, require_allowed_url
+from jurisync.connectors.pje.auth.sso import alert_text, https_pje, require_allowed_url
 from jurisync.core import awswaf, credentials
 from jurisync.core.certificate import credential_names, load_configured
 from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
 from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginFailed, LoginRejected, MissingLogin
-from jurisync.core.totp import configured_account, totp
+from jurisync.core.totp import configured_account, fresh_code, next_code
 
 
 def _require_available(page, config=None):
@@ -197,9 +197,8 @@ def _twofa(portal, twofa_data=None):
     return configured_account(portals.pje(portal), None, data=twofa_data)
 
 
-# A login that stops short of the authenticated page is often a TOTP code the SSO already took or one that expired
-# mid-flight. The same code is not valid twice, so the retry waits for the next 30-second window.
-RETRYABLE_LOGIN = ("did not reach an authenticated PJe page", "SSO did not advance")
+# The TOTP window: a code the SSO refuses is answered once more with the next window's code (a recent login may
+# have spent the current one). Kept for callers that wait for a fresh window.
 TOTP_WINDOW = 30
 
 
@@ -210,7 +209,8 @@ def _seconds_to_next_window(now):
 def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None, sleep=time.sleep, clock=time.time):
     """Return an authenticated PJe session via A1 certificate (+ TOTP when the SSO asks).
 
-    One failed attempt is repeated once, on a new session, after the TOTP window changes.
+    The login is never repeated as a whole: a refused code is answered once more on the SSO's own form, in the next
+    window (``_answer_otp``), and any other stop is reported with where it stopped (``LoginFailed``).
     """
     config = portals.pje(portal)
     account = _twofa(portal, twofa_data)
@@ -226,22 +226,8 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
             f"{config.env_name('PASSWORD')} and {config.env_name('2FA_DATA')} (or {config.env_name('2FA_QR')}) for "
             f"the password login, or {file_name} and {pin_name} for the A1 certificate"
         ) from None
-    try:
-        return _login(session or requests.Session(), config, account, signer)
-    except RuntimeError as error:
-        if account is None or not any(marker in str(error) for marker in RETRYABLE_LOGIN):
-            raise
-        log.info("%s login stopped short (%s); retrying in the next TOTP window", config.key, error)
-        sleep(_seconds_to_next_window(clock()))
-        try:
-            return _login(requests.Session(), config, account, signer)
-        except RuntimeError as second:
-            if not any(marker in str(second) for marker in RETRYABLE_LOGIN):
-                raise
-            # Two codes in two windows were refused: stop here, or every tool call spends two more attempts.
-            raise LoginRejected(
-                f"{second} (twice; check the TOTP secret and the certificate)", reason="otp_refused"
-            ) from None
+    # ``sleep``/``clock`` stay for callers of the earlier whole-login retry; the code wait lives in ``_answer_otp``.
+    return _login(session or requests.Session(), config, account, signer)
 
 
 def a3_cert_login(portal, session=None, *, signer=None):
@@ -267,7 +253,65 @@ def a3_cert_login(portal, session=None, *, signer=None):
         return _login(session, config, account, token)
 
 
-def _login(session, config, account, signer):
+def _page_shape(response):
+    """Where a login stopped, without identifiers: HTTP status, URL path, page title and the SSO's alert, if any."""
+    soup = BeautifulSoup(getattr(response, "text", "") or "", "html.parser")
+    title = " ".join((soup.title.get_text(" ") if soup.title else "").split())[:80]
+    alert = alert_text(soup)
+    shape = f"HTTP {response.status_code} at {url_shape(response.url)}, title {title!r}"
+    return shape + (f', SSO message "{alert}"' if alert else "")
+
+
+def _otp_form(response):
+    return BeautifulSoup(getattr(response, "text", "") or "", "html.parser").find("form", id="kc-otp-login-form")
+
+
+def _answer_otp(session, response, account, config, *, sleep=time.sleep, clock=time.time):
+    """Answer the SSO's OTP form; when the SSO shows the form again (it refused the code), once more next window.
+
+    A form shown again after both codes is a real refusal (``LoginRejected``, ``otp_refused``) with the SSO's own
+    message. Anything else is returned for the caller to recognise: no further code is ever sent.
+    """
+    for attempt in range(2):
+        form = _otp_form(response)
+        if form is None or not form.get("action"):
+            return response
+        account = account() if callable(account) else account
+        action = urllib.parse.urljoin(response.url, form["action"])
+        require_allowed_url(action)
+        if attempt:
+            log.info(
+                "%s SSO refused the code (%s); answering with the next window's",
+                config.key,
+                alert_text(BeautifulSoup(response.text, "html.parser")) or "no message",
+            )
+        code = (
+            next_code(account, sleep=sleep, now=clock()) if attempt else fresh_code(account, clock=clock, sleep=sleep)
+        )
+        refused = response
+        response = session.post(
+            action,
+            data={"otp": code, "login": "Validar"},
+            impersonate=IMPERSONATE,
+            allow_redirects=False,
+            timeout=60,
+        )
+        log_request("POST", action, response.status_code)
+        response = _follow(session, response)
+    if _otp_form(response) is not None:
+        alert = alert_text(BeautifulSoup(response.text, "html.parser")) or alert_text(
+            BeautifulSoup(refused.text, "html.parser")
+        )
+        raise LoginRejected(
+            f"{config.key}: the SSO refused the authenticator code twice, in two windows"
+            + (f' (SSO message: "{alert}")' if alert else " (the form came back without a message)")
+            + "; check the TOTP secret chosen for this account (OTP_PROFILE_MATCH/INDEX)",
+            reason="otp_refused",
+        )
+    return response
+
+
+def _login(session, config, account, signer, *, sleep=time.sleep, clock=time.time):
     """``account`` is the TOTP account (None when not configured), or a callable read only if the SSO asks."""
     page = _follow(session, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30))
     require_allowed_url(page.url)
@@ -326,33 +370,30 @@ def _login(session, config, account, signer):
     if _authenticated(response, config.host, config.root):
         log.info("%s certificate login complete (no OTP asked) -> %s", config.key, url_shape(response.url))
         return session
-    candidate = BeautifulSoup(response.text, "html.parser").find("form", id="kc-otp-login-form")
-    if not candidate or not candidate.get("action"):
-        raise RuntimeError("SSO did not advance after the certificate callback")
+    if _otp_form(response) is None or not _otp_form(response).get("action"):
+        raise LoginFailed(
+            f"{config.key}: the SSO did not advance after the certificate callback ({_page_shape(response)})",
+            reason="unexpected",
+        )
     if account is None:
         raise MissingLogin(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
-    otp_action = urllib.parse.urljoin(response.url, candidate["action"])
-    require_allowed_url(otp_action)
-
-    otp = totp(account() if callable(account) else account).now()
-    response = session.post(
-        otp_action,
-        data={"otp": otp, "login": "Validar"},
-        impersonate=IMPERSONATE,
-        allow_redirects=False,
-        timeout=60,
-    )
-    log_request("POST", otp_action, response.status_code)
-    final = _follow(session, response)
+    final = _answer_otp(session, response, account, config, sleep=sleep, clock=clock)
     _require_registered(final, config)
     if not _authenticated(final, config.host, config.root):
         # JT portals park the flow on a /pjekz/ loader: probe an app page, whose
         # error.seam forward renders the authenticated shell when the session holds.
+        landed = final
         probe = session.get(config.search_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30)
         log_request("GET", config.search_url, probe.status_code)
         final = _follow(session, probe)
-    _require_registered(final, config)
-    if not _authenticated(final, config.host, config.root):
-        raise RuntimeError(f"{config.key} login did not reach an authenticated PJe page")
+        _require_registered(final, config)
+        if not _authenticated(final, config.host, config.root):
+            # The code was taken (no OTP form came back): this is not a refusal, and a second code would not help.
+            raise LoginFailed(
+                f"{config.key}: the SSO accepted the authenticator code, but the login ended on a page not "
+                f"recognised as logged in ({_page_shape(landed)}; the search page then answered "
+                f"{_page_shape(final)}); no other code was sent",
+                reason="unexpected",
+            )
     log.info("%s certificate login complete -> %s", config.key, url_shape(final.url))
     return session

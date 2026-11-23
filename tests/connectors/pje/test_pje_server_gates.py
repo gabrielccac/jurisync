@@ -212,5 +212,35 @@ class ReadExpedienteAtoCienciaTest(PjeServerCase):
         self.open_act.assert_called_once()
 
 
+class WrongCourtBeforeLoginTest(PjeServerCase):
+    """A number of another court is refused before the session is taken: it never costs a login (natalia trt5-1g)."""
+
+    CASES = [
+        ("pje_get_process", {"processNumber": NUMBER, "portal": "trt5-1g"}),
+        # Same region, other branch of justice: TJMG (8.13) is not TRT13 (5.13).
+        ("pje_get_process", {"processNumber": "0000001-11.2026.5.13.0001", "portal": "tjmg-pje-1g"}),
+        ("pje_read_documents", {"processNumber": NUMBER, "portal": "tjba-2g", "documentIds": ["1"]}),
+        ("pje_read_expediente_ato", {"processNumber": NUMBER, "portal": "trt20-1g", "expedienteId": "9"}),
+        ("pje_list_watched_processes", {"processNumber": NUMBER, "portal": "trf1-1g"}),
+        ("pje_list_inbox", {"processNumber": NUMBER, "portal": "trf1-1g"}),
+        ("pje_get_process", {"processNumber": "123", "portal": "trf5-1g"}),
+    ]
+
+    def test_a_number_of_another_court_is_refused_without_a_login(self):
+        for name, arguments in self.CASES:
+            with self.subTest(name=name, portal=arguments["portal"]):
+                text, is_error = call(name, arguments)
+                self.assertTrue(is_error)
+                self.assertRegex(text, "does not belong to|format")
+        self.assertEqual(self.logins, [])
+        self.session.get.assert_not_called()
+
+    def test_the_portal_own_number_still_logs_in(self):
+        with mock.patch.object(server, "fetch_process", return_value={"success": True, "timeline": []}) as fetch:
+            call("pje_get_process", {"processNumber": NUMBER, "portal": "trf5-1g"})
+        self.assertEqual(self.logins, ["trf5-1g"])
+        fetch.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

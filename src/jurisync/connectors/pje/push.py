@@ -11,7 +11,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import kz
+from jurisync.connectors.pje import jsf, kz
 from jurisync.connectors.pje.parsers import parse_process_number, response_html
 from jurisync.connectors.pje.process import login_portal
 from jurisync.core.http import IMPERSONATE, UnsafeUrlError, enable_request_logging, require_url
@@ -26,6 +26,16 @@ EMPTY_PUSH = re.compile(r"n[ãa]o\s+h[áa]\s+nenhum\s+processo\s+cadastrado\s+na
 PUSH_TIMEOUT = 90
 # The registered-processes grid (TJRJ: j_id214:processosCadastradosTable), as opposed to "Processos relacionados".
 PUSH_GRID_ID = "processoscadastrados"
+# The "Processos relacionados" tab lists the processes linked to the account (TJMG: 4 and 10 pages of them beside
+# an empty registry). They are not Push registrations and are never read as such (the PJe-JT reader skips them too).
+RELATED_ID = "processosrelacionados"
+RELATED_NOTE = (
+    "The page's 'Processos relacionados' tab (processes linked to the account, not Push registrations) is not "
+    "listed here; pje_list_processes lists the account's processes."
+)
+SCROLLER = re.compile(r"Richfaces\.Datascroller\(\s*'([^']+)'")
+# Pages of the registry read per call at most (RichFaces pages hold 10 to 20 rows; the tool returns up to 500).
+MAX_PUSH_PAGES = 50
 
 
 def _safe_url(value, *, host=None, path_prefix="/pje/", path_exact=None):
@@ -71,6 +81,18 @@ def _own(table, name):
 
 def _values(row):
     return [" ".join(cell.stripped_strings) for cell in row.find_all("td", recursive=False)]
+
+
+def _registry(html):
+    """The page without its "Processos relacionados" tab, and whether that tab listed any process."""
+    soup = BeautifulSoup(html, "html.parser")
+    related = False
+    for node in soup.find_all(id=lambda value: bool(value) and RELATED_ID in value.casefold()):
+        if node.decomposed:
+            continue
+        related = related or bool(PROCESS_RE.search(node.get_text(" ")))
+        node.decompose()
+    return soup, related
 
 
 def _push_grid(soup):
@@ -123,7 +145,7 @@ def parse_push_items(html):
     shows twice, as the portal's own count does. Only the table's own headers and rows count: the layout tables
     around the grid hold it as a nested table, and TJRJ/TJPA put the paginator (another table) inside the grid.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup, _ = _registry(html)
     grid = _push_grid(soup)
     if grid is None:
         return []
@@ -149,8 +171,12 @@ def parse_push_items(html):
 
 
 def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.br/pje/Push/listView.seam"):
-    """Parse Push counts/navigation without replaying an unverified page action."""
-    text = " ".join(BeautifulSoup(html, "html.parser").stripped_strings)
+    """Parse Push counts/navigation without replaying an unverified page action.
+
+    Only the registry counts: the "Processos relacionados" tab, with its own count and pages, is left out.
+    """
+    soup, _ = _registry(html)
+    text = " ".join(soup.stripped_strings)
     result_count_match = re.search(r"(\d+)\s+resultados?\s+encontrados|encontrados:\s*(\d+)\s+resultados?", text, re.I)
     if result_count_match:
         result_count = int(result_count_match.group(1) or result_count_match.group(2))
@@ -160,7 +186,6 @@ def parse_push_page(html, rows_returned=None, base_url="https://pje1g.trf1.jus.b
     else:
         range_match = re.search(r"\b\d+\s*-\s*\d+\s+de\s+(\d+)\b", text, re.I)
         result_count = int(range_match.group(1)) if range_match else None
-    soup = BeautifulSoup(html, "html.parser")
     base_host = _known_host(base_url)
     current_page = None
     total_pages = None
@@ -221,26 +246,81 @@ MAX_LIMIT = 500
 def _window(result, limit, offset, process_number):
     """One window of the registry: ``items[offset:offset + limit]`` of the rows that match ``process_number``.
 
-    ``total`` counts the matching rows (the portal's own count when nothing is filtered) and ``hasMore`` says
-    whether rows remain after this window. ``pagination`` keeps describing the portal's list, not the window.
+    ``total`` counts the matching rows: the portal's own count when nothing is filtered, else the rows read once the
+    whole list was read, and None when neither is known (pages were left unread and the portal shows no count).
+    ``hasMore`` says whether rows remain after this window, unread pages included. ``pagination`` keeps describing
+    the portal's list, not the window.
     """
     items = result["items"]
+    complete = result.get("complete") is True
     if process_number:
         wanted = re.sub(r"\D", "", process_number)
         items = [item for item in items if re.sub(r"\D", "", item["process_number"]) == wanted]
-        total = len(items)
+        total = len(items) if complete else None
     else:
-        total = max(result.get("results_count") or 0, len(items))
+        count = result.get("results_count")
+        total = count if count is not None else (len(items) if complete else None)
     window = items[offset : offset + limit]
+    seen = offset + len(window)
     return {
         **result,
         "total": total,
         "offset": offset,
         "limit": limit,
-        "hasMore": offset + len(window) < total,
+        "hasMore": seen < len(items) or (total is not None and seen < total) or (total is None and not complete),
         "rows_returned": len(window),
         "items": window,
     }
+
+
+def _scroller(html):
+    """(form id, scroller id) of the registry grid's RichFaces datascroller, or None when the grid has none."""
+    soup, _ = _registry(html)
+    for script in soup.find_all("script"):
+        code = script.get_text()
+        found = SCROLLER.search(code)
+        if not found or RELATED_ID in found.group(1).casefold():
+            continue
+        form, _, _ = jsf.a4j_submit(code)
+        return form, found.group(1)
+    return None
+
+
+def _next_pages(session, config, html, pagination, items, needed):
+    """Turn the registry's datascroller page by page, as its "»" does, until ``needed`` rows or the last page.
+
+    Returns (rows of the pages after the first, pages read, whether the last page was reached). A page that does
+    not advance (the portal answers the last page again) ends the walk.
+    """
+    found = _scroller(html)
+    if not found or not pagination.get("has_next_page"):
+        return [], 1, not pagination.get("has_next_page")
+    form_id, scroller = found
+    url = _portal_url(config.key, f"{config.root}Push/listView.seam")
+    fields = jsf.form_fields(html, form_id)
+    fields["javax.faces.ViewState"] = jsf.view_state(html, "PJe Push list")
+    rows, page, last = [], pagination.get("current_page") or 1, False
+    while page < MAX_PUSH_PAGES and (needed is None or len(items) + len(rows) < needed):
+        body = {
+            **fields,
+            "AJAXREQUEST": "_viewRoot",
+            scroller: str(page + 1),
+            "ajaxSingle": scroller,
+            "AJAX:EVENTS_COUNT": "1",
+        }
+        response = response_html(jsf.post(session, url, body, label=f"PJe Push list page {page + 1}"))
+        state = BeautifulSoup(response, "html.parser").find("input", attrs={"name": "javax.faces.ViewState"})
+        if state is not None and state.get("value"):
+            fields["javax.faces.ViewState"] = state["value"]
+        turned = parse_push_page(response, base_url=url)
+        if turned["current_page"] != page + 1:
+            raise RuntimeError(f"PJe Push list did not turn to page {page + 1}")
+        rows.extend(parse_push_items(response))
+        page += 1
+        if not turned["has_next_page"]:
+            last = True
+            break
+    return rows, page, last
 
 
 def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_number=None):
@@ -274,6 +354,24 @@ def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_numb
         html = response_html(push)
         items = parse_push_items(html)
         pagination = parse_push_page(html, len(items), base_url=push_url)
+        # Without a filter the first offset + limit rows are enough; a filter has to see the whole list.
+        more, pages, last = _next_pages(
+            session, config, html, pagination, items, None if process_number else offset + limit
+        )
+        items += more
+        if pages > 1:
+            count = pagination["results_count"]
+            pagination.update(
+                current_page=pages,
+                has_next_page=not last,
+                complete=last and (count is None or count == len(items)),
+            )
+        if pagination["has_next_page"]:
+            # The datascroller shows at most 10 page buttons (TJMG: "1 … 10" for 23 pages): unknown until read.
+            pagination["total_pages"] = None
+        elif pages > 1:
+            pagination["total_pages"] = pages
+        _, related = _registry(html)
         result = {
             "success": True,
             "portal": name,
@@ -284,6 +382,7 @@ def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_numb
             "items": items,
             # Push stores watched processes; movement text arrives in the email.
             "content_note": "This page lists watched processes, not the individual movement email text.",
+            **({"related_note": RELATED_NOTE} if related else {}),
         }
         return _window(result, limit, offset, process_number)
     finally:

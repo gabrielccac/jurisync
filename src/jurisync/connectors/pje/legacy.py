@@ -99,23 +99,26 @@ def _tab_html(session, url, html, tab, label):
     return _post(session, url, html, form_id, {"AJAXREQUEST": "_viewRoot", tab_id: tab_id, "ajaxSingle": tab_id}, label)
 
 
-def read_panel(session, portal):
-    """Walk the panel's tabs and return the buckets with their counts (and where each one lives).
+def _walk_panel(session, portal):
+    """Walk the panel's tabs, yielding ``(bucket, html)`` as each bucket's counter is read.
 
-    Acervo: "Pendentes de Manifestação" and "Acervo Geral" (the two sub-tabs). Each Intimações tab: its toggle buckets.
+    Acervo: "Pendentes de Manifestação" and "Acervo Geral" (the two sub-tabs). Each Intimações tab: its toggle
+    buckets, with the tab's page (``html``) on which the bucket's toggle can be opened. Indices follow the walk.
     """
     config = portals.pje(portal)
     previous = jsf.TIMEOUT
     jsf.TIMEOUT = LEGACY_TIMEOUT
     try:
         url, html = _panel(session, config)
-        buckets = []
+        index = 0
 
-        def add(group, label, count, **where):
-            buckets.append({"index": str(len(buckets)), "label": f"{group} / {label}", "count": count, **where})
+        def bucket(group, label, count, **where):
+            nonlocal index
+            index += 1
+            return {"index": str(index - 1), "label": f"{group} / {label}", "count": count, "url": url, **where}
 
         counts = parse_found_counts(html)
-        add(ACERVO, "Pendentes de Manifestação", counts[0] if counts else 0, kind="acervo")
+        yield bucket(ACERVO, "Pendentes de Manifestação", counts[0] if counts else 0, kind="acervo"), html
         general = _soup(html).find("td", id="idCaixa_lbl")
         if general is not None and general.find_parent("form") is not None:
             html = _post(
@@ -127,16 +130,21 @@ def read_panel(session, portal):
                 f"{config.key} Acervo Geral",
             )
             counts = parse_found_counts(html)
-            add(ACERVO, "Acervo Geral", counts[0] if counts else 0, kind="acervo")
+            yield bucket(ACERVO, "Acervo Geral", counts[0] if counts else 0, kind="acervo"), html
         for tab in parse_tabs(html):
             if tab[0] == "tabProcAdvPainelPeticaoInicial":
                 continue
             html = _tab_html(session, url, html, tab, f"{config.key} {tab[1]}")
             for toggle, label, count in parse_buckets(html):
-                add(tab[1], label, count, kind="intimacoes", tab=tab[0], toggle=toggle)
-        return url, buckets
+                yield bucket(tab[1], label, count, kind="intimacoes", tab=tab[0], form=tab[2], toggle=toggle), html
     finally:
         jsf.TIMEOUT = previous
+
+
+def read_panel(session, portal):
+    """Every bucket of the panel with its count (and where each one lives)."""
+    buckets = [bucket for bucket, _ in _walk_panel(session, portal)]
+    return portals.pje(portal).url(PANEL_PATH), buckets
 
 
 def read_counters(session, portal):
@@ -150,10 +158,14 @@ def read_counters(session, portal):
     }
 
 
+def _exact(bucket, wanted):
+    return bucket["index"] == wanted or bucket["label"].casefold() == wanted.casefold()
+
+
 def select_bucket(buckets, wanted):
     """The bucket whose index equals ``wanted`` or whose label contains it (default: Intimações / Pendentes)."""
     wanted = DEFAULT_BUCKET if wanted is None else str(wanted)
-    exact = [b for b in buckets if b["index"] == wanted or b["label"].casefold() == wanted.casefold()]
+    exact = [b for b in buckets if _exact(b, wanted)]
     found = exact or [b for b in buckets if wanted.casefold() in b["label"].casefold()]
     if len(found) != 1:
         valid = ", ".join(f"{b['index']}={b['label']}" for b in buckets)
@@ -161,13 +173,33 @@ def select_bucket(buckets, wanted):
     return found[0]
 
 
+def _find_bucket(session, portal, wanted):
+    """The wanted bucket and the tab page it was counted on, walking the panel only as far as needed.
+
+    The walk stops at a bucket named exactly (its index or full label: the default "Intimações / Pendentes" is in the
+    first Intimações tab), so the later tabs are not opened. TRF5's "Intimações de Pauta de Julgamento" tab alone takes
+    27-37 s to answer. A partial label still needs every bucket, to be sure it names only one.
+    """
+    wanted = DEFAULT_BUCKET if wanted is None else str(wanted)
+    walk = _walk_panel(session, portal)
+    seen = []
+    try:
+        for bucket, html in walk:
+            if _exact(bucket, wanted):
+                return bucket, html
+            seen.append((bucket, html))
+    finally:
+        walk.close()
+    chosen = select_bucket([bucket for bucket, _ in seen], wanted)
+    return chosen, next(html for bucket, html in seen if bucket is chosen)
+
+
 def read_inbox(session, portal, *, bucket=None, filters=None):
     """The rows of one Intimações bucket. Opening it does not notify anyone; no row is confirmed."""
     config = portals.pje(portal)
     if filters:
         raise ValueError(f"{portal} (PJe 1.x) does not support inbox filters; read the bucket and filter the rows")
-    url, buckets = read_panel(session, portal)
-    chosen = select_bucket(buckets, bucket)
+    chosen, html = _find_bucket(session, portal, bucket)
     brief = {k: chosen[k] for k in ("index", "label", "count")}
     if not chosen["count"]:
         return {"success": True, "portal": portal, "bucket": brief, "inboxes": [], "complete": True}
@@ -178,15 +210,13 @@ def read_inbox(session, portal, *, bucket=None, filters=None):
     previous = jsf.TIMEOUT
     jsf.TIMEOUT = LEGACY_TIMEOUT
     try:
-        _, html = _panel(session, config)
-        tab = next(t for t in parse_tabs(html) if t[0] == chosen["tab"])
-        html = _tab_html(session, url, html, tab, f"{config.key} {tab[1]}")
+        # The walk left the session on this bucket's tab: its toggle opens from that page, as a click does.
         toggle = chosen["toggle"]
         html = _post(
             session,
-            url,
+            chosen["url"],
             html,
-            tab[2],
+            chosen["form"],
             {"AJAXREQUEST": "_viewRoot", toggle: toggle, "ajaxSingle": toggle},
             f"{config.key} {chosen['label']}",
         )

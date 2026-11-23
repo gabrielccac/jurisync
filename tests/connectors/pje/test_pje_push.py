@@ -183,5 +183,91 @@ class PjeNotificationChecks(unittest.TestCase):
         self.assertEqual((explicit["current_page"], explicit["total_pages"]), (2, 4))
 
 
+def _scroller_page(numbers, page, pages, *, related=""):
+    """A TJMG-like Push page: the registry grid with its own RichFaces datascroller, page ``page`` of ``pages``."""
+    buttons = "".join(
+        f'<td class="rich-datascr-{"act" if n == page else "inact"}">{n}</td>' for n in range(1, pages + 1)
+    )
+    rows = "".join(f"<tr><td>{number}</td><td>01/10/2026 09:00</td></tr>" for number in numbers)
+    return f"""<html><body><form id="j_id192" action="/pje/Push/listView.seam">
+    <input type="hidden" name="javax.faces.ViewState" value="state{page}"/>
+    <table id="j_id192:processosCadastradosTable"><thead><tr><th>Processo</th><th>Data de inclusão</th></tr></thead>
+    <tfoot><tr><td><table class="rich-dtascroller-table"><tr>{buttons}</tr></table></td></tr></tfoot>
+    <tbody>{rows}</tbody></table>
+    <script>new Richfaces.Datascroller('j_id192:processosCadastradosTable:scroller', function(event){{
+    A4J.AJAX.Submit('j_id192',event,{{'similarityGroupingId':'j_id192:processosCadastradosTable:scroller',
+    'parameters':{{'j_id192:processosCadastradosTable:scroller':event.memo.page,
+    'ajaxSingle':'j_id192:processosCadastradosTable:scroller'}} }}); return false;}});</script>
+    {related}</form></body></html>"""
+
+
+def _response(html, url="https://pje.tjmg.jus.br/pje/Push/listView.seam"):
+    return SimpleNamespace(status_code=200, url=url, content=html.encode(), headers={"Content-Type": "text/html"})
+
+
+RELATED = """<td id="j_id192:processosRelacionadosTab"><div id="j_id192:divProcessosRelacionados">
+<table id="j_id192:dataTableProcessosRelacionados"><thead><tr><th></th><th>Processo</th></tr></thead><tbody>
+<tr><td></td><td>5000009-99.2025.8.13.0261</td></tr></tbody></table>
+<div class="rich-datascr"><table><tr><td class="rich-datascr-act">1</td><td class="rich-datascr-inact">2</td>
+</tr></table></div></div>
+<script>new Richfaces.Datascroller('j_id192:dataTableProcessosRelacionados:scrollerListaProcessosRelacionados',
+function(event){A4J.AJAX.Submit('j_id192',event,{}); return false;});</script></td>"""
+
+
+class PushRegistryPages(unittest.TestCase):
+    def _numbers(self, start, count):
+        return [f"{n:07d}-11.2026.8.13.0024" for n in range(start, start + count)]
+
+    def _read(self, pages, **options):
+        session = Mock()
+        session.get.return_value = _response(pages[0])
+        session.post.side_effect = [_response(page) for page in pages[1:]]
+        return push.read_push("tjmg-pje-1g", session=session, **options), session
+
+    def test_the_related_processes_tab_is_not_the_registry(self):
+        # TJMG TR: an empty registry beside 4 pages of "Processos relacionados" was read as 20 registrations.
+        html = (
+            '<form id="j_id192"><td id="j_id192:processosCadastradosTab">Não há nenhum processo cadastrado na sua '
+            f"lista de processos do Push.</td>{RELATED}</form>"
+        )
+        self.assertEqual(push.parse_push_items(html), [])
+        page = push.parse_push_page(html, 0)
+        self.assertEqual((page["results_count"], page["total_pages"], page["complete"]), (0, None, True))
+        result, session = self._read([html])
+        self.assertEqual((result["total"], result["hasMore"], result["complete"]), (0, False, True))
+        self.assertIn("Processos relacionados", result["related_note"])
+        session.post.assert_not_called()
+
+    def test_every_page_of_the_registry_is_read_up_to_the_limit(self):
+        pages = [
+            _scroller_page(self._numbers(1, 20), 1, 3, related=RELATED),
+            _scroller_page(self._numbers(21, 20), 2, 3),
+            _scroller_page(self._numbers(41, 5), 3, 3),
+        ]
+        result, session = self._read(pages, limit=500)
+        self.assertEqual((result["total"], result["hasMore"], result["complete"]), (45, False, True))
+        self.assertEqual((result["current_page"], result["total_pages"]), (3, 3))
+        self.assertEqual(len({item["process_number"] for item in result["items"]}), 45)
+        # The page turn is the datascroller's own A4J submit, carrying the latest ViewState.
+        bodies = [call.kwargs["data"] for call in session.post.call_args_list]
+        self.assertIn("j_id192%3AprocessosCadastradosTable%3Ascroller=2", bodies[0])
+        self.assertIn("javax.faces.ViewState=state2", bodies[1])
+        self.assertNotIn("Relacionados", bodies[0])
+
+    def test_a_window_reads_only_the_pages_it_needs_and_says_more_remain(self):
+        pages = [_scroller_page(self._numbers(1, 20), 1, 3), _scroller_page(self._numbers(21, 20), 2, 3)]
+        result, session = self._read(pages, limit=10, offset=15)
+        self.assertEqual(session.post.call_count, 1)
+        self.assertEqual(result["rows_returned"], 10)
+        # No count on the page and pages left: the total is unknown, not the rows read so far.
+        self.assertEqual((result["total"], result["hasMore"], result["complete"]), (None, True, False))
+        self.assertIsNone(result["total_pages"])
+
+    def test_a_page_that_does_not_turn_is_an_error_not_a_short_list(self):
+        pages = [_scroller_page(self._numbers(1, 20), 1, 3), _scroller_page(self._numbers(1, 20), 1, 3)]
+        with self.assertRaisesRegex(RuntimeError, "did not turn to page 2"):
+            self._read(pages, limit=500)
+
+
 if __name__ == "__main__":
     unittest.main()

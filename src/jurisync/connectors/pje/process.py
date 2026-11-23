@@ -42,6 +42,22 @@ def credentials(portal):
     return values["USERNAME"], values["PASSWORD"], account
 
 
+def require_own_number(portal, process_number):
+    """Refuse, before any login, a CNJ number this portal cannot hold: its branch of justice and region must match.
+
+    ``Portal.owns_number`` checks the region only, so TJMG (8.13) would take a TRT13 number (5.13); the justice
+    segment closes that. A malformed number is refused the same way. Returns the parsed parts.
+    """
+    config = portals.pje(portal)
+    parts = parse_process_number(process_number)
+    if parts[3] != config.justice or not config.owns_number(parts):
+        raise ValueError(
+            f"Process number {process_number} does not belong to {config.tribunal} (portal {portal}): its CNJ "
+            f"segment J.TR is {parts[3]}.{parts[4]}; nothing was sent to the portal"
+        )
+    return parts
+
+
 def login_portal(portal):
     """Authenticate with the method assigned to this portal."""
     config = portals.pje(portal)
@@ -86,12 +102,9 @@ def fetch_process(
     by the search layer. Document bodies are never fetched here: ``read_documents`` is the only
     reader, because it checks for a pending ciência first.
     """
-    config = portals.pje(portal)
     if scope not in ("latest", "page", "all"):
         raise ValueError("scope must be latest, page or all")
-    number_parts = parse_process_number(process_number)
-    if not config.owns_number(number_parts):
-        raise ValueError(f"Process number does not belong to {config.tribunal}")
+    require_own_number(portal, process_number)
     if download_dir and not fetch_documents:
         raise ValueError("download_dir requires fetch_documents=True")
     if fetch_documents or download_dir:
@@ -167,10 +180,7 @@ def read_documents(process_number, document_ids, *, portal, session=None, save=F
     """
     from jurisync.connectors.pje.documents import parse_expedientes
 
-    config = portals.pje(portal)
-    number_parts = parse_process_number(process_number)
-    if not config.owns_number(number_parts):
-        raise ValueError(f"Process number does not belong to {config.tribunal}")
+    require_own_number(portal, process_number)
     validate_document_ids(document_ids)
     owned_session = session is None
     if owned_session:
