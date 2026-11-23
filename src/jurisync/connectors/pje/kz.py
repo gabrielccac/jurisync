@@ -358,6 +358,77 @@ def read_inbox(session, portal, *, bucket=None, regions=None, filters=None, max_
     return {"success": True, "portal": portal, "bucket": brief, "inboxes": inboxes, "complete": complete}
 
 
+ACERVO_BUCKETS = ("acervo", "arquivad")
+
+
+def _parties(item):
+    """ "AUTHOR X DEFENDANT" as the panel shows it, with "e outros" when a side has more than one party."""
+    sides = []
+    for name, count in (("nomeParteAutora", "qtdeParteAutora"), ("nomeParteRe", "qtdeParteRe")):
+        if item.get(name):
+            sides.append(_text(item[name]) + (" e outros" if (item.get(count) or 1) > 1 else ""))
+    return " X ".join(sides) or None
+
+
+def read_acervo(session, portal, *, regions=None, max_pages=25):
+    """The lawyer's processes from the panel's Acervo Geral and Arquivados buckets, all pages up to ``max_pages``.
+
+    The same panel list as the expediente buckets: number, class, parties, órgão julgador and the filing and archiving
+    dates; it shows no last movement.
+    """
+    api = Api(session, portal)
+    buckets = parse_buckets(
+        api.json(f"/paineladvogado/{api.user}/totalizadores", {"tipoPainelAdvogado": 0}, label="PJe panel")
+    )
+    selected = [b for b in buckets if any(word in b["label"].casefold() for word in ACERVO_BUCKETS)]
+    if not selected:
+        raise ValueError(f"PJe panel has no Acervo bucket; buckets on this portal: {[b['label'] for b in buckets]}")
+    jurisdictions, items = [], {}
+    for bucket in selected:
+        params = {"idPainelAdvogadoEnum": bucket["index"], "tipoPainelAdvogado": bucket["index"]}
+        rows, total, pages, page = 0, bucket["count"] or 0, 1, 1
+        while bucket["count"] and page <= min(pages, max_pages):
+            data = api.json(
+                f"/paineladvogado/{api.user}/processos",
+                {**params, "tamanhoPagina": PAGE_SIZE, "pagina": page},
+                label="PJe panel list",
+            )
+            pages, total = data.get("qtdPaginas") or 0, data.get("totalRegistros") or 0
+            for item in data.get("resultado") or []:
+                row = parse_row(item)
+                rows += 1
+                if regions and not any(t.casefold() in (row["orgaoJulgador"] or "").casefold() for t in regions):
+                    continue
+                items.setdefault(
+                    row["processId"] or row["processNumber"],
+                    {
+                        "processNumber": row["processNumber"],
+                        "processId": row["processId"],
+                        "classe": row["classe"],
+                        "partes": _parties(item),
+                        "orgaoJulgador": row["orgaoJulgador"],
+                        "distribuidoEm": _date(item.get("dataAutuacao")),
+                        "arquivadoEm": _date(item.get("dataArquivamento")),
+                        "jurisdicao": row["orgaoJulgador"],
+                        "caixa": bucket["label"],
+                    },
+                )
+            page += 1
+        jurisdictions.append(
+            {"label": bucket["label"], "count": bucket["count"], "pages": pages, "complete": rows >= total}
+        )
+    return {
+        "success": True,
+        "portal": portal,
+        "source": "acervo",
+        "jurisdictions": jurisdictions,
+        "total": sum(b["count"] or 0 for b in selected),
+        "returned": len(items),
+        "items": list(items.values()),
+        "complete": all(j["complete"] for j in jurisdictions),
+    }
+
+
 ROW_DETAILS = ("tipo", "parte", "meio", "prazoDias", "semPrazo")
 
 

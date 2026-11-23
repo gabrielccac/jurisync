@@ -69,3 +69,22 @@ is not stored (rows keep the internal `processId` only).
   `acknowledgeCiencia` in the call always wins. Whenever a pending communication is read, the result
   carries `ciencia.pendenteAoLer` (expedienteId, tipo, parte, prazoDias, limite) and an `aviso`, so
   the skill can tell the user in chat and write it into the task.
+
+## Acervo listing (`pje_list_processes`)
+
+`acervo.list_processes` reads the panel's Acervo tab the way the browser does: the tab (`tabAcervo`), each
+jurisdiction node with a non-zero counter (`formAbaAcervo:trAc:<id>::jNd`), each box under it
+(`formAbaAcervo:trAc:<id>:<box>::cxItem`: Caixa de entrada is `-1`, then the lawyer's own boxes such as Arquivados)
+and every page of the box's `formAcervo:tbProcessos` through its data scroller (`scPendentes`, page number as the
+value). A jurisdiction without boxes (TJRN) answers with the listing form only; its Pesquisar with blank filters
+lists everything. Each row gives class abbreviation + number, subject, parties (`span.nome-parte`), órgão julgador,
+"Distribuído em", "Último movimento" and the Prioritário flag; the internal `processId` is kept, the `ca` key is not.
+The "Autos Digitais", "Peticionar" and "Histórico de movimentações entre caixas" links are never posted.
+`complete` needs every box read to its "N resultados encontrados" and the boxes adding up to the jurisdiction counter.
+
+PJe-JT (KZ) has no tree: `kz.read_acervo` pages the Acervo Geral and Arquivados buckets of the panel API (number,
+class, parties, órgão, filing and archiving dates; no last movement); covered by fixtures, not run live in this
+round. TRF5's PJe 1.x (`trf5-legacy`) is refused.
+
+Live 23/11 (juliana, one login per portal): tjmg-pje-1g 197/197 processes in 53 jurisdictions (boxes up to 30 rows,
+all on one page, so paging is covered only by tests); tjce-1g 19/19 in 6 jurisdictions, 6 s including the login.

@@ -158,3 +158,18 @@ Nada foi commitado, enviado ao GitHub ou protocolado.
   PDF só valem para processo habilitado na conta (aparece em intimações/petições do painel).
 - A busca por OAB (`cbPesquisa=NUMOAB`, GET) responde 200 sem CAPTCHA no TJSP; o conector não a expõe.
 - `cposg` não está implementado para o TJSP (o adaptador usa só `cpopg`).
+
+## Lista dos processos da conta (`esaj_list_processes`, 23/11/2026)
+
+O painel (`tarefas-adv`) só tem tarefas (intimações, audiências, petições) e o menu da conta (`esaj/api/menus`) não
+tem "Meus processos". A lista vem da consulta de 1º grau por OAB, a mesma da tela pública:
+`<cpopg|cpopg5>/search.do?cbPesquisa=NUMOAB&dadosConsulta.valorConsulta=<OAB>` (25 por página; as seguintes em
+`trocarPagina.do?paginaConsulta=N`), uma busca por OAB da conta (`esaj/api/auth/session` → `oabs[].stringOab`),
+somadas e sem repetir o processo achado por duas OABs. Cada item: número, classe, assunto principal, parte com o
+papel, data e local de recebimento, código/foro e as OABs que o acharam; `oabs[]` traz total/lidos/`complete` de cada
+busca. TJMS (`cpopg5`, reCAPTCHA) usa o token v3 por HTTP de sempre. Um único resultado vem como página de detalhe
+(`show.do`), lida como um item. Nada de pasta digital, documento ou intimação é aberto.
+
+Ao vivo (Juliana, A1, um login por portal): TJAL 5 processos (3 OABs: 0/0/5, completo); TJMS 1 processo (0/0/1,
+completo, via token). Limites: só 1º grau (2º grau não entra); TJAM (portal antigo, sem `auth/session`) responde
+`not_supported`; a paginação (`trocarPagina.do`) só foi exercida nos testes, pois nenhuma busca passou de 25.

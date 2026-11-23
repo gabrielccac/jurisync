@@ -16,6 +16,39 @@ e uma camada SAJ na consulta pública. O portal fica atrás de **F5 BIG-IP ASM**
 certificado interno; não aceita A1/A3 em mTLS, e a consulta pública está atrás
 de F5/reCAPTCHA.
 
+## Listas da mesa (implementado e validado em 2026-11-23)
+
+`projudi_list_intimations` e `projudi_list_processes` aceitam `portal="tjam-1g"` (antes só TJGO). Validação ao vivo
+com a conta da Thaile, **1 login**, nenhuma intimação aberta (o link "Visualizar" → `processo/intimacao.do`, que
+registra a leitura, nunca é seguido; nenhum link de linha sai no resultado).
+
+- **Menu:** o frameset agrupa os `add_menu(...)` por seção (`add_menu("Intimações")` sem caminho abre a seção). O
+  mesmo rótulo aparece em seções diferentes ("Já Cumpridas" em Intimações e Citações), então a lista é achada por
+  (seção, rótulo). Rotas: `processosAdvogado.do` (1º grau), `processo/recursal/recursoBusca.do` (2º grau),
+  `processo/intimacaoAdvogado.do`, `citacao/citacaoAdvogado.do`.
+- **Página 1** = GET do link do menu. **Páginas seguintes / 2º grau** = POST do formulário da própria lista para
+  `...?actionType=listar` com `<lista>PageNumber` (20 por página) ou `instancia=segundoGrau` trocados; só essas quatro
+  rotas e ações `listar*` são aceitas. Uma página além do fim devolve as últimas linhas de novo ("exibindo de 21 até
+  1"), então a paginação para no total do rodapé ("N registro(s) encontrado(s)").
+- **Intimações** (`lists`): `novas` (Novas — Aguardando Leitura; linhas com `cienciaPendente=true`), `ultimoDia`,
+  `prazoDecorrendo`, `lidasSemPrazo`, `cumpridas`, `prazoPerdido30/90/180` e as de citação (`citacoes...`; o menu de
+  Citações não tem "Novas"). Padrão: novas, ultimoDia, prazoDecorrendo e as três de citação com prazo. Colunas:
+  número, parte intimada, data de postagem, data da intimação, prazo. `awaitingCiencia` traz os processos da agenda
+  "Aguardando Ciência" da mesa (a mesma que trava o download).
+- **Processos** (`situation`: todos, ativos, suspensos, arquivados...; padrão ativos): número, partes por polo,
+  distribuição/arquivamento, classe (e vara de origem nos recursos); `deskCounts` traz os contadores da mesa.
+
+| Resultado ao vivo (23/11) | |
+|---|---|
+| intimações padrão (6 listas, 1º grau) | 0 em todas, completas; agenda "Aguardando Ciência" 0 |
+| prazo perdido 90/180 dias | 2 / 2 (completas); 2º grau 0 |
+| processos ativos / todos (1º grau) | 1 / 1 (completas), contador da mesa ativos=1; recursos 0 |
+
+Limites: paginação acima de 20 linhas só foi exercida em teste (a conta não tem listas maiores; o POST `listar` com
+página e instância foi exercido ao vivo); no menu de Citações o `<select>` tem o valor `7` repetido, então página 2+
+de "Prazo perdido 90 dias" de citações pode cair na outra lista de valor 7; "Com Prazo a Vencer no Período Informado"
+(pede datas) não é lida.
+
 ## Resumo
 
 | Capacidade | Situação em 2026-11-05 |
