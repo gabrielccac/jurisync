@@ -289,12 +289,14 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
         if customer in previous:
             plan.users = list(previous[customer].get("users", [])) if plan.mode == "hosted" else []
             plan.name = (names or {}).get(customer) or previous[customer].get("name", plan.name)
+        (out / "profiles").mkdir(mode=0o700, exist_ok=True)
         profile = out / "profiles" / customer
-        profile.mkdir(parents=True, exist_ok=True)
+        profile.mkdir(mode=0o700, exist_ok=True)
         for file_name in PROFILE_FILES:
             source = customers.customer_dir(customer) / file_name
             if source.is_file():
                 shutil.copyfile(source, profile / file_name)
+                (profile / file_name).chmod(0o600)
         offices.append(plan)
         if plan.mode == "local":
             (out / f"{plan.tenant}.jurisync").unlink(missing_ok=True)  # a bundle from before the switch

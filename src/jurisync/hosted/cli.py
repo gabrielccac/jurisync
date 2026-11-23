@@ -263,8 +263,8 @@ def portal_list(args, say):
     if office["mode"] == "local":
         say(f"{tenant}: só local ({office['reason'] or 'instalação local'}); nenhum portal no servidor")
         return
-    values, files = vault.get(tenant)
-    values = access.tenant_values(office, values)  # the state the server logs in with
+    stored, files = vault.get(tenant)
+    values = access.tenant_values(office, stored)  # the state the server logs in with
     info = access.certificate_info(values, files)
     say(f"Certificado A1: {f'{info.holder}, válido até {info.expires}' if info else 'não cadastrado'}")
     checks = store.checks(tenant)
@@ -274,17 +274,32 @@ def portal_list(args, say):
         check = checks.get(key)
         return "não testado" if check is None else ("OK" if check["ok"] else f"falhou: {check['message']}")
 
-    for key in office_portals(office, values, checks):
+    listed = office_portals(office, values, checks)
+    offered = served_now(office, stored, files, listed)
+    for key in listed:
         config = portals.get(key)
         state = access.portal_state(config, values, files)
         authenticator = "sim" if state.has_authenticator else "não"
+        status = result(key)
+        if key not in offered:
+            status = "não oferecido: falta login no cofre" + ("" if key not in checks else f" (último teste: {status})")
         say(
             f"{key:<16} {registry.label(config.system):<9} {methods[state.method]:<16} 2FA={authenticator:<4} "
-            + result(key)
+            + status
         )
     for service in registry.SERVICES:
         if all(values.get(name) for name in registry.get(service).login):
             say(f"{service:<16} {registry.label(service):<9} {methods[access.PASSWORD]:<16} {'':<9}{result(service)}")
+
+
+def served_now(office, values, files, keys):
+    """Which of ``keys`` the server offers this office right now (its profile and the login in its vault)."""
+    from jurisync.hosted import access
+    from jurisync.hosted.app import offered_portals
+
+    with access.tenant_scope(office, values, files):
+        offered = {name: offered_portals(name) for name in {portals.get(key).system for key in keys}}
+    return {key for key in keys if key in (offered[portals.get(key).system] or ())}
 
 
 def office_portals(office, values, checks=()):
@@ -530,7 +545,10 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         password = ask_secret("Senha do usuário (mín. 12 caracteres): ")
         if password != ask_secret("Repita a senha: "):
             raise SystemExit("As senhas não conferem")
-        open_store().add_user(args.email, args.tenant, password)
+        try:
+            open_store().add_user(args.email, args.tenant, password)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
         say(f"Usuário {args.email.strip().lower()} pode entrar em {args.tenant}.")
     elif args.command == "user" and args.action == "password":
         password = ask_secret("Nova senha (mín. 12 caracteres): ")
