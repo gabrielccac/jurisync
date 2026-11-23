@@ -11,6 +11,7 @@ import pytest
 from curl_cffi.requests import exceptions
 
 from jurisync.connectors.esaj import base, parsers
+from jurisync.core.http import UnsafeUrlError
 
 NUMBER = "0000001-00.2026.8.26.0001"
 DIGITS = "00000010020268260001"
@@ -367,3 +368,225 @@ def test_get_process_returns_the_whole_history_and_flags_a_truncated_one(monkeyp
     monkeypatch.setattr(base, "paged_movements", lambda *a: (rows, False))
     assert base.load_process(None, "tjal-esaj", TJAL)["movementsTruncated"] is True
     assert parsers.movements_on_demand(detail.text) and not parsers.movements_on_demand("<table></table>")
+
+
+# --- Every panel call waits for the session's first, slow answer ----------------------------------------------------
+
+
+@pytest.mark.parametrize("call", ["peticoes", "audiencias", "lookup"])
+def test_every_panel_list_gets_the_long_wait_and_reports_a_timeout(monkeypatch, call):
+    seen = []
+
+    def request(session, portal, method, path, **kwargs):
+        seen.append((path, kwargs["timeout"]))
+        raise exceptions.Timeout("Operation timed out")
+
+    monkeypatch.setattr(base, "request", request)
+    with pytest.raises(base.EsajBlocked) as error:
+        if call == "lookup":
+            base.dashboard_lookup(None, "tjsp-esaj", {"numerosProcesso": DIGITS})
+        else:
+            base.list_tasks(None, "tjsp-esaj", call)
+    assert error.value.reason == "portal_timeout"
+    assert seen == [(f"tarefas-adv/api/{'processos' if call == 'lookup' else call}", base.PANEL_TIMEOUT)]
+    assert base.PANEL_TIMEOUT >= 120
+
+
+# --- TJSP's throttle: "multiplas consultas simultâneas" ---------------------------------------------------------------
+
+THROTTLED = (
+    '<form id="formConsulta"><input type="radio" name="dadosConsulta.tipoNuProcesso"></form>'
+    '<div id="spwTabelaMensagem"><td id="mensagemRetorno"><li>Foram identificadas multiplas consultas simultâneas.'
+    "</li></td></div>"
+)
+
+
+def test_the_throttle_answer_is_recognized():
+    assert parsers.simultaneous_queries(THROTTLED)
+    assert parsers.simultaneous_queries(THROTTLED.replace("multiplas", "múltiplas").encode())
+    assert not parsers.simultaneous_queries(f'<span id="numeroProcesso">{NUMBER}</span>')
+
+
+def test_a_throttled_consultation_is_asked_again_after_a_pause(monkeypatch):
+    detail = reply(text=f'<span id="numeroProcesso">{NUMBER}</span>', url=f"{HOST}/cpopg/show.do?processo.codigo=A1")
+    answers = iter([reply(text=THROTTLED, url=f"{HOST}/cpopg/search.do"), detail])
+    pauses = []
+    monkeypatch.setattr(base, "request", lambda *a, **k: next(answers))
+    monkeypatch.setattr(base.time, "sleep", pauses.append)
+    assert base.consult(None, "tjsp-esaj", "cpopg/search.do", params={}) is detail
+    assert pauses == [base.THROTTLE_PAUSE]
+
+
+def test_a_portal_that_keeps_throttling_is_reported_as_such_not_as_a_missing_process(monkeypatch):
+    seen = []
+
+    def request(session, portal, method, path, **kwargs):
+        seen.append(path)
+        if path.endswith("open.do"):
+            return reply(text="<form></form>", url=f"{HOST}/cpopg/open.do")
+        return reply(text=THROTTLED, url=f"{HOST}/cpopg/search.do")
+
+    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(base.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
+    monkeypatch.setattr(base, "bridge_search", lambda *a: pytest.fail("the bridge is not a way around the throttle"))
+    with pytest.raises(base.EsajBlocked) as error:
+        base.load_process(None, "tjsp-esaj", NUMBER)
+    assert error.value.reason == "rate_limited"
+    assert seen.count("cpopg/search.do") == base.THROTTLE_RETRIES + 1
+
+
+# --- Bug: documents of a case the panel does not list ("No authorized document viewer link") ------------------------
+
+CODE = "AB0000000001"
+VIEWER_URL = (
+    f"{HOST}/pastadigital/abrirPastaProcessoDigital.do?nuProcesso={NUMBER}&cdProcesso={CODE}&instanciaProcesso=pg"
+    "&cdServico=190101&ticket=t0"
+)
+RECORDS_DETAIL = (
+    f'<span id="numeroProcesso">{NUMBER}</span>'
+    f'<a class="linkPasta btn" href="/cpopg/abrirPastaDigital.do?processo.codigo={CODE}">Visualizar autos</a>'
+    f'<a class="linkPasta btn" href="/cpopg/abrirPastaDigital.do?processo.codigo={CODE}&acessibilidade=true">'
+    "Visualizar autos</a>"
+)
+APPEALED_DETAIL = (
+    f'<span id="numeroProcesso">{NUMBER}</span><span id="labelSituacaoProcesso">Em grau de recurso</span>'
+    f'<a class="linkConsultaSG btn" href="/cpopg/abrirConsultaProcessoSG.do?nuProcesso={NUMBER}&cdProcessoSg=SG01'
+    '&cdForoSg=990&isProcessoOrigemCr=false">Consultar em 2ª instância</a>'
+)
+SECOND_DETAIL = (
+    f'<span id="numeroProcesso">{NUMBER}</span><input type="hidden" name="cdProcesso" value="SG0000000001">'
+    '<a class="linkPasta btn" id="pbVisualizarAutos" href="#">Visualizar autos</a>'
+)
+PASSWORD_POPUP = '<p>É necessário informar uma senha</p><input name="senhaProcesso"><input name="cdProcesso">'
+
+
+class Records:
+    """A fake e-SAJ for the detail-page route to the viewer; the panel resolves nothing."""
+
+    def __init__(self, detail, *, answer=VIEWER_URL, second=(200, VIEWER_URL), first=(200, VIEWER_URL)):
+        self.detail, self.answer, self.second, self.first = detail, answer, second, first
+        self.seen = []
+
+    def __call__(self, session, portal, method, path, **kwargs):
+        self.seen.append((path, kwargs.get("params")))
+        if path == "tarefas-adv/api/intimacoes":
+            return reply([])
+        if path == "tarefas-adv/api/processos":
+            return reply([])
+        if path.startswith("/cpopg/abrirPastaDigital.do?"):
+            return reply(text=self.answer, url=f"{HOST}{path}")
+        if path == "cpopg/abrirPastaDigital.do":
+            status, body = self.first
+            return reply(text=body, status=status, url=f"{HOST}/{path}")
+        if path.startswith("/cpopg/abrirConsultaProcessoSG.do"):
+            return reply(text=SECOND_DETAIL, url=f"{HOST}/cposg/show.do?processo.codigo=SG0000000001")
+        if path == "/cposg/verificarAcessoPastaDigital.do":
+            assert kwargs["params"] == {"cdProcesso": "SG0000000001"} and kwargs["accept"] == (403,)
+            status, body = self.second
+            return reply(text=body, status=status, url=f"{HOST}{path}")
+        if path.startswith("/pastadigital/abrirPastaProcessoDigital.do"):
+            return reply(text=viewer(), url=f"{HOST}/pastadigital/abrirPastaProcessoDigital.do")
+        raise AssertionError(f"unexpected request {method} {path}")
+
+    def paths(self):
+        return [path for path, _params in self.seen]
+
+
+@pytest.fixture
+def records(monkeypatch):
+    def install(detail, **kwargs):
+        fake = Records(reply(text=detail, url=f"{HOST}/cpopg/show.do?processo.codigo={CODE}"), **kwargs)
+        monkeypatch.setattr(base, "request", fake)
+        monkeypatch.setattr(base, "consultation_code", lambda *a: (CODE, fake.detail))
+        return fake
+
+    return install
+
+
+def test_a_case_the_panel_does_not_list_opens_through_visualizar_autos(records):
+    fake = records(RECORDS_DETAIL)
+    items = base.list_documents(None, "tjsp-esaj", NUMBER)["items"]
+    assert items[0]["documentId"] == "7" and items[0]["accessStatus"] == "permission_check_required"
+    assert f"/cpopg/abrirPastaDigital.do?processo.codigo={CODE}" in fake.paths()  # not its accessible twin
+    assert fake.paths()[-1].startswith("/pastadigital/abrirPastaProcessoDigital.do")
+    assert "tarefas-adv/api/peticoes" not in fake.paths()  # with a code, the petitions are not reloaded
+    assert parsers.records_link(RECORDS_DETAIL, "cpopg").endswith(f"processo.codigo={CODE}")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "https://evil.example/pastadigital/abrirPastaProcessoDigital.do?nuProcesso=" + NUMBER,
+        f"{HOST}/pastadigital/outra.do?nuProcesso={NUMBER}",
+        VIEWER_URL.replace(NUMBER, "0000009-00.2026.8.26.0001"),
+    ],
+)
+def test_the_viewer_url_the_button_answers_is_checked_before_it_is_followed(records, answer):
+    fake = records(RECORDS_DETAIL, answer=answer)
+    with pytest.raises((UnsafeUrlError, base.EsajParseError)):
+        base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert not any(path.startswith("/pastadigital/") for path in fake.paths())
+
+
+def test_a_button_answer_that_is_not_a_url_is_no_viewer(records):
+    fake = records(RECORDS_DETAIL, answer="<html>Erro</html>")
+    with pytest.raises(base.EsajBlocked):
+        base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert not any(path.startswith("/pastadigital/") for path in fake.paths())
+
+
+def test_a_case_in_the_second_instance_opens_its_second_instance_records(records):
+    fake = records(APPEALED_DETAIL)
+    assert base.list_documents(None, "tjsp-esaj", NUMBER)["items"][0]["documentId"] == "7"
+    assert "/cposg/verificarAcessoPastaDigital.do" in fake.paths()
+    assert "cpopg/abrirPastaDigital.do" not in fake.paths()
+
+
+def test_a_second_instance_password_falls_back_to_the_first_instance_records(records):
+    fake = records(APPEALED_DETAIL, second=(403, PASSWORD_POPUP))
+    assert base.list_documents(None, "tjsp-esaj", NUMBER)["items"][0]["documentId"] == "7"
+    assert fake.seen[fake.paths().index("cpopg/abrirPastaDigital.do")][1] == {"processo.codigo": CODE}
+
+
+def test_both_instances_refused_is_password_required(records):
+    fake = records(APPEALED_DETAIL, second=(403, PASSWORD_POPUP), first=(403, PASSWORD_POPUP))
+    with pytest.raises(base.EsajBlocked) as error:
+        base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert error.value.reason == "password_required" and "second instance" in str(error.value)
+    assert not any(path.startswith("/pastadigital/") for path in fake.paths())
+
+
+def test_the_daily_limit_on_unlinked_cases_is_reported_and_nothing_else_is_tried(records):
+    fake = records(APPEALED_DETAIL, second=(406, ""))
+    with pytest.raises(base.EsajBlocked) as error:
+        base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert error.value.reason == "access_limit"
+    assert "cpopg/abrirPastaDigital.do" not in fake.paths()
+
+
+def test_a_process_page_without_any_records_route_keeps_the_flow_answer(records):
+    fake = records(f'<span id="numeroProcesso">{NUMBER}</span>', first=(200, "<html></html>"))
+    with pytest.raises(base.EsajBlocked) as error:
+        base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert error.value.reason == "flow_required"
+    assert not any(path.startswith("/pastadigital/") for path in fake.paths())
+
+
+def test_the_second_instance_link_must_name_this_process():
+    assert parsers.second_instance_link(APPEALED_DETAIL, "cpopg", NUMBER)
+    assert parsers.second_instance_link(APPEALED_DETAIL, "cpopg", "0000009-00.2026.8.26.0001") is None
+    assert parsers.hidden_process_code(SECOND_DETAIL) == "SG0000000001"
+    assert parsers.hidden_process_code("<p></p>") == ""
+
+
+def test_a_403_is_still_a_refusal_unless_the_caller_reads_it(monkeypatch):
+    class Session:
+        def request(self, method, url, **kwargs):
+            return SimpleNamespace(status_code=403, url=url, headers={}, text="", content=b"")
+
+    monkeypatch.setattr(base, "follow_redirects", lambda session, response, **kwargs: response)
+    with pytest.raises(base.EsajBlocked):
+        base.request(Session(), "tjsp-esaj", "GET", "cposg/verificarAcessoPastaDigital.do")
+    response = base.request(Session(), "tjsp-esaj", "GET", "cposg/verificarAcessoPastaDigital.do", accept=(403,))
+    assert response.status_code == 403

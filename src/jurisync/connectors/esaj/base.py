@@ -10,6 +10,7 @@ as ``EsajBlocked`` and never worked around.
 
 import base64
 import re
+import time
 import urllib.parse
 
 from bs4 import BeautifulSoup
@@ -254,12 +255,13 @@ def is_cas_login_page(response):
     return response.status_code == 200 and path.split(";")[0].rstrip("/").endswith("/sajcas/login")
 
 
-def request(session, portal, method, path, **kwargs):
+def request(session, portal, method, path, *, accept=(), **kwargs):
     """One guarded request on the portal host.
 
     Each e-SAJ application (caixapostal, intimacoesweb, ...) first redirects to the CAS, which, with a valid session,
     sends the browser straight back with a ticket; the redirects are followed here, host-checked. Ending on the CAS login
-    page means the session expired. A 403 is a flow the portal will not serve without a person (a captcha).
+    page means the session expired. A 403 is a flow the portal will not serve without a person (a captcha), unless the
+    caller reads that answer itself (``accept=(403,)``: a check whose refusal page says why).
     """
     if method != "GET" and not (method == "POST" and path == "pastadigital/validarAberturaIntimacaoNaoRecebida.do"):
         raise ValueError("e-SAJ connector allows only reads and the document permission check")
@@ -290,7 +292,7 @@ def request(session, portal, method, path, **kwargs):
         response.close()
     if is_cas_login_page(response) or response.status_code == 401:
         raise EsajSessionExpired("e-SAJ session expired")
-    if response.status_code == 403:
+    if response.status_code == 403 and 403 not in accept:
         raise EsajBlocked("e-SAJ refused this page (403): it needs a step only a person can do, such as a captcha")
     if response.status_code in REDIRECTS:
         raise RuntimeError(f"e-SAJ redirected too many times (HTTP {response.status_code})")
@@ -387,28 +389,32 @@ def list_tasks(session, portal, kind, state="AGUARDANDO_ASSINATURA"):
     if kind == "intimacoes":
         return {"kind": kind, "items": public_json(intimations(session, portal))}
     params = {"situacao": state} if kind == "peticoes" else {}
-    return {
-        "kind": kind,
-        "items": public_json(json_response(request(session, portal, "GET", f"tarefas-adv/api/{kind}", params=params))),
-    }
+    return {"kind": kind, "items": public_json(json_response(panel(session, portal, kind, params=params)))}
 
 
-# TJSP's panel can take minutes to answer the first intimações request of a session (seen live: over 3 minutes, then
-# the same request answered in under a second). Only this call gets the longer wait; a timeout is reported as such.
-INTIMATIONS_TIMEOUT = 150
+# TJSP's panel assembles the account's lists on the first API request of a session, whichever list it is: seen live,
+# the first ``peticoes`` call took 57 s and the first ``intimacoes`` 28 s (other days 65 s and over 3 minutes), then
+# both answered in under a second. The API takes no paging or period parameter (the panel's own page sends a plain
+# GET), so every panel call gets this longer wait and a timeout is reported as such.
+PANEL_TIMEOUT = 150
+INTIMATIONS_TIMEOUT = PANEL_TIMEOUT
+
+
+def panel(session, portal, name, params=None):
+    """One ``tarefas-adv/api/<name>`` request with the panel's wait; a timeout is ``portal_timeout``."""
+    try:
+        return request(session, portal, "GET", f"tarefas-adv/api/{name}", params=params, timeout=PANEL_TIMEOUT)
+    except requests.exceptions.Timeout:
+        raise EsajBlocked(
+            f"The portal did not finish the panel's {name} list within {PANEL_TIMEOUT} s. The court assembles the "
+            "lists on the first request of a session and answers the next ones quickly: try again in a few minutes",
+            "portal_timeout",
+        ) from None
 
 
 def intimations(session, portal):
     """The panel's intimações (each with its process code and the ``ciencia`` flag). Never marks any of them."""
-    try:
-        response = request(session, portal, "GET", "tarefas-adv/api/intimacoes", timeout=INTIMATIONS_TIMEOUT)
-    except requests.exceptions.Timeout:
-        raise EsajBlocked(
-            f"The portal did not finish the intimações list within {INTIMATIONS_TIMEOUT} s. The court assembles it "
-            "on the first request of a session and answers the next ones quickly: try again in a few minutes",
-            "portal_timeout",
-        ) from None
-    items = json_response(response)
+    items = json_response(panel(session, portal, "intimacoes"))
     if not isinstance(items, list):
         raise EsajParseError("Unexpected intimações response")
     return items
@@ -472,6 +478,31 @@ class BridgeResponse:
         self.url = url
         self.content = html.encode("utf-8")
         self.status_code = 200
+
+
+# TJSP answers a consultation asked less than about a second after the previous one with the search form and "Foram
+# identificadas multiplas consultas simultâneas" instead of the process. Seen live: four searches 0.1 s apart all got it,
+# the same search 1 s later was served. The page is asked again after a pause, as a person would; a portal that keeps
+# answering so is reported as such, not as a missing process.
+THROTTLE_PAUSE = 2
+THROTTLE_RETRIES = 2
+
+
+def consult(session, portal, path, **kwargs):
+    """A consultation page (``search.do``, ``show.do``), asked again after a pause while the portal throttles it."""
+    from jurisync.connectors.esaj import parsers
+
+    for attempt in range(THROTTLE_RETRIES + 1):
+        if attempt:
+            time.sleep(THROTTLE_PAUSE * attempt)
+        response = request(session, portal, "GET", path, **kwargs)
+        if not parsers.simultaneous_queries(response.content):
+            return response
+    raise EsajBlocked(
+        'The portal is refusing consultations as simultaneous queries ("múltiplas consultas simultâneas"): '
+        "another consultation with this account is running. Try again in a few seconds",
+        "rate_limited",
+    )
 
 
 def consultation_params(number):
@@ -562,7 +593,7 @@ def token_page(session, portal, url):
         raise EsajBlocked(f"Consultation requires CAPTCHA: {error}", "captcha_required") from None
     query = dict(urllib.parse.parse_qsl(parts.query))
     query.update({"recaptcha_response_token": token, "uuidCaptcha": identifier})
-    return request(session, portal, "GET", parts.path + "?" + urllib.parse.urlencode(query))
+    return consult(session, portal, parts.path + "?" + urllib.parse.urlencode(query))
 
 
 def token_search(session, portal, adapter, number, open_page):
@@ -589,7 +620,7 @@ def token_search(session, portal, adapter, number, open_page):
         raise EsajBlocked(f"Consultation requires CAPTCHA: {error}", "captcha_required") from None
     params = dict(consultation_params(number))
     params.update({"recaptcha_response_token": token, "uuidCaptcha": identifier})
-    response = request(session, portal, "GET", f"{adapter.CONSULTATION}/search.do", params=params)
+    response = consult(session, portal, f"{adapter.CONSULTATION}/search.do", params=params)
     if parsers.captcha(response.content):
         raise EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
     return response
@@ -604,9 +635,7 @@ def consultation_search(session, portal, adapter, number):
         start = request(session, portal, "GET", f"{adapter.CONSULTATION}/open.do")
         if parsers.captcha(start.content):
             raise EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
-        response = request(
-            session, portal, "GET", f"{adapter.CONSULTATION}/search.do", params=consultation_params(number)
-        )
+        response = consult(session, portal, f"{adapter.CONSULTATION}/search.do", params=consultation_params(number))
         if parsers.captcha(response.content):
             raise EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
         return response, "http"
@@ -617,8 +646,9 @@ def consultation_search(session, portal, adapter, number):
         if start is None:
             raise EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
         return token_search(session, portal, adapter, number, start), "http_token"
-    except EsajBlocked:
-        pass
+    except EsajBlocked as error:
+        if error.reason == "rate_limited":
+            raise
     return bridge_search(session, portal, number), "browser_bridge"
 
 
@@ -653,7 +683,9 @@ def load_process(session, portal, number):
                     start = request(session, portal, "GET", f"{adapter.CONSULTATION}/open.do")
                     response = token_search(session, portal, adapter, number, start)
                     source = "http_token"
-                except EsajBlocked:
+                except EsajBlocked as error:
+                    if error.reason == "rate_limited":
+                        raise
                     if parsers.not_found(response.content):
                         raise EsajBlocked(
                             "This e-SAJ has no process with this number (it may be on another system of the court)",
@@ -674,14 +706,14 @@ def load_process(session, portal, number):
     parts = urllib.parse.urlsplit(link)
     if parts.path != f"/{adapter.CONSULTATION}/show.do":
         raise EsajParseError("Unexpected process detail endpoint")
-    response = detail_response or request(
-        session, portal, "GET", parts.path + ("?" + parts.query if parts.query else "")
-    )
+    response = detail_response or consult(session, portal, parts.path + ("?" + parts.query if parts.query else ""))
     if parsers.captcha(response.content):
         try:
             response = token_page(session, portal, link)
             source = "http_token"
-        except EsajBlocked:
+        except EsajBlocked as error:
+            if error.reason == "rate_limited":
+                raise
             response = bridge_page(session, portal, link)
             source = "browser_bridge"
         if parsers.captcha(response.content):
@@ -736,9 +768,7 @@ PETITION_STATES = ("AGUARDANDO_ASSINATURA", "AGUARDANDO_DISTRIBUICAO", "AGUARDAN
 
 def dashboard_lookup(session, portal, params):
     """The panel's ``processos`` answer for ``numerosProcesso`` or ``cdsProcesso`` (repeatable) parameters."""
-    items = json_response(
-        request(session, portal, "GET", "tarefas-adv/api/processos", params=params, timeout=PANEL_TIMEOUT)
-    )
+    items = json_response(panel(session, portal, "processos", params=params))
     if not isinstance(items, list):
         raise EsajParseError("Unexpected process dashboard response")
     return items
@@ -755,8 +785,6 @@ def dashboard_entry(items, digits):
 
 
 PROCESS_CODE = re.compile(r"[A-Za-z0-9]{1,40}")
-# TJSP's panel API answers in seconds most of the time but sometimes takes longer than the default 30 s.
-PANEL_TIMEOUT = 60
 
 
 def dashboard_process(session, portal, number, code=None, *, petitions=True):
@@ -774,11 +802,7 @@ def dashboard_process(session, portal, number, code=None, *, petitions=True):
         return item
     tried = {code}
     for state in PETITION_STATES:
-        listed = json_response(
-            request(
-                session, portal, "GET", "tarefas-adv/api/peticoes", params={"situacao": state}, timeout=PANEL_TIMEOUT
-            )
-        )
+        listed = json_response(panel(session, portal, "peticoes", params={"situacao": state}))
         for petition in listed if isinstance(listed, list) else []:
             process = petition.get("processo") if isinstance(petition, dict) else None
             if not isinstance(process, dict) or re.sub(r"\D", "", str(process.get("nuProcesso") or "")) != digits:
@@ -816,6 +840,114 @@ def consultation_code(session, portal, number):
 VIEWER_PATHS = frozenset(f"/{app}/abrirPastaDigitalIntegracao.do" for app in ("cpopg", "cpopg5", "cposg", "cposg5"))
 
 
+VIEWER_PAGE = "/pastadigital/abrirPastaProcessoDigital.do"
+
+
+SECOND_INSTANCE_DETAIL = frozenset({"/cposg/show.do", "/cposg5/show.do"})
+
+
+def second_instance_records(session, portal, number, detail):
+    """The viewer-URL answer for a case "em grau de recurso": its first-instance page has no "Visualizar autos", only
+    "Consultar em 2ª instância". That link opens the second-instance page, whose button asks
+    ``verificarAcessoPastaDigital.do?cdProcesso=`` (the page's hidden ``cdProcesso``) as the page's own script does: the
+    answer is the viewer URL; 406 is the court's daily limit on unlinked cases; any other refusal is the
+    process-password dialog (the account is not linked to the case in the second instance).
+    """
+    from jurisync.connectors.esaj import parsers
+
+    adapter = adapter_for(portal)
+    link = parsers.second_instance_link(detail.content, adapter.CONSULTATION, number)
+    if not link:
+        raise EsajBlocked("No authorized document viewer link in the account dashboard or the process page")
+    parts = urllib.parse.urlsplit(urllib.parse.urljoin(detail.url, link))
+    page = consult(session, portal, f"{parts.path}?{parts.query}")
+    application = urllib.parse.urlsplit(page.url).path
+    if page.status_code != 200 or application not in SECOND_INSTANCE_DETAIL:
+        raise EsajBlocked("The second-instance page of this process is unavailable to this account")
+    code = parsers.hidden_process_code(page.content)
+    if not code or not PROCESS_CODE.fullmatch(code):
+        raise EsajParseError("The second-instance page has no process code")
+    answer = request(
+        session,
+        portal,
+        "GET",
+        application.replace("/show.do", "/verificarAcessoPastaDigital.do"),
+        params={"cdProcesso": code},
+        accept=(403,),
+    )
+    if answer.status_code == 406:
+        raise EsajBlocked(
+            "The court's daily limit of document-viewer openings for cases the account is not linked to was reached",
+            "access_limit",
+        )
+    if answer.status_code != 200:
+        raise EsajBlocked(
+            "The process is in the second instance and the portal asks for the process password to show its "
+            "records there: the account is not linked to the case in the second instance. The password comes from "
+            "the court registry; the connector does not ask for it",
+            "password_required",
+        )
+    return answer
+
+
+def detail_viewer(session, portal, number, code, detail=None):
+    """The document viewer reached the way the detail page's "Visualizar autos" button reaches it.
+
+    The button's ``abrirPastaDigital.do?processo.codigo=`` answers with the viewer's own URL as plain text (with a
+    one-time ``ticket``), which the page then opens. That URL is followed only on the portal host, on the viewer path and
+    for this process number. A detail page whose button opens only the process-password dialog is ``password_required``.
+    """
+    from jurisync.connectors.esaj import parsers
+
+    adapter = adapter_for(portal)
+    config = portals.esaj(portal)
+    if detail is None:
+        detail = consult(session, portal, f"{adapter.CONSULTATION}/show.do", params={"processo.codigo": code})
+    if parsers.records_need_password(detail.content):
+        raise EsajBlocked(
+            "The portal asks for the process password to show its records: the account is not linked to this "
+            "process in e-SAJ. The password comes from the court registry; the connector does not ask for it",
+            "password_required",
+        )
+    link = parsers.records_link(detail.content, adapter.CONSULTATION)
+    if link:
+        parts = urllib.parse.urlsplit(urllib.parse.urljoin(detail.url, link))
+        if urllib.parse.parse_qs(parts.query).get("processo.codigo") != [code]:
+            raise EsajParseError("The process page links the records of another process")
+        answer = request(session, portal, "GET", f"{parts.path}?{parts.query}")
+    else:
+        try:
+            answer = second_instance_records(session, portal, number, detail)
+        except EsajBlocked as refusal:
+            if refusal.reason == "access_limit":
+                raise
+            # A case in the second instance keeps its first-instance records where the account is linked: the page
+            # hides their button while the case is away, but the same route still serves them to a linked account
+            # (seen live on TJSP). Whatever the portal answers decides; a refusal there keeps the first one.
+            answer = request(
+                session,
+                portal,
+                "GET",
+                f"{adapter.CONSULTATION}/abrirPastaDigital.do",
+                params={"processo.codigo": code},
+                accept=(403,),
+            )
+            if answer.status_code != 200 or not (answer.text or "").strip().startswith("https://"):
+                raise refusal from None
+    target = (answer.text or "").strip() if answer.status_code == 200 else ""
+    if not target.startswith("https://") or any(character.isspace() for character in target):
+        raise EsajBlocked("Document viewer is unavailable to this account")
+    require_portal_url(config, target, "e-SAJ document viewer")
+    viewer = urllib.parse.urlsplit(target)
+    numbers = urllib.parse.parse_qs(viewer.query).get("nuProcesso", [])
+    if viewer.path != VIEWER_PAGE or [re.sub(r"\D", "", value) for value in numbers] != [re.sub(r"\D", "", number)]:
+        raise EsajParseError("Unexpected document viewer endpoint")
+    response = request(session, portal, "GET", f"{viewer.path}?{viewer.query}")
+    if response.status_code != 200 or not urllib.parse.urlsplit(response.url).path.startswith("/pastadigital/"):
+        raise EsajBlocked("Document viewer is unavailable to this account")
+    return response
+
+
 def document_inventory(session, portal, number):
     from jurisync.connectors.esaj import parsers
 
@@ -824,22 +956,18 @@ def document_inventory(session, portal, number):
     ensure_no_pending_intimation(session, portal, number)
     item = dashboard_process(session, portal, number, petitions=False)
     if not item or not item.get("urlPasta"):
-        # The consultation names the process code, which the panel resolves; failing that, the petitions it lists.
+        # The consultation names the process code, which the panel resolves for the cases on the account's panel.
+        # A case the panel does not list opens through its detail page's "Visualizar autos", as in the browser.
+        # Without a code (consultation behind a CAPTCHA), the petitions the panel lists may still name one.
         try:
             code, detail = consultation_code(session, portal, number)
-        except EsajBlocked:
+        except EsajBlocked as error:
+            if error.reason == "rate_limited":
+                raise
             code, detail = None, None
-        item = dashboard_process(session, portal, number, code=code)
-        if (
-            (not item or not item.get("urlPasta"))
-            and detail is not None
-            and parsers.records_need_password(detail.content)
-        ):
-            raise EsajBlocked(
-                "The portal asks for the process password to show its records: the account is not linked to this "
-                "process in e-SAJ. The password comes from the court registry; the connector does not ask for it",
-                "password_required",
-            )
+        item = dashboard_process(session, portal, number, code=code, petitions=code is None)
+        if (not item or not item.get("urlPasta")) and code:
+            return parsers.viewer_documents(detail_viewer(session, portal, number, code, detail).text, number)
     if not item or not item.get("urlPasta"):
         raise EsajBlocked("No authorized document viewer link in the account dashboard")
     link = item["urlPasta"]

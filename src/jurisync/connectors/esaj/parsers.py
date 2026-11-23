@@ -175,6 +175,48 @@ def records_need_password(html):
     return bool(links) and all(link["href"].startswith("#liberarAutoPorSenha") for link in links)
 
 
+def records_link(html, prefix):
+    """The detail page's "Visualizar autos" target (``abrirPastaDigital.do?processo.codigo=``), not its accessible twin."""
+    for link in soup(html).select("a.linkPasta[href]"):
+        parts = urlsplit(link["href"])
+        query = parse_qs(parts.query)
+        if (
+            parts.path.endswith(f"/{prefix}/abrirPastaDigital.do")
+            and query.get("processo.codigo")
+            and query.get("acessibilidade", ["false"]) != ["true"]
+        ):
+            return link["href"]
+    return None
+
+
+def second_instance_link(html, prefix, number):
+    """The first-instance page's "Consultar em 2ª instância" (``abrirConsultaProcessoSG.do``) for this process number."""
+    digits = re.sub(r"\D", "", number)
+    for link in soup(html).select("a[href]"):
+        parts = urlsplit(link["href"])
+        query = parse_qs(parts.query)
+        if parts.path.endswith(f"/{prefix}/abrirConsultaProcessoSG.do") and [
+            re.sub(r"\D", "", value) for value in query.get("nuProcesso", [])
+        ] == [digits]:
+            return link["href"]
+    return None
+
+
+def hidden_process_code(html):
+    """The process code the second-instance page keeps for its own scripts (``input[name=cdProcesso]``)."""
+    node = soup(html).select_one('input[type="hidden"][name="cdProcesso"]')
+    return node.get("value", "") if node is not None else ""
+
+
+def simultaneous_queries(html):
+    """TJSP's throttle answer: "Foram identificadas multiplas consultas simultâneas" instead of the page asked for."""
+    import unicodedata
+
+    text = " ".join(soup(html).get_text(" ", strip=True).split()).lower()
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return "multiplas consultas simultaneas" in text
+
+
 def viewer_documents(html, number):
     """Process-bound PDF parameters from the viewer's JSON, never from a caller URL."""
     import json
