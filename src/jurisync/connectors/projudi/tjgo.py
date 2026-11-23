@@ -9,7 +9,9 @@ cookie, and an expired session is redirected to ``/LogOn``.
 
 A process is opened by CNJ number (``POST /BuscaProcesso``); its document index (``PaginaAtual=9``) exists only for the
 process opened in the session, and a file downloads with its ``id_movi_arq`` and ``hash``. The search covers only active
-processes unless told otherwise, so an archived one takes a second search with its own status code. TJGO's own lists
+processes unless told otherwise, so an archived one takes a second search with its own status code. The search form
+keeps its filters in the session (the own-process lists leave a serventia type behind), so every search by number
+starts with the form's "Limpar". TJGO's own lists
 show a short number (``NNNNNNN-DD``), which the search also accepts.
 
 Ciência (observed live 2026-11-17, ``tjgo_desk`` has the pages): a lawyer's TJGO intimações go out through the Diário
@@ -273,7 +275,19 @@ class TjgoAdapter(base.Adapter):
             raise base.ProjudiSessionExpired("Projudi session expired")
         return html
 
+    def _clear_search(self, session, portal):
+        """The search form's own "Limpar" button (``PaginaAtual=4``): navigation only.
+
+        ``BuscaProcesso`` keeps its filters in the session and a later request changes only the fields it sends. The
+        own-process lists leave the last serventia type (``Id_ServentiaSubTipo``) and an archived search leaves its
+        status behind, so a search by number after them looked only there: on 23/11/2026, after
+        ``projudi_list_processes``, a process of another type answered "Nenhum Processo foi localizado" until the
+        form was cleared.
+        """
+        self._page(self.request(session, portal, "POST", "BuscaProcesso", data={"PaginaAtual": "4"}), "search reset")
+
     def _search_process(self, session, portal, process_number, status=None):
+        self._clear_search(session, portal)
         response = self.request(
             session,
             portal,

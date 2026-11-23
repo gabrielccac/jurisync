@@ -5,6 +5,7 @@ from unittest import mock
 from jurisync import portals
 from jurisync.connectors.eproc import certificate
 from jurisync.core.http import UnsafeUrlError
+from jurisync.core.session_pool import LoginFailed
 
 LOGIN = "https://eproc-sso.trf4.jus.br/realms/eproc/protocol/openid-connect/auth?scope=openid&state=s"
 BUTTON = "<button onclick=\"document.location.host = 'eproc-sso-certificado.trf4.jus.br';\"></button>"
@@ -597,13 +598,53 @@ class Trf6BrowserEntryTest(unittest.TestCase):
         target = certificate._certificate_url(result.text, result.url, self.config)
         self.assertTrue(target.startswith("https://certificado-sso-eproc.trf6.jus.br/realms/eproc/"), target)
 
-    def test_a_page_that_never_offers_the_certificate_stops_and_closes_the_browser(self):
+    def test_a_challenge_that_never_clears_stops_as_captcha_and_closes_the_browser(self):
         driver = FakeDriver([CHALLENGE])
         with (
             mock.patch.object(certificate, "BROWSER_ENTRY_TIMEOUT", -1),
-            self.assertRaisesRegex(RuntimeError, "did not open in the browser"),
+            self.assertRaisesRegex(LoginFailed, "did not open in the browser: the portal's bot challenge") as caught,
         ):
             self.browse(driver)
+        self.assertEqual(caught.exception.reason, "captcha")
+        self.assertIn("https://sso-eproc.trf6.jus.br/realms/eproc/protocol/openid-connect/auth", str(caught.exception))
+        self.assertNotIn("state=", str(caught.exception))  # the address shape only
+        self.assertTrue(driver.quit_called)
+
+    def test_the_f5_refusal_stops_at_once_without_another_entry(self):
+        refused = "<html><title>Request Rejected</title>The requested URL was rejected. Your support ID is: 1</html>"
+        driver = FakeDriver([refused])
+        with self.assertRaisesRegex(LoginFailed, "refused the browser at its bot check") as caught:
+            self.browse(driver)
+        self.assertEqual((caught.exception.reason, driver.opened), ("captcha", [self.config.login_url]))
+        self.assertTrue(driver.quit_called)
+
+    def test_the_challenge_page_support_id_is_not_a_refusal(self):
+        challenge = CHALLENGE + "<noscript>Please enable JavaScript. Your support ID is: 1.</noscript>"
+        driver = FakeDriver([challenge, TRF6_BUTTON])
+        self.assertEqual(self.browse(driver)[1].text, TRF6_BUTTON)
+
+    def test_a_page_without_challenge_nor_certificate_goes_to_the_sso_entry_once(self):
+        home = "<html><title>eproc</title><input id='txtUsuario'></html>"
+        driver = FakeDriver([home, home, TRF6_BUTTON])
+        with mock.patch.object(certificate, "BROWSER_SETTLE", 0):
+            _, result = self.browse(driver)
+        self.assertEqual(driver.opened, [self.config.login_url, self.config.url(certificate.SSO_ENTRY)])
+        self.assertEqual(result.text, TRF6_BUTTON)
+        stuck = FakeDriver([home])
+        with (
+            mock.patch.object(certificate, "BROWSER_SETTLE", 0),
+            mock.patch.object(certificate, "BROWSER_ENTRY_TIMEOUT", 0.01),
+            self.assertRaisesRegex(LoginFailed, "answered no login page") as caught,
+        ):
+            self.browse(stuck)
+        self.assertEqual((caught.exception.reason, len(stuck.opened)), ("portal_unavailable", 2))
+
+    def test_an_entry_that_does_not_load_is_portal_unavailable(self):
+        driver = FakeDriver([""])
+        driver.get = mock.Mock(side_effect=TimeoutError("page load"))
+        with self.assertRaisesRegex(LoginFailed, "entry did not load in the browser") as caught:
+            self.browse(driver)
+        self.assertEqual(caught.exception.reason, "portal_unavailable")
         self.assertTrue(driver.quit_called)
 
     def test_a_browser_sent_off_the_court_hands_nothing_over(self):

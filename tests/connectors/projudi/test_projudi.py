@@ -273,12 +273,21 @@ class TjgoAdapterTest(unittest.TestCase):
     def _search_page(html):
         return mock.Mock(status_code=200, content=html.encode(), headers={})
 
+    CLEARED = "<html><title>Busca de Processo</title></html>"
+
     def test_archived_process_opens_on_the_second_search(self):
         session = mock.Mock()
-        session.request.side_effect = [self._search_page(NOT_LOCATED_HTML), self._search_page(PROCESS_HTML)]
+        cleared = self._search_page(self.CLEARED)
+        session.request.side_effect = [
+            cleared,
+            self._search_page(NOT_LOCATED_HTML),
+            cleared,
+            self._search_page(PROCESS_HTML),
+        ]
         process = tjgo.TjgoAdapter().open_process(session, "tjgo-1g", NUMBER)
         self.assertEqual(process["number"], NUMBER)
-        first, second = (call.kwargs["data"] for call in session.request.call_args_list)
+        clear, first, clear_again, second = (call.kwargs["data"] for call in session.request.call_args_list)
+        self.assertEqual(clear, clear_again)
         self.assertNotIn("ProcessoStatusCodigo", first)
         self.assertEqual((second["ProcessoStatus"], second["ProcessoStatusCodigo"]), ("", "1"))
 
@@ -286,19 +295,31 @@ class TjgoAdapterTest(unittest.TestCase):
         session = mock.Mock()
         session.request.return_value = self._search_page(PROCESS_HTML)
         tjgo.TjgoAdapter().open_process(session, "tjgo-1g", NUMBER)
-        self.assertEqual(session.request.call_count, 1)
+        self.assertEqual(session.request.call_count, 2)  # the form's "Limpar", then the search
+
+    def test_every_search_starts_by_clearing_the_form_the_lists_left_behind(self):
+        # 23/11/2026: after projudi_list_processes the session's search form kept the last serventia type
+        # (Id_ServentiaSubTipo) and the search by number answered "Nenhum Processo foi localizado" until cleared.
+        session = mock.Mock()
+        session.request.return_value = self._search_page(PROCESS_HTML)
+        tjgo.TjgoAdapter().open_process(session, "tjgo-1g", NUMBER)
+        clear, search = session.request.call_args_list
+        self.assertEqual((clear.args[0], clear.args[1].rsplit("/", 1)[1]), ("POST", "BuscaProcesso"))
+        self.assertEqual(clear.kwargs["data"], {"PaginaAtual": "4"})
+        self.assertEqual((search.kwargs["data"]["PaginaAtual"], search.kwargs["data"]["ProcessoNumero"]), ("2", NUMBER))
 
     def test_process_missing_from_both_searches_is_not_found(self):
         session = mock.Mock()
         session.request.return_value = self._search_page(NOT_LOCATED_HTML)
         with self.assertRaisesRegex(ValueError, "not found"):
             tjgo.TjgoAdapter().open_process(session, "tjgo-1g", NUMBER)
-        self.assertEqual(session.request.call_count, 2)
+        self.assertEqual(session.request.call_count, 4)
 
     def test_archived_search_still_checks_the_opened_number(self):
         session = mock.Mock()
         other = PROCESS_HTML.replace(NUMBER, "0000002-23.2026.8.09.0001")
-        session.request.side_effect = [self._search_page(NOT_LOCATED_HTML), self._search_page(other)]
+        cleared = self._search_page(self.CLEARED)
+        session.request.side_effect = [cleared, self._search_page(NOT_LOCATED_HTML), cleared, self._search_page(other)]
         with self.assertRaisesRegex(ValueError, "different process"):
             tjgo.TjgoAdapter().open_process(session, "tjgo-1g", NUMBER)
 

@@ -229,6 +229,9 @@ def page(html, status=200):
     return mock.Mock(status_code=status, content=content, headers={})
 
 
+CLEARED = "<html><title>Busca de Processo</title></html>"  # the search form after its "Limpar"
+
+
 class DeskSession:
     """Answers the desk's GETs by path; records every request."""
 
@@ -411,11 +414,11 @@ class TjgoGuardTest(unittest.TestCase):
 
         listed = process_list(["0000001-23", "0000001-99"]).replace("submete('999')", "submete('111')", 1)
         session = mock.Mock()
-        session.request.side_effect = [page(listed), page(PROCESS_HTML)]
+        session.request.side_effect = [page(CLEARED), page(listed), page(PROCESS_HTML)]
         self.assertEqual(self.adapter.open_process(session, "tjgo-1g", "0000001-23")["number"], NUMBER)
         self.assertTrue(session.request.call_args.args[1].endswith("BuscaProcesso?Id_Processo=111"))
         twice = process_list(["0000001-23", "0000001-23"]).replace("submete('999')", "submete('222')", 1)
-        session.request.side_effect = [page(twice)]
+        session.request.side_effect = [page(CLEARED), page(twice)]
         with self.assertRaisesRegex(ValueError, "matches 2 processes; pass the full CNJ number"):
             self.adapter.open_process(session, "tjgo-1g", "0000001-23")
         self.assertNotIn(

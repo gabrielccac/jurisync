@@ -68,6 +68,17 @@ SSO_ONLY = {"tjsc-1g", "tjsc-2g"}
 # any other Keycloak portal. The browser types nothing and clicks nothing.
 BROWSER_ENTRY = {"trf6-1g", "trf6-2g"}
 BROWSER_ENTRY_TIMEOUT = 60
+SSO_ENTRY = "externo_controlador.php?acao=SSO/login"
+# A page still answering with a bot challenge (TRF6: F5 "bobcmn"/TSPD script; the other vendors' markers too) and the
+# F5 refusal page ("The requested URL was rejected"). The challenge page itself carries "Your support ID" in its
+# <noscript>, so only the refusal's own sentence marks a refusal.
+BOT_CHALLENGE = re.compile(
+    r"bobcmn|TSPD|cf-chl|challenge-platform|_Incapsula_Resource|verify you are human|captcha", re.I
+)
+BOT_REFUSAL = re.compile(r"The requested URL was rejected|Request Rejected", re.I)
+# A page that is neither a challenge nor the certificate option (the portal's own home, a classic form) is given this
+# long before the browser opens the SSO entry instead, as the HTTP login does.
+BROWSER_SETTLE = 8
 
 
 def is_sso_host(config, host):
@@ -139,7 +150,7 @@ def _certificate_url(html, page_url, config):
 
 def _login_page(session, config):
     """The SSO login page. The portal root sometimes serves its home page instead of redirecting to it."""
-    entries = [config.login_url, config.url("externo_controlador.php?acao=SSO/login")]
+    entries = [config.login_url, config.url(SSO_ENTRY)]
     if config.key in SSO_ONLY:
         entries.reverse()  # SSO entry first
     for url in entries:
@@ -167,25 +178,87 @@ def _browser_cookies(driver):
     return result
 
 
+def _browser_seen(driver):
+    """What the browser shows, for an error message: address shape, HTTP status of the page and its title."""
+    try:
+        status = driver.execute_script(
+            "var e = performance.getEntriesByType('navigation')[0]; return e ? e.responseStatus : null"
+        )
+    except Exception:  # noqa: BLE001 - a page without the API (Chrome's own error page)
+        status = None
+    try:
+        title = " ".join((driver.title or "").split())[:80]
+    except Exception:  # noqa: BLE001
+        title = ""
+    seen = url_shape(driver.get_current_url())
+    if status:
+        seen += f", HTTP {status}"
+    return seen + (f", title {title!r}" if title else "")
+
+
+def _browser_failure(config, driver, html):
+    """``LoginFailed`` for an entry that never offered the certificate, with what the browser was showing."""
+    seen = _browser_seen(driver)
+    if BOT_CHALLENGE.search(html):
+        return LoginFailed(
+            f"{config.tribunal} eproc login page did not open in the browser: the portal's bot challenge did not let "
+            f"it through in {BROWSER_ENTRY_TIMEOUT} s ({seen}); nothing was sent",
+            reason="captcha",
+        )
+    return LoginFailed(
+        f"{config.tribunal} eproc login page did not open in the browser: the portal answered no login page "
+        f"in {BROWSER_ENTRY_TIMEOUT} s ({seen}); nothing was sent",
+        reason="portal_unavailable",
+    )
+
+
+def _browser_open(config, driver, url):
+    try:
+        driver.get(url)
+    except Exception as error:  # noqa: BLE001 - selenium's page-load timeout or network error
+        raise LoginFailed(
+            f"{config.tribunal} eproc entry did not load in the browser ({type(error).__name__}: {url_shape(url)})",
+            reason="portal_unavailable",
+        ) from error
+
+
 def _browser_login_page(session, config):
     """The SSO login page as a headless browser reaches it past the entry's bot challenge; its cookies go to ``session``.
 
-    Only navigation: the browser opens the portal entry and waits for the page that offers the certificate.
+    Only navigation: the browser opens the portal entry and waits for the page that offers the certificate. A page that
+    settles without a challenge and without that option sends it to the SSO entry once (as ``_login_page`` does over
+    HTTP); a challenge that never clears, or the F5 refusal, stops with ``captcha``, anything else with
+    ``portal_unavailable``. Nothing is typed or clicked, and a refusal is never tried again.
     """
     from seleniumbase import Driver  # imported here: other portals never pay for it
 
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
-        driver.get(config.login_url)
+        entries = [config.login_url, config.url(SSO_ENTRY)]
+        _browser_open(config, driver, entries.pop(0))
         deadline = time.monotonic() + BROWSER_ENTRY_TIMEOUT
+        settled = None
         while True:
             html = driver.page_source or ""
             if CERT_HOST.search(html):
                 break
-            if time.monotonic() > deadline:
-                raise RuntimeError(
-                    f"{config.tribunal} eproc login page did not open in the browser (bot challenge or portal down)"
+            if BOT_REFUSAL.search(html):
+                raise LoginFailed(
+                    f"{config.tribunal} eproc refused the browser at its bot check ({_browser_seen(driver)}); "
+                    "nothing was sent",
+                    reason="captcha",
                 )
+            now = time.monotonic()
+            if BOT_CHALLENGE.search(html):
+                settled = None
+            elif settled is None:
+                settled = now
+            elif entries and now - settled >= BROWSER_SETTLE:
+                _browser_open(config, driver, entries.pop(0))
+                settled = None
+                continue
+            if now > deadline:
+                raise _browser_failure(config, driver, html)
             time.sleep(0.5)
         url = require_login_url(config, driver.get_current_url())
         for cookie in session_from_cookies(_browser_cookies(driver)).cookies.jar:
