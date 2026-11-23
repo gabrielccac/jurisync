@@ -16,6 +16,7 @@ import re
 
 from jurisync import portals
 from jurisync.connectors.tucujuris import client
+from jurisync.core import ciencia
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.documents_dir import save_document
@@ -26,6 +27,11 @@ PERIODS = ("hoje", "ontem", "ultimos10dias")
 MONTH = re.compile(r"(\d{4})-(0[1-9]|1[0-2])")
 SITUATIONS = ("naolidas", "lidas")
 POLES = {0: "ativo", 1: "passivo"}
+CIENCIA_PENDING = (
+    "Este processo tem comunicação não lida no Tucujuris; os arquivos do movimento dela não foram abertos. A ciência "
+    "só é registrada quando o advogado marca a comunicação como lida no portal (o conector nunca faz isso) ou pelo "
+    "decurso do prazo de ciência tácita."
+)
 
 
 class CienciaPending(ValueError):
@@ -315,7 +321,8 @@ def load_process(session, process_number, documents=True):
     if cover_rows:
         process["parties"] = cover_rows
     process["movements"] = [movement(item) for item in movements or [] if isinstance(item, dict)]
-    pending = {_id(item.get("id_movimento_origem")) for item in pending_comunicacoes(session, number)} - {None}
+    unread = pending_comunicacoes(session, number)
+    pending = {_id(item.get("id_movimento_origem")) for item in unread} - {None}
     files, suppressed = {}, None
     if documents:
         data = _consulta(session, "publico/buscar-anexos-processo-consulta-publica", autos_id, key)
@@ -328,7 +335,15 @@ def load_process(session, process_number, documents=True):
     if suppressed:
         process["suppressedFiles"] = suppressed
     process["_autos"] = (autos_id, key)
+    process["_unread"] = [comunicacao(item) for item in unread]
     return process, files, pending
+
+
+def ciencia_of(process):
+    """The ``ciencia`` block of a read: files of an unread comunicação are never opened, so at most 'pendente'."""
+    if process["_unread"]:
+        return ciencia.report(ciencia.PENDING, CIENCIA_PENDING, process["_unread"])
+    return ciencia.report(ciencia.NONE)
 
 
 def movement_files(session, process, movement_id):
@@ -370,6 +385,8 @@ def read_documents(session, process_number, document_ids):
             result["extractionStatus"] = content_type
             continue
         status, text = extract_document_text(content, content_type, process["number"], allow_unnumbered=True)
+        if status == "session_expired":
+            raise client.TucujurisSessionExpired("Tucujuris answered its login page instead of a document")
         result.update(
             {
                 "extractionStatus": status,
@@ -380,18 +397,25 @@ def read_documents(session, process_number, document_ids):
                 "textTruncated": len(text) > MAX_TEXT_CHARACTERS,
             }
         )
-    return process["number"], results
+    return process["number"], results, ciencia_of(process)
 
 
 def download_document(session, process_number, document_id):
     process, files, pending = load_process(session, process_number)
     (file,) = _selected(files, pending, [document_id])
     content, content_type = client.download(session, file)
-    result = {"documentId": file["id"], "name": file["name"], "movementId": file["movementId"]}
+    result = {
+        "documentId": file["id"],
+        "name": file["name"],
+        "movementId": file["movementId"],
+        "ciencia": ciencia_of(process),
+    }
     if content is None:
         return {**result, "saved": False, "reason": content_type}
     kind = file_format(content, content_type)
     status, _ = extract_document_text(content, content_type, process["number"], allow_unnumbered=True)
+    if status == "session_expired":
+        raise client.TucujurisSessionExpired("Tucujuris answered its login page instead of a document")
     result.update(
         {
             "format": kind,
@@ -400,7 +424,7 @@ def download_document(session, process_number, document_id):
             "extractionStatus": status,
         }
     )
-    if status in ("access_denied", "session_expired"):
+    if status == "access_denied":
         return {**result, "saved": False}
     extension = {"pdf": "pdf", "html": "html"}.get(kind, (file["extension"] or "bin").lower()[:5])
     if not re.fullmatch(r"[a-z0-9]{1,5}", extension):

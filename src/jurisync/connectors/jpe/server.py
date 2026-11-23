@@ -19,6 +19,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from jurisync import portals
 from jurisync.connectors.jpe import client, process
 from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
@@ -33,7 +34,9 @@ CIENCIA_GUARD = (
     "The read is refused, with nothing opened, when the process has a comunicação 'Pendente de Leitura' (or when that "
     "list could not be read in full: the error starts with 'ciência not checked'); opening it may register the "
     "ciência and start the deadline. Ask the user; only with their explicit yes repeat the call with "
-    "acknowledgeCiencia=true. When such a read happens the result carries ciencia.pendenteAoLer and an aviso."
+    "acknowledgeCiencia=true. The result always carries a ciencia block: estado 'nenhuma' (nothing pending was "
+    "opened), 'dada' (a comunicação pending reading was opened: intimacoes lists it) or 'desconhecida' (the list "
+    "could not be checked); always relay ciencia.aviso to the user."
 )
 ACKNOWLEDGE = Field(
     description="Leave empty. true reads even when a ciência may be pending, which may register the party's ciência "
@@ -41,6 +44,15 @@ ACKNOWLEDGE = Field(
 )
 
 sessions = SessionPool(login=client.login, refresh=client.refresh, close=lambda session: session.close())
+
+
+def configured_portals():
+    """``("tjmg-jpe-2g",)`` when the account has the JPe's own login or the PDPJ one (CPF, password, authenticator);
+    () otherwise."""
+    portal = client.config()
+    own = portal.env("LOGIN") and portal.env("LOGIN_PASSWORD")
+    pdpj = portal.env("USERNAME") and portal.env("PASSWORD") and (portal.env("2FA_DATA") or portal.env("2FA_QR"))
+    return (portal.key,) if own or pdpj else ()
 
 
 def call(read):
@@ -156,7 +168,7 @@ def create_server():
             number, documents, ciencia = process.read_documents(
                 session, process_number, document_ids, acknowledge_ciencia=bool(acknowledgeCiencia)
             )
-            return {"success": True, "number": number, "documents": documents, **ciencia, "notice": UNTRUSTED}
+            return {"success": True, "number": number, "documents": documents, "ciencia": ciencia, "notice": UNTRUSTED}
 
         return call(read)
 
@@ -189,6 +201,7 @@ def create_server():
 
 def main():
     load_env_file()
+    sessions.only(configured_portals() or portals.keys("jpe"))
     serve(create_server(), on_exit=sessions.close)
 
 

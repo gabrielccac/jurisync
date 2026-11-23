@@ -5,7 +5,6 @@ Authentication is the account's API key in the ``X-Api-Key`` header (``MINDCHAT_
 A conversation and its notes are addressed by the contact's phone, which the API takes as a query parameter.
 """
 
-import os
 import time
 from urllib.parse import urlsplit
 
@@ -34,7 +33,7 @@ class Client:
         self.api_key = api_key or (credentials.env("MINDCHAT_API_KEY") or "").strip()
         if not self.api_key:
             raise MindchatError("MINDCHAT_API_KEY is not set for this customer")
-        self.base_url = (base_url or os.environ.get("MINDCHAT_BASE_URL") or BASE_URL).rstrip("/")
+        self.base_url = (base_url or credentials.env("MINDCHAT_BASE_URL") or BASE_URL).rstrip("/")
         self.session = session or requests.Session()
         self.pause = pause
 

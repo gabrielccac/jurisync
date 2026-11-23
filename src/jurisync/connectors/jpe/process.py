@@ -19,15 +19,20 @@ import hashlib
 import re
 
 from jurisync.connectors.jpe import client, parsers
+from jurisync.core import ciencia
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.documents_dir import save_document
 
 MAX_TEXT_CHARACTERS = 60_000
 STATUSES = tuple(parsers.COMMUNICATION_MENU)
-CIENCIA_NOTICE = (
-    "Reading a document of a process with a comunicação pending reading may register the ciência and start the "
-    "deadline in JPe."
+CIENCIA_GIVEN = (
+    "Este processo tinha comunicação pendente de leitura no JPe: abrir o documento pode ter registrado a ciência e "
+    "iniciado o prazo."
+)
+CIENCIA_UNKNOWN = (
+    "Não foi possível conferir se este processo tinha comunicação pendente de leitura no JPe: abrir o documento pode "
+    "ter registrado a ciência e iniciado o prazo."
 )
 
 
@@ -125,7 +130,7 @@ def pending_reading(session):
 
 
 def check_ciencia(session, number, acknowledge=False):
-    """Refuse (``CienciaPending``/``CienciaUnchecked``) unless acknowledged; return what the read may do."""
+    """Refuse (``CienciaPending``/``CienciaUnchecked``) unless acknowledged; return the ``ciencia`` block of the read."""
     key = digits(number)
     items, unchecked = pending_reading(session)
     pending = [item for item in items if _matches(item, key)]
@@ -143,12 +148,11 @@ def check_ciencia(session, number, acknowledge=False):
                 "Opening its documents may register the ciência and start the deadline. Ask the user for explicit "
                 "permission; if they agree, repeat the call with acknowledgeCiencia=true."
             )
-    extra = {}
+    if pending:
+        return ciencia.report(ciencia.GIVEN, CIENCIA_GIVEN, pending)
     if unchecked:
-        extra["cienciaChecked"] = False
-    if pending or unchecked:
-        extra["ciencia"] = {"pendenteAoLer": pending, "aviso": CIENCIA_NOTICE}
-    return extra
+        return ciencia.report(ciencia.UNKNOWN, CIENCIA_UNKNOWN)
+    return ciencia.report(ciencia.NONE)
 
 
 # --- Processes --------------------------------------------------------------------------------------------------------
@@ -341,9 +345,9 @@ def _selected(documents, document_ids):
 
 
 def read_documents(session, process_number, document_ids, *, acknowledge_ciencia=False):
-    """``(number, documents, ciencia extra)``: text of 1-5 documents of one of the account's processes."""
+    """``(number, documents, ciencia block)``: text of 1-5 documents of one of the account's processes."""
     validate_document_ids(document_ids)
-    ciencia = check_ciencia(session, process_number, acknowledge_ciencia)
+    read = check_ciencia(session, process_number, acknowledge_ciencia)
     data, documents, window = load_process(session, process_number)
     results = []
     for entry, control in _selected(documents, document_ids):
@@ -354,6 +358,8 @@ def read_documents(session, process_number, document_ids, *, acknowledge_ciencia
             result["extractionStatus"] = content_type
             continue
         status, text = extract_document_text(content, content_type, data["number"] or "", allow_unnumbered=True)
+        if status == "session_expired":
+            raise client.JpeSessionExpired("JPe answered its login page instead of a document")
         result.update(
             {
                 "extractionStatus": status,
@@ -364,20 +370,22 @@ def read_documents(session, process_number, document_ids, *, acknowledge_ciencia
                 "textTruncated": len(text) > MAX_TEXT_CHARACTERS,
             }
         )
-    return data["number"], results, ciencia
+    return data["number"], results, read
 
 
 def download_document(session, process_number, document_id, *, acknowledge_ciencia=False):
     validate_document_ids([document_id])
-    ciencia = check_ciencia(session, process_number, acknowledge_ciencia)
+    read = check_ciencia(session, process_number, acknowledge_ciencia)
     data, documents, window = load_process(session, process_number)
     ((entry, control),) = _selected(documents, [document_id])
-    result = {"documentId": entry["documentId"], "name": entry.get("name"), **ciencia}
+    result = {"documentId": entry["documentId"], "name": entry.get("name"), "ciencia": read}
     content, content_type = client.fetch_file(session, window, control)
     if content is None:
         return {**result, "saved": False, "reason": content_type}
     kind = file_format(content, content_type)
     status, _ = extract_document_text(content, content_type, data["number"] or "", allow_unnumbered=True)
+    if status == "session_expired":
+        raise client.JpeSessionExpired("JPe answered its login page instead of a document")
     result.update(
         {
             "format": kind,
@@ -386,7 +394,7 @@ def download_document(session, process_number, document_id, *, acknowledge_cienc
             "extractionStatus": status,
         }
     )
-    if status in ("access_denied", "session_expired"):
+    if status == "access_denied":
         return {**result, "saved": False}
     extension = {"pdf": "pdf", "html": "html"}.get(kind, "bin")
     result["savedAs"] = save_document(f"{digits(data['number'])}_{entry['documentId']}.{extension}", content)

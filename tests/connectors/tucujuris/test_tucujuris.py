@@ -312,8 +312,11 @@ class ReadTest(Base):
 
     def test_read_documents_downloads_by_the_index_never_by_caller_input(self):
         with mock.patch.object(process, "extract_document_text", return_value=("extracted", "Decisão sintética")):
-            number, documents = process.read_documents(self.session, N1, ["9003"])
+            number, documents, ciencia = process.read_documents(self.session, N1, ["9003"])
         self.assertEqual(number, N1)
+        self.assertEqual(ciencia["estado"], "pendente")  # 9004's movement has an unread comunicação, not opened
+        self.assertEqual([item["movementId"] for item in ciencia["intimacoes"]], ["7003"])
+        self.assertIn("marca a comunicação como lida", ciencia["aviso"])
         self.assertEqual(documents[0]["extractionStatus"], "extracted")
         self.assertEqual(documents[0]["format"], "pdf")
         (download,) = self.http.calls(api("publico/download-anexo-movimento-consulta-publica"))
@@ -325,8 +328,15 @@ class ReadTest(Base):
             process.read_documents(self.session, N1, ["123456"])
         self.assert_read_only()
 
+    def test_a_login_page_instead_of_a_file_is_an_expired_session(self):
+        with mock.patch.object(process, "extract_document_text", return_value=("session_expired", "")):
+            with self.assertRaises(client.TucujurisSessionExpired):
+                process.read_documents(self.session, N1, ["9003"])
+            with self.assertRaises(client.TucujurisSessionExpired):
+                process.download_document(self.session, N1, "9003")
+
     def test_media_outside_tucujuris_is_not_fetched(self):
-        number, documents = process.read_documents(self.session, N1, ["9005"])
+        number, documents, _ = process.read_documents(self.session, N1, ["9005"])
         self.assertEqual(documents[0]["extractionStatus"], "outside_tucujuris")
         self.assertEqual(self.http.calls(api("publico/download-anexo-movimento-consulta-publica")), [])
 
@@ -396,6 +406,11 @@ class ServerTest(Base):
             with self.subTest(name=name):
                 self.assertFalse(tool.annotations.destructive_hint)
                 self.assertEqual(tool.annotations.read_only_hint, name != "tucujuris_download_document")
+
+    def test_configured_portals(self):
+        self.assertEqual(server.configured_portals(), ("tjap-tucujuris",))
+        with mock.patch.dict(os.environ, {"TJAP_TUCUJURIS_2FA_DATA": ""}):
+            self.assertEqual(server.configured_portals(), ())
 
     def test_expired_token_logs_in_once_more_and_repeats(self):
         http = FakeHttp(routes())

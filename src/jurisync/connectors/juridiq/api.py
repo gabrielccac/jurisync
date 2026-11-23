@@ -48,8 +48,8 @@ def config():
         else Path(os.environ.get("JURIDIQ_SESSION_FILE") or _cache_dir() / name)
     )
     return {
-        "apiBaseUrl": os.environ.get("JURIDIQ_API_BASE_URL") or "https://api.juridiq.com.br",
-        "loginUrl": os.environ.get("JURIDIQ_LOGIN_URL") or "https://www.api.juridiq.com.br/auth/login",
+        "apiBaseUrl": credentials.env("JURIDIQ_API_BASE_URL") or "https://api.juridiq.com.br",
+        "loginUrl": credentials.env("JURIDIQ_LOGIN_URL") or "https://www.api.juridiq.com.br/auth/login",
         "email": email,
         "password": credentials.env("JURIDIQ_PASSWORD"),
         "sessionFile": session_file,

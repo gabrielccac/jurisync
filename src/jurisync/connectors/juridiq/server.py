@@ -1,7 +1,6 @@
 """Juridiq MCP server. Write tools are registered only when JURIDIQ_ALLOW_WRITES=true."""
 
 import inspect
-import os
 from datetime import date
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -12,6 +11,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from jurisync.connectors.juridiq.api import JuridiqApi, JuridiqError
+from jurisync.core import credentials
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 
 ADDITIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
@@ -289,7 +289,7 @@ def _payload(model):
 
 
 def create_server(allow_writes=None, api=None):
-    allow_writes = os.environ.get("JURIDIQ_ALLOW_WRITES") == "true" if allow_writes is None else allow_writes
+    allow_writes = credentials.env("JURIDIQ_ALLOW_WRITES") == "true" if allow_writes is None else allow_writes
     api = api or JuridiqApi()
     server = MCPServer("juridiq", version="1.0.0")
 

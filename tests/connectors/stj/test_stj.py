@@ -467,6 +467,7 @@ class ServerTest(unittest.TestCase):
         data, error = self.call("stj_read_documents", {"process": "2026/0000001-7", "document_ids": ["1"]})
         self.assertFalse(error)
         self.assertIn("Petição inicial", data["documents"][0]["text"])
+        self.assertEqual(data["ciencia"], {"estado": "nenhuma"})
         self.assertNotIn("grant-", json.dumps(data))
         grant = [r for r in self.session.http.sent if r[1].endswith("getPecaAutorizacao")]
         self.assertEqual(grant[0][2]["seq"], "1")
@@ -535,6 +536,15 @@ class ServerTest(unittest.TestCase):
         for method, path, _params, _body in self.session.http.sent:
             client.require_read(method, path)
             self.assertNotIn("ciencia", path.lower())
+
+
+def test_configured_portals_needs_the_certificate_and_its_pin():
+    with mock.patch.dict("os.environ", {"PJE_A1_P12": "/tmp/a1.p12"}, clear=True):
+        assert server.configured_portals() == ()
+    with mock.patch.dict("os.environ", {"PJE_A1_P12": "/tmp/a1.p12", "PJE_A1_PIN": "pin"}, clear=True):
+        assert server.configured_portals() == ("stj",)
+    with mock.patch.dict("os.environ", {"STJ_A1_P12": "/tmp/stj.p12", "STJ_A1_PIN": "pin"}, clear=True):
+        assert server.configured_portals() == ("stj",)
 
 
 def test_the_portal_is_wired_and_claims_every_stj_link():

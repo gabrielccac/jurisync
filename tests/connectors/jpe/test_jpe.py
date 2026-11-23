@@ -318,7 +318,7 @@ class ReadTests(unittest.TestCase):
         session, http = logged_in()
         number, documents, ciencia = process.read_documents(session, N_FREE, ["123401"])
         self.assertEqual(number, N_FREE)
-        self.assertEqual(ciencia, {})
+        self.assertEqual(ciencia, {"estado": "nenhuma"})
         self.assertEqual(documents[0]["format"], "pdf")
         self.assertEqual(http.requests[-1]["url"], HOST + "/rupe/portaljus/jpe/documento.rupe?idDocumento=123401")
 
@@ -333,7 +333,24 @@ class ReadTests(unittest.TestCase):
         routes = home_routes()
         session, _ = logged_in(routes)
         _, _, ciencia = process.read_documents(session, N_PENDING, ["123401"], acknowledge_ciencia=True)
-        self.assertEqual(ciencia["ciencia"]["pendenteAoLer"][0]["number"], N_PENDING)
+        self.assertEqual(ciencia["estado"], "dada")
+        self.assertEqual(ciencia["intimacoes"][0]["number"], N_PENDING)
+        self.assertIn("ciência", ciencia["aviso"])
+
+    def test_acknowledged_read_of_an_unchecked_list_is_desconhecida(self):
+        routes = home_routes()
+        routes[("GET", HOST + "/rupe/portaljus/jpe/comunicacoes.rupe?situacao=PL")] = Response(500, b"erro")
+        session, _ = logged_in(routes)
+        _, _, ciencia = process.read_documents(session, N_FREE, ["123401"], acknowledge_ciencia=True)
+        self.assertEqual(ciencia["estado"], "desconhecida")
+        self.assertNotIn("intimacoes", ciencia)
+
+    def test_download_reports_the_ciencia(self):
+        session, _ = logged_in()
+        with mock.patch.object(process, "save_document", return_value="saved.pdf"):
+            result = process.download_document(session, N_FREE, "123401")
+        self.assertEqual(result["ciencia"], {"estado": "nenhuma"})
+        self.assertTrue(result["saved"])
 
     def test_unreadable_pending_list_blocks_the_read(self):
         routes = home_routes()
@@ -369,6 +386,16 @@ class ReadTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
+    def test_configured_portals(self):
+        for env, expected in (
+            (OWN_ENV, ("tjmg-jpe-2g",)),
+            (SSO_ENV, ("tjmg-jpe-2g",)),
+            ({"TJMG_JPE_2G_USERNAME": "000.000.001-91", "TJMG_JPE_2G_PASSWORD": "x"}, ()),  # no authenticator
+            ({}, ()),
+        ):
+            with self.subTest(env=sorted(env)), mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(server.configured_portals(), expected)
+
     def test_tools(self):
         tools = {tool.name: tool for tool in asyncio.run(server.create_server().list_tools())}
         self.assertEqual(
