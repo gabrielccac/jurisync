@@ -148,7 +148,7 @@ class HostedAppTest(unittest.TestCase):
             return "written"
 
         with (
-            mock.patch.dict("jurisync.hosted.app.WRITE_TOOLS", {"fake": {"pje_draft_write"}}),
+            mock.patch.dict("jurisync.hosted.app.LOCAL_ONLY_TOOLS", {"fake": {"pje_draft_write"}}),
             mock.patch("jurisync.hosted.app.TENANT_READY", ("fake",)),
         ):
             self.app, _ = build_app(BASE, self.store, self.vault, ["fake"], load=lambda name: (fake, None))

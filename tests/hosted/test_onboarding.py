@@ -149,6 +149,25 @@ class OperatorCommandsTest(unittest.TestCase):
             self.assertIn(action, joined)
         self.assertNotIn("certa", joined)
 
+    def test_portals_of_every_system_are_listed_removed_and_forgotten(self):
+        data, pin = make_p12_bytes("Advogado Teste", "pin-9")
+        values = {access.A1_PIN: pin, "TJMG_1G_USERNAME": "123", "TJMG_1G_PASSWORD": "s", "TJMG_1G_2FA_DATA": SECRET}
+        cli.open_vault().put("office-a", values, {access.A1_FILE: data})
+        self.said.clear()
+        self.cli(["portal", "list", "office-a"])
+        listed = [line.split()[0] for line in self.said[1:]]
+        self.assertEqual(listed, ["tjmg-1g"])  # the office's portals, not all 64 of the PJe
+        self.assertIn("Eproc", self.said[1])
+        self.assertIn("login com senha", self.said[1])
+
+        with mock.patch.object(access, "forget") as forget:
+            self.cli(["portal", "remove", "office-a", "tjmg-1g"])
+            self.assertEqual(cli.open_vault().get("office-a")[0], {access.A1_PIN: pin})
+            forget.reset_mock()
+            self.cli(["certificate", "remove", "office-a"])
+        forgotten = {call.args[0] for call in forget.call_args_list}
+        self.assertLessEqual({"trf1-1g", "tjmg-1g", "tjsp-esaj", "tjgo-1g", "stj"}, forgotten)  # the A1 logs in to all
+
     def test_bundle_import_can_require_a_login_check(self):
         from jurisync.install import credentials_bundle
 

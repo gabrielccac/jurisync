@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import pyotp
 
-from jurisync import portals
+from jurisync import portals, registry
 from jurisync.core import credentials
 from jurisync.core.totp import parse_accounts, select_account
 
@@ -31,6 +31,10 @@ PORTAL_FIELDS = (
     "OTP_PROFILE_MATCH",
     "OTP_PROFILE_INDEX",
     "USER_PROFILE",
+    "SESSION_ACCOUNT",
+    "LOGIN",
+    "LOGIN_PASSWORD",
+    *(old for olds in portals.LEGACY_NAMES.values() for old in olds),
 )
 
 
@@ -162,11 +166,12 @@ def portal_state(config, values, files):
                 return value
         return ""
 
-    certificate = A1_FILE in files and (config.auth == "certificate_totp" or read("CERT").lower() == "true")
-    password = bool(read("USERNAME") and read("PASSWORD"))
-    method = CERTIFICATE if certificate else PASSWORD if password else None
+    # certificate_totp (PJe), certificate_challenge (e-SAJ), certificate_mtls: the A1 is the portal's only login.
+    certificate = A1_FILE in files and (config.auth.startswith("certificate") or read("CERT").lower() == "true")
+    username = read("USERNAME") if read("PASSWORD") else read("LOGIN") if read("LOGIN_PASSWORD") else ""
+    method = CERTIFICATE if certificate else PASSWORD if username else None
     return PortalState(
-        config.key, portal_label(config), method, read("USERNAME") if method == PASSWORD else "", bool(read("2FA_DATA"))
+        config.key, portal_label(config), method, username if method == PASSWORD else "", bool(read("2FA_DATA"))
     )
 
 
@@ -233,26 +238,27 @@ def check_login(portal):
 
 
 # Everything an office can test from the web area or `jurisync-hosted portal check`.
-SERVICES = ("advbox", "juridiq")
+SERVICES = registry.SERVICES
+
+
+def served_portals():
+    """Every portal of every connector, in registry order."""
+    return tuple(key for connector in registry.CONNECTORS.values() for key in connector.portals())
 
 
 def check_targets():
-    return (*portals.keys("pje"), *portals.keys("eproc"), *SERVICES)
+    return (*served_portals(), *SERVICES)
 
 
 def check(target):
-    """Log in to a PJe or Eproc portal, ADVBOX or Juridiq with the current credential scope. Raises on failure.
+    """Log in to a portal, ADVBOX or Juridiq with the current credential scope. Raises on failure.
 
     A fresh login is forced: a cached cookie or token would otherwise pass without proving the new password.
     """
     if target in portals.keys("pje"):
         return check_login(target)
-    if target in portals.keys("eproc"):
-        from jurisync.connectors.eproc.client import authenticate
-        from jurisync.connectors.eproc.server import sessions
-
-        pool_login(sessions, target, authenticate)[0].close()
-        return None
+    if target in served_portals():
+        return registry.of_portal(target).sessions().check(target)
     if target == "advbox":
         from jurisync.connectors.advbox.client import AdvboxClient
         from jurisync.connectors.advbox.session import session_file
@@ -277,12 +283,10 @@ def forget(target):
     """After a change: drop the office's open login and cached cookie or token for this access."""
     if target in portals.keys("pje"):
         return forget_sessions(target)
-    if target in portals.keys("eproc"):
+    if target in served_portals():
         try:
-            from jurisync.connectors.eproc.server import sessions
-
-            sessions.forget(target)
-        except ImportError:
+            registry.of_portal(target).sessions().forget(target)
+        except ImportError:  # a connector whose optional dependencies are not installed has no login to drop
             pass
         return None
     if target == "advbox":

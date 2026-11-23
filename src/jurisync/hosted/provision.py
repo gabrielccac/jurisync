@@ -36,15 +36,15 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from jurisync import customers, portals
+from jurisync import customers, portals, registry
 from jurisync.install import credentials_bundle
 
 PLAN = "plan.json"
 PROFILE_FILES = ("portals.toml", "settings.toml")
 # Systems the hosted server serves, in the order a tenant lists them.
-SYSTEM_ORDER = ("pje", "eproc", "esaj", "projudi", "stj", "djen", "advbox", "juridiq")
-SERVICES = {"advbox": ("ADVBOX_EMAIL", "ADVBOX_PASSWORD"), "juridiq": ("JURIDIQ_EMAIL", "JURIDIQ_PASSWORD")}
-WRITE_GRANTS = ("ADVBOX_ALLOW_WRITES", "JURIDIQ_ALLOW_WRITES")
+SYSTEM_ORDER = tuple(registry.CONNECTORS)
+SERVICES = {name: registry.get(name).login for name in registry.SERVICES}
+WRITE_GRANTS = tuple(connector.write_grant for connector in registry.CONNECTORS.values() if connector.write_grant)
 # Portals whose login meets a CAPTCHA the server answers with JURISYNC_CAPTCHA_API_KEY (or the captcha-ocr extra).
 CAPTCHA_PORTALS = {"tjes-1g": "AWS WAF"}
 
@@ -56,7 +56,7 @@ class OfficePlan:
     customer: str
     connectors: list = field(default_factory=list)
     portals: list = field(default_factory=list)  # portal keys stored in the vault, plus advbox/juridiq
-    checks: list = field(default_factory=list)  # what `jurisync-hosted portal check` can test, one login each
+    checks: list = field(default_factory=list)  # one `jurisync-hosted portal check` login each: every portal, service
     skipped: dict = field(default_factory=dict)  # portal -> reason
     notes: list = field(default_factory=list)
     renamed: dict = field(default_factory=dict)  # legacy name -> canonical name
@@ -161,8 +161,7 @@ def plan_office(customer, values, *, name=None, ready=None):
             plan.skipped[key] = "faltam " + ", ".join(missing)
             continue
         plan.portals.append(key)
-        if config.system in ("pje", "eproc"):
-            plan.checks.append(key)
+        plan.checks.append(key)
         if setup.method == "browser_totp":
             browsers += 1
         switch = a3_switch(config, values)
@@ -428,9 +427,13 @@ def apply_local(store, vault, office, say):
     store.log(tenant, "operador", "escritório só local", reason)
 
 
-# Tools an office plugin may name that the hosted server does not serve: filing runs on the office's machine and PJe
-# draft writes are off on the server.
-LOCAL_ONLY_TOOLS = re.compile(r"\b(filing_[a-z_]+|pje_draft_write|pje_draft_delete)\b")
+# Tools an office plugin may name that the hosted server does not serve: filing runs on the office's machine, and so do
+# each connector's local-only tools (PJe drafts).
+LOCAL_ONLY_TOOLS = re.compile(
+    r"\b(filing_[a-z_]+|"
+    + "|".join(sorted(tool for connector in registry.CONNECTORS.values() for tool in connector.local_only_tools))
+    + r")\b"
+)
 
 
 def remote_plugin(source, url, out, *, say=print):

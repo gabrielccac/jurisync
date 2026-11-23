@@ -6,11 +6,13 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Literal
 from unittest import mock
 
 from mcp.server.mcpserver import MCPServer
 from starlette.testclient import TestClient
 
+from jurisync import portals
 from jurisync.core import credentials
 from jurisync.core.session_pool import LoginRejected
 from jurisync.hosted import access, cli
@@ -60,7 +62,7 @@ class OfficeCase(SignInCase):
         with (
             mock.patch.dict(os.environ, {REQUIRE_RESOURCE_FLAG: "", **self.environment}),
             mock.patch("jurisync.hosted.app.TENANT_READY", ("alpha", "beta")),
-            mock.patch.dict("jurisync.hosted.app.WRITE_TOOLS", {"alpha": {"alpha_draft_write"}}),
+            mock.patch.dict("jurisync.hosted.app.LOCAL_ONLY_TOOLS", {"alpha": {"alpha_draft_write"}}),
         ):
             self.app, _ = build_app(BASE, self.store, self.vault, list(made), load=lambda name: (made[name], None))
 
@@ -143,6 +145,96 @@ class CombinedEndpointTest(OfficeCase):
             server.add_tool(lambda: "x", name="same_name")
         with mock.patch("jurisync.hosted.app.TENANT_READY", ("alpha", "beta")), self.assertRaises(ValueError):
             build_app(BASE, self.store, self.vault, list(twice), load=lambda name: (twice[name], None))
+
+
+def portal_servers():
+    """Stand-ins for Projudi (two portals, one tool for tjgo-1g only) and STJ (one portal, no ``portal`` field)."""
+    projudi, stj = MCPServer("projudi"), MCPServer("stj")
+
+    @projudi.tool(name="projudi_get_process")
+    def get_process(number: str, portal: Literal["tjgo-1g", "tjam-1g"] = "tjgo-1g") -> dict:
+        return {"portal": portal}
+
+    @projudi.tool(name="projudi_list_intimations")
+    def intimations(portal: Literal["tjgo-1g"] = "tjgo-1g") -> dict:
+        return {"portal": portal}
+
+    @stj.tool(name="stj_get_process")
+    def stj_process(number: str) -> dict:
+        return {"number": number}
+
+    return {"projudi": projudi, "stj": stj}
+
+
+def configured(system):
+    """``configured_portals`` read from the office's credentials, as the connectors do."""
+    return lambda: tuple(key for key in credentials.env("CONFIGURED").split(",") if key in portals.keys(system))
+
+
+class PortalChoicesTest(OfficeCase):
+    """office-a has a login for tjam-1g only; office-b for both Projudi portals and STJ."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        root = Path(self.directory.name)
+        self.store = Store(root / "store.sqlite")
+        self.vault = Vault(root / "vault", load_key(generate_key()))
+        for tenant, logins in (("office-a", "tjam-1g"), ("office-b", "tjgo-1g,tjam-1g,stj")):
+            self.store.add_tenant(tenant, tenant, connectors=["projudi", "stj"])
+            self.store.add_user(f"user@{tenant}.test", tenant, PASSWORD)
+            self.vault.put(tenant, {"CONFIGURED": logins})
+        self.servers = portal_servers()
+        for system in self.servers:
+            patch = mock.patch(
+                f"jurisync.connectors.{system}.server.configured_portals", configured(system), create=True
+            )
+            patch.start()
+            self.addCleanup(patch.stop)
+        with mock.patch.dict(os.environ, {REQUIRE_RESOURCE_FLAG: ""}):
+            self.app, _ = build_app(
+                BASE, self.store, self.vault, list(self.servers), load=lambda name: (self.servers[name], None)
+            )
+
+    def tools(self, send):
+        return {tool["name"]: tool for tool in send("tools/list")["result"]["tools"]}
+
+    def test_each_office_sees_only_the_portals_it_has_a_login_for(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            office_a = self.tools(self.mcp(client, self.token(client, resource=f"{BASE}/mcp")))
+            office_b = self.tools(self.mcp(client, self.token(client, "user@office-b.test", resource=f"{BASE}/mcp")))
+        self.assertEqual(set(office_a), {"projudi_get_process"})  # STJ and the tjgo-1g-only tool are gone
+        field = office_a["projudi_get_process"]["inputSchema"]["properties"]["portal"]
+        self.assertEqual(field["enum"], ["tjam-1g"])
+        self.assertNotIn("default", field)  # tjgo-1g: no login there
+        self.assertIn("tjam-1g", field["description"])
+        self.assertEqual(set(office_b), {"projudi_get_process", "projudi_list_intimations", "stj_get_process"})
+        self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["properties"]["portal"]["enum"],
+                         ["tjgo-1g", "tjam-1g"])  # fmt: skip
+        shared = self.servers["projudi"]._tool_manager.get_tool("projudi_get_process").parameters
+        self.assertEqual(shared["properties"]["portal"]["enum"], ["tjgo-1g", "tjam-1g"])  # never changed in place
+
+    def test_a_portal_without_login_is_refused_before_the_connector(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            send = self.mcp(client, self.token(client, resource=f"{BASE}/mcp"))
+            self.assertEqual(
+                self.data(self.call(send, "projudi_get_process", {"number": "1", "portal": "tjam-1g"})),
+                {"portal": "tjam-1g"},
+            )
+            for arguments in ({"number": "1", "portal": "tjgo-1g"}, {"number": "1"}):
+                refused = self.call(send, "projudi_get_process", arguments)
+                self.assertTrue(refused["isError"])
+                self.assertIn("no login is configured for tjgo-1g", refused["content"][0]["text"])
+            refused = self.call(send, "stj_get_process", {"number": "1"})
+            self.assertTrue(refused["isError"])
+            self.assertIn("no STJ login is configured", refused["content"][0]["text"])
+
+
+class HealthTest(OfficeCase):
+    def test_healthz_answers_without_a_token(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            response = client.get("/healthz")
+        self.assertEqual((response.status_code, response.json()), (200, {"ok": True}))
 
 
 class CombinedAudienceTest(OfficeCase):

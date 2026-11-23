@@ -23,21 +23,11 @@ import sys
 import time
 from pathlib import Path
 
-from jurisync import customers, portals
+from jurisync import customers, portals, registry
 from jurisync.core.totp import match_for_tribunal, parse_accounts, select_account, unique_match
 from jurisync.install import credentials_bundle
 from jurisync.paths import USER_ENV_FILE
 
-SERVERS = {
-    "esaj": "jurisync-esaj",
-    "eproc": "jurisync-eproc",
-    "pje": "jurisync-pje",
-    "projudi": "jurisync-projudi",
-    "advbox": "jurisync-advbox",
-    "juridiq": "jurisync-juridiq",
-    "djen": "jurisync-djen",
-    "stj": "jurisync-stj",
-}
 FILE_SUFFIXES = ("_P12", "_PFX")  # variables that hold the path of a certificate file
 # Settings of the computer a bundle is installed on: a bundle never sets them.
 MACHINE_NAMES = ("JURISYNC_ENV_FILE", "JURISYNC_CHROME_PATH", "LIBREOFFICE_BIN", "*_LOGIN_URL")
@@ -263,39 +253,24 @@ def check_juridiq():
     return True, "sessão ok"
 
 
-def check_certificate_portal(system, key):
-    """Log in once to a Projudi, e-SAJ or STJ portal with the A1 certificate."""
+def check_portal(system, key):
+    """Log in once to a portal of another system (Projudi, e-SAJ, STJ, Tucujuris, JPe) with the stored login."""
     try:
-        if system == "projudi":
-            from jurisync.connectors.projudi.server import adapter_for
-
-            session = adapter_for(key).login(key)
-        elif system == "esaj":
-            from jurisync.connectors.esaj.base import login
-
-            session = login(key)
-        else:
-            from jurisync.connectors.stj.client import login
-
-            session = login()
+        registry.get(system).sessions().check(key)
     except Exception as error:  # noqa: BLE001 - report any login failure to the user
         return False, f"{type(error).__name__}: {str(error)[:140]}"
-    try:
-        session.close()
-    except Exception:  # noqa: BLE001
-        pass
     return True, "login ok"
 
 
 def run_check(check):
-    """``eproc:``, ``pje:``, ``projudi:``, ``esaj:`` or ``stj:<portal>``, ``advbox`` or ``juridiq`` → (ok, message)."""
+    """``<system>:<portal>`` (``eproc:tjrs-1g``), ``advbox`` or ``juridiq`` → (ok, message)."""
     system, _, key = check.partition(":")
     if system == "eproc":
         return check_login(key)
     if system == "pje":
         return check_pje(key)
-    if system in ("projudi", "esaj", "stj"):
-        return check_certificate_portal(system, key)
+    if key and system in registry.CONNECTORS:
+        return check_portal(system, key)
     if system == "advbox":
         return check_advbox()
     if system == "juridiq":
@@ -356,7 +331,11 @@ def register_claude_code(names, say):
 
 
 def server_commands(servers):
-    return {name: shutil.which(command) or command for name, command in SERVERS.items() if name in servers}
+    return {
+        name: shutil.which(connector.command) or connector.command
+        for name, connector in registry.CONNECTORS.items()
+        if name in servers
+    }
 
 
 def check_secret(check):
@@ -577,9 +556,7 @@ def export_main(argv, *, ask_secret, say):
             del selected[name]
     checks = []
     for key in setups:
-        system = portals.get(key).system
-        if system in ("eproc", "pje", "projudi", "esaj", "stj"):
-            checks.append(f"{system}:{key}")
+        checks.append(f"{portals.get(key).system}:{key}")
     if any(name.startswith("ADVBOX_") for name in selected):
         checks.append("advbox")
     if any(name.startswith("JURIDIQ_") for name in selected):

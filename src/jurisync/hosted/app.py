@@ -5,12 +5,16 @@ Per request, ``TenantGate`` resolves the token's tenant, refuses connectors the 
 the connector logs in with that office's credentials and the session pool keeps that login apart from other offices.
 
 Each endpoint is an ``Office`` server that delegates to the connector servers: it lists and calls only the tools of the
-connectors enabled for the office, and records every call (no arguments, no results) in the store.
+connectors enabled for the office, with only the portals the office has a login for, and records every call (no
+arguments, no results) in the store.
 """
 
 import contextvars
+import importlib
+import inspect
 import logging
 import os
+import threading
 import time
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from urllib.parse import urlsplit
@@ -38,37 +42,26 @@ from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from jurisync import customers
+from jurisync import customers, registry
 from jurisync.core import credentials
 from jurisync.hosted.oauth import SCOPE, BrowserBinding, Provider, login_routes
 from jurisync.hosted.throttle import IP_MAX_FAILURES, Throttle
 
 log = logging.getLogger(__name__)
 
-# Connectors whose accounts come from the office's credential scope. Anything else (filing) still reads the server's
-# own environment and would serve every office with one account, so it is refused.
-TENANT_READY = ("pje", "eproc", "esaj", "projudi", "stj", "djen", "advbox", "juridiq")
-# Tools that change a portal stay off the hosted server until writes are designed per tenant. ADVBOX and Juridiq
-# writes stay mounted but answer only for an office whose credentials allow them (ADVBOX_ALLOW_WRITES and
-# JURIDIQ_ALLOW_WRITES, from its vault entry or its customer profile).
-WRITE_TOOLS = {"pje": {"pje_draft_write", "pje_draft_delete"}}
+# Connectors whose accounts come from the office's credential scope: every registry connector. Anything else (filing)
+# still reads the server's own environment and would serve every office with one account, so it is refused.
+TENANT_READY = tuple(registry.CONNECTORS)
+# Tools that only work on the office's computer (PJe drafts: the run folders and the writes stay local).
+LOCAL_ONLY_TOOLS = {name: set(connector.local_only_tools) for name, connector in registry.CONNECTORS.items()}
 # Writes an office gets only with its own grant (vault entry or customer profile, never the server's environment):
 # connector -> (grant variable, tools). Without the grant the office does not see them and a call is refused before
-# the connector runs; the connector checks the same grant again. Juridiq's write tools are the ones it registers only
-# with writes allowed, so ``hosted_load`` finds them by comparing both builds.
+# the connector runs; the connector checks the same grant again. A connector that registers its writes only when
+# allowed (Juridiq) lists none: ``hosted_load`` finds them by comparing both builds.
 GRANTED_WRITES = {
-    "advbox": (
-        "ADVBOX_ALLOW_WRITES",
-        {
-            "advbox_create_folder",
-            "advbox_upload_files",
-            "advbox_create_task",
-            "advbox_update_task",
-            "advbox_complete_task",
-            "advbox_delete_task",
-        },
-    ),
-    "juridiq": ("JURIDIQ_ALLOW_WRITES", set()),
+    name: (connector.write_grant, set(connector.write_tools))
+    for name, connector in registry.CONNECTORS.items()
+    if connector.write_grant
 }
 DEV_FLAG = "JURISYNC_HOSTED_DEV"
 # Off by default: a token issued without a resource (RFC 8707) is accepted on every connector the office has. Set to 1
@@ -77,16 +70,7 @@ REQUIRE_RESOURCE_FLAG = "JURISYNC_REQUIRE_TOKEN_RESOURCE"
 METADATA_PATH = "/.well-known/oauth-authorization-server"
 # Keep "https://host" as written: OAuth clients compare the issuer as an exact string.
 EXACT_URL = TypeAdapter(AnyHttpUrl, config=ConfigDict(url_preserve_empty_path=True))
-SYSTEMS = {
-    "pje": "PJe",
-    "eproc": "Eproc",
-    "esaj": "e-SAJ",
-    "projudi": "Projudi",
-    "stj": "STJ",
-    "djen": "DJEN",
-    "advbox": "ADVBOX",
-    "juridiq": "Juridiq",
-}
+SYSTEMS = {name: connector.label for name, connector in registry.CONNECTORS.items()}
 # (tenant row, user e-mail) of the request, set by TenantGate.
 caller = contextvars.ContextVar("jurisync_caller", default=None)
 
@@ -102,20 +86,58 @@ def granted(connector, tool):
 
 
 def hosted_load(name):
-    """``serve.load``, except Juridiq registers its write tools: each office's grant decides who sees and calls them."""
-    from jurisync.install.serve import load
+    """``Connector.load`` with every portal wired (``Office`` narrows them per office), and with the writes a connector
+    registers only when allowed: each office's grant decides who sees and calls them."""
+    connector = registry.get(name)
+    if connector.write_grant and not connector.write_tools:
+        server, close = connector.load(allow_writes=True)
+        reads = {tool.name for tool in connector.load(allow_writes=False)[0]._tool_manager.list_tools()}
+        GRANTED_WRITES[name] = (
+            connector.write_grant,
+            {tool.name for tool in server._tool_manager.list_tools()} - reads,
+        )
+        return server, close
+    if connector.portals() and connector.attribute == "create_server()":
+        create = importlib.import_module(connector.module).create_server
+        if "keys" in inspect.signature(create).parameters:
+            # Built at start, outside any office: its own choice would be the server's (empty) environment.
+            return connector.load(keys=connector.portals())
+    return connector.load()
 
-    if name != "juridiq":
-        return load(name)
-    from jurisync.connectors.juridiq.server import create_server
 
-    server = create_server(allow_writes=True)
-    reads = {tool.name for tool in create_server(allow_writes=False)._tool_manager.list_tools()}
-    GRANTED_WRITES["juridiq"] = (
-        GRANTED_WRITES["juridiq"][0],
-        {tool.name for tool in server._tool_manager.list_tools()} - reads,
-    )
-    return server, None
+def offered_portals(connector):
+    """The portals the current office has a login for; None for a connector without portals."""
+    spec = registry.CONNECTORS.get(connector)
+    if spec is None or not spec.portals():
+        return None
+    configured = getattr(importlib.import_module(spec.module), "configured_portals", None)
+    return tuple(configured()) if configured else spec.portals()
+
+
+def portal_field(server, name):
+    return ((server._tool_input_schema(name) or {}).get("properties") or {}).get("portal")
+
+
+def offer(tool, field, offered, label):
+    """A copy of ``tool`` whose ``portal`` takes only the offered portals; None when it would take none.
+
+    A copy: the tools of the connector server are shared by every office.
+    """
+    if field is None:
+        return tool if offered else None
+    choices = [field["const"]] if "const" in field else field.get("enum") or list(offered)
+    keys = [key for key in choices if key in offered]
+    if not keys:
+        return None
+    if "const" in field:
+        return tool
+    field = {
+        **{key: value for key, value in field.items() if key != "default" or value in keys},
+        "enum": keys,
+        "description": f"{label} portal key, one of the portals configured for this office: {', '.join(keys)}.",
+    }
+    schema = {**tool.input_schema, "properties": {**tool.input_schema["properties"], "portal": field}}
+    return tool.model_copy(update={"input_schema": schema})
 
 
 class Office(MCPServer):
@@ -138,13 +160,19 @@ class Office(MCPServer):
 
     async def list_tools(self):
         tenant, _ = caller.get() or ({"connectors": []}, "")
-        return [
-            tool
-            for connector, server in self.servers.items()
-            if connector in tenant["connectors"]
-            for tool in await server.list_tools()
-            if granted(connector, tool.name)
-        ]
+        tools = []
+        for connector, server in self.servers.items():
+            if connector not in tenant["connectors"]:
+                continue
+            offered = offered_portals(connector)
+            for tool in await server.list_tools():
+                if not granted(connector, tool.name):
+                    continue
+                if offered is not None:
+                    tool = offer(tool, portal_field(server, tool.name), offered, SYSTEMS.get(connector, connector))
+                if tool is not None:
+                    tools.append(tool)
+        return tools
 
     async def call_tool(self, name, arguments, context=None):
         connector = self.owner.get(name)
@@ -164,6 +192,9 @@ class Office(MCPServer):
                 raise NotEnabled(
                     f"{name} changes {SYSTEMS.get(connector, connector)}: writes are not enabled for this office"
                 )
+            offered = offered_portals(connector)
+            if offered is not None:
+                self._check_portal(connector, name, arguments, offered)
             result = await self.servers[connector].call_tool(name, arguments, context)
             if getattr(result, "is_error", False):
                 error = "ToolResult"
@@ -174,6 +205,19 @@ class Office(MCPServer):
         finally:
             duration = round((time.monotonic() - started) * 1000)
             self.store.log_call(tenant["id"], user, connector, name, error, duration)
+
+    def _check_portal(self, connector, name, arguments, offered):
+        label = SYSTEMS.get(connector, connector)
+        if not offered:
+            raise NotEnabled(f"{name}: no {label} login is configured for this office")
+        field = portal_field(self.servers[connector], name)
+        if field is None:
+            return
+        portal = arguments.get("portal") or field.get("const") or field.get("default")
+        if portal is not None and portal not in offered:
+            raise NotEnabled(
+                f"{name}: no login is configured for {portal} on this office; configured: {', '.join(offered)}"
+            )
 
 
 class TenantGate:
@@ -188,6 +232,7 @@ class TenantGate:
         self.open_tenant = open_tenant
         self.require_resource = require_resource
         self._logged = set()
+        self._saving = threading.Lock()
 
     def _note_missing_resource(self, token, tenant_id):
         """Once per client and office: tells the operator whether real clients send the resource."""
@@ -204,6 +249,18 @@ class TenantGate:
             tenant_id,
             REQUIRE_RESOURCE_FLAG,
         )
+
+    def _saver(self, tenant_id):
+        """``credentials.save`` for this office: a value a connector renewed (ADVBOX device id) goes to its vault."""
+
+        def save(name, value):
+            with self._saving:
+                values, files = self.vault.get(tenant_id)
+                values[name] = value
+                self.vault.put(tenant_id, values, files)
+            self.store.log(tenant_id, "conector", "credencial renovada", name)
+
+        return save
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -240,7 +297,7 @@ class TenantGate:
         user = (token.subject or "") if token else ""
         marker = caller.set((tenant, user))
         try:
-            with credentials.scope(tenant["id"], values, files):
+            with credentials.scope(tenant["id"], values, files, saver=self._saver(tenant["id"])):
                 await self.app(scope, receive, send)
         finally:
             caller.reset(marker)
@@ -263,6 +320,11 @@ def transport_security(base_url):
             *(f"http://{host}:*" for host in local),
         ],
     )
+
+
+async def healthz(_request):
+    """For the proxy and the smoke test: the process answers. No sign-in, nothing about the offices."""
+    return JSONResponse({"ok": True})
 
 
 def flag(name):
@@ -317,10 +379,11 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
     if {AUTHORIZATION_PATH, METADATA_PATH} - {route.path for route in routes}:
         raise RuntimeError("The MCP SDK no longer serves /authorize or the metadata where the sign-in expects them")
     routes += login_routes(provider, Throttle(), Throttle(max_failures=IP_MAX_FAILURES))
+    routes.append(Route("/healthz", endpoint=healthz, methods=["GET"]))
     servers, closers = {}, []
     for name in connectors:
         server, close = load(name)
-        for tool in WRITE_TOOLS.get(name, ()):
+        for tool in LOCAL_ONLY_TOOLS.get(name, ()):
             with suppress(ToolError):  # already removed by an earlier app in this process
                 server.remove_tool(tool)
         servers[name] = server

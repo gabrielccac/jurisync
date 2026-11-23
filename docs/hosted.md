@@ -4,10 +4,11 @@ One remote MCP server for several offices. A caller (Claude, ChatGPT) signs in w
 (tenant); every tool call then runs with that office's portal credentials, read from an encrypted vault on the server.
 Local installs are unchanged: without a tenant, connectors read `os.environ` as before.
 
-Connectors served to offices: PJe, Eproc, e-SAJ, Projudi, STJ, DJEN, ADVBOX and Juridiq (`TENANT_READY` in
-`hosted/app.py`). PJe draft writes stay off; ADVBOX and Juridiq write tools are listed and answer only for an office
-whose own grant (`ADVBOX_ALLOW_WRITES`/`JURIDIQ_ALLOW_WRITES` in its vault entry or `[env].set` of its profile) is
-`true` (`GRANTED_WRITES`); the server's environment never grants them.
+Connectors served to offices: every connector of `src/jurisync/registry.py` (PJe, Eproc, e-SAJ, Projudi, STJ,
+Tucujuris, JPe, DJEN, ADVBOX and Juridiq); `hosted/app.py`, `provision.py`, `cli.py` and `access.py` read that list.
+The PJe draft tools (`local_only_tools`) stay on the office's computer; ADVBOX and Juridiq write tools are listed and
+answer only for an office whose own grant (`ADVBOX_ALLOW_WRITES`/`JURIDIQ_ALLOW_WRITES` in its vault entry or
+`[env].set` of its profile) is `true` (`GRANTED_WRITES`); the server's environment never grants them.
 
 Deployment (VPS install, systemd, HTTPS, backups, smoke test): `deploy/README.md`.
 
@@ -39,6 +40,9 @@ per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
    issued for this resource (a token for `/mcp` works only on `/mcp`, one for `/pje/mcp` only there), then opens
    `credentials.scope(tenant, vault values)`. A per-connector URL answers 403 when the connector is not enabled for the
    tenant; on `/mcp`, `tools/list` shows only the enabled connectors' tools and a call to another one returns an error.
+   A tool's `portal` choices are only the portals the office has a login for (the connector's `configured_portals()`
+   in the office's scope); a call naming another portal is refused, and a connector with no portal configured is not
+   listed for the office. `/healthz` answers `{"ok": true}` without a token.
 5. The SDK carries that context into the tool call (including the worker thread of a sync tool). The connector logs
    in with the tenant's A1 and TOTP; the session pool keeps that login apart from other tenants.
 6. Every tool call, on either URL, writes one row to the store: office, user, connector, tool, ok or error type,
@@ -52,7 +56,8 @@ per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
   (`<filings>/tenants/<id>`) are per tenant.
 - MCP sessions are bound to the token's principal by the SDK, so one office cannot resume another's session.
 - The vault decrypts per request; the A1 certificate is never written to disk on the server.
-- Write tools (`pje_draft_write`, `pje_draft_delete`) are removed from the hosted server, on every URL.
+- The PJe draft tools (`pje_draft_write`, `_delete`, `_status`, `_inspect`) are removed from the hosted server, on
+  every URL.
 - Server-wide settings (`JURISYNC_CAPTCHA_API_KEY`, `JURISYNC_CAPTCHA_MODEL`) are read from the process environment
   or the service's systemd credentials (`credentials.machine`), also inside an office's scope; an office's vault
   cannot set them. The vault key is also read from `$CREDENTIALS_DIRECTORY/JURISYNC_VAULT_KEY`.
@@ -132,7 +137,7 @@ our side.
 
 | Path | Who | How |
 |---|---|---|
-| Encrypted bundle | Our team, from credentials set up with the office | `jurisync-setup export` produces a passphrase-sealed file; `jurisync-hosted secrets import-bundle <office> <file> --portal <key> --check` stores it only if the PJe logins get in |
+| Encrypted bundle | Our team, from credentials set up with the office | `jurisync-setup export` produces a passphrase-sealed file; `jurisync-hosted secrets import-bundle <office> <file> --portal <key> --check` stores it only if the logins get in |
 | The office's own page | The office; no one on our team sees the secrets | To build. It signs the office user in, takes login + password + authenticator (text or QR image) per portal, or the A1 file + PIN once for the office, and stores each access only after a test login |
 
 `hosted/access.py` already holds the page's logic: `read_certificate` (opens the A1, reports holder and expiry,
@@ -145,10 +150,11 @@ choosing among several accounts), `with_portal`/`without_portal` (per-portal vau
 Operator commands that take no secrets:
 
 ```bash
-jurisync-hosted portal list <office>              # A1 holder and expiry; per portal: method, 2FA, last test
-jurisync-hosted portal check <office> trf1-1g     # test the stored access again
-jurisync-hosted portal remove <office> trf1-1g
-jurisync-hosted certificate remove <office>
+jurisync-hosted portal list <office>              # A1 holder and expiry; the office's portals (its profile's, else
+                                                  # those in its vault), any system: method, 2FA, last test
+jurisync-hosted portal check <office> trf1-1g     # test the stored access again; any portal, advbox or juridiq
+jurisync-hosted portal remove <office> tjmg-1g    # any portal
+jurisync-hosted certificate remove <office>       # also drops every portal's open login and cookie cache
 jurisync-hosted history <office>                  # who changed what; never values
 jurisync-hosted calls <office> --limit 50         # tool calls: user, tool, ok/error, duration; never arguments
 ```

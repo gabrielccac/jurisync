@@ -8,35 +8,17 @@ authentication: this is for local test installs, reached through a tunnel you co
 """
 
 import argparse
-import importlib
 from contextlib import AsyncExitStack, asynccontextmanager
-from functools import reduce
 
+from jurisync import registry
 from jurisync.core.mcp import http_settings, load_env_file
 
-# name -> (module, attribute holding the server, or "create_server()", attribute path to close on exit)
-SERVERS = {
-    "esaj": ("jurisync.connectors.esaj.server", "create_server()", "sessions.close"),
-    "pje": ("jurisync.connectors.pje.server", "server", "sessions.close"),
-    "advbox": ("jurisync.connectors.advbox.server", "server", "client.close"),
-    "djen": ("jurisync.connectors.djen.server", "server", None),
-    "eproc": ("jurisync.connectors.eproc.server", "create_server()", "sessions.close"),
-    "juridiq": ("jurisync.connectors.juridiq.server", "create_server()", None),
-    "projudi": ("jurisync.connectors.projudi.server", "create_server()", "sessions.close"),
-    "stj": ("jurisync.connectors.stj.server", "create_server()", "sessions.close"),
-    "tucujuris": ("jurisync.connectors.tucujuris.server", "create_server()", "sessions.close"),
-    "jpe": ("jurisync.connectors.jpe.server", "create_server()", "sessions.close"),
-}
 DEFAULT_SERVERS = ("pje", "advbox")
 
 
 def load(name):
     """Import one server and return ``(MCPServer, close callback or None)``."""
-    module_name, attribute, closer = SERVERS[name]
-    module = importlib.import_module(module_name)
-    server = getattr(module, attribute.removesuffix("()"))
-    server = server() if attribute.endswith("()") else server
-    return server, (reduce(getattr, closer.split("."), module) if closer else None)
+    return registry.get(name).load()
 
 
 def build_app(names, host="127.0.0.1"):
@@ -66,7 +48,7 @@ def build_app(names, host="127.0.0.1"):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Serve Jurisync MCP servers over streamable HTTP, one path each.")
-    parser.add_argument("servers", nargs="*", choices=list(SERVERS), default=list(DEFAULT_SERVERS))
+    parser.add_argument("servers", nargs="*", choices=list(registry.CONNECTORS), default=list(DEFAULT_SERVERS))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)

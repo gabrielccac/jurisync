@@ -112,6 +112,21 @@ class AccessChecksTest(unittest.TestCase):
             access.check("nada")
 
 
+class PortalAccessTest(unittest.TestCase):
+    def test_every_portal_is_checked_and_forgotten_through_its_pool(self):
+        from jurisync import registry
+        from jurisync.connectors.projudi.server import sessions
+
+        targets = access.check_targets()
+        for connector in registry.CONNECTORS.values():
+            self.assertLessEqual(set(connector.portals()), set(targets))
+        with mock.patch.object(sessions, "check") as check, mock.patch.object(sessions, "forget") as forget:
+            access.check("tjam-1g")
+            access.forget("tjam-1g")
+        check.assert_called_once_with("tjam-1g")
+        forget.assert_called_once_with("tjam-1g")
+
+
 class ServerGuardsTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -122,7 +137,10 @@ class ServerGuardsTest(unittest.TestCase):
         self.directory.cleanup()
 
     def test_only_tenant_aware_connectors_mount(self):
-        self.assertEqual(set(TENANT_READY), {"pje", "eproc", "esaj", "projudi", "stj", "djen", "advbox", "juridiq"})
+        self.assertEqual(
+            set(TENANT_READY),
+            {"pje", "eproc", "esaj", "projudi", "stj", "tucujuris", "jpe", "djen", "advbox", "juridiq"},
+        )
         with self.assertRaises(ValueError):
             build_app("https://mcp.test", self.store, self.vault, ["filing"])
         app, closers = build_app("https://mcp.test", self.store, self.vault, list(TENANT_READY))
@@ -159,3 +177,28 @@ class ServiceImportTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CredentialSaverTest(unittest.TestCase):
+    def test_a_renewed_value_goes_to_that_office_vault_only(self):
+        import secrets
+
+        from jurisync.hosted.app import TenantGate
+        from jurisync.hosted.store import Store
+        from jurisync.hosted.vault import Vault
+
+        with tempfile.TemporaryDirectory() as directory:
+            store, vault = (
+                Store(Path(directory) / "store.sqlite"),
+                Vault(Path(directory) / "vault", secrets.token_bytes(32)),
+            )
+            vault.put("office-a", {"ADVBOX_DEVICE_ID": "old", "ADVBOX_EMAIL": "a@x.br"}, {"cert.pfx": b"x"})
+            vault.put("office-b", {"ADVBOX_DEVICE_ID": "other"})
+            gate = TenantGate(None, connector=None, store=store, vault=vault, resource="https://mcp.test")
+            with credentials.scope("office-a", {"ADVBOX_DEVICE_ID": "old"}, saver=gate._saver("office-a")):
+                credentials.save("ADVBOX_DEVICE_ID", "new")
+                self.assertEqual(credentials.env("ADVBOX_DEVICE_ID"), "new")
+            self.assertEqual(
+                vault.get("office-a"), ({"ADVBOX_DEVICE_ID": "new", "ADVBOX_EMAIL": "a@x.br"}, {"cert.pfx": b"x"})
+            )
+            self.assertEqual(vault.get("office-b")[0], {"ADVBOX_DEVICE_ID": "other"})

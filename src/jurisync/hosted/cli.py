@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-from jurisync import customers, portals
+from jurisync import customers, portals, registry
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key, require_tenant_id
 from jurisync.install import credentials_bundle
@@ -50,8 +50,8 @@ def qr_text(raw):
 
 # Services outside the portal registry and the names their connectors read.
 SERVICE_NAMES = {
-    "advbox": {"ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID", "ADVBOX_UPLOAD_FOLDER", "ADVBOX_ALLOW_WRITES"},
-    "juridiq": {"JURIDIQ_EMAIL", "JURIDIQ_PASSWORD", "JURIDIQ_ALLOW_WRITES"},
+    name: {*registry.get(name).login, *registry.get(name).settings, registry.get(name).write_grant} - {""}
+    for name in registry.SERVICES
 }
 # Never stored for an office: PJe draft writes stay off on the server, and an A3 token (its PIN, the switch that sends
 # a portal to it) only works on the machine where it is plugged in.
@@ -175,7 +175,9 @@ def merge(vault, tenant, values, files, say, *, portal_keys=None, customer="", c
 
         targets = [key for key in portal_keys or () if key in access.check_targets()]
         if not targets:
-            raise SystemExit("--check precisa de --portal com ao menos um portal do PJe ou do Eproc, advbox ou juridiq")
+            raise SystemExit(
+                f"--check precisa de --portal com ao menos um portal ou serviço ({', '.join(SERVICE_NAMES)})"
+            )
         failed = [key for key in targets if not run_check(store, tenant, key, current_values, current_files, say)]
         if failed:
             raise SystemExit(f"Nada foi gravado: o login falhou em {', '.join(failed)}")
@@ -216,7 +218,7 @@ def forget(tenant, values, files, portal_keys):
 
     with access.tenant_scope(tenant, values, files):
         for key in portal_keys:
-            access.forget_sessions(key)
+            access.forget(key)
 
 
 def certificate_remove(args, say):
@@ -225,7 +227,8 @@ def certificate_remove(args, say):
     store, vault = open_store(), open_vault()
     tenant = require_existing(store, args.tenant)["id"]
     values, files = vault.get(tenant)
-    forget(tenant, values, files, portals.keys("pje"))
+    # The A1 also logs in to Eproc, e-SAJ, Projudi, STJ: every portal's login and cookie cache goes.
+    forget(tenant, values, files, access.served_portals())
     values.pop(access.A1_PIN, None)
     files.pop(access.A1_FILE, None)
     vault.put(tenant, values, files)
@@ -251,13 +254,33 @@ def portal_list(args, say):
     say(f"Certificado A1: {f'{info.holder}, válido até {info.expires}' if info else 'não cadastrado'}")
     checks = store.checks(tenant)
     methods = {access.PASSWORD: "login com senha", access.CERTIFICATE: "certificado A1", None: "-"}
-    for config in access.pje_portals():
+
+    def result(key):
+        check = checks.get(key)
+        return "não testado" if check is None else ("OK" if check["ok"] else f"falhou: {check['message']}")
+
+    for key in office_portals(office, values, checks):
+        config = portals.get(key)
         state = access.portal_state(config, values, files)
-        check = checks.get(config.key)
-        result = "não testado" if check is None else ("OK" if check["ok"] else f"falhou: {check['message']}")
+        authenticator = "sim" if state.has_authenticator else "não"
         say(
-            f"{config.key:<10} {methods[state.method]:<16} 2FA={'sim' if state.has_authenticator else 'não':<4} {result}"
+            f"{key:<16} {registry.label(config.system):<9} {methods[state.method]:<16} 2FA={authenticator:<4} "
+            + result(key)
         )
+    for service in registry.SERVICES:
+        if all(values.get(name) for name in registry.get(service).login):
+            say(f"{service:<16} {registry.label(service):<9} {methods[access.PASSWORD]:<16} {'':<9}{result(service)}")
+
+
+def office_portals(office, values, checks=()):
+    """The office's portals: its customer profile's, else those with a value in its vault or a login check."""
+    from jurisync.hosted import access
+
+    served = access.served_portals()
+    if office["customer"] and (customers.customer_dir(office["customer"]) / "portals.toml").is_file():
+        return [key for key in customers.load_setup(office["customer"]) if key in served]
+    present = {name for name, value in values.items() if value}
+    return [key for key in served if key in checks or access.portal_names(portals.get(key)) & present]
 
 
 def portal_check(args, say):
@@ -273,7 +296,7 @@ def portal_remove(args, say):
 
     store, vault = open_store(), open_vault()
     tenant = require_existing(store, args.tenant)["id"]
-    config = portals.pje(args.portal)
+    config = portals.get(args.portal)
     values, files = vault.get(tenant)
     forget(tenant, values, files, [config.key])
     vault.put(tenant, access.without_portal(values, config), files)
@@ -350,6 +373,7 @@ def serve(args):
 def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     parser = argparse.ArgumentParser(prog="jurisync-hosted", description="Servidor remoto do Jurisync.")
     commands = parser.add_subparsers(dest="command", required=True)
+    from jurisync.hosted import access as _access
 
     commands.add_parser("init", help="cria a pasta de dados e mostra uma chave nova para o cofre")
 
@@ -358,12 +382,12 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     add.add_argument("tenant")
     add.add_argument("--name", required=True)
     add.add_argument("--customer", default="", help="perfil em customers/ (portals.toml, settings.toml)")
-    add.add_argument("--connectors", nargs="+", default=["pje"])
+    add.add_argument("--connectors", nargs="+", default=["pje"], choices=list(registry.CONNECTORS))
     add.add_argument("--local", metavar="MOTIVO", help="escritório só local (ex. A3): registrado, sem nada servido")
     tenant.add_parser("list")
     set_connectors = tenant.add_parser("connectors", help="troca os conectores do escritório")
     set_connectors.add_argument("tenant")
-    set_connectors.add_argument("connectors", nargs="+")
+    set_connectors.add_argument("connectors", nargs="+", choices=list(registry.CONNECTORS))
     remove = tenant.add_parser("remove")
     remove.add_argument("tenant")
 
@@ -371,8 +395,8 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     from_bundle = secrets.add_parser("import-bundle", help="lê um pacote .jurisync (jurisync-setup export)")
     from_bundle.add_argument("tenant")
     from_bundle.add_argument("bundle")
-    from_bundle.add_argument("--portal", nargs="*", choices=sorted(portals.PORTALS) + ["advbox", "juridiq"])
-    from_bundle.add_argument("--check", action="store_true", help="só grava se o login nos portais do PJe entrar")
+    from_bundle.add_argument("--portal", nargs="*", choices=_access.check_targets())
+    from_bundle.add_argument("--check", action="store_true", help="só grava se o login nos portais e serviços entrar")
     from_bundle.add_argument("--passphrase-file", help="arquivo (0600) com a senha do pacote, em vez de digitá-la")
     listing = secrets.add_parser("list")
     listing.add_argument("tenant")
@@ -382,18 +406,16 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     )
     cert.add_parser("remove").add_argument("tenant")
 
-    portal = commands.add_parser("portal", help="acesso a cada portal do PJe").add_subparsers(
+    portal = commands.add_parser("portal", help="acesso do escritório a cada portal").add_subparsers(
         dest="action", required=True
     )
     portal.add_parser("list").add_argument("tenant")
-    from jurisync.hosted import access as _access
-
     portal_check_parser = portal.add_parser("check", help="testa o login de um portal, advbox ou juridiq")
     portal_check_parser.add_argument("tenant")
     portal_check_parser.add_argument("portal", choices=_access.check_targets())
     portal_remove_parser = portal.add_parser("remove")
     portal_remove_parser.add_argument("tenant")
-    portal_remove_parser.add_argument("portal", choices=portals.keys("pje"))
+    portal_remove_parser.add_argument("portal", choices=_access.served_portals())
 
     log = commands.add_parser("history", help="histórico de alterações do escritório")
     log.add_argument("tenant")

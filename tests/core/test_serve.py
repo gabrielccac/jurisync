@@ -6,6 +6,7 @@ from unittest import mock
 
 from mcp.server.mcpserver import MCPServer
 
+from jurisync import registry
 from jurisync.core import mcp as core_mcp
 from jurisync.install import serve as serve_module
 
@@ -35,7 +36,7 @@ class CombinedAppTest(unittest.TestCase):
         self.assertEqual(closers, [])
 
     def test_known_servers_resolve_and_close_callbacks_are_found(self):
-        for name in serve_module.SERVERS:
+        for name in registry.CONNECTORS:
             with self.subTest(name):
                 server, close = serve_module.load(name)
                 self.assertIsInstance(server, MCPServer)

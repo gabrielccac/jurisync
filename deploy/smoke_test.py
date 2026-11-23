@@ -4,7 +4,8 @@
     python deploy/smoke_test.py https://mcp.example.com.br --plan rollout/plan.json \
         --user advogada@victor.test=/root/victor.password --user advogada@herica.test=/root/herica.password
 
-Without users: the OAuth metadata, the protected resource of /mcp and the 401 a client gets before signing in.
+Without users: /healthz, the OAuth metadata, the protected resource of /mcp and the 401 a client gets before signing
+in.
 With users (password read from a file, never from the command line): dynamic client registration, the sign-in page,
 PKCE code exchange, then MCP initialize + tools/list on /mcp. With --plan, each user's tools must be exactly the
 systems of the user's office, and a tool of a system the office lacks must be refused (tenant isolation). With
@@ -32,6 +33,8 @@ PROBES = {
     "esaj": "esaj_get_session",
     "projudi": "projudi_get_process",
     "stj": "stj_get_process",
+    "tucujuris": "tucujuris_list_processes",
+    "jpe": "jpe_list_processes",
     "advbox": "advbox_list_members",
     "juridiq": "juridiq_list_users",
 }
@@ -109,7 +112,13 @@ def pkce():
     return verifier, challenge
 
 
+# Tools only an office's own computer serves (registry ``local_only_tools``).
+LOCAL_ONLY = {"pje_draft_write", "pje_draft_delete", "pje_draft_status", "pje_draft_inspect"}
+
+
 def public_checks(client, base):
+    health = client.get("/healthz")
+    check(health.status_code == 200 and health.json().get("ok") is True, f"/healthz ({health.status_code})")
     metadata = client.get("/.well-known/oauth-authorization-server")
     check(metadata.status_code == 200, f"metadados OAuth ({metadata.status_code})")
     if metadata.status_code == 200:
@@ -233,7 +242,7 @@ def main(argv=None):
         systems = sorted({name.split("_", 1)[0] for name in tools})
         check(bool(tools), f"{email}: {len(tools)} ferramentas ({', '.join(systems)})")
         seen[email] = set(tools)
-        check(not {"pje_draft_write", "pje_draft_delete"} & set(tools), f"{email}: escrita do PJe fora da lista")
+        check(not LOCAL_ONLY & set(tools), f"{email}: rascunhos do PJe fora da lista")
         office = office_of(plan, email) if plan else None
         if office is not None:
             expected = sorted(office["connectors"])

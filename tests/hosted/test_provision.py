@@ -152,6 +152,7 @@ class PlanTest(ProvisionCase):
         alfa, beta, gama = offices["alfa"], offices["beta"], offices["gama"]
         self.assertEqual(alfa.portals, ["trf5-1g", "trf1-1g", "advbox"])
         self.assertEqual(alfa.connectors, ["pje", "djen", "advbox"])
+        self.assertEqual(alfa.checks, alfa.portals)  # every served portal and service gets its first login
         self.assertTrue(any("MINDCHAT_API_KEY" in note for note in alfa.notes))
         # Legacy names count once renamed; the portal without its password is left out with the reason.
         self.assertEqual(beta.portals, ["trf4-1g-sc"])
