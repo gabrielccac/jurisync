@@ -119,6 +119,10 @@ The recording also deletes the folder: `POST /s3` with `id=<folder path>`, `type
 - Delete the three files (`type=file`, `customer=''`) and both folders (`type=folder`, `id=<path>`,
   `customer=<customerId>`): empty `200` each; the listings confirmed nothing was left.
 
+Checked again on 2026-11-23 (customer `TESTE`): create folder → upload one PDF (`listed: true`) → delete the file and
+the folder with the step 4 requests → the customer root was empty again. See `advbox-lawsuit-stage.md` for the full
+run of that day.
+
 Still assumed:
 
 - Upload limits: 25 MB and the type list are the connector's own; ADVBOX showed none.

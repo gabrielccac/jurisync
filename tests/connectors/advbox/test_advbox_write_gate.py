@@ -22,6 +22,7 @@ WRITE_CALLS = {
     "advbox_update_task": {"postId": "1", "comments": "x"},
     "advbox_complete_task": {"postId": "1"},
     "advbox_delete_task": {"postId": "1"},
+    "advbox_update_lawsuit_stage": {"lawsuitId": "1", "stageId": "3"},
 }
 # Not ADVBOX writes: the device check changes the account's trusted devices only; the others save files locally.
 NOT_GATED = {"advbox_verify_device", "advbox_download_file", "advbox_download_folder", "advbox_save_folder"}

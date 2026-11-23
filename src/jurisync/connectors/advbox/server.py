@@ -681,10 +681,29 @@ def upload_files(
     return call(run) if dryRun else write(run)
 
 
+StageId = Annotated[
+    str,
+    Field(
+        pattern=r"^\d+$",
+        description="Lawsuit stage id (the screen's Fase: Judicial, Recursal...), from advbox_task_filters stages, "
+        "e.g. '3'.",
+    ),
+]
+SubStageId = Annotated[
+    str,
+    Field(
+        pattern=r"^\d*$",
+        description="Optional sub-stage id inside that stage (the screen's Etapa, e.g. 'AJUIZADO/EM ANDAMENTO'), "
+        "from subStageOptions of a dryRun. Empty: a new stage gets its first sub-stage, as the screen does; the "
+        "same stage keeps the current one.",
+    ),
+]
+
+
 @server.tool(
     name="advbox_create_task",
     title="Create ADVBOX task",
-    description="Create a task on a lawsuit with a task-type ID (tasksId), responsible guest IDs (guests: a JSON list of 1 or more user IDs from advbox_list_members; a task cannot be created with no responsible), a date in YYYY-MM-DD, and comments. Attachments can be given inline as base64 (attachments) or by file name from the shared documents folder (attachmentFiles, the savedAs names returned by pje_read_documents with save=true); at most 5 files in total. With dryRun=true nothing is sent: the task body and files are validated and returned. dedupeKey (e.g. the DJEN communication id) makes a retry safe: a pending task of this lawsuit already marked [ref:<dedupeKey>] is returned with duplicate=true and nothing is created; otherwise the marker becomes the last line of the comment. If ADVBOX does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search the lawsuit's tasks before retrying, the call is never replayed. Creating requires ADVBOX_ALLOW_WRITES=true; attachments also need ADVBOX_UPLOAD_FOLDER.",
+    description="Create a task on a lawsuit with a task-type ID (tasksId), responsible guest IDs (guests: a JSON list of 1 or more user IDs from advbox_list_members; a task cannot be created with no responsible), a date in YYYY-MM-DD, and comments. Attachments can be given inline as base64 (attachments) or by file name from the shared documents folder (attachmentFiles, the savedAs names returned by pje_read_documents with save=true); at most 5 files in total. With dryRun=true nothing is sent: the task body and files are validated and returned. dedupeKey (e.g. the DJEN communication id) makes a retry safe: a pending task of this lawsuit already marked [ref:<dedupeKey>] is returned with duplicate=true and nothing is created; otherwise the marker becomes the last line of the comment. If ADVBOX does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search the lawsuit's tasks before retrying, the call is never replayed. stageId (optional, with subStageId) also moves the lawsuit to that stage after the task is created, like advbox_update_lawsuit_stage: an unknown stage is refused before the task is written; if the move fails after the task exists, the result keeps the new postId and reports stage.error and warnings (call advbox_update_lawsuit_stage, never create the task again). The result's stage block has previous and new stage. Creating requires ADVBOX_ALLOW_WRITES=true; attachments also need ADVBOX_UPLOAD_FOLDER.",
     annotations=WRITE,
 )
 def create_task(
@@ -739,6 +758,14 @@ def create_task(
             description="Optional reference that identifies what this task answers, e.g. the DJEN communication id '747498033'. One line, no square brackets. When given, an existing pending task of the lawsuit marked [ref:<dedupeKey>] is returned (duplicate=true) instead of creating a second one.",
         ),
     ] = "",
+    stageId: Annotated[
+        str,
+        Field(
+            pattern=r"^\d*$",
+            description="Optional lawsuit stage id from advbox_task_filters stages (e.g. '3' Judicial): after the task is created the lawsuit moves to it. Empty leaves the stage alone.",
+        ),
+    ] = "",
+    subStageId: SubStageId = "",
 ) -> dict[str, Any]:
     def run():
         if len(attachments) + len(attachmentFiles) > MAX_ATTACHMENTS:
@@ -767,9 +794,12 @@ def create_task(
             "deadline": advbox_date(deadline),
             "comments": comments,
         }
+        if subStageId and not stageId:
+            raise ValueError("subStageId needs stageId")
+        stage = {"stage_id": stageId, "sub_stage_id": subStageId} if stageId else {}
         if dryRun:
-            return client.preview_task(options, files, dedupe_key=dedupeKey)
-        return client.create_task(options, files, dedupe_key=dedupeKey)
+            return client.preview_task(options, files, dedupe_key=dedupeKey, **stage)
+        return client.create_task(options, files, dedupe_key=dedupeKey, **stage)
 
     return call(run) if dryRun else write(run)
 
@@ -911,6 +941,26 @@ def delete_task(
         return client.delete_task(
             postId, scope=scope, comments=comments, expect_comments=expectComments, dry_run=dryRun
         )
+
+    return call(run) if dryRun else write(run)
+
+
+@server.tool(
+    name="advbox_update_lawsuit_stage",
+    title="Change ADVBOX lawsuit stage",
+    description="Move a lawsuit to another stage (the screen's Fase: Negociação, Administrativo, Judicial, Recursal...; ids from advbox_task_filters stages) and sub-stage (the screen's Etapa inside it). Sends the lawsuit screen's own save with only these two fields changed; every other field is sent back as the form holds it and is compared after the save. Unknown stage or sub-stage ids are refused before anything is sent. Without subStageId a new stage gets its first sub-stage, as the screen does. Returns previous and new {stageId, stage, subStageId, subStage}: call again with previous to undo. Confirmed by reading the lawsuit form again; when that read does not show the new stage the call fails saying the change is NOT confirmed. The change is logged in the lawsuit history. With dryRun=true nothing is sent and the plan plus the target stage's subStageOptions are returned. Requires ADVBOX_ALLOW_WRITES=true.",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True),
+)
+def update_lawsuit_stage(
+    lawsuitId: Id,
+    stageId: StageId,
+    subStageId: SubStageId = "",
+    dryRun: Annotated[
+        bool, Field(description="true checks the ids and returns the plan without sending. Use it first.")
+    ] = False,
+) -> dict[str, Any]:
+    def run():
+        return client.update_lawsuit_stage(lawsuitId, stageId, subStageId, dry_run=dryRun)
 
     return call(run) if dryRun else write(run)
 

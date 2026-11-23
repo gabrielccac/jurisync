@@ -90,6 +90,7 @@ CONNECTORS = {
                     "advbox_update_task",
                     "advbox_complete_task",
                     "advbox_delete_task",
+                    "advbox_update_lawsuit_stage",
                 }
             ),
         ),

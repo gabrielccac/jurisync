@@ -5,6 +5,7 @@ import os
 import re
 from datetime import date, datetime
 from html import unescape
+from html.parser import HTMLParser
 from urllib.parse import parse_qs, urljoin, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -709,4 +710,160 @@ def build_edit_body(
             body[flag] = "1"
     if file_codes:
         body["file[]"] = [str(code) for code in file_codes]
+    return body
+
+
+class _FormFields(HTMLParser):
+    """The fields one ``<form class="...">`` would submit, in document order, the way jQuery's ``serialize`` (which
+    the ADVBOX screens use) builds them: enabled named inputs (checkboxes and radios only when checked), the selected
+    options of each select (a single select without one submits its first option) and textareas."""
+
+    SKIPPED_TYPES = {"submit", "button", "reset", "file", "image"}
+
+    def __init__(self, form_class):
+        super().__init__(convert_charrefs=True)
+        self.form_class = form_class
+        self.depth = 0  # 0 outside the form, else the number of open <form> elements since it started
+        self.found = False
+        self.action = ""
+        self.method = ""
+        self.pairs = []
+        self.selects = {}
+        self._select = None
+        self._option = None
+        self._textarea = None
+
+    def handle_starttag(self, tag, attrs):
+        attributes = {key: value if value is not None else "" for key, value in attrs}
+        if tag == "form":
+            if self.depth:
+                self.depth += 1
+            elif not self.found and self.form_class in attributes.get("class", "").split():
+                self.found, self.depth = True, 1
+                self.action, self.method = attributes.get("action", ""), attributes.get("method", "GET").upper()
+            return
+        if not self.depth:
+            return
+        name = attributes.get("name")
+        disabled = "disabled" in attributes
+        if tag == "input" and name and not disabled:
+            kind = attributes.get("type", "text").lower()
+            if kind in self.SKIPPED_TYPES or (kind in ("checkbox", "radio") and "checked" not in attributes):
+                return
+            self.pairs.append([name, attributes.get("value", "on" if kind in ("checkbox", "radio") else "")])
+        elif tag == "select" and name:
+            self._select = {"name": name, "multiple": "multiple" in attributes, "disabled": disabled, "options": []}
+        elif tag == "option" and self._select is not None:
+            self._option = {"value": attributes.get("value"), "selected": "selected" in attributes, "text": ""}
+            self._select["options"].append(self._option)
+        elif tag == "textarea" and name and not disabled:
+            self._textarea = [name, ""]
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self.depth:
+            self.depth -= 1
+        elif tag == "option":
+            self._option = None
+        elif tag == "select" and self._select is not None:
+            select, self._select = self._select, None
+            for option in select["options"]:
+                option["text"] = option["text"].strip()
+                if option["value"] is None:
+                    option["value"] = option["text"]
+            self.selects[select["name"]] = select
+            if select["disabled"]:
+                return
+            chosen = [option for option in select["options"] if option["selected"]]
+            if not chosen and not select["multiple"] and select["options"]:
+                chosen = select["options"][:1]
+            self.pairs += [[select["name"], option["value"]] for option in chosen]
+        elif tag == "textarea" and self._textarea is not None:
+            self.pairs.append(self._textarea)
+            self._textarea = None
+
+    def handle_data(self, data):
+        if self._option is not None:
+            self._option["text"] += data
+        elif self._textarea is not None:
+            self._textarea[1] += data
+
+
+def parse_form(html, form_class):
+    """``{"action", "method", "pairs": [[name, value], ...], "selects": {name: {...options}}}`` of the first form
+    with ``form_class``; ValueError when the page has none."""
+    parser = _FormFields(form_class)
+    parser.feed(str(html or ""))
+    parser.close()
+    if not parser.found:
+        raise ValueError(f"ADVBOX page has no form {form_class!r}")
+    # The browser drops the newline that directly follows <textarea>.
+    pairs = [[name, value[1:] if value.startswith("\n") else value] for name, value in parser.pairs]
+    return {"action": parser.action, "method": parser.method, "pairs": pairs, "selects": parser.selects}
+
+
+def _options(select):
+    return [{"id": option["value"], "label": option["text"]} for option in (select or {}).get("options", [])]
+
+
+def parse_lawsuit_form(html):
+    """The lawsuit edit form (``GET /lawsuits/<id>/edit``, class ``lawsuit-data``): the fields the screen's
+    "Atualizar dados do processo" sends, the current stage (``steps_id``, the screen's "Fase": Judicial,
+    Recursal...) and sub-stage (``stages_id``, the screen's "Etapa" inside it), and the stage options."""
+    form = parse_form(html, "lawsuit-data")
+    values = {}
+    for name, value in form["pairs"]:
+        values[name] = value  # PHP keeps the last of repeated names
+    found = re.search(r"/lawsuits/(\d+)$", form["action"])
+    if not found or form["method"] != "POST" or values.get("_method") != "PUT":
+        raise ValueError("ADVBOX lawsuit form was not recognised (action, method or _method changed)")
+    if "steps_id" not in form["selects"] or "stages_id" not in form["selects"]:
+        raise ValueError("ADVBOX lawsuit form has no stage (steps_id) or sub-stage (stages_id) field")
+    steps = [option for option in _options(form["selects"]["steps_id"]) if option["id"]]
+    sub_stages = [option for option in _options(form["selects"]["stages_id"]) if option["id"]]
+    return {
+        "lawsuitId": found[1],
+        "action": form["action"],
+        "pairs": form["pairs"],
+        "stageId": values.get("steps_id") or "",
+        "subStageId": values.get("stages_id") or "",
+        "stages": steps,
+        "subStages": sub_stages,
+    }
+
+
+def parse_sub_stages(payload):
+    """``POST /stages/<stageId>`` (the list the screen loads when the stage changes) as ``[{"id", "label",
+    "workflowId"}]``; inactive entries are left out. ``workflowId`` is the workflow ADVBOX offers to start when a
+    lawsuit enters that sub-stage."""
+    data = json.loads(payload) if isinstance(payload, str | bytes) else payload
+    if not isinstance(data, list):
+        raise ValueError("ADVBOX sub-stage list was not a JSON list")
+    return [
+        {
+            "id": str(entry["id"]),
+            "label": str(entry.get("stage") or "").strip(),
+            "workflowId": entry.get("workflows_id"),
+        }
+        for entry in data
+        if isinstance(entry, dict) and entry.get("id") is not None and entry.get("is_active", 1) in (1, "1", True)
+    ]
+
+
+def build_lawsuit_stage_body(form, stage_id, sub_stage_id):
+    """The screen's lawsuit save (every field as the form holds it) with only ``steps_id`` and ``stages_id``
+    replaced. ``_token`` is left to the session, which sends its own."""
+    body = {}
+    for name, value in form["pairs"]:
+        if name == "_token":
+            continue
+        if name == "steps_id":
+            value = str(stage_id)
+        elif name == "stages_id":
+            value = str(sub_stage_id or "")
+        if name.endswith("[]"):
+            body.setdefault(name, []).append(value)
+        else:
+            body[name] = value  # PHP keeps the last of repeated names
+    if "steps_id" not in body or "stages_id" not in body:
+        raise ValueError("ADVBOX lawsuit form has no stage (steps_id) or sub-stage (stages_id) field")
     return body
