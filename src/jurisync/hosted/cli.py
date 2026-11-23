@@ -7,6 +7,8 @@
     jurisync-hosted user add pessoa@escritorio.com.br --tenant escritorio-teste
     jurisync-hosted serve --base-url https://mcp.exemplo.com.br --port 8080
     jurisync-hosted calls escritorio-teste --limit 50           # tool calls: who, which tool, result; no arguments
+    jurisync-hosted provision export --out ~/rollout --passphrase-file ~/.config/jurisync/rollout.passphrase
+    jurisync-hosted provision apply ~/rollout --passphrase-file /root/rollout.passphrase   # on the server
 
 State lives in JURISYNC_HOSTED_DIR (default ~/.local/share/jurisync/hosted): ``store.sqlite`` and ``vault/``. The vault
 key is read from JURISYNC_VAULT_KEY and is never written there. Portal credentials come in only as an encrypted bundle
@@ -16,6 +18,7 @@ key is read from JURISYNC_VAULT_KEY and is never written there. Portal credentia
 import argparse
 import getpass
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -47,9 +50,17 @@ def qr_text(raw):
 
 # Services outside the portal registry and the names their connectors read.
 SERVICE_NAMES = {
-    "advbox": {"ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID", "ADVBOX_UPLOAD_FOLDER"},
-    "juridiq": {"JURIDIQ_EMAIL", "JURIDIQ_PASSWORD"},
+    "advbox": {"ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID", "ADVBOX_UPLOAD_FOLDER", "ADVBOX_ALLOW_WRITES"},
+    "juridiq": {"JURIDIQ_EMAIL", "JURIDIQ_PASSWORD", "JURIDIQ_ALLOW_WRITES"},
 }
+# Never stored for an office: PJe draft writes stay off on the server, and an A3 token (its PIN, the switch that sends
+# a portal to it) only works on the machine where it is plugged in.
+NEVER_HOSTED = ("PJE_ALLOW_DRAFT_WRITES",)
+NEVER_HOSTED_SUFFIXES = ("_A3_PIN", "_AUTH")
+
+
+def never_hosted(name):
+    return name in NEVER_HOSTED or name.endswith(NEVER_HOSTED_SUFFIXES)
 
 
 def wanted_names(portal_keys, customer):
@@ -65,6 +76,8 @@ def wanted_names(portal_keys, customer):
         for key in portal_keys:
             names |= access.portal_names(portals.get(key)) | {access.A1_FILE, access.A1_PIN}
         return names
+    from jurisync.hosted import access
+
     setups = customers.load_setup(customer)
     for key in portal_keys:
         setup = setups.get(key)
@@ -72,6 +85,16 @@ def wanted_names(portal_keys, customer):
             raise ValueError(f"{key} is not declared in customers/{customer}/portals.toml")
         for group in setup.secrets:
             names.update(name.strip() for name in group.split("|"))
+        # Fields a profile may leave undeclared but the login reads (wesley's TRF1 takes PJE_1G_2FA_DATA).
+        names |= access.portal_names(portals.get(key))
+    if portal_keys:
+        # The office-wide names of [env] (the A1 certificate, a CPF): a service's own names only with that service.
+        required, optional = customers.extra_variables(customer)
+        names |= {
+            name
+            for name in [*required, *optional]
+            if not any(name in service_names for service_names in SERVICE_NAMES.values())
+        }
     return names
 
 
@@ -84,6 +107,8 @@ def normalize(values, files, wanted=None):
     """Turn a local env (values + files) into vault content: QR images become TOTP text, file paths become bytes."""
     out_values, out_files = {}, {}
     for name, value in values.items():
+        if never_hosted(name):
+            continue
         if wanted is not None and name not in wanted and not name.endswith(SETTING_SUFFIXES):
             continue
         if name.endswith("_2FA_QR"):
@@ -116,7 +141,12 @@ def missing_groups(portal_keys, customer, values, files):
 def import_bundle(args, say):
     store, vault = open_store(), open_vault()
     tenant = require_existing(store, args.tenant)
-    passphrase = getpass.getpass("Senha do pacote: ")
+    if tenant["mode"] == "local":
+        raise SystemExit(f"{tenant['id']} usa a instalação local ({tenant['reason']}): nada vai para o cofre")
+    if args.passphrase_file:
+        passphrase = Path(args.passphrase_file).expanduser().read_text(encoding="utf-8").strip()
+    else:
+        passphrase = getpass.getpass("Senha do pacote: ")
     opened = credentials_bundle.unseal(Path(args.bundle).read_text(encoding="utf-8"), passphrase)
     values = dict(opened["env"])
     files = {}
@@ -209,6 +239,9 @@ def portal_list(args, say):
     store, vault = open_store(), open_vault()
     office = require_existing(store, args.tenant)
     tenant = office["id"]
+    if office["mode"] == "local":
+        say(f"{tenant}: só local ({office['reason'] or 'instalação local'}); nenhum portal no servidor")
+        return
     values, files = vault.get(tenant)
     if office["customer"]:
         # The server applies the profile's pinned values on every call; show the same state.
@@ -277,6 +310,17 @@ def require_existing(store, tenant_id):
     return tenant
 
 
+def missing_profiles(store):
+    """Offices whose customer profile is not on this machine (JURISYNC_CUSTOMERS_DIR)."""
+    return [
+        row["id"]
+        for row in store.tenants()
+        if row["customer"]
+        and row["mode"] == "hosted"
+        and not (customers.customer_dir(row["customer"]) / "portals.toml").is_file()
+    ]
+
+
 def serve(args):
     import uvicorn
 
@@ -285,6 +329,11 @@ def serve(args):
 
     store, vault = open_store(), open_vault()
     enable_request_logging()
+    lacking = missing_profiles(store)
+    if lacking:
+        # The profile pins per-portal methods (A1 on a password portal) and the office's settings: without it the
+        # server would try another login. Install it (provision apply, JURISYNC_CUSTOMERS_DIR) before serving.
+        raise SystemExit(f"Perfil customers/<nome>/portals.toml ausente para: {', '.join(lacking)}")
     if args.open_tenant:
         print(
             f"ATENÇÃO: modo de teste sem login. Quem tiver o endereço usa as credenciais de {args.open_tenant}.",
@@ -310,7 +359,11 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     add.add_argument("--name", required=True)
     add.add_argument("--customer", default="", help="perfil em customers/ (portals.toml, settings.toml)")
     add.add_argument("--connectors", nargs="+", default=["pje"])
+    add.add_argument("--local", metavar="MOTIVO", help="escritório só local (ex. A3): registrado, sem nada servido")
     tenant.add_parser("list")
+    set_connectors = tenant.add_parser("connectors", help="troca os conectores do escritório")
+    set_connectors.add_argument("tenant")
+    set_connectors.add_argument("connectors", nargs="+")
     remove = tenant.add_parser("remove")
     remove.add_argument("tenant")
 
@@ -320,6 +373,7 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     from_bundle.add_argument("bundle")
     from_bundle.add_argument("--portal", nargs="*", choices=sorted(portals.PORTALS) + ["advbox", "juridiq"])
     from_bundle.add_argument("--check", action="store_true", help="só grava se o login nos portais do PJe entrar")
+    from_bundle.add_argument("--passphrase-file", help="arquivo (0600) com a senha do pacote, em vez de digitá-la")
     listing = secrets.add_parser("list")
     listing.add_argument("tenant")
 
@@ -361,6 +415,25 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     user_remove = user.add_parser("remove")
     user_remove.add_argument("email")
 
+    provision = commands.add_parser("provision", help="escritórios a partir de customers/").add_subparsers(
+        dest="action", required=True
+    )
+    export_parser = provision.add_parser("export", help="na nossa máquina: plano + um pacote cifrado por escritório")
+    export_parser.add_argument("--out", required=True, help="pasta do plano e dos pacotes")
+    export_parser.add_argument("--passphrase-file", required=True, help="senha dos pacotes (criada se não existir)")
+    export_parser.add_argument("--customers-dir", help="pasta customers/ (padrão: JURISYNC_CUSTOMERS_DIR ou a do repo)")
+    export_parser.add_argument("--customer", nargs="+", help="só estes clientes (padrão: todos com portals.toml)")
+    apply_parser = provision.add_parser("apply", help="no servidor: cria escritórios, cofre e usuários do plano")
+    apply_parser.add_argument("plan", help="pasta gerada pelo export")
+    apply_parser.add_argument("--passphrase-file", required=True)
+    apply_parser.add_argument("--office", nargs="+", help="só estes escritórios")
+    apply_parser.add_argument("--user-passwords", help="arquivo 0600 das senhas iniciais (padrão: na pasta de dados)")
+
+    plugin_parser = provision.add_parser("plugin", help="cópia de um plugin do escritório apontando para o servidor")
+    plugin_parser.add_argument("source", help="pasta do plugin, ex. plugins/victor")
+    plugin_parser.add_argument("--url", required=True, help="https://<host>/mcp")
+    plugin_parser.add_argument("--out", required=True)
+
     run = commands.add_parser("serve")
     run.add_argument("--base-url", required=True, help="endereço público, ex. https://mcp.exemplo.com.br")
     run.add_argument("--host", default="127.0.0.1")
@@ -381,12 +454,25 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         if args.customer and not customers.customer_dir(args.customer).is_dir():
             raise SystemExit(f"Perfil customers/{args.customer} não existe")
         open_store().add_tenant(
-            require_tenant_id(args.tenant), args.name, customer=args.customer, connectors=args.connectors
+            require_tenant_id(args.tenant),
+            args.name,
+            customer=args.customer,
+            connectors=args.connectors,
+            mode="local" if args.local else "hosted",
+            reason=args.local or "",
         )
-        say(f"Escritório {args.tenant} criado ({', '.join(args.connectors)}).")
+        served = f"só local: {args.local}" if args.local else ", ".join(args.connectors)
+        say(f"Escritório {args.tenant} criado ({served}).")
+    elif args.command == "tenant" and args.action == "connectors":
+        store = open_store()
+        if require_existing(store, args.tenant)["mode"] == "local":
+            raise SystemExit(f"{args.tenant} usa a instalação local: não recebe conectores")
+        store.update_tenant(args.tenant, connectors=args.connectors)
+        say(f"Escritório {args.tenant}: {', '.join(args.connectors)}.")
     elif args.command == "tenant" and args.action == "list":
         for row in open_store().tenants():
-            say(f"{row['id']}\t{row['name']}\tperfil={row['customer'] or '-'}\t{','.join(row['connectors'])}")
+            served = ",".join(row["connectors"]) if row["mode"] == "hosted" else f"só local: {row['reason'] or '-'}"
+            say(f"{row['id']}\t{row['name']}\tperfil={row['customer'] or '-'}\t{served}")
     elif args.command == "tenant" and args.action == "remove":
         open_store().remove_tenant(args.tenant)
         open_vault().delete(args.tenant)
@@ -427,6 +513,22 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         history(args, say)
     elif args.command == "calls":
         calls(args, say)
+    elif args.command == "provision" and args.action == "export":
+        from jurisync.hosted import provision as provisioning
+
+        if args.customers_dir:
+            os.environ["JURISYNC_CUSTOMERS_DIR"] = str(Path(args.customers_dir).expanduser().resolve())
+        provisioning.export(args.out, args.passphrase_file, only=args.customer, say=say)
+    elif args.command == "provision" and args.action == "apply":
+        from jurisync.hosted import provision as provisioning
+
+        provisioning.apply(
+            args.plan, args.passphrase_file, only=args.office, user_passwords=args.user_passwords, say=say
+        )
+    elif args.command == "provision" and args.action == "plugin":
+        from jurisync.hosted import provision as provisioning
+
+        provisioning.remote_plugin(args.source, args.url, args.out, say=say)
     elif args.command == "serve":
         serve(args)
     return 0

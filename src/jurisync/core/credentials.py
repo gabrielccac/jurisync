@@ -51,6 +51,33 @@ def env(name, default=""):
     return current.values.get(name, default)
 
 
+def service_credential(name):
+    """A secret systemd hands the service as a file (``LoadCredential``/``LoadCredentialEncrypted``), or "".
+
+    The file in ``$CREDENTIALS_DIRECTORY`` is named like the variable, so the secret is never in the environment, on
+    a command line or in the unit file.
+    """
+    directory = os.environ.get("CREDENTIALS_DIRECTORY", "").strip()
+    if not directory or "/" in name:
+        return ""
+    try:
+        return (Path(directory) / name).read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, NotADirectoryError):
+        return ""
+
+
+def machine(name, default=""):
+    """A setting of the server itself (a CAPTCHA key it pays for, a model name), never of one office.
+
+    Always the process environment or the service's systemd credentials, also inside a tenant scope: an office's vault
+    entry cannot set or override them. Only for ``JURISYNC_*`` names (``core.mcp.MACHINE_PATTERNS``), never for an
+    account or a write grant.
+    """
+    if not name.startswith("JURISYNC_") or name == "JURISYNC_VAULT_KEY":
+        raise ValueError(f"{name} is not a machine setting")
+    return os.environ.get(name) or service_credential(name) or default
+
+
 def has(name):
     """Whether the account has this credential, as a value or (hosted) as file bytes."""
     current = _current.get()

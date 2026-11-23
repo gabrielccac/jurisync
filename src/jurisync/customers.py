@@ -123,6 +123,22 @@ def ciencia_on_read(name=None):
     return value
 
 
+HOSTED_MODES = ("hosted", "local")
+
+
+def hosted_mode(name):
+    """``(mode, reason)`` from the customer's ``settings.toml`` ``[hosted]`` table.
+
+    ``mode = "local"`` keeps the office on its own computer (an A3 token, say): the hosted server only remembers it,
+    with no credentials, no users and no tools. Default ``hosted``.
+    """
+    table = settings(name).get("hosted", {})
+    mode = table.get("mode", "hosted")
+    if mode not in HOSTED_MODES:
+        raise ValueError(f"settings.toml [hosted] mode must be one of {', '.join(HOSTED_MODES)}")
+    return mode, str(table.get("reason", "")).strip()
+
+
 def customer_env_path(name=None):
     name = name or customer_name()
     return customer_dir(name) / ".env" if name else None

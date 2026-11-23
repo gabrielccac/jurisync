@@ -22,7 +22,9 @@ create table if not exists tenants (
     name text not null,
     customer text not null default '',
     connectors text not null default 'pje',
-    created integer not null
+    created integer not null,
+    mode text not null default 'hosted',
+    reason text not null default ''
 );
 create table if not exists users (
     email text primary key,
@@ -117,6 +119,10 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("pragma foreign_keys = on")
         self._db.executescript(SCHEMA)
+        columns = {row["name"] for row in self._db.execute("pragma table_info(tenants)")}
+        for column, definition in (("mode", "text not null default 'hosted'"), ("reason", "text not null default ''")):
+            if column not in columns:  # stores created before local-only offices existed
+                self._db.execute(f"alter table tenants add column {column} {definition}")
         self._lock = threading.Lock()
         self.path.chmod(0o600)
 
@@ -126,15 +132,20 @@ class Store:
 
     # Tenants and users
 
-    def add_tenant(self, tenant, name, *, customer="", connectors=("pje",)):
+    def add_tenant(self, tenant, name, *, customer="", connectors=("pje",), mode="hosted", reason=""):
+        """``mode="local"``: an office that stays on its own install; it is remembered here with no connectors."""
         require_tenant_id(tenant)
+        if mode not in ("hosted", "local"):
+            raise ValueError("mode must be hosted or local")
         self._run(
-            "insert into tenants (id, name, customer, connectors, created) values (?, ?, ?, ?, ?)",
+            "insert into tenants (id, name, customer, connectors, created, mode, reason) values (?, ?, ?, ?, ?, ?, ?)",
             tenant,
             name,
             customer,
-            ",".join(connectors),
+            "" if mode == "local" else ",".join(connectors),
             int(time.time()),
+            mode,
+            reason,
         )
 
     def tenant(self, tenant):
@@ -144,6 +155,25 @@ class Store:
         row = dict(rows[0])
         row["connectors"] = [name for name in row["connectors"].split(",") if name]
         return row
+
+    def update_tenant(self, tenant, *, name=None, connectors=None, mode=None, reason=None):
+        """Change an office's display name, connectors or mode; its users, tokens and vault stay.
+
+        A local office never has connectors: setting ``mode="local"`` clears them.
+        """
+        if name is not None:
+            self._run("update tenants set name = ? where id = ?", name, tenant)
+        if mode is not None:
+            if mode not in ("hosted", "local"):
+                raise ValueError("mode must be hosted or local")
+            self._run("update tenants set mode = ? where id = ?", mode, tenant)
+        if reason is not None:
+            self._run("update tenants set reason = ? where id = ?", reason, tenant)
+        if connectors is not None:
+            self._run("update tenants set connectors = ? where id = ?", ",".join(connectors), tenant)
+        current = self.tenant(tenant)
+        if current and current["mode"] == "local" and current["connectors"]:
+            self._run("update tenants set connectors = '' where id = ?", tenant)
 
     def tenants(self):
         return [self.tenant(row["id"]) for row in self._run("select id from tenants order by id")]
@@ -156,8 +186,11 @@ class Store:
         self._run("delete from tenants where id = ?", tenant)
 
     def add_user(self, email, tenant, password):
-        if self.tenant(tenant) is None:
+        office = self.tenant(tenant)
+        if office is None:
             raise ValueError(f"Unknown tenant {tenant}")
+        if office["mode"] == "local":
+            raise ValueError(f"{tenant} uses its local install: it has no users on the server")
         if len(password) < 12:
             raise ValueError("Use a password of at least 12 characters")
         self._run(

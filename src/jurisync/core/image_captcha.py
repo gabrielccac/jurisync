@@ -117,7 +117,7 @@ def read_with_model(image_bytes, *, length=4, api_key=None, model=None, timeout=
     api_key = api_key or captcha_api_key()
     if not api_key:
         raise RuntimeError("The portal asks for an image CAPTCHA: set JURISYNC_CAPTCHA_API_KEY to solve it")
-    model = model or credentials.env("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
+    model = model or credentials.machine("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
     content = [
         {"type": "text", "text": PROMPT.format(length=length)},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64," + _png64(image_bytes)}},

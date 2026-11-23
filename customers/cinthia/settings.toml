@@ -1,0 +1,7 @@
+# Office choices (committed, no secrets).
+
+# Stays on the local install: its PJe/Eproc logins use an A3 token plugged into the office's computer, which the
+# hosted server cannot reach. The server only remembers the office (no credentials, users or tools).
+[hosted]
+mode = "local"
+reason = "A3 — instalação local"

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run jurisync-hosted on the server as the jurisync user, with the same settings and systemd credentials as the
+# service, so the vault key is never exported in a shell. Installed as /usr/local/bin/jurisync-admin.
+#
+#   sudo jurisync-admin tenant list
+#   sudo jurisync-admin provision apply /var/lib/jurisync/rollout --passphrase-file /var/lib/jurisync/rollout.passphrase
+#   sudo jurisync-admin portal check victor trf5-1g
+#   sudo jurisync-admin user add advogada@escritorio.com.br --tenant victor
+set -euo pipefail
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+
+args=(--quiet --wait --collect --uid=jurisync --gid=jurisync
+  -p EnvironmentFile=/etc/jurisync/jurisync.env -p EnvironmentFile=-/etc/jurisync/base-url.env
+  -p WorkingDirectory=/var/lib/jurisync -p UMask=0077)
+if [ -f /etc/jurisync/credential-properties ]; then
+  while IFS= read -r property; do
+    [ -n "$property" ] && args+=(-p "$property")
+  done </etc/jurisync/credential-properties
+fi
+if [ -t 0 ] && [ -t 1 ]; then args+=(--pty); else args+=(--pipe); fi
+exec systemd-run "${args[@]}" /opt/jurisync/app/.venv/bin/jurisync-hosted "$@"

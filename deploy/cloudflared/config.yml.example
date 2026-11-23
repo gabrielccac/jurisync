@@ -1,0 +1,14 @@
+# /etc/cloudflared/config.yml: named Cloudflare Tunnel (domain on Cloudflare, no open ports on the VPS).
+#   cloudflared tunnel login
+#   cloudflared tunnel create jurisync           # writes /etc/cloudflared/<TUNNEL_ID>.json
+#   cloudflared tunnel route dns jurisync mcp.example.com.br
+#   cloudflared service install && systemctl enable --now cloudflared
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: mcp.example.com.br
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 30s
+      keepAliveTimeout: 15m
+  - service: http_status:404

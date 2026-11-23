@@ -52,7 +52,7 @@ return {
 
 def captcha_api_key():
     """The OpenRouter key that pays for CAPTCHA answers: the shared machine key, else the office's own."""
-    return credentials.env("JURISYNC_CAPTCHA_API_KEY") or credentials.env("OPENROUTER_API_KEY")
+    return credentials.machine("JURISYNC_CAPTCHA_API_KEY") or credentials.env("OPENROUTER_API_KEY")
 
 
 def is_challenge(response):
@@ -136,7 +136,7 @@ def solve(url, *, api_key=None, model=None, max_puzzles=MAX_PUZZLES, debug_dir=N
         raise RuntimeError(
             "The portal shows an AWS WAF CAPTCHA: set JURISYNC_CAPTCHA_API_KEY (or OPENROUTER_API_KEY) to solve it"
         )
-    model = model or credentials.env("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
+    model = model or credentials.machine("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
     driver = Driver(uc=True, headless=True, locale="pt-BR")
     try:
         driver.set_window_size(1280, 900)
