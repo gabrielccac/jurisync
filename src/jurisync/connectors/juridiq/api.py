@@ -31,6 +31,10 @@ class JuridiqError(RuntimeError):
         self.status, self.payload = status, payload
 
 
+class JuridiqLoginMissing(JuridiqError):
+    reason = "login_missing"
+
+
 def _cache_dir():
     """Private token cache outside the repository (LocalAppData on Windows)."""
     if os.environ.get("LOCALAPPDATA"):
@@ -199,7 +203,7 @@ class JuridiqApi:
 
     def _login(self, settings):
         if not settings["email"] or not settings["password"]:
-            raise JuridiqError("Set JURIDIQ_EMAIL/JURIDIQ_PASSWORD.")
+            raise JuridiqLoginMissing("Set JURIDIQ_EMAIL/JURIDIQ_PASSWORD.")
         response = self._send(
             "POST",
             settings["loginUrl"],

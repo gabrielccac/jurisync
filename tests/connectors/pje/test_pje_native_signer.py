@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.serialization import BestAvailableEncryption
 from cryptography.x509.oid import NameOID
 
 from jurisync.connectors.pje.auth import signer as native_signer
+from jurisync.core import certificate
 
 
 def make_p12(pin):
@@ -43,11 +44,11 @@ class NativeSignerChecks(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.p12 = make_p12("1234")
-        cls.key, cls.cert, cls.chain = native_signer.load_a1(cls.p12, "1234")
+        cls.key, cls.cert, cls.chain = certificate.load_a1(cls.p12, "1234")
 
     def test_wrong_pin_rejected(self):
         with self.assertRaises(Exception):
-            native_signer.load_a1(self.p12, "errada")
+            certificate.load_a1(self.p12, "errada")
 
     def test_sign_verifies(self):
         message = "0.9582867978871357"

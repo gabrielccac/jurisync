@@ -277,8 +277,8 @@ class LoginFlowTest(unittest.TestCase):
         with (
             mock.patch.dict("os.environ", environ, clear=True),
             mock.patch.object(certificate, "portal_totp_account", return_value={"secret": "JBSWY3DPEHPK3PXP"}),
-            mock.patch.object(certificate, "totp", return_value=mock.Mock(now=lambda: "123456")),
-            mock.patch.object(certificate.native_signer, "load_a1", return_value=("key", "cert", [])),
+            mock.patch("jurisync.core.totp.totp", return_value=mock.Mock(now=lambda: "123456")),
+            mock.patch.object(certificate, "load_configured", return_value=("key", "cert", [])),
             mock.patch.object(certificate, "client_certificate") as pem,
         ):
             pem.return_value.__enter__.return_value = "/tmp/a1.pem"
@@ -381,7 +381,7 @@ class LoginFlowTest(unittest.TestCase):
         session = object()
         with (
             mock.patch.object(certificate, "portal_totp_account", return_value={}),
-            mock.patch.object(certificate.native_signer, "load_a1", return_value=(None, None, [])),
+            mock.patch.object(certificate, "load_configured", return_value=(None, None, [])),
             mock.patch.object(certificate, "_local_certificate_login", return_value="authenticated") as local,
         ):
             self.assertEqual(certificate.cert_login("tjmg-2g", pin="example", session=session), "authenticated")
@@ -509,7 +509,7 @@ class TjtoCertificateHostTest(unittest.TestCase):
             mock.patch.object(certificate.requests, "Session", return_value=Unresolved(steps)),
             mock.patch.dict("os.environ", {"PJE_A1_PIN": "pin"}, clear=True),
             mock.patch.object(certificate, "portal_totp_account", return_value={}),
-            mock.patch.object(certificate.native_signer, "load_a1", return_value=("key", "cert", [])),
+            mock.patch.object(certificate, "load_configured", return_value=("key", "cert", [])),
             mock.patch.object(certificate, "client_certificate") as pem,
             self.assertRaisesRegex(RuntimeError, "mtls.tjto.jus.br does not resolve"),
         ):
@@ -627,8 +627,8 @@ class Trf6BrowserEntryTest(unittest.TestCase):
             mock.patch.object(certificate, "_browser_login_page", entry),
             mock.patch.object(certificate, "_login_page", side_effect=AssertionError("no HTTP entry")),
             mock.patch.object(certificate, "portal_totp_account", return_value={"secret": "JBSWY3DPEHPK3PXP"}),
-            mock.patch.object(certificate, "totp", return_value=mock.Mock(now=lambda: "123456")),
-            mock.patch.object(certificate.native_signer, "load_a1", return_value=("key", "cert", [])),
+            mock.patch("jurisync.core.totp.totp", return_value=mock.Mock(now=lambda: "123456")),
+            mock.patch.object(certificate, "load_configured", return_value=("key", "cert", [])),
             mock.patch.object(certificate, "client_certificate") as pem,
         ):
             pem.return_value.__enter__.return_value = "/tmp/a1.pem"

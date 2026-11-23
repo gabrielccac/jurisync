@@ -20,7 +20,7 @@ from jurisync import portals
 from jurisync.connectors.djen import client as djen
 from jurisync.connectors.djen.normalize import normalize_item
 from jurisync.connectors.stj import client, parsers
-from jurisync.core import certificate, credentials
+from jurisync.core import certificate
 from jurisync.core.ciencia import NONE, report
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import MAX_DOCUMENTS, validate_document_ids
@@ -45,8 +45,7 @@ sessions = SessionPool(
 
 def configured_portals():
     """``("stj",)`` when the account has the A1 and its PIN; () otherwise."""
-    file_name, pin_name = certificate.credential_names(client.config().env_prefix)
-    return (KEY,) if credentials.has(file_name) and credentials.has(pin_name) else ()
+    return (KEY,) if certificate.is_configured(client.config().env_prefix) else ()
 
 
 def call(read):

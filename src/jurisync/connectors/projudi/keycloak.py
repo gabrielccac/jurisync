@@ -23,7 +23,6 @@ Safety rules of this adapter (the read rules are in ``legacy.py``):
 import re
 import urllib.parse
 from dataclasses import dataclass
-from pathlib import Path
 
 from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
@@ -41,7 +40,7 @@ from jurisync.connectors.projudi.legacy import (  # noqa: F401 - re-exported: ca
 )
 from jurisync.core.http import TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
 from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import accounts_from_image, parse_accounts, portal_account, totp
+from jurisync.core.totp import configured_account, totp
 
 USERNAME_PATTERN = re.compile(r"(\d{11}|[A-Z0-9]{12}\d{2})")
 PUBLIC_HOME_MARKER = "acesso ao sistema"
@@ -97,13 +96,7 @@ def login_credentials(config):
 
 
 def otp_account(config):
-    data, qr_path = config.env("2FA_DATA"), config.env("2FA_QR")
-    if not data and not qr_path:
-        raise MissingCredentials(
-            f"Projudi asks for a TOTP code: set {config.env_name('2FA_DATA')} or {config.env_name('2FA_QR')} "
-            f"(and {config.env_name('OTP_PROFILE_MATCH')} when the export holds several profiles)"
-        )
-    return portal_account(config, parse_accounts(data) if data else accounts_from_image(Path(qr_path)))
+    return configured_account(config, MissingCredentials)
 
 
 def classify_sso_page(html):
@@ -201,7 +194,7 @@ class KeycloakAdapter(legacy.LegacyAdapter):
             response = self._post(session, config, action, {**hidden_fields(form), "otp": totp(account).now()})
             state = self._classify(config, response)
             if state in ("login", "otp"):
-                raise LoginRejected("Projudi did not accept the authenticator code")
+                raise LoginRejected("Projudi did not accept the authenticator code", reason="otp_refused")
         if state != "app":
             raise RuntimeError("Projudi login did not return to the portal")
         if self.refresh(portal, session) is None:

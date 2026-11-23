@@ -13,6 +13,8 @@ from pathlib import Path
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
+from jurisync.core.session_pool import REASONS
+
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 log = logging.getLogger(__name__)
@@ -191,12 +193,14 @@ def tool_errors(label, *anticipated):
     """Report anticipated failures to the model as sanitized tool errors.
 
     Anything else propagates and the SDK reports only a generic tool failure,
-    so unexpected exception text never reaches the caller.
+    so unexpected exception text never reaches the caller. A failed login carries its reason code: ``[otp_refused]``.
     """
     try:
         yield
     except anticipated as error:
-        raise ToolError(f"{label} request failed: {sanitize_diagnostics(error) or 'unknown'}") from error
+        reason = getattr(error, "reason", None)
+        tag = f" [{reason}]" if reason in REASONS else ""
+        raise ToolError(f"{label} request failed{tag}: {sanitize_diagnostics(error) or 'unknown'}") from error
 
 
 def offer_portals(server, keys, describe):

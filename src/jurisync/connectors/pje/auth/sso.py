@@ -110,6 +110,24 @@ def credential_failure(html):
     return "unknown", "The portal returned no OTP form and no SSO alert; the login page may have changed"
 
 
+# What each refused ``credential_failure`` kind is in the shared login vocabulary (``session_pool.REASONS``).
+REFUSED_KINDS = {"credentials": "credentials_refused", "expired": "password_expired", "blocked": "blocked"}
+
+
+def credential_refusal(html, other=RuntimeError, detail=""):
+    """The exception for a credential POST that did not reach the OTP step (PJe and JPe share this SSO).
+
+    A refusal is ``LoginRejected`` with its reason; anything else is ``other`` (``captcha`` for a WAF page).
+    """
+    kind, message = credential_failure(html)
+    message = f"{message} ({detail})" if detail else message
+    if kind in REFUSED_KINDS:
+        return LoginRejected(message, reason=REFUSED_KINDS[kind])
+    error = other(message)
+    error.reason = "captcha" if kind == "waf" else "unexpected"
+    return error
+
+
 def sso_username(username, form_id):
     """The username as the PDPJ theme of the PJe-JT login (``kc-form-login``) expects it: a CPF/CNPJ as digits.
 
@@ -134,7 +152,7 @@ def portal_login_error(html):
     return match.group(1).strip() if match else ""
 
 
-def _https_pje(url):
+def https_pje(url):
     """PJe-JT SSO bounces back over plain http; the same PJe path serves https."""
     parts = urlsplit(url)
     if parts.scheme == "http" and (parts.hostname or "") in portals.hosts("pje"):
@@ -168,12 +186,18 @@ def _sso_page(session, app_url):
     return response
 
 
-def _login_form_id(html):
+def login_form_id(html):
+    """The SSO theme's login form: ``loginForm`` (TRF-style) or ``kc-form-login`` (PDPJ)."""
     return "loginForm" if BeautifulSoup(html, "html.parser").find("form", id="loginForm") else "kc-form-login"
 
 
 def _login_form(html, page_url):
-    return form_action(html, page_url, _login_form_id(html))
+    return form_action(html, page_url, login_form_id(html))
+
+
+def credentials_form(username, password, form_id):
+    """What the SSO's login form posts: the user and password, the PJeOffice fields empty."""
+    return {"username": sso_username(username, form_id), "password": password, "pjeoffice-code": "", "phrase": ""}
 
 
 def login_session(username, password, account, app_url=None, expected_app_host=None, portal=None):
@@ -182,11 +206,11 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     expected_app_host = expected_app_host or config.host
     session = requests.Session()
     response = _sso_page(session, app_url)
-    form_id = _login_form_id(response.text)
+    form_id = login_form_id(response.text)
     login_url = form_action(response.text, response.url, form_id)
     response = session.post(
         login_url,
-        data={"username": sso_username(username, form_id), "password": password, "pjeoffice-code": "", "phrase": ""},
+        data=credentials_form(username, password, form_id),
         allow_redirects=False,
         impersonate=IMPERSONATE,
     )
@@ -194,9 +218,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     try:
         otp_url = form_action(response.text, response.url, "kc-otp-login-form")
     except RuntimeError as error:
-        kind, reason = credential_failure(response.text)
-        refused = kind in {"credentials", "expired", "blocked"}
-        raise (LoginRejected if refused else RuntimeError)(f"{reason} ({error})") from None
+        raise credential_refusal(response.text, detail=str(error)) from None
     otp = totp(account).now()
 
     response = session.post(
@@ -207,13 +229,13 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
     )
     log_request("POST", otp_url, response.status_code)
     if response.status_code not in {301, 302, 303, 307, 308}:
-        raise LoginRejected("OTP submission did not redirect; the code may be invalid or expired")
+        raise LoginRejected("OTP submission did not redirect; the code may be invalid or expired", reason="otp_refused")
 
     for _ in range(8):
         location = response.headers.get("Location")
         if response.status_code not in {301, 302, 303, 307, 308} or not location:
             break
-        response = get_with_log(session, _https_pje(urljoin(response.url, location)))
+        response = get_with_log(session, https_pje(urljoin(response.url, location)))
 
     soup = BeautifulSoup(response.text, "html.parser")
     authenticated = (
@@ -243,7 +265,10 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
             authenticated = kz.is_authenticated(session, config.key)
     if not authenticated and (refusal := portal_login_error(response.text)):
         # The SSO accepted the account but this court did not: retrying cannot help until the user acts on it.
-        raise LoginRejected(f"{config.key} refused the login: {refusal}")
+        expired = any(marker in refusal.lower() for marker in EXPIRED_PASSWORD)
+        raise LoginRejected(
+            f"{config.key} refused the login: {refusal}", reason="password_expired" if expired else "unexpected"
+        )
     if not authenticated:
         raise RuntimeError(
             f"Login did not reach an authenticated PJe page (HTTP {response.status_code} at {url_shape(response.url)})"

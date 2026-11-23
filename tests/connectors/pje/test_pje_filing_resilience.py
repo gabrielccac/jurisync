@@ -435,7 +435,7 @@ class LoginRetryTests(unittest.TestCase):
 
         with (
             mock.patch.object(certificate, "_twofa", return_value=account),
-            mock.patch.object(certificate.native_signer, "load_a1", return_value=(1, 2, 3)),
+            mock.patch.object(certificate, "load_configured", return_value=(1, 2, 3)),
             mock.patch.object(certificate.native_signer, "a1_path", return_value="a1.p12"),
             mock.patch.object(certificate, "_login", side_effect=fake_login),
             mock.patch.object(certificate.requests, "Session", return_value="fresh"),

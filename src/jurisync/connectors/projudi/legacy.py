@@ -21,6 +21,7 @@ from jurisync import portals
 from jurisync.connectors.projudi import base, parsers
 from jurisync.core.ciencia import NONE, report
 from jurisync.core.http import REDIRECTS
+from jurisync.core.session_pool import MissingLogin
 
 SESSION_EXPIRED_MARKERS = ("a sessao expirou", "a sessão expirou")
 # The page the portal serves for a dropped session says "A sessao expirou". Every logged-in TJAM page also carries
@@ -43,12 +44,14 @@ DATE = re.compile(r"\b\d{2}/\d{2}/\d{4}\b")
 MAX_FRAME_PAGES = 6
 
 
-class MissingCredentials(RuntimeError):
+class MissingCredentials(MissingLogin):
     """The customer's Projudi login or password is not configured; nothing was sent to the portal."""
 
 
 class HumanVerificationRequired(RuntimeError):
     """The portal asks for a CAPTCHA or human verification: a person must do it; the connector never solves it."""
+
+    reason = "captcha"
 
 
 class DocumentsBlocked(RuntimeError):

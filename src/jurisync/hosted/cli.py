@@ -193,6 +193,7 @@ def merge(vault, tenant, values, files, say, *, portal_keys=None, customer="", c
 def run_check(store, tenant, portal, values, files, say):
     """Log in to one portal or service with these credentials; record and print the result."""
     from jurisync.core.mcp import sanitize_diagnostics
+    from jurisync.core.session_pool import EXPLANATIONS, login_reason
     from jurisync.hosted import access
 
     say(f"Testando o login em {portal}...")
@@ -200,8 +201,9 @@ def run_check(store, tenant, portal, values, files, say):
         with access.tenant_scope(tenant, values, files):
             access.check(portal)
     except Exception as error:  # noqa: BLE001 - any portal failure is reported, never raised to the operator
-        message = sanitize_diagnostics(error) or type(error).__name__
-        say(f"{portal}: o login falhou ({message})")
+        reason = login_reason(error)
+        message = f"[{reason}] {sanitize_diagnostics(error) or type(error).__name__}"
+        say(f"{portal}: o login falhou: {EXPLANATIONS[reason]} ({message})")
         if store is not None:
             store.save_check(tenant, portal, False, message)
             store.log(tenant, "operador", "teste de login falhou", f"{portal}: {message}")

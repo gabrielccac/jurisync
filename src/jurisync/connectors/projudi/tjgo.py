@@ -49,6 +49,8 @@ LIST_TIMEOUT = 120
 class PortalTimeout(RuntimeError):
     """TJGO did not answer in time; the message starts with ``portal_timeout``."""
 
+    reason = "portal_unavailable"
+
 
 def connect_failed(error):
     """Whether a request failed before it was sent (no connection or TLS handshake): repeating it is harmless."""
@@ -133,7 +135,8 @@ def choose_serventia(config, options):
         names = "; ".join(label for _, label in options)
         raise LoginRejected(
             f"Projudi asks which serventia to use ({names}); set {config.env_name('USER_PROFILE')} to one of them "
-            "(OAB such as GO12345, or a word of the label)"
+            "(OAB such as GO12345, or a word of the label)",
+            reason="unexpected",
         )
     return chosen[0][0]
 
@@ -221,7 +224,7 @@ class TjgoAdapter(base.Adapter):
                 raise RuntimeError("Projudi did not open the panel of the chosen serventia")
             return session
         if LOGIN_READY not in (response.url or "") or not is_authenticated_panel(response):
-            raise LoginRejected("Projudi did not accept the A1 certificate")
+            raise LoginRejected("Projudi did not accept the A1 certificate", reason="certificate_refused")
         return session
 
     def refresh(self, portal, session):

@@ -32,6 +32,7 @@ from jurisync.connectors.advbox.parsers import (
     parse_verification_recipient,
 )
 from jurisync.core import credentials
+from jurisync.core.session_pool import LoginRejected, MissingLogin
 from jurisync.paths import STATE_DIR
 
 
@@ -109,7 +110,7 @@ def require_writes():
 def _required(name):
     value = (credentials.env(name) or "").strip()
     if not value:
-        raise RuntimeError(f"Set {name} in .env")
+        raise MissingLogin(f"Set {name} in .env")
     return value
 
 
@@ -240,7 +241,7 @@ class AdvboxSession:
         if pathname.startswith("/user/2fa"):
             self._hold_verification(response.text, final_url, device, email)
         if pathname.startswith("/login"):
-            raise RuntimeError("ADVBOX login failed; verify ADVBOX_EMAIL and ADVBOX_PASSWORD")
+            raise LoginRejected("ADVBOX login failed; verify ADVBOX_EMAIL and ADVBOX_PASSWORD")
         if "advbox_session" not in self.jar:
             raise RuntimeError(f"ADVBOX login did not return a session cookie (landed on {pathname})")
         self._save()

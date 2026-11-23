@@ -77,21 +77,13 @@ def upgrade_scheme(config):
 # --- Login ----------------------------------------------------------------------------------------------------------
 
 
-def _a1_names():
-    return certificate.credential_names("ESAJ")
-
-
 def has_certificate():
     """Whether the account sets the A1 file and its PIN (``load_certificate`` reads both)."""
-    return all(credentials.has(name) for name in _a1_names())
+    return certificate.is_configured("ESAJ")
 
 
 def load_certificate(*, pin=None, p12_path=None):
-    file_name, pin_name = _a1_names()
-    pin = pin or credentials.env(pin_name)
-    if not pin:
-        raise RuntimeError(f"Set {pin_name} to the A1 certificate password")
-    return certificate.load_a1(p12_path, pin, name=file_name)
+    return certificate.load_configured("ESAJ", pin=pin, p12_path=p12_path)
 
 
 def challenge_from(html):
@@ -175,6 +167,8 @@ class EsajTwoFactorRequired(LoginRejected):
     next call.
     """
 
+    reason = "unexpected"
+
 
 TWO_FACTOR_ON = re.compile(r"\$\.saj\.cas\.DuploFatorHabilitado\s*=\s*true\b")
 PASSWORD_BUTTON = "pbEntrar"
@@ -191,7 +185,7 @@ def password_credentials(config):
 
 def uses_password(config):
     """Password login when the account has no A1 certificate and sets ``<PREFIX>_USERNAME``/``_PASSWORD``."""
-    file_name, _pin = _a1_names()
+    file_name, _pin = certificate.credential_names("ESAJ")
     return not credentials.has(file_name) and password_credentials(config) is not None
 
 
@@ -242,7 +236,7 @@ def login(portal, *, pin=None, p12_path=None, session=None):
     if any(cookie.name == "CASTGC" for cookie in session.cookies.jar):
         return session
     if not password_login:
-        raise LoginRejected("e-SAJ did not accept the A1 certificate")
+        raise LoginRejected("e-SAJ did not accept the A1 certificate", reason="certificate_refused")
     if TWO_FACTOR_ON.search(response.text or ""):
         raise EsajTwoFactorRequired(
             "e-SAJ accepted the password and sent a validation code to the account's e-mail: the connector cannot "

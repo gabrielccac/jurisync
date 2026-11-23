@@ -23,15 +23,14 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.core.documents import read_limited
 from jurisync.core.http import TIMEOUT, impersonate_for, log_request, require_url
-from jurisync.core.session_pool import LoginRejected, SessionExpired
-from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, portal_account, totp
+from jurisync.core.session_pool import LoginRejected, MissingLogin, SessionExpired
+from jurisync.core.totp import configured_account, fresh_code
 
 PORTAL = "tjap-tucujuris"
 API = "/api/"
@@ -76,7 +75,6 @@ TOKEN = re.compile(r"[A-Za-z0-9._~+/=-]{8,4096}")
 CPF = re.compile(r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}")
 OAB_NUMBER_FIRST = re.compile(r"(?:OAB)?[\s/.-]*(\d{1,7}[A-Z]?)[\s/.-]*([A-Z]{2})")
 OAB_STATE_FIRST = re.compile(r"(?:OAB)?[\s/.-]*([A-Z]{2})[\s/.-]*(\d{1,7}[A-Z]?)")
-FRESH_CODE_SECONDS = 8  # a code this close to the end of its window waits for the next one
 
 
 class TucujurisError(RuntimeError):
@@ -90,8 +88,10 @@ class TucujurisSessionExpired(SessionExpired):
 class HumanVerificationRequired(RuntimeError):
     """Cloudflare (or the portal) asked for a CAPTCHA/challenge: never solved or bypassed."""
 
+    reason = "captcha"
 
-class MissingCredentials(RuntimeError):
+
+class MissingCredentials(MissingLogin):
     pass
 
 
@@ -221,23 +221,7 @@ def get(session, path, params=None, page="home/home.html"):
 
 
 def otp_account(portal):
-    data, image = portal.env("2FA_DATA"), portal.env("2FA_QR")
-    if data:
-        accounts = parse_accounts(data)
-    elif image:
-        accounts = accounts_from_image(Path(image).expanduser())
-    else:
-        raise MissingCredentials(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')}")
-    return portal_account(portal, accounts)
-
-
-def fresh_code(account, *, clock=time.time, sleep=time.sleep):
-    """The current code, or the next window's when the current one is about to expire."""
-    period = account.get("period", 30)
-    now = clock()
-    if period - now % period < FRESH_CODE_SECONDS:
-        return next_code(account, sleep=sleep, now=now)
-    return totp(account).at(now)
+    return configured_account(portal, MissingCredentials)
 
 
 def login(portal_key=PORTAL, *, http_factory=requests.Session, clock=time.time, sleep=time.sleep):
@@ -263,10 +247,15 @@ def login(portal_key=PORTAL, *, http_factory=requests.Session, clock=time.time, 
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             raise TucujurisError("Tucujuris login answered without a session token")
         if data.get("requer_trocar_senha"):
-            raise LoginRejected("Tucujuris asks for a password change: change it in the portal, then update the .env")
+            raise LoginRejected(
+                "Tucujuris asks for a password change: change it in the portal, then update the .env",
+                reason="password_expired",
+            )
         state = data.get("situcao_segundo_fator") or data.get("situacao_segundo_fator") or ""
         if state == "configuracao_pendente":
-            raise LoginRejected("Tucujuris asks to enroll a new authenticator; the connector never does that")
+            raise LoginRejected(
+                "Tucujuris asks to enroll a new authenticator; the connector never does that", reason="unexpected"
+            )
         if state == "verificacao_pendente":
             # The account picks the second factor: an authenticator ("otp") or a code e-mailed at each login, which
             # only a person with that mailbox can answer. The page asks the method before showing the code field.
@@ -279,7 +268,8 @@ def login(portal_key=PORTAL, *, http_factory=requests.Session, clock=time.time, 
             if method == "email":
                 raise LoginRejected(
                     "Tucujuris sends this account's second-factor code by e-mail; switch it to the authenticator app "
-                    "in the portal (Meu perfil) to log in unattended"
+                    "in the portal (Meu perfil) to log in unattended",
+                    reason="unexpected",
                 )
             try:
                 result = call(
@@ -287,9 +277,11 @@ def login(portal_key=PORTAL, *, http_factory=requests.Session, clock=time.time, 
                     page="segundo-fator-verificar/segundo-fator-verificar.html", token=token,
                 )  # fmt: skip
             except TucujurisError as error:
-                raise LoginRejected(f"Tucujuris refused the authenticator code: {error}") from None
+                raise LoginRejected(
+                    f"Tucujuris refused the authenticator code: {error}", reason="otp_refused"
+                ) from None
             if (result or {}).get("situacao") not in ("verificado", ""):
-                raise LoginRejected("Tucujuris did not accept the authenticator code")
+                raise LoginRejected("Tucujuris did not accept the authenticator code", reason="otp_refused")
         elif state not in ("", "verificado"):
             raise TucujurisError(f"Tucujuris second factor in an unknown state: {state[:40]}")
         session = Session(http, token, portal)

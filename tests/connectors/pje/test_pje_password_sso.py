@@ -37,8 +37,8 @@ def test_login_form_accepts_the_keycloak_form_id():
 
 
 def test_plain_http_bounce_to_a_pje_host_is_upgraded_only_there():
-    assert sso._https_pje("http://pje.tst.jus.br/pjekz/") == "https://pje.tst.jus.br/pjekz/"
-    assert sso._https_pje("http://example.com/") == "http://example.com/"
+    assert sso.https_pje("http://pje.tst.jus.br/pjekz/") == "https://pje.tst.jus.br/pjekz/"
+    assert sso.https_pje("http://example.com/") == "http://example.com/"
 
 
 def test_superior_court_accepts_origin_numbers_of_its_branch_only():

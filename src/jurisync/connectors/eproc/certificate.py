@@ -22,13 +22,11 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import is_panel, panel_link, portal_totp_account, session_from_cookies
-from jurisync.connectors.pje.auth import signer as native_signer
-from jurisync.core import credentials
-from jurisync.core.certificate import client_certificate
+from jurisync.core.certificate import client_certificate, load_configured
 from jurisync.core.http import IMPERSONATE, TIMEOUT, UnsafeUrlError, follow_redirects, require_url
 from jurisync.core.redaction import url_shape
-from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import next_code, totp
+from jurisync.core.session_pool import LoginFailed, LoginRejected
+from jurisync.core.totp import answer_code, totp
 
 CERT_HOST = re.compile(r"document\.location\.host\s*=\s*['\"]([a-z0-9.-]+)['\"]", re.I)
 BROKER_HOST = "sso.cloud.pje.jus.br"
@@ -235,12 +233,13 @@ def _classic_login(session, config, page, pem):
         if not host or host not in str(error):
             raise
         # Seen 13-16/11/2026: the court sends the certificate login to a host it has not published in DNS.
-        raise RuntimeError(
+        raise LoginFailed(
             f"{config.tribunal} certificate login host {host} does not resolve (not published in DNS by the court); "
-            "certificate login is unavailable until it is"
+            "certificate login is unavailable until it is",
+            reason="portal_unavailable",
         ) from None
     if "erro" in urllib.parse.parse_qs(urllib.parse.urlsplit(response.url).query):
-        raise LoginRejected("eproc did not accept the A1 certificate")
+        raise LoginRejected("eproc did not accept the A1 certificate", reason="certificate_refused")
     return response
 
 
@@ -251,18 +250,13 @@ def _code_form(response):
 
 def _classic_otp_step(session, config, response, account):
     """eproc's own code screen (after a classic certificate login): ``hdnAcao=2fa_validar``."""
-    if _code_form(response) is None:
-        return response
-    for code in (totp(account).now(), None):
-        code = code or next_code(account)  # a code already used in this window by a recent login
-        form = _code_form(response)
-        action, fields = _form(response.text, response.url, config, form.get("id"))
+
+    def submit(page, form, code):
+        action, fields = _form(page.text, page.url, config, form.get("id"))
         fields.update({CLASSIC_CODE_FIELD: code, "hdnAcao": "2fa_validar"})
-        response = _follow(session, config, _post(session, action, fields, response.url))
-        if _code_form(response) is None:
-            return response
-        time.sleep(1)
-    raise LoginRejected("eproc rejected the OTP")
+        return _follow(session, config, _post(session, action, fields, page.url))
+
+    return answer_code(response, account, _code_form, submit, label="eproc", pause=1)
 
 
 def profiles(html):
@@ -312,7 +306,8 @@ def _choose_profile(session, config, response):
     if len(chosen) != 1:
         names = ", ".join(label for _, label in options)
         raise LoginRejected(
-            f"eproc asks which profile to use ({names}); set {config.env_name('USER_PROFILE')} to one of them"
+            f"eproc asks which profile to use ({names}); set {config.env_name('USER_PROFILE')} to one of them",
+            reason="unexpected",
         )
     action = PROFILE_ACTION.search(response.text)
     path = action.group(1) if action else "controlador.php?acao=pessoa_usuario_logar"
@@ -324,24 +319,18 @@ def _choose_profile(session, config, response):
 
 
 def _otp_step(session, config, response, account):
-    action, _ = _form(response.text, response.url, config, "kc-otp-login-form")
-    if action is None:
-        return response
-    for code in (totp(account).now(), None):
-        code = code or next_code(account)  # a code already used in this window by a recent login
-        submitted = session.post(
-            action,
-            data={"otp": code, "login": "Sign In"},
-            impersonate=IMPERSONATE,
-            allow_redirects=False,
-            timeout=TIMEOUT,
+    def action(page):
+        return _form(page.text, page.url, config, "kc-otp-login-form")[0]
+
+    def submit(page, url, code):
+        data = {"otp": code, "login": "Sign In"}
+        return _follow(
+            session,
+            config,
+            session.post(url, data=data, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT),
         )
-        response = _follow(session, config, submitted)
-        action, _ = _form(response.text, response.url, config, "kc-otp-login-form")
-        if action is None:
-            return response
-        time.sleep(1)
-    raise LoginRejected("eproc rejected the OTP")
+
+    return answer_code(response, account, action, submit, label="eproc", pause=1)
 
 
 def _local_certificate_login(session, config, key, cert, chain, account):
@@ -413,11 +402,8 @@ def rooted(config, url):
 def cert_login(portal, *, pin=None, p12_path=None, session=None):
     """Return ``(session, panel_html, panel_url)`` like the browser login, using the A1 certificate."""
     config = portals.eproc(portal)
-    pin = pin or credentials.env("PJE_A1_PIN")
-    if not pin:
-        raise RuntimeError("Set PJE_A1_PIN to the A1 certificate password")
+    key, cert, chain = load_configured(pin=pin, p12_path=p12_path)
     account = portal_totp_account(config)
-    key, cert, chain = native_signer.load_a1(p12_path, pin)
     session = session or requests.Session()
     if config.key in {"tjms-eproc-1g", "tjmg-2g"}:
         return _local_certificate_login(session, config, key, cert, chain, account)
@@ -448,7 +434,7 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
             )
         elif _form(response.text, response.url, config, "kc-otp-login-form")[0] is None:
             # TJPR skips the "Continue" form and asks the code at once; anything else is a refusal.
-            raise LoginRejected("eproc did not accept the A1 certificate")
+            raise LoginRejected("eproc did not accept the A1 certificate", reason="certificate_refused")
         response = _otp_step(session, config, response, account)
     response = _choose_profile(session, config, response)
     if not is_panel(response.url):

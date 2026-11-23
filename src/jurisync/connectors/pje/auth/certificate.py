@@ -10,26 +10,28 @@ import re
 import time
 import urllib.parse
 import uuid
-from pathlib import Path
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
-from jurisync.connectors.pje.auth.sso import require_allowed_url
-from jurisync.core import awswaf, credentials
+from jurisync.connectors.pje.auth.sso import https_pje, require_allowed_url
+from jurisync.core import awswaf
+from jurisync.core.certificate import load_configured
 from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
 from jurisync.core.redaction import url_shape
-from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import accounts_from_image, parse_accounts, portal_account, totp
+from jurisync.core.session_pool import LoginFailed, LoginRejected, MissingLogin
+from jurisync.core.totp import configured_account, totp
 
 
 def _require_available(page, config=None):
     """A 5xx login page means the portal is down, not that the login flow changed."""
     if page.status_code >= 500:
         name = f"{config.tribunal} PJe" if config else "PJe"
-        raise RuntimeError(f"{name} is unavailable (HTTP {page.status_code}); try again later")
+        raise LoginFailed(
+            f"{name} is unavailable (HTTP {page.status_code}); try again later", reason="portal_unavailable"
+        )
 
 
 def _challenge(html, config):
@@ -94,9 +96,10 @@ def _legacy_login(session, config, page, signer):
             reason = " ".join(BeautifulSoup(reason, "html.parser").get_text(" ").split())[:500]
             if re.search(r"Certificado n[ãa]o encont", reason):
                 # The callback read the signature and the chain and found no user for the holder's certificate.
-                raise RuntimeError(
+                raise LoginRejected(
                     f"{config.key}: the portal found no user for this certificate (Certificado não encontrado); "
-                    f"the lawyer is probably not registered in this PJe. Portal message: {reason}"
+                    f"the lawyer is probably not registered in this PJe. Portal message: {reason}",
+                    reason="not_registered",
                 )
             raise RuntimeError(f"{config.key}: the PJeOffice callback refused the certificate login: {reason}")
         home = f"{root}/homePJeOffice.seam?cid={cid}"
@@ -137,18 +140,8 @@ def _submit_code(sso_session, action, token):
     return response
 
 
-def _upgrade_pje_http(url):
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme.lower() == "http" and (parts.hostname or "").lower() in portals.hosts("pje"):
-        # JT SSO bounces back over plain http (pjekz); the same path serves https.
-        return "https://" + url.split("://", 1)[1]
-    return url
-
-
 def _follow(sso_session, response, hops=6):
-    return follow_redirects(
-        sso_session, response, check=require_allowed_url, hops=hops, rewrite=_upgrade_pje_http, timeout=30
-    )
+    return follow_redirects(sso_session, response, check=require_allowed_url, hops=hops, rewrite=https_pje, timeout=30)
 
 
 # Where PJe sends a user it does not know: the pre-registration page itself (PJe-JT), or the SSO registration
@@ -169,7 +162,8 @@ def _require_registered(response, config):
         raise LoginRejected(
             f"{config.key}: the SSO accepted the certificate and the TOTP code, but this user is not registered in "
             "this PJe (it redirected to its pre-registration page, cadastro.seam); ask the court for the lawyer's "
-            "registration in this PJe. Retrying will not help."
+            "registration in this PJe. Retrying will not help.",
+            reason="not_registered",
         )
 
 
@@ -200,14 +194,7 @@ def _twofa(portal, twofa_data=None):
 
     <PREFIX>_2FA_DATA (or _2FA_QR), with the optional <PREFIX>_OTP_PROFILE_MATCH / _OTP_PROFILE_INDEX selectors.
     """
-    config = portals.pje(portal)
-    data = twofa_data or config.env("2FA_DATA")
-    qr_path = config.env("2FA_QR")
-    if data:
-        return portal_account(config, parse_accounts(data))
-    if qr_path:
-        return portal_account(config, accounts_from_image(Path(qr_path)))
-    return None
+    return configured_account(portals.pje(portal), None, data=twofa_data)
 
 
 # A login that stops short of the authenticated page is often a TOTP code the SSO already took or one that expired
@@ -227,10 +214,7 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
     """
     config = portals.pje(portal)
     account = _twofa(portal, twofa_data)
-    pin = pin or credentials.env("PJE_A1_PIN")
-    if not pin:
-        raise RuntimeError("Set PJE_A1_PIN to the A1 certificate password")
-    signer = native_signer.A1Signer(*native_signer.load_a1(p12_path, pin))
+    signer = native_signer.A1Signer(*load_configured(pin=pin, p12_path=p12_path))
     try:
         return _login(session or requests.Session(), config, account, signer)
     except RuntimeError as error:
@@ -244,7 +228,9 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
             if not any(marker in str(second) for marker in RETRYABLE_LOGIN):
                 raise
             # Two codes in two windows were refused: stop here, or every tool call spends two more attempts.
-            raise LoginRejected(f"{second} (twice; check the TOTP secret and the certificate)") from None
+            raise LoginRejected(
+                f"{second} (twice; check the TOTP secret and the certificate)", reason="otp_refused"
+            ) from None
 
 
 def a3_cert_login(portal, session=None, *, signer=None):
@@ -261,7 +247,7 @@ def a3_cert_login(portal, session=None, *, signer=None):
     def account():
         found = _twofa(portal)
         if found is None:
-            raise RuntimeError(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
+            raise MissingLogin(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
         return found
 
     if signer is not None:
@@ -285,7 +271,9 @@ def _login(session, config, account, signer):
         require_allowed_url(page.url)
         log_request("GET", config.login_url, page.status_code)
         if awswaf.is_challenge(page):
-            raise RuntimeError(f"{config.key}: the AWS WAF still asks for a CAPTCHA after it was solved")
+            raise LoginFailed(
+                f"{config.key}: the AWS WAF still asks for a CAPTCHA after it was solved", reason="captcha"
+            )
     _require_available(page, config)
     try:
         _, mensagem = _challenge(page.text, config)
@@ -331,7 +319,7 @@ def _login(session, config, account, signer):
     if not candidate or not candidate.get("action"):
         raise RuntimeError("SSO did not advance after the certificate callback")
     if account is None:
-        raise RuntimeError(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
+        raise MissingLogin(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
     otp_action = urllib.parse.urljoin(response.url, candidate["action"])
     require_allowed_url(otp_action)
 

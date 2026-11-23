@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from curl_cffi import requests
 
 from jurisync import portals
-from jurisync.core import certificate, credentials
+from jurisync.core import certificate
 from jurisync.core.documents import read_limited
 from jurisync.core.http import IMPERSONATE, TIMEOUT, log_request
 from jurisync.core.session_pool import LoginRejected, SessionExpired
@@ -61,6 +61,8 @@ class StjSessionExpired(SessionExpired):
 class StjNotRegistered(LoginRejected):
     """The certificate holder has no CPE registration; registering is left to the lawyer."""
 
+    reason = "not_registered"
+
 
 class StjAccessDenied(StjError):
     """The CPE refused this process or document to the logged-in lawyer (403)."""
@@ -87,11 +89,7 @@ def config():
 
 def load_certificate(*, pin=None, p12_path=None):
     """``(key, cert, chain)`` of the A1: ``STJ_A1_P12``/``STJ_A1_PIN`` when set, otherwise the shared PJe A1."""
-    file_name, pin_name = certificate.credential_names(config().env_prefix)
-    pin = pin or credentials.env(pin_name)
-    if not pin:
-        raise RuntimeError(f"Set {pin_name} to the A1 certificate password")
-    return certificate.load_a1(p12_path, pin, name=file_name)
+    return certificate.load_configured(config().env_prefix, pin=pin, p12_path=p12_path)
 
 
 def holder_cpf(cert):
@@ -155,7 +153,7 @@ def login(*, pin=None, p12_path=None, http=None):
         )
     log_request("POST", AUTH_URL, response.status_code)
     if response.status_code in (401, 403):
-        raise LoginRejected(f"STJ refused the certificate (HTTP {response.status_code})")
+        raise LoginRejected(f"STJ refused the certificate (HTTP {response.status_code})", reason="certificate_refused")
     if response.status_code != 200:
         raise StjError(f"STJ certificate login failed (HTTP {response.status_code})")
     answer = _json(response, "login")

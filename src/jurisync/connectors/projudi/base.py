@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
-from jurisync.core import certificate, credentials
+from jurisync.core import certificate
 from jurisync.core.ciencia import GIVEN, NONE, PENDING, UNKNOWN, report
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import read_limited, validate_document_ids
@@ -74,25 +74,14 @@ def require_download_url(config, value):
 # --- A1 certificate -------------------------------------------------------------------------------------------------
 
 
-def _credential_names():
-    """The A1 file and PIN names: the Projudi override when set, otherwise the shared PJe A1."""
-    if credentials.has("PROJUDI_A1_P12"):
-        return "PROJUDI_A1_P12", "PROJUDI_A1_PIN" if credentials.has("PROJUDI_A1_PIN") else "PJE_A1_PIN"
-    return "PJE_A1_P12", "PJE_A1_PIN"
-
-
 def has_certificate():
     """Whether the account sets the A1 file and the PIN ``load_certificate`` reads."""
-    return all(credentials.has(name) for name in _credential_names())
+    return certificate.is_configured("PROJUDI")
 
 
 def load_certificate(*, pin=None, p12_path=None):
-    """Load ``(key, cert, chain)`` from the Projudi override or the shared A1, honoring an explicit path."""
-    p12_name, pin_name = _credential_names()
-    pin = pin or credentials.env(pin_name)
-    if not pin:
-        raise RuntimeError(f"Set {pin_name} to the A1 certificate password")
-    return certificate.load_a1(p12_path, pin, name=p12_name)
+    """Load ``(key, cert, chain)`` from the Projudi override (``PROJUDI_A1_P12``) or the shared A1."""
+    return certificate.load_configured("PROJUDI", pin=pin, p12_path=p12_path)
 
 
 @contextmanager

@@ -4,7 +4,6 @@ import argparse
 import json
 import sys
 from contextlib import redirect_stdout
-from pathlib import Path
 
 from jurisync import portals
 from jurisync.connectors.pje import search
@@ -24,8 +23,8 @@ from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core import ciencia
 from jurisync.core.http import enable_request_logging
 from jurisync.core.redaction import drop_keys
-from jurisync.core.session_pool import SessionExpired
-from jurisync.core.totp import accounts_from_image, parse_accounts, portal_account
+from jurisync.core.session_pool import MissingLogin, SessionExpired
+from jurisync.core.totp import configured_account
 
 
 def credentials(portal):
@@ -35,14 +34,8 @@ def credentials(portal):
     for field in ("USERNAME", "PASSWORD"):
         values[field] = portal.env(field)
         if not values[field]:
-            raise RuntimeError(f"Set {portal.env_name(field)}")
-    if portal.env("2FA_DATA"):
-        account = portal_account(portal, parse_accounts(portal.env("2FA_DATA")))
-    elif portal.env("2FA_QR"):
-        account = portal_account(portal, accounts_from_image(Path(portal.env("2FA_QR"))))
-    else:
-        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')}")
-    return values["USERNAME"], values["PASSWORD"], account
+            raise MissingLogin(f"Set {portal.env_name(field)}")
+    return values["USERNAME"], values["PASSWORD"], configured_account(portal)
 
 
 def login_portal(portal):

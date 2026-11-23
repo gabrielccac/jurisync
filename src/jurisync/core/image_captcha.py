@@ -25,6 +25,7 @@ import re
 
 from jurisync.core import credentials
 from jurisync.core.awswaf import API, DEFAULT_MODEL, captcha_api_key
+from jurisync.core.session_pool import LoginFailed
 
 log = logging.getLogger("jurisync.image_captcha")
 
@@ -39,8 +40,10 @@ DARK, GRAY = 150, 130
 _local_reader = None
 
 
-class UnreadableCaptcha(RuntimeError):
+class UnreadableCaptcha(LoginFailed):
     """No code of the expected shape could be read from the picture."""
+
+    reason = "captcha"
 
 
 def data_uri_bytes(src):
@@ -116,7 +119,9 @@ def read_with_model(image_bytes, *, length=4, api_key=None, model=None, timeout=
 
     api_key = api_key or captcha_api_key()
     if not api_key:
-        raise RuntimeError("The portal asks for an image CAPTCHA: set JURISYNC_CAPTCHA_API_KEY to solve it")
+        raise LoginFailed(
+            "The portal asks for an image CAPTCHA: set JURISYNC_CAPTCHA_API_KEY to solve it", reason="captcha"
+        )
     model = model or credentials.machine("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
     content = [
         {"type": "text", "text": PROMPT.format(length=length)},

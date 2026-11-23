@@ -21,11 +21,6 @@ def a1_path():
     return Path(path.strip().strip('"')).expanduser()
 
 
-def load_a1(p12_path, pin):
-    """Load (key, cert, chain) from the A1 file, or from the account's PJE_A1_P12 when ``p12_path`` is None."""
-    return certificate.load_a1(p12_path, pin)
-
-
 def _der_length(n):
     if n < 128:
         return bytes([n])
@@ -122,8 +117,10 @@ def post_result(session, payload):
         timeout=30,
     )
     if not 200 <= response.status_code < 300:
-        refused = LoginRejected if response.status_code in {401, 403} else RuntimeError
-        raise refused(f"SSO rejected the certificate callback (HTTP {response.status_code})")
+        message = f"SSO rejected the certificate callback (HTTP {response.status_code})"
+        if response.status_code in {401, 403}:
+            raise LoginRejected(message, reason="certificate_refused")
+        raise RuntimeError(message)
     return response
 
 
@@ -136,7 +133,7 @@ def main():
     args = parser.parse_args()
     if not args.pin:
         parser.error("PIN via --pin ou PJE_A1_PIN")
-    key, cert, chain = load_a1(args.p12 or a1_path(), args.pin)
+    key, cert, chain = certificate.load_a1(args.p12 or a1_path(), args.pin)
     signature = sign_mensagem(args.mensagem, key)
     payload = build_payload(args.token, args.mensagem, signature, certificate_chain64(cert, chain))
     payload["assinatura"] = payload["assinatura"][:64] + "..."

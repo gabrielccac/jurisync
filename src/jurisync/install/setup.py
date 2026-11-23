@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from jurisync import customers, portals, registry
+from jurisync.core.session_pool import EXPLANATIONS, login_reason
 from jurisync.core.totp import match_for_tribunal, parse_accounts, select_account, unique_match
 from jurisync.install import credentials_bundle
 from jurisync.paths import USER_ENV_FILE
@@ -201,6 +202,12 @@ def collect(keys, current, *, qr, ask, ask_secret, say):
     return updates
 
 
+def failure(error):
+    """The check's message for a failed login: the reason in Portuguese, its code, then the error itself."""
+    reason = login_reason(error)
+    return f"{EXPLANATIONS[reason]} [{reason}] ({type(error).__name__}: {str(error)[:140]})"
+
+
 def check_login(key):
     """Log in once. Returns (ok, message); the message never contains a secret."""
     from jurisync.connectors.eproc.client import authenticate
@@ -208,7 +215,7 @@ def check_login(key):
     try:
         session, _, _ = authenticate(key)
     except Exception as error:  # noqa: BLE001 - report any login failure to the user
-        return False, f"{type(error).__name__}: {str(error)[:140]}"
+        return False, failure(error)
     try:
         session.close()
     except Exception:  # noqa: BLE001
@@ -223,7 +230,7 @@ def check_pje(key):
     try:
         session, _ = login_portal(key)
     except Exception as error:  # noqa: BLE001 - report any login failure to the user
-        return False, f"{type(error).__name__}: {str(error)[:140]}"
+        return False, failure(error)
     try:
         session.close()
     except Exception:  # noqa: BLE001
@@ -238,7 +245,7 @@ def check_advbox():
     try:
         AdvboxClient().ensure_session()
     except Exception as error:  # noqa: BLE001
-        return False, f"{type(error).__name__}: {str(error)[:140]}"
+        return False, failure(error)
     return True, "sessão ok"
 
 
@@ -249,7 +256,7 @@ def check_juridiq():
     try:
         JuridiqApi().token(force_refresh=True)
     except Exception as error:  # noqa: BLE001
-        return False, f"{type(error).__name__}: {str(error)[:140]}"
+        return False, failure(error)
     return True, "sessão ok"
 
 
@@ -258,7 +265,7 @@ def check_portal(system, key):
     try:
         registry.get(system).sessions().check(key)
     except Exception as error:  # noqa: BLE001 - report any login failure to the user
-        return False, f"{type(error).__name__}: {str(error)[:140]}"
+        return False, failure(error)
     return True, "login ok"
 
 

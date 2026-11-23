@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from jurisync.core import credentials
+from jurisync.core.session_pool import MissingLogin
 
 DEFAULT_FILE = "PJE_A1_P12"
 DEFAULT_PIN = "PJE_A1_PIN"
@@ -34,6 +35,20 @@ def load_a1(p12_path, pin, *, name=DEFAULT_FILE):
     if key is None or cert is None:
         raise ValueError("A1 file has no private key/certificate (wrong PIN?)")
     return key, cert, list(chain or [])
+
+
+def is_configured(prefix=""):
+    """Whether the account sets the A1 file and the PIN ``load_configured(prefix)`` reads."""
+    return all(credentials.has(name) for name in credential_names(prefix))
+
+
+def load_configured(prefix="", *, pin=None, p12_path=None):
+    """``(key, cert, chain)`` of the account's A1 (``credential_names(prefix)``), honoring an explicit PIN and path."""
+    file_name, pin_name = credential_names(prefix)
+    pin = pin or credentials.env(pin_name)
+    if not pin:
+        raise MissingLogin(f"Set {pin_name} to the A1 certificate password")
+    return load_a1(p12_path, pin, name=file_name)
 
 
 def write_pem(directory, key, cert, chain):

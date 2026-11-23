@@ -33,7 +33,7 @@ from jurisync.core import credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
-from jurisync.core.session_pool import SessionExpired
+from jurisync.core.session_pool import MissingLogin, SessionExpired
 
 # Read-only citation/intimation queues, keyed by the tool's `queue` argument.
 # The panel advertises which of these a deployment exposes; the extra kinds are
@@ -183,7 +183,7 @@ def _credentials(portal):
     config = portals.eproc(portal)
     username, password = config.env("USERNAME"), config.env("PASSWORD")
     if not username or not password:
-        raise RuntimeError(f"Set {config.env_name('USERNAME')} and {config.env_name('PASSWORD')} in .env")
+        raise MissingLogin(f"Set {config.env_name('USERNAME')} and {config.env_name('PASSWORD')} in .env")
     return username, password
 
 

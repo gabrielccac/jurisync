@@ -11,14 +11,14 @@ class CertificateLoginChecks(unittest.TestCase):
     def test_a1_is_loaded_and_passed_to_login(self):
         session = Mock()
         with (
-            patch.object(cert_login.native_signer, "load_a1", return_value=("key", "cert", [])) as load,
+            patch.object(cert_login, "load_configured", return_value=("key", "cert", [])) as load,
             patch.object(cert_login, "_login", return_value=session) as login,
         ):
             self.assertIs(
                 cert_login.cert_login("trf5-1g", "JBSWY3DPEHPK3PXP", session, pin="test-pin", p12_path="a1.p12"),
                 session,
             )
-        load.assert_called_once_with("a1.p12", "test-pin")
+        load.assert_called_once_with(pin="test-pin", p12_path="a1.p12")
         signer = login.call_args.args[3]
         self.assertIsInstance(signer, cert_login.native_signer.A1Signer)
         self.assertEqual((signer.key, signer.cert, signer.chain), ("key", "cert", []))
@@ -87,7 +87,7 @@ class CertificateLoginChecks(unittest.TestCase):
         sleep = Mock()
         with (
             patch.object(cert_login, "_twofa", return_value=object()),
-            patch.object(cert_login.native_signer, "load_a1", return_value=(None, None)),
+            patch.object(cert_login, "load_configured", return_value=(None, None)),
             patch.object(cert_login.native_signer, "A1Signer"),
             patch.object(cert_login, "_login", side_effect=login),
             patch.object(cert_login.portals, "pje", return_value=SimpleNamespace(key="tjce-2g")),

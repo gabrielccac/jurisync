@@ -27,21 +27,20 @@ the reading (the ciência). A page that asks for the justification of a third-pa
 import re
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.jpe import parsers
-from jurisync.connectors.pje.auth.sso import SSO_HOST, credential_failure, sso_username
+from jurisync.connectors.pje.auth.sso import SSO_HOST, credential_refusal, credentials_form, login_form_id
 from jurisync.connectors.pje.jsf import a4j_submit
 from jurisync.connectors.pje.parsers import jsf_data, response_html
 from jurisync.core.documents import read_limited
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
 from jurisync.core.redaction import url_shape
-from jurisync.core.session_pool import LoginRejected, SessionExpired
-from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, portal_account, totp
+from jurisync.core.session_pool import LoginRejected, MissingLogin, SessionExpired
+from jurisync.core.totp import configured_account, fresh_code
 
 PORTAL = "tjmg-jpe-2g"
 ROOT = "/rupe/"
@@ -51,7 +50,6 @@ SSO_REFUSED = (
     "client jpe-tjmg-2g"
 )
 CPF = re.compile(r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}")
-FRESH_CODE_SECONDS = 8  # a code this close to the end of its window waits for the next one
 ROUTES = {"pdpj": "sso", "sso": "sso", "jpe": "jpe", "proprio": "jpe", "own": "jpe"}
 
 
@@ -66,8 +64,10 @@ class JpeSessionExpired(SessionExpired):
 class SsoRefused(LoginRejected):
     """The PDPJ SSO refused to start the JPe login (client ``jpe-tjmg-2g``); no credential was sent."""
 
+    reason = "unexpected"
 
-class MissingCredentials(RuntimeError):
+
+class MissingCredentials(MissingLogin):
     pass
 
 
@@ -141,23 +141,7 @@ def auth_route(portal):
 
 
 def otp_account(portal):
-    data, image = portal.env("2FA_DATA"), portal.env("2FA_QR")
-    if data:
-        accounts = parse_accounts(data)
-    elif image:
-        accounts = accounts_from_image(Path(image).expanduser())
-    else:
-        raise MissingCredentials(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')}")
-    return portal_account(portal, accounts)
-
-
-def fresh_code(account, *, clock=time.time, sleep=time.sleep):
-    """The current code, or the next window's when the current one is about to expire."""
-    period = account.get("period", 30)
-    now = clock()
-    if period - now % period < FRESH_CODE_SECONDS:
-        return next_code(account, sleep=sleep, now=now)
-    return totp(account).at(now)
+    return configured_account(portal, MissingCredentials)
 
 
 # --- Requests ---------------------------------------------------------------------------------------------------------
@@ -458,25 +442,23 @@ def _sso_login(http, portal, html, page_url, username, password, account, *, clo
         raise JpeError(f'PDPJ SSO refused to start the JPe login: "{refusal}"')
     if (urlsplit(response.url).hostname or "") != SSO_HOST:
         raise JpeError(f"JPe PDPJ button did not reach the SSO (landed at {url_shape(response.url)})")
-    soup = parsers.soup_of(sso_html)
-    form_id = "loginForm" if soup.find("form", id="loginForm") else "kc-form-login"
-    login_form = soup.find("form", id=form_id)
+    form_id = login_form_id(sso_html)
+    login_form = parsers.soup_of(sso_html).find("form", id=form_id)
     if login_form is None or not login_form.get("action"):
         raise JpeError("PDPJ SSO page has no login form")
     login_url = check(urljoin(response.url, login_form["action"]))
     response = _send(
         http, portal, "POST", login_url, check=check, referer=response.url,
-        data={"username": sso_username(username, form_id), "password": password, "pjeoffice-code": "", "phrase": ""},
+        data=credentials_form(username, password, form_id),
     )  # fmt: skip
     otp_form = parsers.soup_of(response_html(response)).find("form", id="kc-otp-login-form")
     if otp_form is None or not otp_form.get("action"):
-        kind, reason = credential_failure(response_html(response))
-        raise (LoginRejected if kind in {"credentials", "expired", "blocked"} else JpeError)(reason)
+        raise credential_refusal(response_html(response), JpeError)
     otp_url = check(urljoin(response.url, otp_form["action"]))
     code = fresh_code(account, clock=clock, sleep=sleep)
     response = _send(http, portal, "POST", otp_url, check=check, data={"otp": code, "login": "Validar"})
     if response.status_code not in REDIRECTS:
-        raise LoginRejected("PDPJ SSO did not accept the authenticator code")
+        raise LoginRejected("PDPJ SSO did not accept the authenticator code", reason="otp_refused")
     response = _follow(http, portal, response, check=check)
     landing = response_html(response)
     if (urlsplit(response.url).hostname or "") != portal.host:
@@ -486,7 +468,8 @@ def _sso_login(http, portal, html, page_url, username, password, account, *, clo
         message = parsers.page_message(landing)
         raise LoginRejected(
             "JPe did not accept the PDPJ login (the account may not be linked to a JPe user)"
-            + (f' (JPe: "{message}")' if message else "")
+            + (f' (JPe: "{message}")' if message else ""),
+            reason="not_registered",
         )
     return Page(response.url, landing)
 

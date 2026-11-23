@@ -20,6 +20,7 @@ import re
 import time
 
 from jurisync.core import credentials
+from jurisync.core.session_pool import LoginFailed
 
 log = logging.getLogger("jurisync.awswaf")
 
@@ -109,7 +110,7 @@ def pick_tiles(instruction, tiles, *, api_key, model, timeout=90):
     reply = response.json()["choices"][0]["message"]["content"] or ""
     match = re.search(r"\[[\d,\s]*\]", reply)
     if not match:
-        raise RuntimeError("CAPTCHA model reply has no tile list")
+        raise LoginFailed("CAPTCHA model reply has no tile list", reason="captcha")
     return sorted({int(value) - 1 for value in json.loads(match.group(0)) if 1 <= int(value) <= 9})
 
 
@@ -133,8 +134,9 @@ def solve(url, *, api_key=None, model=None, max_puzzles=MAX_PUZZLES, debug_dir=N
 
     api_key = api_key or captcha_api_key()
     if not api_key:
-        raise RuntimeError(
-            "The portal shows an AWS WAF CAPTCHA: set JURISYNC_CAPTCHA_API_KEY (or OPENROUTER_API_KEY) to solve it"
+        raise LoginFailed(
+            "The portal shows an AWS WAF CAPTCHA: set JURISYNC_CAPTCHA_API_KEY (or OPENROUTER_API_KEY) to solve it",
+            reason="captcha",
         )
     model = model or credentials.machine("JURISYNC_CAPTCHA_MODEL") or DEFAULT_MODEL
     driver = Driver(uc=True, headless=True, locale="pt-BR")
@@ -149,7 +151,7 @@ def solve(url, *, api_key=None, model=None, max_puzzles=MAX_PUZZLES, debug_dir=N
             if state.get("state") == "gone":
                 break
             if state.get("state") != "grid":
-                raise RuntimeError("AWS WAF CAPTCHA grid did not load")
+                raise LoginFailed("AWS WAF CAPTCHA grid did not load", reason="captcha")
             time.sleep(1)  # the canvas paints after the element appears
             instruction = _instruction(driver.execute_script(_STATE_JS).get("text", ""))
             canvas = driver.find_element("css selector", "#captcha-container canvas")
@@ -178,7 +180,7 @@ def solve(url, *, api_key=None, model=None, max_puzzles=MAX_PUZZLES, debug_dir=N
             driver.save_screenshot(f"{debug_dir}/waf-final.png")
             log.info("AWS WAF final: %s at %s; token=%s", final.get("state"), driver.current_url, _token(driver))
         if final.get("state") != "gone" or not _token(driver):
-            raise RuntimeError("AWS WAF CAPTCHA was not accepted")
+            raise LoginFailed("AWS WAF CAPTCHA was not accepted", reason="captcha")
         return _all_cookies(driver)
     finally:
         driver.quit()

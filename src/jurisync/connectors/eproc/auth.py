@@ -4,14 +4,13 @@ import html as html_lib
 import time
 import urllib.parse
 from http.cookiejar import Cookie
-from pathlib import Path
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from jurisync import portals
-from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import accounts_from_image, next_code, parse_accounts, portal_account, totp
+from jurisync.core.session_pool import LoginFailed, LoginRejected
+from jurisync.core.totp import answer_code, configured_account
 
 PANEL_MARKER = "acao=painel_adv_listar"
 PANEL_MARKERS = (PANEL_MARKER, "acao=painel_advogado_listar")  # TNU names its panel the second way
@@ -43,11 +42,7 @@ LOGIN_FIELDS = {
 
 def portal_totp_account(portal):
     """Select this portal's TOTP account from its own authenticator export."""
-    portal = portals.eproc(portal)
-    data, qr_path = portal.env("2FA_DATA"), portal.env("2FA_QR")
-    if not data and not qr_path:
-        raise RuntimeError(f"Set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')} in .env")
-    return portal_account(portal, parse_accounts(data) if data else accounts_from_image(Path(qr_path)))
+    return configured_account(portals.eproc(portal))
 
 
 def dismiss_alert(driver):
@@ -110,8 +105,9 @@ def wait_for_step(driver, timeout=25):
             return "otp"
         if has(driver, CAPTCHA_INPUT):
             # An image/audio CAPTCHA (old-style Eproc such as TJTO) needs a person; clicking Enviar only raises a JS alert.
-            raise RuntimeError(
-                "eproc asks for an image CAPTCHA (code typed from a picture); it cannot be solved automatically"
+            raise LoginFailed(
+                "eproc asks for an image CAPTCHA (code typed from a picture); it cannot be solved automatically",
+                reason="captcha",
             )
         if has(driver, "button:contains('Enviar')"):
             return "captcha"
@@ -296,6 +292,17 @@ def _classic_cert_login(driver, config):
     return wait_for_step(driver)
 
 
+def _answer_otp(driver, step, account):
+    """The step after the portal's code screen, when ``step`` is it: the current code, then the next window's."""
+    return answer_code(
+        step,
+        account,
+        lambda current: current if current == "otp" else None,
+        lambda _step, _otp, code: _submit_otp(driver, code),
+        label="eproc",
+    )
+
+
 def login(username, password, account, *, portal, certificate=False):
     if account["type"] != "totp":
         raise ValueError("Selected authenticator account is not TOTP")
@@ -315,13 +322,7 @@ def login(username, password, account, *, portal, certificate=False):
             )
             if not str(result).startswith("opaqueredirect"):
                 raise RuntimeError(f"Unexpected answer to the eproc password step: {result}")
-            step = _classic_cert_login(driver, config)
-            if step == "otp":
-                step = _submit_otp(driver, totp(account).now())
-                if step == "otp":
-                    step = _submit_otp(driver, next_code(account))
-                if step == "otp":
-                    raise RuntimeError("eproc rejected the OTP")
+            step = _answer_otp(driver, _classic_cert_login(driver, config), account)
             if step != "panel":
                 raise RuntimeError(f"Unexpected eproc login step after the certificate: {step}")
             session = session_from_cookies(driver.get_cookies())
@@ -349,12 +350,7 @@ def login(username, password, account, *, portal, certificate=False):
             hint = page_hint(driver)
             raise LoginRejected("eproc rejected the username/password" + (f" (page: {hint})" if hint else ""))
         if step == "otp":
-            step = _submit_otp(driver, totp(account).now())
-            if step == "otp":
-                # Usually a code already used in this window by a recent login.
-                step = _submit_otp(driver, next_code(account))
-            if step == "otp":
-                raise LoginRejected("eproc rejected the OTP")
+            step = _answer_otp(driver, step, account)
             if step == "login":
                 raise RuntimeError("eproc returned to login after OTP submission")
 

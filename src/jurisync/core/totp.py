@@ -12,11 +12,16 @@ import argparse
 import base64
 import hashlib
 import re
+import time
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pyotp
 
+from jurisync.core.session_pool import LoginRejected, MissingLogin
+
 BASE32 = re.compile(r"[A-Za-z2-7 ]+={0,6}")
+FRESH_CODE_SECONDS = 8  # a code this close to the end of its window waits for the next one
 
 
 def _varint(data, offset):
@@ -179,6 +184,24 @@ def portal_account(portal, accounts):
     )
 
 
+def configured_account(portal, missing=MissingLogin, *, data=None):
+    """This portal's account from ``<PREFIX>_2FA_DATA`` (or ``data``), else from the ``<PREFIX>_2FA_QR`` image.
+
+    Neither set: ``missing`` is raised before any request, or None is returned when ``missing`` is None.
+    """
+    data, image = data or portal.env("2FA_DATA"), portal.env("2FA_QR")
+    if data:
+        return portal_account(portal, parse_accounts(data))
+    if image:
+        return portal_account(portal, accounts_from_image(Path(image).expanduser()))
+    if missing is None:
+        return None
+    raise missing(
+        f"The portal asks for a TOTP code: set {portal.env_name('2FA_DATA')} or {portal.env_name('2FA_QR')} "
+        f"(and {portal.env_name('OTP_PROFILE_MATCH')} when the export holds several profiles)"
+    )
+
+
 def match_for_tribunal(accounts, tribunal):
     """The OTP_PROFILE_MATCH to store for a tribunal at setup time: the issuer (or name) of the single account
     whose issuer/name names the tribunal as a whole token ("Eproc/TRF4" for TRF4; TRF1 never matches TRF10).
@@ -230,13 +253,41 @@ def next_code(account, *, sleep=None, now=None):
     Portals reject a code that was already used in the current window, for
     example by a login a few seconds earlier; the next window's code is fresh.
     """
-    import time
-
     sleep = sleep or time.sleep
     period = account.get("period", 30)
     current = time.time() if now is None else now
     sleep(period - current % period + 1)
     return totp(account).now()
+
+
+def fresh_code(account, *, clock=time.time, sleep=time.sleep):
+    """The current code, or the next window's when the current one is about to expire."""
+    period = account.get("period", 30)
+    now = clock()
+    if period - now % period < FRESH_CODE_SECONDS:
+        return next_code(account, sleep=sleep, now=now)
+    return totp(account).at(now)
+
+
+def answer_code(page, account, form_of, submit, *, label, pause=0, sleep=time.sleep):
+    """Answer a code form with the current code and, when the form comes back, once with the next window's (a
+    recent login may have spent the current one). Still asked after both: ``LoginRejected`` (``otp_refused``).
+
+    ``form_of(page)`` is the code form, None when no code is asked (``page`` is then returned as is);
+    ``submit(page, form, code)`` sends it and returns the next page. ``account`` may be a callable, read only
+    when a code is asked.
+    """
+    for attempt in range(2):
+        form = form_of(page)
+        if form is None:
+            return page
+        account = account() if callable(account) else account
+        if attempt:
+            sleep(pause)
+        page = submit(page, form, next_code(account) if attempt else totp(account).now())
+    if form_of(page) is not None:
+        raise LoginRejected(f"{label} rejected the OTP", reason="otp_refused")
+    return page
 
 
 def main():

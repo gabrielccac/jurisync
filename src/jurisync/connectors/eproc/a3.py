@@ -19,7 +19,8 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER, portal_totp_account
 from jurisync.core import mtls
-from jurisync.core.totp import next_code, totp
+from jurisync.core.session_pool import LoginFailed, LoginRejected
+from jurisync.core.totp import answer_code
 
 MTLS_HOST = re.compile(r"document\.location\.host\s*=\s*'([a-z0-9.-]+)'", re.I)
 
@@ -87,6 +88,7 @@ def _keycloak_x509(session, page, mtls_host, signer):
         reason = eproc_message(response.url, response.text)
         if not reason and _form(response.text, "kc-form-login") is not None:
             reason = "the certificate was read, but no user of this portal is linked to it (register the CPF first)"
+            raise LoginRejected(f"Keycloak did not accept the certificate: {reason}", reason="not_registered")
         raise RuntimeError("Keycloak did not accept the certificate" + (f": {reason}" if reason else ""))
     action = urljoin(url, html.unescape(form["action"]))
     if urlsplit(action).hostname != auth.hostname:
@@ -96,18 +98,18 @@ def _keycloak_x509(session, page, mtls_host, signer):
 
 def _submit_otp(session, response, portal):
     """Answer Keycloak's OTP form with the portal TOTP; one retry with the next code, as the browser login does."""
-    account = None
-    for attempt in range(2):
-        form = _form(response.text, "kc-otp-login-form")
-        if form is None:
-            return response
-        account = account or portal_totp_account(portal)
-        code = totp(account).now() if attempt == 0 else next_code(account)
-        action = urljoin(response.url, html.unescape(form["action"]))
-        response = session.post(action, data={"otp": code, "login": "Entrar"}, impersonate="chrome", timeout=60)
-    if _form(response.text, "kc-otp-login-form") is not None:
-        raise RuntimeError("eproc rejected the OTP")
-    return response
+
+    def submit(page, form, code):
+        action = urljoin(page.url, html.unescape(form["action"]))
+        return session.post(action, data={"otp": code, "login": "Entrar"}, impersonate="chrome", timeout=60)
+
+    return answer_code(
+        response,
+        lambda: portal_totp_account(portal),
+        lambda page: _form(page.text, "kc-otp-login-form"),
+        submit,
+        label="eproc",
+    )
 
 
 def _logged_in(response, config):
@@ -125,7 +127,9 @@ def login(portal, *, signer=None):
     try:
         page = session.get(config.login_url, impersonate="chrome", timeout=60)
         if page.status_code >= 500:
-            raise RuntimeError(f"{config.tribunal} eproc is unavailable (HTTP {page.status_code})")
+            raise LoginFailed(
+                f"{config.tribunal} eproc is unavailable (HTTP {page.status_code})", reason="portal_unavailable"
+            )
         host = MTLS_HOST.search(page.text)
         if not host:
             raise NoKeycloakCertificate(f"{config.key} login page offers no Keycloak X.509 certificate login")

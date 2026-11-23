@@ -30,12 +30,72 @@ class SessionExpired(RuntimeError):
     """
 
 
-class LoginRejected(RuntimeError):
+# Why a login failed, the same words for every system. The first six mean the portal refused what was sent.
+REFUSALS = (
+    "credentials_refused",
+    "password_expired",
+    "otp_refused",
+    "certificate_refused",
+    "not_registered",
+    "blocked",
+)
+REASONS = (*REFUSALS, "captcha", "portal_unavailable", "login_missing", "unexpected")
+
+
+class LoginFailed(RuntimeError):
+    """A login that did not go through; ``reason`` is one of ``REASONS``."""
+
+    reason = "unexpected"
+
+    def __init__(self, message="", *, reason=None):
+        super().__init__(message)
+        if reason is not None:
+            self.reason = reason
+
+
+class MissingLogin(LoginFailed):
+    """The account sets no login for this system (user, password, certificate or authenticator); nothing was sent."""
+
+    reason = "login_missing"
+
+
+class LoginRejected(LoginFailed):
     """Raised by a connector's login when the portal refused the credentials (wrong password, OTP or certificate).
 
     Network and page errors are not this. The pool never retries it and blocks further logins for the same
     tenant and portal until the cool-down passes or ``forget`` reports that the credentials changed.
+    ``reason`` is one of ``REFUSALS``, or ``unexpected`` when the portal stopped the login for something none of them
+    names (a profile to choose, an account action the connector never takes).
     """
+
+    reason = "credentials_refused"
+
+
+# The operator's one line per reason (setup and hosted checks).
+EXPLANATIONS = {
+    "credentials_refused": "o portal recusou o usuário ou a senha: confira o login configurado",
+    "password_expired": "senha expirada: o advogado precisa trocar no portal",
+    "otp_refused": "o código do autenticador foi recusado: confira a conta escolhida no QR (OTP_PROFILE_MATCH/INDEX)",
+    "certificate_refused": "o portal recusou o certificado A1: confira o arquivo, o PIN e a validade",
+    "not_registered": "o tribunal não tem cadastro para este certificado/CPF",
+    "blocked": "a conta está bloqueada ou desativada no portal: o advogado precisa falar com o tribunal",
+    "captcha": "o portal pediu um CAPTCHA que não foi resolvido",
+    "portal_unavailable": "o portal está fora do ar ou não respondeu: tente mais tarde",
+    "login_missing": "falta configurar o login (usuário, senha, certificado ou autenticador)",
+    "unexpected": "falha inesperada no login: veja a mensagem",
+}
+
+
+def login_reason(error):
+    """The ``REASONS`` code of a failed login: the one the connector set, else what the exception type tells."""
+    reason = getattr(error, "reason", None)
+    if reason in REASONS:
+        return reason
+    from curl_cffi.requests import exceptions
+
+    if isinstance(error, (exceptions.ConnectionError, exceptions.Timeout, ConnectionError, TimeoutError)):
+        return "portal_unavailable"
+    return "unexpected"
 
 
 def _env_number(name, default, convert=float):
@@ -83,7 +143,7 @@ class SessionPool:
         self._wall_clock = wall_clock
         self._entries = {}  # key -> (session, last successful use; -inf after a failed call)
         self._used = {}  # key -> last use of any kind, for idle eviction
-        self._rejected = {}  # key -> (clock time, wall time) of the last LoginRejected
+        self._rejected = {}  # key -> (clock time, wall time, reason) of the last LoginRejected
         self._locks = {}
         self._guard = threading.Lock()
         self._only = None  # the portals a local server offers; None logs in anywhere (hosted: the office decides)
@@ -134,7 +194,7 @@ class SessionPool:
         now = self._clock()
         with self._guard:
             idle = [key for key, used in self._used.items() if key != keep and now - used > self._idle_ttl]
-            expired = [key for key, (at, _) in self._rejected.items() if now - at >= self._cooldown()]
+            expired = [key for key, (at, *_) in self._rejected.items() if now - at >= self._cooldown()]
             for key in expired:
                 del self._rejected[key]
         for key in idle:
@@ -163,7 +223,8 @@ class SessionPool:
         at = time.strftime("%H:%M", time.localtime(rejected[1]))
         raise LoginRejected(
             f"{key[1]}: the portal rejected these credentials at {at}. Correct them, or wait "
-            f"{max(1, round(remaining / 60))} min before trying again; no new login was attempted"
+            f"{max(1, round(remaining / 60))} min before trying again; no new login was attempted",
+            reason=rejected[2],
         )
 
     def only(self, portals):
@@ -179,9 +240,9 @@ class SessionPool:
         with login_slots():
             try:
                 return (login or self._login)(portal)
-            except LoginRejected:
+            except LoginRejected as error:
                 with self._guard:
-                    self._rejected[key] = (self._clock(), self._wall_clock())
+                    self._rejected[key] = (self._clock(), self._wall_clock(), error.reason)
                 raise
 
     def fresh_login(self, portal, login=None):

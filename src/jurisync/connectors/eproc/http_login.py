@@ -33,8 +33,8 @@ from jurisync import portals
 from jurisync.connectors.eproc.a3 import _cookies_for, _store_cookies, eproc_message
 from jurisync.connectors.eproc.auth import is_panel, panel_link
 from jurisync.core import image_captcha, mtls
-from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import next_code, totp
+from jurisync.core.session_pool import LoginFailed, LoginRejected
+from jurisync.core.totp import answer_code
 
 MAX_HOPS = 10
 INFRA_CAPTCHA = "infra-captcha"
@@ -125,7 +125,7 @@ def _captcha_step(session, response, config, signer_factory, trail):
         trail.append(f"captcha({source})")
         response = _post(session, config.url("index.php"), fields, response.url)
         response = _follow(session, response, config.host, signer_factory, trail)
-    raise RuntimeError(f"{config.key}: the image CAPTCHA was not accepted after {answers} answers")
+    raise LoginFailed(f"{config.key}: the image CAPTCHA was not accepted after {answers} answers", reason="captcha")
 
 
 def _post(session, url, data, referer):
@@ -168,7 +168,9 @@ def login(username, password, account, *, portal, signer=None, certificate=False
     try:
         page = session.get(config.login_url, impersonate="chrome", timeout=60)
         if page.status_code >= 500:
-            raise RuntimeError(f"{config.tribunal} eproc is unavailable (HTTP {page.status_code})")
+            raise LoginFailed(
+                f"{config.tribunal} eproc is unavailable (HTTP {page.status_code})", reason="portal_unavailable"
+            )
         if not _has_login_form(page.text):
             raise NotClassicLogin(f"{config.key}: no classic eproc login form")
         if "captcha" in page.text.lower():
@@ -204,20 +206,16 @@ def login(username, password, account, *, portal, signer=None, certificate=False
                 "eproc returned to the login form (" + " > ".join(trail) + ")" + (f": {reason}" if reason else "")
             )
 
-        for attempt in range(2):
-            if not _has_field(response.text, "txtAcessoCodigo"):
-                break
-            code = totp(account).now() if attempt == 0 else next_code(account)
-            trail.append("2fa" if attempt == 0 else "2fa(next)")
-            response = _post(
-                session,
-                config.url("index.php"),
-                {"txtAcessoCodigo": code, "hdnAcao": "2fa_validar", "hdnDebug": ""},
-                response.url,
+        def submit_code(page, _field, code):
+            trail.append("2fa(next)" if "2fa" in trail else "2fa")
+            data = {"txtAcessoCodigo": code, "hdnAcao": "2fa_validar", "hdnDebug": ""}
+            return _follow(
+                session, _post(session, config.url("index.php"), data, page.url), config.host, with_token, trail
             )
-            response = _follow(session, response, config.host, with_token, trail)
-        if _has_field(response.text, "txtAcessoCodigo"):
-            raise RuntimeError("eproc rejected the OTP")
+
+        response = answer_code(
+            response, account, lambda page: _has_field(page.text, "txtAcessoCodigo") or None, submit_code, label="eproc"
+        )
 
         link = None if is_panel(response.url) else panel_link(response.text, response.url)
         if link:
