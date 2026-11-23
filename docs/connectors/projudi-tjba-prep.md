@@ -100,7 +100,7 @@ em "Não consegue acessar o sistema?" (login + e-mail), entrar com a senha do e-
 
 Mesa após o login e menu (citações/intimações, pendências, processos, audiências), busca e abertura de processo,
 movimentações, lista de arquivos, download e tipo de conteúdo, sinais de expiração da sessão. Hipótese pela linha CNJ 1.x
-(rotas vistas no TJPI, `docs/connectors/projudi-tjpi.md`):
+(rotas conhecidas do Projudi CNJ 1.x):
 
 | Hipótese | Rota |
 |---|---|
@@ -119,8 +119,8 @@ com intimação aguardando leitura, como no TJAM.
   menu `add_menu(...)`). O TJBA usa servlets sem `.do` (`/projudi/Logon`, `buscas/ProcessosParte`, `listagens/...`,
   `interno.jsp?endereco=`), como o TJPI.
 - **Não é `legacy-keycloak`** (sem SSO) nem **`tjgo-servlet`** (sem mTLS/A1; os servlets do TJGO são outra base).
-- **É a geração do TJPI** (`tjpi-publico`, Projudi CNJ 1.x, `formLogin` → `Logon`/`LogonParte`, consulta pública com
-  `captcha.jpg`), mas mais nova e com TCaptcha no login. O TJPI também não tem adaptador.
+- **É a geração Projudi CNJ 1.x** (`formLogin` → `Logon`/`LogonParte`, consulta pública com
+  `captcha.jpg`), mais nova e com TCaptcha no login.
 - De `legacy.py` servem: `session_expired`/`has_human_verification` (incluir "TencentCaptcha"/"TCaptcha" no padrão),
   `hidden_fields`, `page_links` + `FORBIDDEN_LINK`, `strip_path_params`, `DocumentsBlocked`, `_frame_pages`. O login
   e os parsers seriam próprios.

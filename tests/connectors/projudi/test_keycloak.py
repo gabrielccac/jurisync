@@ -145,7 +145,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(portals.PORTALS[KEY].login_url, APP + "autenticacao.do")
 
     def test_courts_of_other_generations_have_no_keycloak_configuration(self):
-        for key in ("tjam-1g", "tjpi-projudi-1g"):
+        for key in ("tjam-1g", "tjba-projudi-1g"):
             with self.subTest(key=key), self.assertRaisesRegex(NotImplementedError, "no Keycloak configuration"):
                 keycloak.sso_for(portals.PORTALS[key])
 

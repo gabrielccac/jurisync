@@ -4,8 +4,8 @@ ciência of a pending intimação, is refused before anything is opened unless t
 
 ``portals.Portal.flavor`` picks the adapter (login flow, routes, parsers); the tools are the same for every portal.
 TJGO (``tjgo-servlet``) and TJAM (``legacy-local``) have adapters. TJBA (``cnj-servlet``) has one whose login flow
-(Tencent CAPTCHA + form) was observed live only up to the portal's refusal, so its portal stays unwired. The other
-generations (``legacy-keycloak`` for TJPR/TJRR, ``tjpi-publico`` for TJPI) are recognized in ``portals.py``. Every
+(Tencent CAPTCHA + form) was observed live only up to the portal's refusal, so its portal stays unwired. The ``legacy-keycloak``
+generation (TJPR/TJRR) is recognized in ``portals.py``. Every
 unwired portal answers "not implemented yet"; what is known about each is in ``docs/connectors/projudi-mapping.md``. Add one as an ``Adapter`` subclass in its own module only
 after a live smoke proves login + process + one document.
 The authenticated session of each portal stays in memory; when Projudi sends it back to the login page, the call logs
