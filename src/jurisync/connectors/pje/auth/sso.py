@@ -11,7 +11,7 @@ from jurisync import portals
 from jurisync.core.http import IMPERSONATE, TIMEOUT, log_request, require_url
 from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import totp
+from jurisync.core.totp import fresh_code
 
 SSO_HOST = "sso.cloud.pje.jus.br"
 ALLOWED_HOSTS = portals.hosts("pje") | {SSO_HOST}
@@ -219,7 +219,7 @@ def login_session(username, password, account, app_url=None, expected_app_host=N
         otp_url = form_action(response.text, response.url, "kc-otp-login-form")
     except RuntimeError as error:
         raise credential_refusal(response.text, detail=str(error)) from None
-    otp = totp(account).now()
+    otp = fresh_code(account)  # one code is sent: never one about to expire
 
     response = session.post(
         otp_url,

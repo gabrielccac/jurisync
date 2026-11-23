@@ -277,7 +277,7 @@ class LoginFlowTest(unittest.TestCase):
         with (
             mock.patch.dict("os.environ", environ, clear=True),
             mock.patch.object(certificate, "portal_totp_account", return_value={"secret": "JBSWY3DPEHPK3PXP"}),
-            mock.patch("jurisync.core.totp.totp", return_value=mock.Mock(now=lambda: "123456")),
+            mock.patch("jurisync.core.totp.fresh_code", return_value="123456"),
             mock.patch.object(certificate, "load_configured", return_value=("key", "cert", [])),
             mock.patch.object(certificate, "client_certificate") as pem,
         ):
@@ -627,7 +627,7 @@ class Trf6BrowserEntryTest(unittest.TestCase):
             mock.patch.object(certificate, "_browser_login_page", entry),
             mock.patch.object(certificate, "_login_page", side_effect=AssertionError("no HTTP entry")),
             mock.patch.object(certificate, "portal_totp_account", return_value={"secret": "JBSWY3DPEHPK3PXP"}),
-            mock.patch("jurisync.core.totp.totp", return_value=mock.Mock(now=lambda: "123456")),
+            mock.patch("jurisync.core.totp.fresh_code", return_value="123456"),
             mock.patch.object(certificate, "load_configured", return_value=("key", "cert", [])),
             mock.patch.object(certificate, "client_certificate") as pem,
         ):

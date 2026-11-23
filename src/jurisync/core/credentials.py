@@ -11,6 +11,7 @@ A connector that learns a new value of its own (ADVBOX's device id) stores it wi
 
 import contextvars
 import os
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,6 +138,9 @@ def _loaded_env_file():
 
 
 def _rewrite_env_line(path, name, value):
+    if "\r" in value or "\n" in value:
+        # A line break would end the assignment and start another one in the env file.
+        raise ValueError(f"{name} must be a single line")
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
@@ -152,9 +156,13 @@ def _rewrite_env_line(path, name, value):
     if not replaced:
         lines.append(f"{name}={quoted}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-        output.write("\n".join(lines) + "\n")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, path)
+    # A unique private file next to the target, so two writers never share it and the swap stays on one filesystem.
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write("\n".join(lines) + "\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise

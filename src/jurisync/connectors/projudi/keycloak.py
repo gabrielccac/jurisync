@@ -40,7 +40,7 @@ from jurisync.connectors.projudi.legacy import (  # noqa: F401 - re-exported: ca
 )
 from jurisync.core.http import TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
 from jurisync.core.session_pool import LoginRejected
-from jurisync.core.totp import configured_account, totp
+from jurisync.core.totp import configured_account, fresh_code
 
 USERNAME_PATTERN = re.compile(r"(\d{11}|[A-Z0-9]{12}\d{2})")
 PUBLIC_HOME_MARKER = "acesso ao sistema"
@@ -191,7 +191,8 @@ class KeycloakAdapter(legacy.LegacyAdapter):
             account = otp_account(config)
             form = soup(response.text).find("form", id="kc-otp-login-form")
             action = urllib.parse.urljoin(response.url, form.get("action") or "")
-            response = self._post(session, config, action, {**hidden_fields(form), "otp": totp(account).now()})
+            # One code is sent: never one about to expire.
+            response = self._post(session, config, action, {**hidden_fields(form), "otp": fresh_code(account)})
             state = self._classify(config, response)
             if state in ("login", "otp"):
                 raise LoginRejected("Projudi did not accept the authenticator code", reason="otp_refused")

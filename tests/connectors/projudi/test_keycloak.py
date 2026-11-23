@@ -5,6 +5,7 @@ Nothing here proves the real portal behaves this way: no authenticated session w
 """
 
 import dataclasses
+import functools
 import os
 import unittest
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from unittest import mock
 
 from jurisync import portals
 from jurisync.connectors.projudi import base, keycloak, server
+from jurisync.core import totp
 from jurisync.core.http import UnsafeUrlError
 from jurisync.core.session_pool import LoginRejected
 
@@ -21,6 +23,7 @@ SSO = "https://sso.projudi.tjpr.jus.br/auth/realms/projudi/"
 LOGIN_ACTION = SSO + "login-actions/authenticate?session_code=S1&execution=E1&client_id=projudi&tab_id=T1"
 OTP_ACTION = SSO + "login-actions/authenticate?session_code=S2&execution=E2&client_id=projudi&tab_id=T2"
 NUMBER = "0000001-23.2026.8.16.0001"
+MID_WINDOW = 1_800_000_010.0  # 10 s into a 30 s TOTP window: the code is sent at once
 USERNAME = "52998224725"  # synthetic CPF-shaped value
 PASSWORD = "synthetic-password"
 OTP_SECRET = "JBSWY3DPEHPK3PXP"  # the public example secret, not a real one
@@ -114,6 +117,16 @@ def login_routes(*, credentials_result="otp", otp_result="app"):
     return routes
 
 
+def code_at(test, now, waits=None):
+    """The adapter reads its one code at ``now`` (a fake clock) and records any wait instead of sleeping."""
+    waits = [] if waits is None else waits
+    patcher = mock.patch.object(
+        keycloak, "fresh_code", functools.partial(totp.fresh_code, clock=lambda: now, sleep=waits.append)
+    )
+    test.addCleanup(patcher.stop)
+    patcher.start()
+
+
 def wired(test):
     patcher = mock.patch.dict(portals.PORTALS, {KEY: dataclasses.replace(portals.PORTALS[KEY], wired=True)})
     env = mock.patch.dict(os.environ, ENV)
@@ -121,6 +134,7 @@ def wired(test):
     test.addCleanup(env.stop)
     patcher.start()
     env.start()
+    code_at(test, MID_WINDOW)
 
 
 class RegistryTest(unittest.TestCase):
@@ -150,10 +164,19 @@ class LoginTest(unittest.TestCase):
         credentials, otp = [call[2]["data"] for call in session.posts()]
         self.assertEqual(credentials, {"credentialId": "", "username": USERNAME, "password": PASSWORD})
         self.assertEqual(set(otp), {"credentialId", "otp"})
-        self.assertRegex(otp["otp"], r"^\d{6}$")
+        self.assertEqual(otp["otp"], totp.totp(totp.parse_accounts(OTP_SECRET)[0]).at(MID_WINDOW))
         for call in session.calls:
             self.assertIs(call[2]["allow_redirects"], False)
         self.assertEqual(len(session.posts()), 2)
+
+    def test_the_one_code_sent_waits_for_the_next_window_when_the_current_one_is_ending(self):
+        waits = []
+        code_at(self, 1_800_000_027.0, waits)  # 3 s left in the window
+        session = FakeSession(login_routes(otp_result="otp"))
+        with self.assertRaises(LoginRejected):
+            keycloak.ADAPTER.login(KEY, session=session)
+        self.assertEqual(waits, [4])
+        self.assertEqual(len(session.posts()), 2)  # still exactly one code
 
     def test_login_without_a_totp_step_when_the_portal_does_not_ask(self):
         session = FakeSession(login_routes(credentials_result="app"))
@@ -418,6 +441,7 @@ def wired_rr(test):
     test.addCleanup(env.stop)
     patcher.start()
     env.start()
+    code_at(test, MID_WINDOW)
 
 
 def migration_export(accounts):

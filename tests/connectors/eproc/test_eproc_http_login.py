@@ -51,6 +51,7 @@ class ClassicFormDetection(unittest.TestCase):
         session.post.assert_not_called()
 
 
+@patch("jurisync.core.totp.FRESH_CODE_SECONDS", 0)  # the first code is sent at once, never after a wait
 class CertificateFlow(unittest.TestCase):
     def test_password_then_a3_then_totp_reach_the_panel(self):
         cert = Response(
@@ -117,6 +118,7 @@ class CertificateFlow(unittest.TestCase):
                 http_login.login("u", "p", ACCOUNT, portal="tjmg-1g", signer=Mock(), certificate=True)
 
 
+@patch("jurisync.core.totp.FRESH_CODE_SECONDS", 0)  # the first code is sent at once, never after a wait
 class PasswordFlow(unittest.TestCase):
     """ "Entrar": the password alone goes to index.php, then the TOTP (JFRJ, JFES, TJMG without a token)."""
 
@@ -269,6 +271,7 @@ def tjto_session(gets, posts):
     return session
 
 
+@patch("jurisync.core.totp.FRESH_CODE_SECONDS", 0)  # the first code is sent at once, never after a wait
 class InfraCaptchaFlow(unittest.TestCase):
     def login(self, session, answers):
         solve = Mock(side_effect=answers)

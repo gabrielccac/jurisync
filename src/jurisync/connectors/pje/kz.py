@@ -721,6 +721,7 @@ def read_documents(process, document_ids, *, session, save=False):
             "extractionStatus": "request_failed",
             "text": "",
         }
+        step = "request"
         try:
             read = fetch_document(api, process_id, doc_id)
             item.update(status=read["status"], content_type=read["content_type"], bytes=read["bytes"])
@@ -732,9 +733,11 @@ def read_documents(process, document_ids, *, session, save=False):
                 item["extractionStatus"], item["text"] = extract_document_text(
                     content, item["content_type"], number, allow_unnumbered=True
                 )
+                step = "save"
                 if save:
                     item["savedAs"] = save_document(_saved_name(number, doc_id, content, item), content)
-        except (RequestException, OSError):
-            item.update(extractionStatus="request_failed", text="")
+        except (RequestException, OSError) as error:
+            # As ``documents.read_selected_documents``: the step and the error's class, never its URL-bearing message.
+            item.update(extractionStatus="request_failed", text="", failure=f"{step} failed: {type(error).__name__}")
         results.append(item)
     return results

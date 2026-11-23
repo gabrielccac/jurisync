@@ -269,9 +269,10 @@ def fresh_code(account, *, clock=time.time, sleep=time.sleep):
     return totp(account).at(now)
 
 
-def answer_code(page, account, form_of, submit, *, label, pause=0, sleep=time.sleep):
-    """Answer a code form with the current code and, when the form comes back, once with the next window's (a
-    recent login may have spent the current one). Still asked after both: ``LoginRejected`` (``otp_refused``).
+def answer_code(page, account, form_of, submit, *, label, pause=0, clock=time.time, sleep=time.sleep):
+    """Answer a code form with the current code (``fresh_code``: the next window's when the current one is about to
+    end) and, when the form comes back, once with the next window's (a recent login may have spent the current one).
+    Still asked after both: ``LoginRejected`` (``otp_refused``).
 
     ``form_of(page)`` is the code form, None when no code is asked (``page`` is then returned as is);
     ``submit(page, form, code)`` sends it and returns the next page. ``account`` may be a callable, read only
@@ -284,7 +285,7 @@ def answer_code(page, account, form_of, submit, *, label, pause=0, sleep=time.sl
         account = account() if callable(account) else account
         if attempt:
             sleep(pause)
-        page = submit(page, form, next_code(account) if attempt else totp(account).now())
+        page = submit(page, form, next_code(account) if attempt else fresh_code(account, clock=clock, sleep=sleep))
     if form_of(page) is not None:
         raise LoginRejected(f"{label} rejected the OTP", reason="otp_refused")
     return page

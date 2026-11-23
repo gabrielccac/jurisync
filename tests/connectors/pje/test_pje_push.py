@@ -41,6 +41,23 @@ class PjeNotificationChecks(unittest.TestCase):
             [i["process_number"] for i in items], ["0000001-11.2026.8.13.0024", "0000002-22.2026.8.13.0024"]
         )
 
+    def test_an_empty_process_table_with_numbers_elsewhere_is_not_an_empty_registry(self):
+        html = """<table id="f:processosCadastradosTable"><tr><th>Processo</th><th>Data de inclusão</th></tr></table>
+        <table id="f:other"><tr><th>Número</th></tr><tr><td>0000001-11.2026.8.13.0024</td></tr></table>
+        <div><span>0000002-22.2026.8.13.0024</span></div>"""
+        with self.assertRaises(RuntimeError) as raised:
+            push.parse_push_items(html)
+        message = str(raised.exception)
+        self.assertIn(
+            "tables seen: id=f:processosCadastradosTable heads=['Processo', 'Data de inclusão'] rows=0", message
+        )
+        self.assertIn("id=f:other heads=['Número']", message)
+        self.assertNotIn("0000001", message)
+        # Truly empty: an empty grid and no number anywhere, or the portal's own message.
+        self.assertEqual(push.parse_push_items(html.split('<table id="f:other">')[0]), [])
+        empty = "Não há nenhum processo cadastrado na sua lista de processos do Push. 0000001-11.2026.8.13.0024"
+        self.assertEqual(push.parse_push_items(f"<table><tr><th>Processo</th></tr></table><p>{empty}</p>"), [])
+
     def test_the_push_list_table_wins_over_another_grid_listing_processes(self):
         html = """<div id="f:relacionados"><table id="f:other"><tr><th>Processo</th><th>Data de inclusão</th>
         <th>Email alternativo</th><th>Observação</th></tr><tr><td>0000009-99.2026.8.08.0024</td><td></td><td></td><td></td></tr>

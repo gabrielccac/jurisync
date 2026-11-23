@@ -31,6 +31,30 @@ class SaveTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(sorted(item.name for item in self.folder.iterdir()), [".env"])
 
+    def test_a_value_with_a_line_break_is_refused_and_the_file_is_untouched(self):
+        path = self.folder / ".env"
+        path.write_text("ADVBOX_EMAIL=a@b.c\n")
+        with mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(path), "JURISYNC_CUSTOMER": ""}):
+            for value in ("abc\nJURISYNC_X=1", "abc\rJURISYNC_X=1"):
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, "ADVBOX_DEVICE_ID must be a single"):
+                    credentials.save("ADVBOX_DEVICE_ID", value)
+            self.assertNotIn("ADVBOX_DEVICE_ID", os.environ)
+        self.assertEqual(path.read_text(), "ADVBOX_EMAIL=a@b.c\n")
+
+    def test_the_file_is_written_through_a_new_temporary_file_never_a_fixed_name(self):
+        path = self.folder / ".env"
+        path.write_text("ADVBOX_EMAIL=a@b.c\n")
+        elsewhere = self.folder / "elsewhere"
+        elsewhere.write_text("keep\n")
+        (self.folder / ".env.tmp").symlink_to(elsewhere)  # a leftover (or planted) file at the old fixed name
+        with mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(path), "JURISYNC_CUSTOMER": ""}):
+            credentials.save("ADVBOX_DEVICE_ID", "abc")
+            with mock.patch("os.replace", side_effect=OSError), self.assertRaises(OSError):
+                credentials.save("ADVBOX_DEVICE_ID", "def")
+        self.assertEqual(path.read_text(), "ADVBOX_EMAIL=a@b.c\nADVBOX_DEVICE_ID=abc\n")
+        self.assertEqual(elsewhere.read_text(), "keep\n")
+        self.assertEqual(sorted(item.name for item in self.folder.iterdir()), [".env", ".env.tmp", "elsewhere"])
+
     def test_a_customer_checkout_writes_its_own_file(self):
         own = self.folder / "victor" / ".env"
         own.parent.mkdir()

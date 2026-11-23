@@ -134,6 +134,21 @@ class PendingVerificationTest(DeviceCase):
         self.login()
         self.assertEqual(self.advbox.logins, 2)
 
+    def test_expired_attempts_of_other_offices_are_dropped_on_any_read_or_new_attempt(self):
+        with credentials.scope("t1", ENV):
+            self.login()
+        later = advbox_session.time.time() + 16 * 60
+        with mock.patch.object(advbox_session.time, "time", return_value=later):
+            with credentials.scope("t2", ENV):
+                self.assertIsNone(advbox_session.pending_verification())
+            self.assertEqual(list(advbox_session._pending), [])  # t1's expired attempt went too
+        with credentials.scope("t1", ENV):
+            self.login()
+        with mock.patch.object(advbox_session.time, "time", return_value=later):
+            with credentials.scope("t2", ENV):
+                self.login()
+            self.assertEqual([key[0] for key in advbox_session._pending], ["t2"])
+
     def test_the_right_code_saves_the_session_without_rewriting_an_unchanged_device(self):
         self.login()
         with mock.patch.object(credentials, "save") as save:

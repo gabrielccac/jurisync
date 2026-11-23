@@ -4,6 +4,7 @@ from unittest import mock
 from urllib.parse import quote
 
 from jurisync.core.totp import (
+    answer_code,
     match_for_tribunal,
     next_code,
     parse_accounts,
@@ -98,6 +99,38 @@ class NextCodeTest(unittest.TestCase):
         code = next_code(account, sleep=waits.append, now=1_000_000_000)  # 10 s into a 30 s window
         self.assertEqual(waits, [21])
         self.assertEqual(len(code), 6)
+
+
+class AnswerCodeTest(unittest.TestCase):
+    def answer(self, now, forms=1):
+        """Answer ``forms`` code forms at ``now`` (a fake clock); next_code stands in for the next window."""
+        sent, waits = [], []
+        asked = iter([True] * forms + [False])
+        with mock.patch("jurisync.core.totp.next_code", return_value="next") as following:
+            answer_code(
+                "otp",
+                parse_accounts(SECRET)[0],
+                lambda page: "form" if next(asked) else None,
+                lambda page, form, code: sent.append(code) or "otp",
+                label="eproc",
+                clock=lambda: now,
+                sleep=waits.append,
+            )
+        return sent, waits, following
+
+    def test_the_first_code_is_the_current_one_mid_window(self):
+        sent, waits, _ = self.answer(1_800_000_010.0)
+        self.assertEqual((sent, waits), ([totp(parse_accounts(SECRET)[0]).at(1_800_000_010.0)], []))
+
+    def test_the_first_code_waits_for_the_next_window_when_the_current_one_is_ending(self):
+        sent, waits, following = self.answer(1_800_000_027.0)  # 3 s left
+        self.assertEqual(sent, ["next"])
+        self.assertEqual(following.call_args.kwargs, {"sleep": waits.append, "now": 1_800_000_027.0})
+
+    def test_a_second_form_still_gets_the_next_windows_code(self):
+        sent, waits, _ = self.answer(1_800_000_010.0, forms=2)
+        self.assertEqual(sent, [totp(parse_accounts(SECRET)[0]).at(1_800_000_010.0), "next"])
+        self.assertEqual(waits, [0])  # the pause before the second code
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ class MessageChecks(unittest.TestCase):
         self.assertEqual(a3.eproc_message("https://sso.tjsc.jus.br/x", text), "Invalid user")
 
 
+@patch("jurisync.core.totp.FRESH_CODE_SECONDS", 0)  # the first code is sent at once, never after a wait
 class KeycloakFlowChecks(unittest.TestCase):
     def test_certificate_host_must_be_a_sibling_court_host(self):
         login_page = page("https://keycloak-eks.tjrs.jus.br/realms/eproc/protocol/openid-connect/auth?x=1", "")

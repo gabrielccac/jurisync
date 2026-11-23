@@ -84,15 +84,20 @@ def _account_key():
     return credentials.tenant(), (credentials.env("ADVBOX_EMAIL") or "").strip().lower()
 
 
+def _drop_expired():
+    """Forget every expired verification, of any office (call with ``_pending_lock`` held): a long-running server
+    never keeps the ones nobody came back for."""
+    now = time.time()
+    for key in [key for key, pending in _pending.items() if now - pending.started > VERIFICATION_SECONDS]:
+        del _pending[key]
+
+
 def pending_verification():
     """The device verification waiting for a code for this office and account, or None."""
     key = _account_key()
     with _pending_lock:
-        pending = _pending.get(key)
-        if pending and time.time() - pending.started > VERIFICATION_SECONDS:
-            del _pending[key]
-            return None
-        return pending
+        _drop_expired()
+        return _pending.get(key)
 
 
 def _drop_verification():
@@ -255,6 +260,7 @@ class AdvboxSession:
             # Kept anyway: logging in again would only make ADVBOX send another code.
             problem = str(error)
         with _pending_lock:
+            _drop_expired()
             _pending[_account_key()] = _Verification(dict(self.jar), form, device, sent_to, time.time(), problem)
         self.jar = None
         if problem:

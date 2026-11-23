@@ -74,7 +74,7 @@ def _values(row):
 
 
 def _push_grid(soup):
-    """The Push grid and its headers; None when no grid lists a process (an empty registry).
+    """The Push grid and its headers; None for an empty registry (its message, or no process number on the page).
 
     Candidates are the tables with a "Processo" column of their own. Tables without a process row (an empty
     "Processos relacionados" tab, a layout table) drop out; then the Push list's own table wins (TJRJ:
@@ -97,7 +97,10 @@ def _push_grid(soup):
         )
     candidates = [t for t in tables if "Processo" in t["heads"]]
     listed = [t for t in candidates if t["rows"]]
-    if not listed and (candidates or not PROCESS_RE.search(soup.get_text(" "))):
+    text = soup.get_text(" ")
+    # Empty only when the page says so or names no process at all: an empty "Processo" table beside numbers listed
+    # in another structure is a grid this parser does not know, not an empty registry.
+    if not listed and (EMPTY_PUSH.search(text) or not PROCESS_RE.search(text)):
         return None
     for key in ("push", "full"):
         listed = [t for t in listed if t[key]] or listed
@@ -105,7 +108,7 @@ def _push_grid(soup):
         # Column names, ids and counts only: enough to fix the next portal without its data.
         seen = "; ".join(
             f"id={t['table'].get('id') or '-'} heads={[head[:40] for head in t['heads'][:8]]} rows={t['rows']}"
-            for t in (candidates or [t for t in tables if t["heads"]])[:8]
+            for t in ((listed and candidates) or [t for t in tables if t["heads"]])[:8]
         )
         raise RuntimeError(f"Could not uniquely identify the PJe Push process grid; tables seen: {seen or 'none'}")
     return listed[0]["table"], listed[0]["heads"]

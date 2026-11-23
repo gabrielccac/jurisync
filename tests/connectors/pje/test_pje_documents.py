@@ -196,6 +196,27 @@ class SelectedDocumentsChecks(unittest.TestCase):
             self.assertEqual(result["text"], "")
             reply.close.assert_called_once()
 
+    def test_a_failing_close_keeps_the_conclusive_status(self):
+        for chunks, expected, failure in (
+            ([b"123", b"456"], "too_large", None),
+            ([b"%PDF"], "extracted", None),
+            (None, "request_failed", "body failed: RequestException"),
+        ):
+            session = Mock()
+            reply = response()
+            reply.close.side_effect = RequestException("https://secret")
+            if chunks is None:
+                reply.iter_content.side_effect = RequestException("interrupted")
+            else:
+                reply.iter_content.return_value = iter(chunks)
+            session.get.return_value = reply
+            with (
+                patch.object(documents, "MAX_DOCUMENT_BYTES", 5),
+                patch.object(documents, "extract_document_text", return_value=("extracted", "texto")),
+            ):
+                result = documents.read_selected_documents(process(), ["456"], session=session)[0]
+            self.assertEqual((result["extractionStatus"], result.get("failure")), (expected, failure))
+
     def test_extraction_reports_unsupported_and_login_pages(self):
         for body, kind, status in (
             (b"", "text/html", "empty"),

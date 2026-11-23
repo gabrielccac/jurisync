@@ -175,9 +175,10 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                 try:
                     response.close()
                 except RequestException as error:
-                    item.update(
-                        extractionStatus="request_failed", text="", failure=f"close failed: {type(error).__name__}"
-                    )
+                    # Only when nothing was concluded: a close failure never hides "too_large", an HTTP error or a
+                    # read document, nor the step that failed first.
+                    if item["extractionStatus"] == "request_failed" and "failure" not in item:
+                        item.update(text="", failure=f"close failed: {type(error).__name__}")
         results.append(item)
     return results
 

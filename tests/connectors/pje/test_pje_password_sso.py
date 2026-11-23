@@ -1,9 +1,14 @@
 """Offline checks of the password + TOTP SSO entry for PJe-JT portals (TST). No portal requests."""
 
+import functools
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from jurisync.connectors.pje.auth import sso
+from jurisync.core import totp
+from jurisync.core.session_pool import LoginRejected
 
 
 def page(status, url, location=None, text=""):
@@ -111,10 +116,6 @@ def test_the_pdpj_theme_gets_the_cpf_as_digits_and_the_trf_theme_as_configured()
 
 
 def test_only_a_refusal_raises_login_rejected(monkeypatch):
-    import pytest
-
-    from jurisync.core.session_pool import LoginRejected
-
     form = '<form id="kc-form-login" action="https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/authenticate">'
     sso_url = "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth"
     monkeypatch.setattr(sso, "_sso_page", lambda session, url: page(200, sso_url, text=form))
@@ -141,7 +142,7 @@ def test_a_jt_landing_without_the_panel_text_is_confirmed_by_the_rest_api(monkey
     monkeypatch.setattr(
         sso, "_sso_page", lambda session, url: page(200, f"{base}/protocol/openid-connect/auth", text=form)
     )
-    monkeypatch.setattr(sso, "totp", lambda account: SimpleNamespace(now=lambda: "000000"))
+    monkeypatch.setattr(sso, "fresh_code", lambda account: "000000")
     loader = page(200, "https://pje.trt19.jus.br/pjekz/", text="<title>Processo Judicial Eletrônico</title>")
     session = Mock()
     session.post.side_effect = [
@@ -161,7 +162,28 @@ def test_a_jt_landing_without_the_panel_text_is_confirmed_by_the_rest_api(monkey
         page(200, f"{base}/login-actions/authenticate", text=otp),
         page(302, f"{base}/login-actions/authenticate", "https://pje.trt19.jus.br/pjekz/"),
     ]
-    import pytest
-
     with pytest.raises(RuntimeError, match="at https://pje.trt19.jus.br/consultaprocessual/"):
         sso.login_session("123.456.789-09", "pw", None, portal="trt19-1g")
+
+
+def test_the_one_code_sent_is_never_about_to_expire(monkeypatch):
+    base = "https://sso.cloud.pje.jus.br/auth/realms/pje"
+    form = f'<form id="kc-form-login" action="{base}/login-actions/authenticate">'
+    otp = f'<form id="kc-otp-login-form" action="{base}/login-actions/authenticate?step=otp">'
+    monkeypatch.setattr(
+        sso, "_sso_page", lambda session, url: page(200, f"{base}/protocol/openid-connect/auth", text=form)
+    )
+    account = totp.parse_accounts("JBSWY3DPEHPK3PXP")[0]
+    for now, expected_waits in ((1_800_000_010.0, []), (1_800_000_027.0, [4])):
+        waits = []
+        code = functools.partial(totp.fresh_code, clock=functools.partial(float, now), sleep=waits.append)
+        monkeypatch.setattr(sso, "fresh_code", code)
+        session = Mock()
+        session.post.side_effect = [page(200, f"{base}/login-actions/authenticate", text=otp)] * 2
+        monkeypatch.setattr(sso.requests, "Session", Mock(return_value=session))
+        with pytest.raises(LoginRejected):
+            sso.login_session("123.456.789-09", "pw", account, portal="trt19-1g")
+        assert waits == expected_waits
+        assert session.post.call_count == 2  # the credentials, then exactly one code
+        if not waits:
+            assert session.post.call_args.kwargs["data"]["otp"] == totp.totp(account).at(now)

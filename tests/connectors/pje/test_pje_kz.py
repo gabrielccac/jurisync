@@ -237,6 +237,30 @@ def test_document_read_uses_the_pdf_route_and_extracts(monkeypatch):
         process.read_documents(NUMBER, ["123"], portal="trt7-1g", session=session)
 
 
+def test_a_failed_document_read_names_the_step_and_error_class_only(monkeypatch):
+    from curl_cffi.requests.exceptions import RequestException
+
+    def interrupted(*args):
+        raise RequestException("https://pje.trt7.jus.br/secret?token=x")
+
+    def unwritable(name, content):
+        raise PermissionError("/private/path")
+
+    monkeypatch.setattr(kz, "fetch_document", interrupted)
+    document = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=Session())["documents"][0]
+    assert (document["extractionStatus"], document["failure"]) == ("request_failed", "request failed: RequestException")
+
+    monkeypatch.setattr(
+        kz, "fetch_document", lambda *args: {"status": 200, "content_type": "", "bytes": 1, "content": b"x"}
+    )
+    monkeypatch.setattr(kz, "extract_document_text", lambda *a, **k: ("extracted", "texto"))
+    monkeypatch.setattr(kz, "save_document", unwritable)
+    document = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=Session(), save=True)["documents"][
+        0
+    ]
+    assert (document["failure"], document["text"]) == ("save failed: PermissionError", "")
+
+
 def test_act_of_a_pending_expediente_is_refused_without_acknowledgement(monkeypatch):
     monkeypatch.setattr(kz, "extract_document_text", lambda *a, **k: ("extracted", "ato"))
     session = Session()
