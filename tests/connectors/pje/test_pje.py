@@ -108,6 +108,13 @@ class PjeChecks(unittest.TestCase):
             next(g for g in match.groups() if g),
             "/1g/seam/resource/rest/pje-legacy/documento/download/-1/1g/7878703/",
         )
+        # TJPA's viewer frame (anonymized shape of its detail page): the PDF URL ends in "#toolbar=0".
+        frame = (
+            '<iframe id="frameBinario" src="/pje/seam/resource/rest/pje-legacy/documento/download/151000001'
+            '#toolbar=0" width="100%" height="100%" style="border:5px #000000 solid"></iframe>'
+        )
+        match = search.DOWNLOAD_PATTERN.search(frame)
+        self.assertEqual(next(g for g in match.groups() if g), "/pje/seam/resource/rest/pje-legacy/documento/download/")
 
     def test_cross_tribunal_number_fails_before_login(self):
         with patch.object(client, "login_portal") as login, self.assertRaisesRegex(ValueError, "TRF5"):

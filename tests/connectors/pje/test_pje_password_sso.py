@@ -8,7 +8,7 @@ import pytest
 
 from jurisync.connectors.pje.auth import sso
 from jurisync.core import totp
-from jurisync.core.session_pool import LoginRejected
+from jurisync.core.session_pool import LoginFailed, LoginRejected
 
 
 def page(status, url, location=None, text=""):
@@ -95,8 +95,63 @@ def test_a_keycloak_flow_error_is_not_a_password_refusal():
 
 def test_a_bare_invalid_elsewhere_on_the_page_is_not_a_password_refusal():
     html = '<form id="kc-form-login"></form><div class="alert alert-error"><span class="kc-feedback-text">Sessão inválida</span></div>'
-    assert sso.credential_failure(html)[0] == "unknown"
+    assert sso.credential_failure(html)[0] == "flow"
     assert sso.credential_failure("<p>invalid request id</p>")[0] == "unknown"
+    other = '<div id="kc-error-message"><p>Parâmetro inválido: redirect_uri</p></div>'
+    assert sso.credential_failure(other)[0] == "unknown"
+
+
+def alert(message, theme="pje-v2"):
+    if theme == "pdpj":
+        return f'<div id="kc-error-message"><p class="instruction">{message}</p></div>'
+    return f'<form id="loginForm"></form><div class="alert alert-error"><span class="kc-feedback-text">{message}</span></div>'
+
+
+# The Keycloak messages (pt-BR and en) of the credential step, as the PDPJ themes render them.
+REFUSALS = (
+    "Usuário ou senha inválidos.",
+    "Nome de usuário ou senha inválida.",
+    "Invalid username or password.",
+    "Invalid username, email or password.",
+    "Credenciais inválidas",
+)
+FLOW = (
+    "Cookie não encontrado. Favor habilitar os cookies no seu navegador.",
+    "Cookie not found. Please make sure cookies are enabled in your browser.",
+    "O tempo de tentativa de login expirou. O login será reiniciado desde o início.",
+    "Your login attempt timed out. Login will start from the beginning.",
+    "Página expirou.",
+    "Page has expired. Please restart the login process.",
+    "Ação expirada. Por favor, continue com o login agora.",
+    "Sessão de autenticação expirada ou inválida",
+    "Requisição inválida",
+    "Invalid Request",
+    "Você já está autenticado.",
+    "You are already logged in.",
+    "Erro inesperado ao autenticar com provedor de identidade",
+)
+
+
+@pytest.mark.parametrize("message", REFUSALS)
+@pytest.mark.parametrize("theme", ["pje-v2", "pdpj"])
+def test_each_keycloak_refusal_is_credentials_refused_with_its_text(message, theme):
+    error = sso.credential_refusal(alert(message, theme))
+    assert type(error) is LoginRejected and error.reason == "credentials_refused"
+    assert f'SSO message: "{message}"' in str(error)
+
+
+@pytest.mark.parametrize("message", FLOW)
+@pytest.mark.parametrize("theme", ["pje-v2", "pdpj"])
+def test_each_keycloak_flow_error_is_a_retryable_login_failure_with_its_text(message, theme):
+    error = sso.credential_refusal(alert(message, theme))
+    assert type(error) is LoginFailed and error.reason == "unexpected" and error.flow_error
+    assert f'SSO message: "{message}"' in str(error)
+
+
+def test_expired_password_and_blocked_account_keep_their_reasons():
+    assert sso.credential_refusal(alert("Senha expirada.")).reason == "password_expired"
+    assert sso.credential_refusal(alert("Conta desativada.")).reason == "blocked"
+    assert not getattr(sso.credential_refusal(alert("Parâmetro inválido: client_id")), "flow_error", True)
 
 
 def test_a_disabled_account_is_told_apart_and_identifiers_are_masked():
@@ -119,7 +174,7 @@ def test_only_a_refusal_raises_login_rejected(monkeypatch):
     form = '<form id="kc-form-login" action="https://sso.cloud.pje.jus.br/auth/realms/pje/login-actions/authenticate">'
     sso_url = "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth"
     monkeypatch.setattr(sso, "_sso_page", lambda session, url: page(200, sso_url, text=form))
-    for answer, error in ((PDPJ_FIELD_ERROR, LoginRejected), (PDPJ_ERROR_PAGE, RuntimeError)):
+    for answer, error, posts in ((PDPJ_FIELD_ERROR, LoginRejected, 1), (PDPJ_ERROR_PAGE, LoginFailed, 2)):
         posted = page(200, sso_url, text=answer)
         session = Mock()
         session.post.return_value = posted
@@ -127,7 +182,28 @@ def test_only_a_refusal_raises_login_rejected(monkeypatch):
         with pytest.raises(error) as raised:
             sso.login_session("123.456.789-09", "pw", None, portal="tst")
         assert type(raised.value) is error
+        # A refusal is never sent again; a flow error gets one fresh attempt, then says it happened twice.
+        assert session.post.call_count == posts
+        assert ("twice" in str(raised.value)) is (posts == 2)
         assert session.post.call_args.kwargs["data"]["username"] == "12345678909"
+
+
+def test_a_flow_error_then_a_good_login_succeeds_on_a_fresh_session(monkeypatch):
+    base = "https://sso.cloud.pje.jus.br/auth/realms/pje"
+    form = f'<form id="kc-form-login" action="{base}/login-actions/authenticate">'
+    otp = f'<form id="kc-otp-login-form" action="{base}/login-actions/authenticate?step=otp">'
+    monkeypatch.setattr(
+        sso, "_sso_page", lambda session, url: page(200, f"{base}/protocol/openid-connect/auth", text=form)
+    )
+    first, second = Mock(), Mock()
+    first.post.return_value = page(200, f"{base}/login-actions/authenticate", text=PDPJ_ERROR_PAGE)
+    second.post.return_value = page(200, f"{base}/login-actions/authenticate", text=otp)
+    monkeypatch.setattr(sso.requests, "Session", Mock(side_effect=[first, second]))
+    monkeypatch.setattr(sso, "fresh_code", lambda account: "000000")
+    # The second attempt, on a new session, reaches the OTP step (whose answer here does not redirect).
+    with pytest.raises(LoginRejected, match="OTP submission"):
+        sso.login_session("123.456.789-09", "pw", None, portal="tst")
+    assert first.post.call_count == 1 and second.post.call_count == 2
 
 
 def test_a_jt_landing_without_the_panel_text_is_confirmed_by_the_rest_api(monkeypatch):

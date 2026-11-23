@@ -4,6 +4,7 @@ from io import BytesIO
 
 from bs4 import BeautifulSoup
 
+from jurisync.core import ocr
 from jurisync.core.transcription import transcribe_bytes
 
 MAX_EXTRACTED_CHARACTERS = 1_000_000
@@ -79,13 +80,28 @@ def _without_lone_surrogates(text):
     return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
 
 
+def _ocr(content, page_count):
+    """A scanned PDF (images, no text layer) read by the optional local OCR: ``extracted_ocr``, or
+    ``extracted_ocr_partial`` when its page or time limit left pages unread; ``ocr_needed`` when OCR is unavailable
+    or finds nothing."""
+    found = ocr.ocr_pdf(content, page_count)
+    if found is None:
+        return "ocr_needed", ""
+    text, complete = found
+    text = _without_lone_surrogates(" ".join(text.split())[:MAX_EXTRACTED_CHARACTERS])
+    if not text:
+        return "ocr_needed", ""
+    return ("extracted_ocr" if complete else "extracted_ocr_partial"), text
+
+
 def extract_document_text(content, content_type="", process_number="", *, allow_unnumbered=False):
     """Return ``(status, text)`` without treating portal/error pages as evidence.
 
     HTML that does not print the process number is normally rejected as an unknown page. With
     ``allow_unnumbered`` (for callers that already fetched the document by a process-bound ID), a
     substantial page without error or login markers is returned as ``extracted_unnumbered``; a short one,
-    also without markers, as ``short_html`` (text included, not vouched for).
+    also without markers, as ``short_html`` (text included, not vouched for). A scanned PDF is read by the local
+    OCR when it is installed (``extracted_ocr``/``extracted_ocr_partial``), else reported as ``ocr_needed``.
     """
     if not content or not content.strip():
         return "empty", ""
@@ -118,7 +134,7 @@ def extract_document_text(content, content_type="", process_number="", *, allow_
             text = _without_lone_surrogates(" ".join(" ".join(pages).split())[:MAX_EXTRACTED_CHARACTERS])
             if text:
                 return "extracted", text
-            return ("ocr_needed", "") if _pdf_has_images(reader) else ("empty", "")
+            return _ocr(content, len(reader.pages)) if _pdf_has_images(reader) else ("empty", "")
         except Exception:
             return "pdf_parse_error", ""
     if "html" not in content_type.casefold() and not looks_html:

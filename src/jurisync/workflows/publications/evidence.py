@@ -281,7 +281,7 @@ def _document_metadata(records, timeline):
         text = record.get("text")
         if text is not None and not isinstance(text, str):
             raise PublicationError("document text must be a string when present")
-        is_extracted = status == 200 and extraction_status == "extracted" and bool(text and text.strip())
+        is_extracted = status == 200 and extraction_status.startswith("extracted") and bool(text and text.strip())
         metadata = {
             "id": doc_id,
             "title": title,

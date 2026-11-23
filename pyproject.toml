@@ -48,6 +48,9 @@ jurisync-hosted = "jurisync.hosted.cli:main"
 transcription = ["faster-whisper==1.1.1", "av==13.1.0"]
 # Local OCR tried first on short image CAPTCHAs (TJTO Eproc) before the vision model.
 captcha-ocr = ["ddddocr==1.6.1"]
+# Local OCR of scanned PDFs (core/ocr.py): the PDFium and ONNX runtime libraries pdf-inspector loads, found in these
+# wheels when PDFIUM_LIB_PATH / ORT_DYLIB_PATH are unset. Its models must already be in the pdf-inspector cache.
+pdf-ocr = ["pypdfium2==4.30.0", "onnxruntime==1.30.0"]
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.10"]

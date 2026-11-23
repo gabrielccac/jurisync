@@ -45,7 +45,8 @@ DETAIL_SUFFIX = {"1g": "&aba=", "2g": ""}
 DOWNLOAD_PATTERN = re.compile(
     r"window\.open\('([^']*/documento/download/[A-Za-z0-9]+/[^']*/\d+/)'"
     r"|var url\s*=\s*'([^']*/seam/resource/rest/pje-legacy/documento/download/[^']*/)'\s*\+\s*idDocumento"
-    r"|<(?:iframe|embed)[^>]*\ssrc=\"([^\"]*/seam/resource/rest/pje-legacy/documento/download/)\d+\""
+    # TJPA's viewer frame shows the PDF without the toolbar: src=".../documento/download/<id>#toolbar=0".
+    r"|<(?:iframe|embed)[^>]*\ssrc=\"([^\"]*/seam/resource/rest/pje-legacy/documento/download/)\d+(?:#[^\"]*)?\""
 )
 
 

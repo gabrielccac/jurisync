@@ -502,3 +502,57 @@ def test_trt_portals_use_the_national_pattern():
         assert config.root == ("/primeirograu/" if grade == "1g" else "/segundograu/")
         assert config.env_prefix == f"TRT{number}_{grade.upper()}"
         assert portals.pje(key).auth == "certificate_totp"
+
+
+def test_reading_documents_after_the_process_reuses_its_lookup_but_rereads_the_expedientes(monkeypatch):
+    """get_process then read_documents on one session: the lookup, record, parties and timeline are not asked
+    again within MEMO_SECONDS; the expedientes (ciência state) always are."""
+    monkeypatch.setattr(kz, "extract_document_text", lambda *a, **k: ("extracted", "texto"))
+    clock = [1000.0]
+    monkeypatch.setattr(kz.time, "monotonic", lambda: clock[0])
+    session = Session()
+    process.fetch_process(NUMBER, "page", portal="trt7-1g", session=session)
+    first = len(session.calls)
+    session.calls.clear()
+    result = process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=session)
+    assert result["documents"][0]["extractionStatus"] == "extracted"
+    paths = [path for path, _ in session.calls]
+    assert not any(path.endswith(("/api/processos", "/processos/id/1000001", "/partes", "/timeline")) for path in paths)
+    assert any(path.endswith("/expedientes") for path in paths)
+    assert len(paths) < first
+
+    clock[0] += kz.MEMO_SECONDS + 1
+    session.calls.clear()
+    process.read_documents(NUMBER, ["9000005"], portal="trt7-1g", session=session)
+    assert any(path.endswith("/timeline") for path, _ in session.calls)  # expired: looked up again
+
+
+def test_a_read_whose_parties_failed_is_not_remembered(monkeypatch):
+    session = Session()
+    original = session.get
+
+    def no_parties(url, params=None, headers=None, **kwargs):
+        if url.endswith("/partes"):
+            session.calls.append((url, {}))
+            return Response(500, {"codigoErro": "X"})
+        return original(url, params, headers, **kwargs)
+
+    session.get = no_parties
+    process.fetch_process(NUMBER, "page", portal="trt7-1g", session=session)
+    session.calls.clear()
+    process.fetch_process(NUMBER, "page", portal="trt7-1g", session=session)
+    assert any(path.endswith("/timeline") for path, _ in session.calls)
+
+
+def test_a_document_may_take_minutes_before_its_first_byte():
+    session = Session()
+    seen = []
+    original = session.get
+
+    def recording(url, params=None, headers=None, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        return original(url, params, headers, **kwargs)
+
+    session.get = recording
+    kz.fetch_document(kz.Api(session, "trt7-1g"), "1000001", "9000005")
+    assert seen[-1] == kz.DOCUMENT_TIMEOUT and kz.DOCUMENT_TIMEOUT[1] >= 120

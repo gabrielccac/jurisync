@@ -19,8 +19,9 @@ from jurisync.paths import user_cache
 def auth_method(portal):
     """How this install logs in to the portal.
 
-    A portal registered with a certificate (TRF5) also accepts its own username, password and TOTP: the
-    password flow is used only when no A1 certificate is configured (``PJE_A1_P12``) and all three are set.
+    A portal registered with a certificate (TRF5, TRTs) also accepts its own username, password and TOTP: the
+    password flow is used when no A1 certificate is configured (``PJE_A1_P12``) and the username and password are.
+    Without the authenticator that login then says so, instead of asking for a certificate the account never had.
 
     Any other PJe portal uses the certificate when one is configured (``PJE_A1_P12``) and the portal
     opts in with ``<PREFIX>_CERT=true``; the certificate flow asks for TOTP only if the SSO does.
@@ -31,11 +32,9 @@ def auth_method(portal):
     if (config.env("AUTH") or credentials.env("PJE_AUTH")).strip().lower() == "a3":
         return "a3_totp"
     certificate = credentials.has("PJE_A1_P12")
-    password_ready = all(config.env(name) for name in ("USERNAME", "PASSWORD")) and bool(
-        config.env("2FA_DATA") or config.env("2FA_QR")
-    )
+    password = all(config.env(name) for name in ("USERNAME", "PASSWORD"))
     if config.auth == "certificate_totp":
-        return "password_totp" if password_ready and not certificate else "certificate_totp"
+        return "password_totp" if password and not certificate else "certificate_totp"
     if config.uses_certificate():
         return "certificate_totp"
     return config.auth

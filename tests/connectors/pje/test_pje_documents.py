@@ -161,6 +161,54 @@ class SelectedDocumentsChecks(unittest.TestCase):
         self.assertEqual(read(login)[0]["failure"], "the portal served text/html, not the document (session_expired)")
         self.assertNotIn("failure", read(response())[0])
 
+    def test_a_large_pdf_may_take_minutes_to_start_and_a_silent_portal_is_named(self):
+        """TJBA prepared an 860 KB petição for 67 s before its first byte: the old 30 s limit cut every such read."""
+        from curl_cffi.requests.exceptions import Timeout
+
+        session = Mock()
+        session.get.return_value = response()
+        documents.read_selected_documents(process(), ["456"], session=session)
+        timeout = session.get.call_args.kwargs["timeout"]
+        self.assertEqual(timeout, (documents.CONNECT_SECONDS, documents.FIRST_BYTE_SECONDS))
+        self.assertGreaterEqual(documents.FIRST_BYTE_SECONDS, 120)
+        # Nothing in time, then the document (the portal finished preparing it): read on the second request.
+        session = Mock()
+        session.get.side_effect = [Timeout("https://secret"), response()]
+        result = documents.read_selected_documents(process(), ["456"], session=session)[0]
+        self.assertEqual((result["extractionStatus"], session.get.call_count), ("extracted", 2))
+        # Nothing twice: named, never retried a third time, no URL.
+        session = Mock()
+        session.get.side_effect = Timeout("https://secret")
+        result = documents.read_selected_documents(process(), ["456"], session=session)[0]
+        self.assertEqual(result["extractionStatus"], "request_failed")
+        seconds = documents.CONNECT_SECONDS + documents.FIRST_BYTE_SECONDS
+        self.assertTrue(
+            result["failure"].startswith(f"request failed: Timeout (the portal sent nothing for {seconds} s, twice")
+        )
+        self.assertEqual(session.get.call_count, 2)
+        self.assertNotIn("secret", str(result))
+        # Other request errors are not repeated.
+        session = Mock()
+        session.get.side_effect = RequestException("https://secret")
+        documents.read_selected_documents(process(), ["456"], session=session)
+        self.assertEqual(session.get.call_count, 1)
+
+    def test_a_body_past_its_deadline_and_documents_past_the_call_budget_are_not_read(self):
+        data = process()
+        second = {"id": "789", "title": "Anexo", "download_url": URL[:-3] + "789"}
+        data["timeline"][0]["movements"][0]["documents"].append(second)
+        clock = iter([0.0, 1.0, 1.0, documents.DOCUMENT_SECONDS + 2.0, documents.CALL_SECONDS + 1.0])
+        session = Mock()
+        reply = response()
+        reply.iter_content.return_value = iter([b"%PDF-", b"rest"])
+        session.get.return_value = reply
+        with patch.object(documents.time, "monotonic", lambda: next(clock)):
+            first, late = documents.read_selected_documents(data, ["456", "789"], session=session)
+        self.assertEqual(first["extractionStatus"], "request_failed")
+        self.assertEqual(first["failure"], f"body failed: not received within {documents.DOCUMENT_SECONDS} s")
+        self.assertEqual((late["extractionStatus"], late["failure"]), ("not_attempted", documents.OUT_OF_TIME))
+        self.assertEqual(session.get.call_count, 1)
+
     def test_a_document_without_a_download_link_is_reported_not_fetched(self):
         data = process()
         data["timeline"][0]["movements"][0]["documents"][0]["download_url"] = None

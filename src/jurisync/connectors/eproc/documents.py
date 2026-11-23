@@ -200,7 +200,7 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
             result["extractionStatus"], result["text"] = extract_document_text(body, result["content_type"], number)
             # A scanned PDF has no text layer but is still the original the user asked to keep.
             scanned = result["format"] == "pdf" and result["extractionStatus"] in ("ocr_needed", "empty")
-            if save and (result["extractionStatus"] == "extracted" or scanned):
+            if save and (result["extractionStatus"].startswith("extracted") or scanned):
                 result["savedAs"] = _save(number, document["id"], body, result)
         except ValueError:
             raise

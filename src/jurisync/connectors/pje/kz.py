@@ -11,9 +11,13 @@ needs every expediente of the process, so ``read_expedientes`` reads all pages a
 """
 
 import base64
+import copy
 import hashlib
 import json
 import re
+import threading
+import time
+import weakref
 from datetime import datetime
 
 from curl_cffi.requests.exceptions import RequestException
@@ -46,7 +50,7 @@ class Api:
         self.origin = f"https://{self.config.host}"
         self._claims = None
 
-    def _get(self, path, params=None, *, label, headers=None, stream=False):
+    def _get(self, path, params=None, *, label, headers=None, stream=False, timeout=TIMEOUT):
         url = self.origin + path
         response = self.session.get(
             url,
@@ -54,7 +58,7 @@ class Api:
             headers=headers or {},
             impersonate=IMPERSONATE,
             allow_redirects=False,
-            timeout=TIMEOUT,
+            timeout=timeout,
             stream=stream,
         )
         log_request("GET", url, response.status_code)
@@ -527,6 +531,34 @@ def parse_details(process):
     }
 
 
+# As ``search._memo`` for the JSF portals: get_process, read_documents and read_expediente_ato on one process each
+# looked it up and read its record, parties and timeline again. Those are kept a few minutes per session; the
+# expedientes are read on every call, because opening a document or an act may register a ciência.
+MEMO_SECONDS = 180
+_memo = weakref.WeakKeyDictionary()  # session -> {process number: (time, process id, record, parties, timeline)}
+_memo_guard = threading.Lock()
+
+
+def _recall(session, number):
+    with _memo_guard:
+        entry = _memo.get(session, {}).get(number)
+    if entry is None or time.monotonic() - entry[0] > MEMO_SECONDS:
+        return None
+    return copy.deepcopy(entry[1:])
+
+
+def _remember(session, number, process_id, process, parties, raw):
+    try:
+        with _memo_guard:
+            _memo.setdefault(session, {})[number] = (
+                time.monotonic(),
+                process_id,
+                *copy.deepcopy((process, parties, raw)),
+            )
+    except TypeError:
+        pass  # a session that cannot be weakly referenced is not remembered
+
+
 def _process_id(api, number):
     response = api.get("/processos", {"numero": number}, label="PJe process lookup")
     found = response.text.strip().strip('"')
@@ -549,28 +581,35 @@ def search_process(
     parts = parse_process_number(process_number)
     canonical = "{}-{}.{}.{}.{}.{}".format(*parts)
     api = Api(session, portal)
-    process_id = _process_id(api, canonical)
-    if not process_id:
-        return {"success": False, "error": "Process not found or not visible to this user", "timeline": []}
-    process = api.json(f"/processos/id/{process_id}", label="PJe process")
-    if process.get("numero") != canonical:
-        return {
-            "success": False,
-            "error": "Process returned does not match the requested number",
-            "processo_id": process_id,
-            "timeline": [],
-        }
     diagnostics = []
-    try:
-        parties = parse_parties(api.json(f"/processos/id/{process_id}/partes", label="PJe parties"))
-    except RuntimeError as error:
-        parties = {}
-        diagnostics.append({"code": "parties_unavailable", "message": str(error)[:200]})
-    raw = api.json(
-        f"/processos/id/{process_id}/timeline",
-        {"somenteDocumentosAssinados": "false", "buscarMovimentos": "true", "buscarDocumentos": "true"},
-        label="PJe timeline",
-    )
+    kept = _recall(session, canonical)
+    if kept is not None:
+        process_id, process, parties, raw = kept
+    else:
+        process_id = _process_id(api, canonical)
+        if not process_id:
+            return {"success": False, "error": "Process not found or not visible to this user", "timeline": []}
+        process = api.json(f"/processos/id/{process_id}", label="PJe process")
+        if process.get("numero") != canonical:
+            return {
+                "success": False,
+                "error": "Process returned does not match the requested number",
+                "processo_id": process_id,
+                "timeline": [],
+            }
+        try:
+            parties = parse_parties(api.json(f"/processos/id/{process_id}/partes", label="PJe parties"))
+        except RuntimeError as error:
+            parties = None
+            diagnostics.append({"code": "parties_unavailable", "message": str(error)[:200]})
+        raw = api.json(
+            f"/processos/id/{process_id}/timeline",
+            {"somenteDocumentosAssinados": "false", "buscarMovimentos": "true", "buscarDocumentos": "true"},
+            label="PJe timeline",
+        )
+        if parties is not None:
+            _remember(session, canonical, process_id, process, parties, raw)  # an incomplete read is not kept
+        parties = parties or {}
     truncated = len(raw) > MAX_TIMELINE
     raw = raw[:MAX_TIMELINE]
     timeline = parse_timeline(raw)
@@ -661,6 +700,10 @@ def _ato(api, process_id, number, item, limit):
 # -- documents -----------------------------------------------------------------
 
 
+# As ``documents._download``: a portal may render a large PDF for a minute before its first byte.
+DOCUMENT_TIMEOUT = (15, 150)
+
+
 def fetch_document(api, process_id, document_id):
     """GET the PDF of a joined document, capped at ``MAX_DOCUMENT_BYTES``; ``content`` is None when not read."""
     out = {"status": None, "content_type": "", "bytes": 0, "content": None}
@@ -670,6 +713,7 @@ def fetch_document(api, process_id, document_id):
         label="PJe document",
         headers={"Accept": "application/pdf,text/html,*/*"},
         stream=True,
+        timeout=DOCUMENT_TIMEOUT,
     )
     try:
         out.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))

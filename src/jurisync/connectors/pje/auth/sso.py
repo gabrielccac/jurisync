@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Shared PJe SSO (Keycloak) and TOTP authentication."""
 
+import logging
 import re
 from urllib.parse import urljoin, urlsplit
 
@@ -10,8 +11,10 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.core.http import IMPERSONATE, TIMEOUT, log_request, require_url
 from jurisync.core.redaction import url_shape
-from jurisync.core.session_pool import LoginRejected
+from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import fresh_code
+
+log = logging.getLogger(__name__)
 
 SSO_HOST = "sso.cloud.pje.jus.br"
 ALLOWED_HOSTS = portals.hosts("pje") | {SSO_HOST}
@@ -61,7 +64,28 @@ WRONG_CREDENTIALS = (
 )
 EXPIRED_PASSWORD = ("senha expirada", "password expired", "expired password")
 ACCOUNT_BLOCKED = ("conta desativada", "conta bloqueada", "temporariamente", "account is disabled", "account disabled")
-FLOW_ERRORS = ("cookie", "expirou", "expired", "tempo esgotado", "timeout", "erro inesperado", "unexpected error")
+# Keycloak's own flow messages (pt-BR and en): the login session or its cookie was lost or timed out, the request
+# was out of step ("Invalid Request", "Você já está autenticado"). None says anything about the password.
+FLOW_ERRORS = (
+    "cookie",
+    "expirou",
+    "expirad",
+    "expired",
+    "tempo esgotado",
+    "timeout",
+    "timed out",
+    "sessão",
+    "sessao",
+    "session",
+    "requisição inválida",
+    "solicitação inválida",
+    "invalid request",
+    "já está autenticado",
+    "já está logado",
+    "already logged in",
+    "erro inesperado",
+    "unexpected error",
+)
 
 
 def alert_text(soup):
@@ -114,10 +138,12 @@ def credential_failure(html):
 REFUSED_KINDS = {"credentials": "credentials_refused", "expired": "password_expired", "blocked": "blocked"}
 
 
-def credential_refusal(html, other=RuntimeError, detail=""):
+def credential_refusal(html, other=LoginFailed, detail=""):
     """The exception for a credential POST that did not reach the OTP step (PJe and JPe share this SSO).
 
-    A refusal is ``LoginRejected`` with its reason; anything else is ``other`` (``captcha`` for a WAF page).
+    A refusal is ``LoginRejected`` with its reason; anything else is ``other`` (``captcha`` for a WAF page). A
+    Keycloak flow error (lost login session or cookie, timeout, out-of-step request) is marked ``flow_error``:
+    nothing was refused, so one fresh login may follow.
     """
     kind, message = credential_failure(html)
     message = f"{message} ({detail})" if detail else message
@@ -125,6 +151,7 @@ def credential_refusal(html, other=RuntimeError, detail=""):
         return LoginRejected(message, reason=REFUSED_KINDS[kind])
     error = other(message)
     error.reason = "captcha" if kind == "waf" else "unexpected"
+    error.flow_error = kind == "flow"
     return error
 
 
@@ -201,6 +228,26 @@ def credentials_form(username, password, form_id):
 
 
 def login_session(username, password, account, app_url=None, expected_app_host=None, portal=None):
+    """Password + TOTP login through the PDPJ SSO.
+
+    A Keycloak flow error at the credential step (no OTP form, nothing refused) gets one fresh attempt on a new
+    session; a refusal, a WAF page or a second flow error is raised as is.
+    """
+    try:
+        return _login_once(username, password, account, app_url, expected_app_host, portal)
+    except LoginFailed as error:
+        if not getattr(error, "flow_error", False):
+            raise
+        log.info("PJe SSO interrupted the login flow (%s); one fresh attempt", error)
+    try:
+        return _login_once(username, password, account, app_url, expected_app_host, portal)
+    except LoginFailed as error:
+        if getattr(error, "flow_error", False):
+            error.args = (f"{error} (twice in a row, on two fresh login sessions)",)
+        raise
+
+
+def _login_once(username, password, account, app_url, expected_app_host, portal):
     config = portals.pje(portal or "trf1-2g")
     app_url = app_url or config.login_url
     expected_app_host = expected_app_host or config.host

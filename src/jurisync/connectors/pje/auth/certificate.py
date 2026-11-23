@@ -17,8 +17,8 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
 from jurisync.connectors.pje.auth.sso import https_pje, require_allowed_url
-from jurisync.core import awswaf
-from jurisync.core.certificate import load_configured
+from jurisync.core import awswaf, credentials
+from jurisync.core.certificate import credential_names, load_configured
 from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
 from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginFailed, LoginRejected, MissingLogin
@@ -214,7 +214,18 @@ def cert_login(portal, twofa_data=None, session=None, *, pin=None, p12_path=None
     """
     config = portals.pje(portal)
     account = _twofa(portal, twofa_data)
-    signer = native_signer.A1Signer(*load_configured(pin=pin, p12_path=p12_path))
+    try:
+        signer = native_signer.A1Signer(*load_configured(pin=pin, p12_path=p12_path))
+    except MissingLogin:
+        file_name, pin_name = credential_names()
+        if p12_path is not None or credentials.has(file_name):
+            raise
+        # No certificate at all: "set the PIN" would point at a login this account never had.
+        raise MissingLogin(
+            f"No login is configured for {config.key}: set {config.env_name('USERNAME')}, "
+            f"{config.env_name('PASSWORD')} and {config.env_name('2FA_DATA')} (or {config.env_name('2FA_QR')}) for "
+            f"the password login, or {file_name} and {pin_name} for the A1 certificate"
+        ) from None
     try:
         return _login(session or requests.Session(), config, account, signer)
     except RuntimeError as error:

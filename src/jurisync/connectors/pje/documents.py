@@ -6,9 +6,10 @@ Do not expose this function over HTTP with caller-supplied process results.
 
 import hashlib
 import re
+import time
 from urllib.parse import urljoin, urlsplit
 
-from curl_cffi.requests.exceptions import RequestException
+from curl_cffi.requests.exceptions import RequestException, Timeout
 
 from jurisync import portals
 from jurisync.connectors.pje import jsf
@@ -32,6 +33,9 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     The fetch is bound to the process (ID and download path), so HTML that omits the process number is
     still accepted as ``extracted_unnumbered`` when it is a substantial page without error markers.
     With ``save`` the original bytes are written to the shared documents folder and reported as ``savedAs``.
+    A PDF can take minutes before its first byte (TJBA prepares it first, then keeps it ready), so each request
+    waits ``FIRST_BYTE_SECONDS``, one that got nothing is made once more, and the body must arrive within
+    ``DOCUMENT_SECONDS``; once the call has spent ``CALL_SECONDS`` the remaining documents are not requested.
     """
     portal = process.get("portal")
     try:
@@ -113,6 +117,7 @@ def read_selected_documents(process, document_ids, *, session, save=False):
         selected.append((document, url))
     viewer = process.get("viewer")
     results = []
+    call_deadline = time.monotonic() + CALL_SECONDS
     for document, url in selected:
         item = {
             "id": document["id"],
@@ -128,10 +133,15 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             item.update(extractionStatus="no_download_location", failure=failure)
             results.append(item)
             continue
+        if time.monotonic() > call_deadline:
+            item.update(extractionStatus="not_attempted", failure=OUT_OF_TIME)
+            results.append(item)
+            continue
         response = None
         step = "request"
+        deadline = time.monotonic() + DOCUMENT_SECONDS
         try:
-            response = _download(session, config, url)
+            response = _download_patiently(session, config, url)
             action = document.get("viewer_action")
             # TJMT serves a document only once the process page shows it in its viewer, as a click does.
             if response.status_code != 200 and action and _show_in_viewer(session, config, viewer, action):
@@ -153,6 +163,9 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                     if item["bytes"] > MAX_DOCUMENT_BYTES:
                         item["extractionStatus"] = "too_large"
                         break
+                    if time.monotonic() > deadline:
+                        item.update(failure=f"body failed: not received within {DOCUMENT_SECONDS} s")
+                        break
                     content.extend(chunk)
                 else:
                     item["sha256"] = hashlib.sha256(content).hexdigest()
@@ -169,7 +182,15 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                         item["savedAs"] = save_document(_saved_name(number, document["id"], content, item), content)
         except (RequestException, OSError) as error:
             # Exception messages can include session-bearing request URLs: only the step and the error's class.
-            item.update(extractionStatus="request_failed", text="", failure=f"{step} failed: {type(error).__name__}")
+            failure = f"{step} failed: {type(error).__name__}"
+            if isinstance(error, Timeout):
+                failure += (
+                    f" (the portal sent nothing for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s, twice; it may still be "
+                    "preparing the document: read it again in a few minutes)"
+                    if step == "request"
+                    else f" (the portal stopped sending for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s)"
+                )
+            item.update(extractionStatus="request_failed", text="", failure=failure)
         finally:
             if response is not None:
                 try:
@@ -183,6 +204,14 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     return results
 
 
+# TJBA, 23/11: the first byte of an 860 KB petição came after 67 s, 11.7 s, 2.3 s, and twice not within 165 s; a
+# 400 KB procuração took 30.3 s; each body then streamed in about a second. The portal prepares the PDF before
+# answering and keeps it ready for a while, so a request that got nothing is made once more.
+CONNECT_SECONDS = 15
+FIRST_BYTE_SECONDS = 120
+DOCUMENT_SECONDS = 300
+CALL_SECONDS = 360
+OUT_OF_TIME = f"not requested: the earlier documents of this call used its {CALL_SECONDS} s; read this one again alone"
 NO_LINK = "the process page gives no download link for this document"
 NO_ROUTE = "the process page gives no download link for any document (its download route was not found)"
 NOT_A_DOCUMENT = {"empty", "unsupported_content", "unrecognized_html", "session_expired", "access_denied"}
@@ -204,6 +233,14 @@ def _http_failure(response, config):
     return f"HTTP {status}: redirected to {where}"
 
 
+def _download_patiently(session, config, url):
+    """``_download``, once more when the portal sent nothing in time (it may have finished preparing it since)."""
+    try:
+        return _download(session, config, url)
+    except Timeout:
+        return _download(session, config, url)
+
+
 def _download(session, config, url):
     return session.get(
         url,
@@ -213,7 +250,8 @@ def _download(session, config, url):
         },
         impersonate=IMPERSONATE,
         allow_redirects=False,
-        timeout=30,
+        # Streamed: curl gives up when under 1 byte/s arrives for connect + wait seconds (headers included).
+        timeout=(CONNECT_SECONDS, FIRST_BYTE_SECONDS),
         stream=True,
     )
 

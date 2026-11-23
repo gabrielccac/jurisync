@@ -35,7 +35,11 @@ def credentials(portal):
         values[field] = portal.env(field)
         if not values[field]:
             raise MissingLogin(f"Set {portal.env_name(field)}")
-    return values["USERNAME"], values["PASSWORD"], configured_account(portal)
+    try:
+        account = configured_account(portal)
+    except MissingLogin as error:
+        raise MissingLogin(f"Password login to {portal.key} also needs the PDPJ authenticator: {error}") from None
+    return values["USERNAME"], values["PASSWORD"], account
 
 
 def login_portal(portal):
