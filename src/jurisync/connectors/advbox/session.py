@@ -282,7 +282,11 @@ class AdvboxSession:
             if not code:
                 raise ValueError("Pass the code ADVBOX sent")
             form = pending.form
-            fields = urlencode({**form["fields"], form["codeField"]: code})
+            fields = {**form["fields"], form["codeField"]: code}
+            if "_device" in fields and not fields["_device"]:
+                # The page leaves _device empty for its FingerprintJS to fill: without it ADVBOX refuses a right code.
+                fields["_device"] = pending.device
+            fields = urlencode(fields)
             self.jar, self.csrf = dict(pending.jar), None
             if form["method"] == "GET":
                 response, final_url = self._send_following(f"{form['action'].split('?')[0]}?{fields}")

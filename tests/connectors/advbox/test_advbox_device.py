@@ -312,3 +312,46 @@ class ElicitationTest(DeviceCase):
             result = self.call("advbox_delete_task", {"postId": "1"}, answers=[CODE])
         self.assertTrue(result.is_error)
         self.assertIn("was not repeated", self.text(result))
+
+
+# The real page (23/11): the code form posts back to /login and leaves _device for the page's FingerprintJS to fill.
+REAL_TWO_FA_PAGE = (
+    "<html><body><p>Enviamos um código para j***@dominio.com.</p>"
+    '<form method="POST" action="https://app.advbox.com.br/invite/validation" class="do__validation">'
+    '<input name="_token" type="hidden" value="tok2"><input name="two_factor_type" type="radio" value="email">'
+    '<input name="two_factor_type" type="radio" value="mobile"><input name="ev__item" type="hidden" value="two_factor">'
+    '<input name="_device" type="hidden"><button type="submit">Enviar</button></form>'
+    '<form method="POST" action="https://app.advbox.com.br/login" class="do__login">'
+    '<input name="_token" type="hidden" value="tok2">'
+    '<input placeholder="Insira seu código aqui" maxlength="20" name="two_factor_code" type="text">'
+    '<input name="email" type="hidden" value="joana@dominio.com"><input name="password" type="hidden" value="pw">'
+    '<input name="_device" type="hidden"><input name="token" type="hidden" value="t"><button>Entrar</button></form>'
+    "</body></html>"
+)
+
+
+class RealPageAdvbox(FakeAdvbox):
+    """The code goes back to /login with the account and the device; ADVBOX refuses a right code sent without it."""
+
+    def __call__(self, session, method, url, headers=None, use_cookies=True, data=None, **kwargs):
+        path = urlsplit(url).path
+        fields = parse_qs(data or "")
+        if path == "/login" and method == "POST" and "two_factor_code" in fields:
+            self.codes.append(fields["two_factor_code"][0])
+            if fields["two_factor_code"] == [CODE] and fields.get("_device") == [ENV["ADVBOX_DEVICE_ID"]]:
+                return Response(302, location="/home", cookies=["advbox_session=ok; path=/"])
+            return Response(302, location="/user/2fa")
+        if path == "/user/2fa" and method == "GET":
+            return Response(200, REAL_TWO_FA_PAGE)
+        return super().__call__(session, method, url, headers, use_cookies, data, **kwargs)
+
+
+class RealPageTest(DeviceCase):
+    def setUp(self):
+        super().setUp()
+        self.advbox = RealPageAdvbox()
+
+    def test_the_code_goes_with_the_device_the_page_leaves_empty(self):
+        self.login()
+        self.assertEqual(self.session.verify_device("123456"), {"verified": True, "deviceSaved": False})
+        self.assertEqual(self.advbox.codes, ["123456"])
