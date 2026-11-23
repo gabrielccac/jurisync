@@ -1,3 +1,5 @@
+> Arquivado em 23/11/2026: substituído por docs/roadmap.md.
+
 # Project-level review (2026-11-10): credentials, architecture, code shape
 
 Three read-only passes (credential model, architecture and portal load, code quality) after the Phase 0 work in

@@ -219,4 +219,4 @@ manual and read-only.
 - [Architecture](docs/architecture.md) — boundaries, sessions, safety rules
 - [Publication workflow](docs/publication-workflow.md) — the agent contract for Juridiq triage
 - [Connector references](docs/connectors/) — endpoints, TRF5 filing, Eproc captures, Tramitação
-- [Backlog](docs/backlog.md)
+- [Roadmap](docs/roadmap.md)

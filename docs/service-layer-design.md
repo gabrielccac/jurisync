@@ -1,21 +1,23 @@
 # Camada de serviço do servidor remoto: cache, sincronização, medição e relatórios (desenho, 16/11/2026)
 
-Base: o mapa do código de hoje (`hosted/`, conectores, `docs/performance.md`, `docs/architecture-review-2026-11-10.md`)
-e a pesquisa de 16/11 sobre servidores MCP para agentes (fontes no fim). Substitui as fases C–E de
-`docs/rollout-plan.md` e detalha `docs/sync-plan.md`.
+> Desenho para depois; ver roadmap.md.
+
+Base: o mapa do código de 16/11 (`hosted/`, conectores, `docs/performance.md`,
+`docs/archive/architecture-review-2026-11-10.md`) e a pesquisa de 16/11 sobre servidores MCP para agentes (fontes no
+fim). Substituiu as fases C–E de `docs/archive/rollout-plan.md` e detalha `docs/archive/sync-plan.md`.
 
 ## 1. Problema medido
 
-| Situação hoje | Custo |
+| Situação em 16/11 | Custo |
 |---|---|
-| `pje_get_process` → `pje_read_documents` → `pje_read_expediente_ato` no mesmo processo | 6–8 requisições cada; a busca e a aba Expedientes são refeitas nas três |
+| `pje_get_process` → `pje_read_documents` → `pje_read_expediente_ato` no mesmo processo | 6–8 requisições cada (23/11: a busca fica 180 s na sessão, 1–2 requisições; a aba Expedientes é sempre relida) |
 | `pje_list_inbox` em todas as regiões | ~43 requisições; contadores com `regions=true`: 62 |
-| `djen_search_saved` | N buscas × 7 variantes de OAB |
-| `eproc_get_process` com documentos | relê as 4 filas pendentes a cada chamada |
+| `djen_search_saved` | N buscas × 7 variantes de OAB (buscas já em paralelo) |
+| `eproc_get_process` com documentos | relia as 4 filas pendentes a cada chamada (23/11: guardadas 120 s por sessão) |
 | e-SAJ / Projudi | refazem inventário ou reabrem o processo por documento |
 | Dado de processo, expediente, referência ADVBOX | nenhum cache; toda pergunta vai ao portal |
 | Registro por chamada (`store.calls`) | só ferramenta, usuário, ok/erro, duração; não conta requisições, logins, processos, bytes, cache |
-| Ciência no Eproc | documentos abrem sem trava (só aviso) |
+| Ciência no Eproc | documentos abrem sem trava; o bloco `ciencia` informa (decidido: informar, não travar) |
 
 ## 2. Arquitetura
 
@@ -75,15 +77,16 @@ rotinas e uma ferramenta `jurisync_whats_new(since)` — o agente pergunta "o qu
 
 Single-flight por (escritório, portal, chave): dois advogados pedindo o mesmo processo ao mesmo tempo geram
 uma leitura. Meta medida: `get_process` seguido de `read_documents` no mesmo processo ≤ 2 requisições
-(hoje 13–14).
+(em 16/11: 13–14).
 
 ## 5. Ciência por construção
 
 - Serviço **Listing** (sincronizador, contadores, listas, capa, movimentações) não tem caminho para
   `fetch_ato`, `read_documents` do PJe/PJe-JT, documentos do Eproc, abertura no e-SAJ/Projudi. Teste que
   importa o módulo do sincronizador e falha se esses símbolos forem alcançáveis.
-- Serviço **Opening** exige argumento explícito quando há intimação pendente (`acceptCiencia=true`), em todos
-  os sistemas — o Eproc passa a travar como o PJe.
+- Serviço **Opening** devolve sempre o bloco `ciencia` (`core/ciencia.py`). PJe, Projudi e JPe pedem
+  `acknowledgeCiencia=true` para um ato pendente; o Eproc abre e informa (decisão: o usuário é informado, não
+  travado).
 - Anotações: ferramentas de abertura com `readOnlyHint=false`, `destructiveHint=true` (hoje
   `esaj_read_document` e `projudi_read_documents` estão como só-leitura). A trava é no servidor; a anotação
   só informa o cliente.
@@ -153,7 +156,7 @@ Exporta CSV/PDF; envio semanal por e-mail opcional.
 | Etapa | Entrega | Prova |
 |---|---|---|
 | 1. Medição | `UsageMeter` + `usage_events` + relatório de uso básico | uma chamada de cada sistema gera linha com requisições e logins corretos |
-| 2. Ciência | Listing/Opening separados; trava do Eproc; anotações corrigidas | teste de alcance do sincronizador; Eproc recusa sem `acceptCiencia` |
+| 2. Ciência | Listing/Opening separados; anotações corrigidas | teste de alcance do sincronizador |
 | 3. Cache ao vivo + single-flight | TTLs do §4 em PJe, Eproc, e-SAJ, Projudi | `get_process`+`read_documents` ≤ 2 requisições; medido no `usage_events` |
 | 4. Read model + sync | store por escritório; jobs DJEN, contadores, caixa, processos ativos; `asOf/stale/maxAgeMinutes` | `pje_list_inbox` responde < 1 s do store; requisições/dia por escritório caem (comparar etapa 1) |
 | 5. Ferramentas de fluxo e relatórios | `whats_new`, `agenda`, `process_overview`, `usage_report`, página do escritório | rotina diária do Victor usa só ferramentas de fluxo |

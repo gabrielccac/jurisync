@@ -1,10 +1,12 @@
+> Arquivado em 23/11/2026: substituído por docs/roadmap.md.
+
 # Migração de todos os escritórios para o MCP remoto (plano, 16/11/2026)
 
 Objetivo: cada escritório usa o Jurisync adicionando **uma URL** (`https://<host>/mcp`) no Claude ou no ChatGPT e
 entrando uma vez. Sem instalação local, sem `.env` na máquina do escritório. O servidor é o modo hospedado que já
 existe (`docs/hosted.md`): OAuth por escritório, cofre cifrado por escritório, pool de sessões por
 (escritório, portal). Este plano diz em que ordem levar os 19 escritórios para lá e o que falta em cada um.
-Complementa `docs/rollout-plan.md` (fases A–E), que segue valendo para cofre/página do escritório e cache/sync.
+Complementa `docs/archive/rollout-plan.md` (fases A–E), que segue valendo para cofre/página do escritório e cache/sync.
 
 ## Onde estamos
 

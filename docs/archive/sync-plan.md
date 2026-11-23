@@ -1,10 +1,12 @@
+> Arquivado em 23/11/2026: substituído por docs/roadmap.md.
+
 # Sync layer and cleanup plan (draft, 2026-11-09)
 
 Goal: clients (Claude through MCP, the HTTP API, scheduled routines) stop hitting the court portals on every
 question. Our own backend syncs each office on a schedule, stores the result, answers from the store with an
 "as of" time, and goes to the portal live only when a read needs it or the caller asks for `refresh`.
 All data comes from our own connectors (no DataJud, MNI or third-party providers). The code-quality fixes of
-`docs/review-2026-11.md` are folded into the same phases. e-SAJ stays as it is.
+`docs/archive/review-2026-11.md` are folded into the same phases. e-SAJ stays as it is.
 
 ## Layers
 

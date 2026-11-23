@@ -3,6 +3,13 @@
 Notes from the first hosted test (2026-10-30, Victor, server in Nuremberg), plus measured connector changes.
 The options below remain proposals unless explicitly recorded as implemented.
 
+State on 23/11/2026 (code on `chore/hardening`): already done from the options below are the `bucket` argument of
+the counters (one bucket instead of `regions=true`), skipping inboxes counted empty, Push pagination
+(`limit`/`offset`/`processNumber`), saved DJEN searches in parallel, the process search kept 180 s per PJe session
+(`get_process` → `read_documents` → `read_expediente_ato` in 1–2 requests; the Expedientes tab is always re-read),
+the Eproc pending queues kept 120 s per session, and the draft tools removed from the hosted server. Caches across
+sessions, sync and the HTTP API are in `service-layer-design.md` (later); order in `roadmap.md`.
+
 ## Implemented: shared Eproc password login (2026-11-04)
 
 The login used to wait for each alternate field separately. On TRF6's legacy form, absent SSO selectors cost
@@ -134,7 +141,7 @@ before each routine), incrementally by expediente / communication id, into a loc
 at once with an "as of" time; a live read happens only when asked (`refresh=true`).
 
 - Gains: sub-second answers, less load on the portals (lower risk of being blocked), and the base for new-expediente
-  alerts (already in the backlog under "PJe Expedientes and Push").
+  alerts (in `roadmap.md`, "Pendências conhecidas").
 - Costs: one more moving part, and data a few minutes old, acceptable for daily routines.
 
 ## Suggested order

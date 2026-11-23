@@ -1,3 +1,5 @@
+> Arquivado em 23/11/2026: substituído por docs/roadmap.md.
+
 # Backlog
 
 ## Hosted server (remote MCP, per-office vault)

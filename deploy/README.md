@@ -1,7 +1,7 @@
 # Deploying the hosted server
 
 One VPS serves every office at `https://<host>/mcp` (see `docs/hosted.md` for the design and
-`docs/remote-mcp-migration-plan.md` for the order of the offices). Everything here is a script; the only manual
+`docs/roadmap.md` for the order of the offices). Everything here is a script; the only manual
 inputs are the VPS address, the domain (or none yet) and the CAPTCHA key.
 
 | File | Runs on | Does |

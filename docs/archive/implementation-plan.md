@@ -1,3 +1,5 @@
+> Arquivado em 23/11/2026: substituído por docs/roadmap.md.
+
 # Implementation plan after the second review (2026-11-09)
 
 Delivery order for the next deployment (remote MCP per office, service layer): `rollout-plan.md`.
