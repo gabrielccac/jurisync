@@ -22,6 +22,7 @@ from pydantic import Field
 from jurisync import portals
 from jurisync.connectors.projudi import base, legacy, tjam, tjgo
 from jurisync.connectors.projudi.base import ProjudiParseError, public_file
+from jurisync.core import ciencia
 from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.mcp import READ_ONLY, load_env_file, sanitize_diagnostics, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
@@ -38,18 +39,15 @@ TJGO_ONLY = "tjgo-1g"
 CIENCIA_GUARD = (
     "On TJGO the read is refused, with nothing opened, when the process has a communication whose ciência may still "
     "be pending (a portal intimação/citação awaiting reading, or a Diário intimação whose publication date is still "
-    "ahead: see projudi_list_intimations); reading it may register the party's ciência and start the deadline. Ask "
-    "the user; only with their explicit yes repeat the call with acknowledgeCiencia=true. It is also refused when "
+    "ahead: see projudi_list_intimations); reading it may register the party's ciência and start the deadline. "
+    f"{ciencia.AUTHORIZATION}. It is also refused when "
     "those lists could not be read in full (the reason starts with 'ciência not checked'). On TJAM a process with an "
     "intimação awaiting ciência stays blocked (no override). The result always carries a ciencia block: estado "
     "'nenhuma' (nothing pending opened), 'pendente' (refused, success=false: intimacoes lists what awaits ciência), "
     "'dada' (read with acknowledgeCiencia: the ciência may have been registered) or 'desconhecida' (read with "
     "acknowledgeCiencia while the lists were unreadable), with an aviso: tell the user and note it in the task."
 )
-ACKNOWLEDGE = Field(
-    description="Leave empty. true reads even when a ciência may be pending, which may register the party's ciência "
-    "and start the deadline; only use after the user explicitly agrees."
-)
+ACKNOWLEDGE = Field(description=ciencia.ACKNOWLEDGE)
 
 
 def adapter_for(portal):

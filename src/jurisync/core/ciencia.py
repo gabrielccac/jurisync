@@ -14,6 +14,17 @@ to read, but the user must always know what the read did:
 NONE, GIVEN, PENDING, UNKNOWN = "nenhuma", "dada", "pendente", "desconhecida"
 STATES = (NONE, GIVEN, PENDING, UNKNOWN)
 
+# When an agent may pass acknowledgeCiencia=true: the user decides, now or in advance.
+AUTHORIZATION = (
+    "Ask the user first, unless they already authorized it in advance (a standing instruction such as a scheduled "
+    "task's prompt or 'pode dar ciência nas leituras'); then repeat the call with acknowledgeCiencia=true without "
+    "asking again, and still relay the ciencia block's aviso to the user and note it in the task"
+)
+ACKNOWLEDGE = (
+    "Leave empty. true reads even when a ciência may be pending, which may register the party's ciência and start "
+    "the deadline; only with the user's authorization, given now or in advance (e.g. a scheduled task's prompt)."
+)
+
 
 def report(state, aviso="", intimacoes=()):
     if state not in STATES:

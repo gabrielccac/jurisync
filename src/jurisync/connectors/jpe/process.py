@@ -139,14 +139,13 @@ def check_ciencia(session, number, acknowledge=False):
             raise CienciaUnchecked(
                 f"ciência not checked: {unchecked}, so it is unknown whether this process has a comunicação pending "
                 "reading. Nothing was opened. Opening a document anyway may register the ciência and start the "
-                "deadline: only with the user's explicit permission, repeat the call with acknowledgeCiencia=true."
+                f"deadline. {ciencia.AUTHORIZATION}."
             )
         if pending:
             shown = "; ".join(" ".join(filter(None, (item.get("class"), item.get("sentAt")))) for item in pending[:5])
             raise CienciaPending(
                 f"this process has {len(pending)} comunicação(ões) pending reading ({shown}). Nothing was opened. "
-                "Opening its documents may register the ciência and start the deadline. Ask the user for explicit "
-                "permission; if they agree, repeat the call with acknowledgeCiencia=true."
+                f"Opening its documents may register the ciência and start the deadline. {ciencia.AUTHORIZATION}."
             )
     if pending:
         return ciencia.report(ciencia.GIVEN, CIENCIA_GIVEN, pending)

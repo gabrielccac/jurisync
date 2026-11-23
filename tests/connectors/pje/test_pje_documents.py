@@ -135,6 +135,52 @@ class SelectedDocumentsChecks(unittest.TestCase):
         self.assertEqual(result["extractionStatus"], "request_failed")
         self.assertNotIn("secret", str(result))
 
+    def test_a_document_not_read_says_which_step_failed_without_urls(self):
+        def read(reply=None, data=None, **kwargs):
+            session = Mock(**kwargs)
+            session.get.return_value = reply
+            return documents.read_selected_documents(data or process(), ["456"], session=session)[0], session
+
+        for location, failure in (
+            ("https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth?x=1", "a login page"),
+            ("/pje/login.seam", "a login page"),
+            ("https://other.example/doc", "another host"),
+            ("/pje/Processo/ConsultaProcesso/listView.seam", "another portal page"),
+        ):
+            reply = response(status=302)
+            reply.headers["Location"] = location
+            result, _ = read(reply)
+            self.assertEqual(result["failure"], f"HTTP 302: redirected to {failure}")
+        self.assertEqual(read(response(status=404))[0]["failure"], "HTTP 404")
+        result, _ = read(**{"get.side_effect": RequestException("https://secret")})
+        self.assertEqual(result["failure"], "request failed: RequestException")
+        reply = response()
+        reply.iter_content.side_effect = RequestException("interrupted")
+        self.assertEqual(read(reply)[0]["failure"], "body failed: RequestException")
+        login = response(f"<html><form>{NUMBER}<input type='password'></form></html>".encode())
+        self.assertEqual(read(login)[0]["failure"], "the portal served text/html, not the document (session_expired)")
+        self.assertNotIn("failure", read(response())[0])
+
+    def test_a_document_without_a_download_link_is_reported_not_fetched(self):
+        data = process()
+        data["timeline"][0]["movements"][0]["documents"][0]["download_url"] = None
+        session = Mock()
+        result = documents.read_selected_documents(data, ["456"], session=session)[0]
+        self.assertEqual((result["extractionStatus"], result["failure"]), ("no_download_location", documents.NO_LINK))
+        result = documents.read_selected_documents({**data, "download_pattern_found": False}, ["456"], session=session)
+        self.assertEqual(result[0]["failure"], documents.NO_ROUTE)
+        session.get.assert_not_called()
+
+    def test_a_document_known_only_by_its_url_field_is_read(self):
+        data = process()
+        document = data["timeline"][0]["movements"][0]["documents"][0]
+        document["url"] = document.pop("download_url")
+        session = Mock()
+        session.get.return_value = response()
+        result = documents.read_selected_documents(data, ["456"], session=session)[0]
+        self.assertEqual(result["extractionStatus"], "extracted")
+        self.assertEqual(session.get.call_args.args[0], URL)
+
     def test_body_limit_and_interrupted_stream(self):
         for chunks, expected in (([b"123", b"456"], "too_large"), (None, "request_failed")):
             session = Mock()

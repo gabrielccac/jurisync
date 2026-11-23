@@ -20,7 +20,7 @@ from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
 from jurisync.core import certificate
-from jurisync.core.ciencia import GIVEN, NONE, PENDING, UNKNOWN, report
+from jurisync.core.ciencia import AUTHORIZATION, GIVEN, NONE, PENDING, UNKNOWN, report
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import read_limited, validate_document_ids
 from jurisync.core.documents_dir import save_document
@@ -284,7 +284,7 @@ def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
                 f"ciência not checked: {unchecked}, so it is unknown whether this process has a communication whose "
                 "ciência is still pending. Nothing was opened. Try again later (projudi_list_intimations shows the "
                 "list when it can be read). Opening it anyway may register the party's ciência and start the "
-                "deadline: only with the user's explicit permission, repeat the call with acknowledgeCiencia=true.",
+                f"deadline. {AUTHORIZATION}.",
                 {
                     **report(
                         NONE,
@@ -299,8 +299,7 @@ def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
             shown = "; ".join(_describe(item) for item in items[:5])
             raise CienciaPending(
                 f"ciência not yet registered for: {shown}. Nothing was opened. Opening a document of this process "
-                "may register the party's ciência and start the deadline. Ask the user for explicit permission; if "
-                "they agree, repeat the call with acknowledgeCiencia=true.",
+                f"may register the party's ciência and start the deadline. {AUTHORIZATION}.",
                 report(
                     PENDING,
                     f"Comunicação aguardando ciência ({shown}); nada foi aberto. Ler os documentos do processo pode "

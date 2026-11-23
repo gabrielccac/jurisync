@@ -21,6 +21,7 @@ from pydantic import Field
 
 from jurisync import portals
 from jurisync.connectors.jpe import client, process
+from jurisync.core import ciencia
 from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
 from jurisync.core.session_pool import SessionPool
@@ -33,15 +34,11 @@ READS_DOCUMENTS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, ide
 CIENCIA_GUARD = (
     "The read is refused, with nothing opened, when the process has a comunicação 'Pendente de Leitura' (or when that "
     "list could not be read in full: the error starts with 'ciência not checked'); opening it may register the "
-    "ciência and start the deadline. Ask the user; only with their explicit yes repeat the call with "
-    "acknowledgeCiencia=true. The result always carries a ciencia block: estado 'nenhuma' (nothing pending was "
+    f"ciência and start the deadline. {ciencia.AUTHORIZATION}. The result always carries a ciencia block: estado 'nenhuma' (nothing pending was "
     "opened), 'dada' (a comunicação pending reading was opened: intimacoes lists it) or 'desconhecida' (the list "
     "could not be checked); always relay ciencia.aviso to the user."
 )
-ACKNOWLEDGE = Field(
-    description="Leave empty. true reads even when a ciência may be pending, which may register the party's ciência "
-    "and start the deadline; only use after the user explicitly agrees."
-)
+ACKNOWLEDGE = Field(description=ciencia.ACKNOWLEDGE)
 
 sessions = SessionPool(login=client.login, refresh=client.refresh, close=lambda session: session.close())
 

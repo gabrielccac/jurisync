@@ -30,6 +30,39 @@ class PjeNotificationChecks(unittest.TestCase):
             [item["process_number"] for item in push.parse_push_items(html)], ["1016572-38.2026.4.01.0000"]
         )
 
+    def test_an_empty_unrelated_table_with_a_process_column_is_not_the_grid(self):
+        # The page renders the "Processos relacionados" tab too, with its own (empty) "Processo" grid.
+        html = """<table id="f:processosRelacionadosTable"><thead><tr><th>Processo</th><th>Data de inclusão</th>
+        <th>Email alternativo</th><th>Observação</th></tr></thead><tbody></tbody></table>
+        <table id="f:grid"><tr><th></th><th>Processo</th></tr>
+        <tr><td></td><td>0000001-11.2026.8.13.0024</td></tr><tr><td></td><td>0000002-22.2026.8.13.0024</td></tr></table>"""
+        items = push.parse_push_items(html)
+        self.assertEqual(
+            [i["process_number"] for i in items], ["0000001-11.2026.8.13.0024", "0000002-22.2026.8.13.0024"]
+        )
+
+    def test_the_push_list_table_wins_over_another_grid_listing_processes(self):
+        html = """<div id="f:relacionados"><table id="f:other"><tr><th>Processo</th><th>Data de inclusão</th>
+        <th>Email alternativo</th><th>Observação</th></tr><tr><td>0000009-99.2026.8.08.0024</td><td></td><td></td><td></td></tr>
+        </table></div><table id="f:processosCadastradosTable"><tr><th>Processo</th></tr>
+        <tr><td>0000001-11.2026.8.08.0024</td></tr></table>"""
+        self.assertEqual([i["process_number"] for i in push.parse_push_items(html)], ["0000001-11.2026.8.08.0024"])
+        # Without the Push list's id, the full grid wins as before.
+        unnamed = html.replace("f:processosCadastradosTable", "f:x")
+        self.assertEqual([i["process_number"] for i in push.parse_push_items(unnamed)], ["0000009-99.2026.8.08.0024"])
+
+    def test_an_ambiguous_grid_names_the_tables_seen_without_their_data(self):
+        html = """<table id="a"><tr><th>Processo</th></tr><tr><td>0000001-11.2026.8.14.0301</td></tr></table>
+        <table><tr><th>Processo</th><th>Classe</th></tr><tr><td>0000002-22.2026.8.14.0301</td></tr></table>"""
+        with self.assertRaises(RuntimeError) as raised:
+            push.parse_push_items(html)
+        message = str(raised.exception)
+        self.assertIn("id=a heads=['Processo'] rows=1", message)
+        self.assertIn("id=- heads=['Processo', 'Classe'] rows=1", message)
+        self.assertNotIn("0000001", message)
+        with self.assertRaisesRegex(RuntimeError, r"tables seen: id=- heads=\['Número'\]"):
+            push.parse_push_items("<table><tr><th>Número</th></tr><tr><td>0000001-11.2026.8.14.0301</td></tr></table>")
+
     def test_trf1_push_grid_has_only_the_process_column_and_keeps_repeated_registrations(self):
         html = """<table id='x'><tr><th></th><th>Processo</th></tr>
         <tr><td><a onclick="construirLogicaAcesso(426331);">go</a></td><td>1003236-66.2019.4.01.3312</td></tr>

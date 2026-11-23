@@ -277,8 +277,8 @@ def unchecked_message(reason):
     return (
         f"ciência not checked: {UNCHECKED[reason]}, so it is unknown whether this document belongs to a communication "
         "whose ciência is still pending. Nothing was opened. Try again later (pje_get_process shows the expedientes "
-        "when they can be read). Opening it anyway may register the party's ciência and start the deadline: only "
-        "with the user's explicit permission, repeat the call with acknowledgeCiencia=true."
+        "when they can be read). Opening it anyway may register the party's ciência and start the deadline. "
+        f"{ciencia.AUTHORIZATION}."
     )
 
 
@@ -286,7 +286,8 @@ AVISOS = {
     ciencia.GIVEN: "Ler este conteúdo pode ter registrado a ciência da parte e iniciado o prazo; informe o usuário.",
     ciencia.PENDING: (
         "A ciência desta comunicação está pendente e o ato não foi aberto: abri-lo registra a ciência da parte e "
-        "inicia o prazo. Só com a concordância expressa do usuário (acknowledgeCiencia=true)."
+        "inicia o prazo. Só com autorização do usuário, dada agora ou antes (por exemplo, na instrução de uma rotina "
+        "agendada): acknowledgeCiencia=true."
     ),
     ciencia.UNKNOWN: (
         "Não foi possível verificar se havia ciência pendente: ler este conteúdo pode ter registrado a ciência da "
@@ -329,7 +330,8 @@ def pending_message(items):
         + "."
         + unlinked
         + " Opening the act, its document or an attachment may register the party's ciência and start the deadline. "
-        "Ask the user for explicit permission; if they agree, repeat the call with acknowledgeCiencia=true."
+        + ciencia.AUTHORIZATION
+        + "."
     )
 
 

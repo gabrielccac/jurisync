@@ -6,7 +6,7 @@ Do not expose this function over HTTP with caller-supplied process results.
 
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from curl_cffi.requests.exceptions import RequestException
 
@@ -26,7 +26,9 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     Validate the whole selection before any request. Use only the exact adapter
     download route, refuse redirects, cap each streamed body at 10 MiB, and leave
     the supplied session open. Returned records omit session-bearing URLs.
-    Network failures return metadata with no evidence text; there is no retry/login.
+    Network failures return metadata with no evidence text; there is no retry/login. A document that is not read
+    says why in ``failure`` (no link on the process page, the HTTP status or redirect, the step a request failed
+    at, or what the portal served instead), never with a URL or document content.
     The fetch is bound to the process (ID and download path), so HTML that omits the process number is
     still accepted as ``extracted_unnumbered`` when it is a substantial page without error markers.
     With ``save`` the original bytes are written to the shared documents folder and reported as ``savedAs``.
@@ -87,7 +89,8 @@ def read_selected_documents(process, document_ids, *, session, save=False):
         document = known[doc_id]
         url = document.get("download_url") or document.get("url")
         if not isinstance(url, str):
-            raise ValueError("Selected document has no download location")
+            selected.append((document, None))
+            continue
         parsed = urlsplit(url)
         if (
             parsed.scheme != "https"
@@ -107,10 +110,10 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             )
         ):
             raise ValueError("Document download location is outside the supported read route")
-        selected.append(document)
+        selected.append((document, url))
     viewer = process.get("viewer")
     results = []
-    for document in selected:
+    for document, url in selected:
         item = {
             "id": document["id"],
             "title": document.get("title", ""),
@@ -120,22 +123,30 @@ def read_selected_documents(process, document_ids, *, session, save=False):
             "extractionStatus": "request_failed",
             "text": "",
         }
+        if url is None:
+            failure = NO_ROUTE if process.get("download_pattern_found") is False else NO_LINK
+            item.update(extractionStatus="no_download_location", failure=failure)
+            results.append(item)
+            continue
         response = None
+        step = "request"
         try:
-            response = _download(session, config, document["download_url"])
+            response = _download(session, config, url)
             action = document.get("viewer_action")
             # TJMT serves a document only once the process page shows it in its viewer, as a click does.
             if response.status_code != 200 and action and _show_in_viewer(session, config, viewer, action):
                 response.close()
                 response = None
-                response = _download(session, config, document["download_url"])
+                response = _download(session, config, url)
             item.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
             if response.status_code != 200:
                 # The first-instance copy of a second-instance document is not served here: read the visible one.
                 item["extractionStatus"] = (
                     "first_instance_copy" if document.get("first_instance_copy") else "http_error"
                 )
+                item["failure"] = _http_failure(response, config)
             else:
+                step = "body"
                 content = bytearray()
                 for chunk in response.iter_content():
                     item["bytes"] += len(chunk)
@@ -148,19 +159,48 @@ def read_selected_documents(process, document_ids, *, session, save=False):
                     item["extractionStatus"], item["text"] = extract_document_text(
                         bytes(content), item["content_type"], number, allow_unnumbered=True
                     )
+                    if item["extractionStatus"] in NOT_A_DOCUMENT:
+                        item["failure"] = (
+                            f"the portal served {item['content_type'] or 'no Content-Type'}, not the document "
+                            f"({item['extractionStatus']})"
+                        )
+                    step = "save"
                     if save:
                         item["savedAs"] = save_document(_saved_name(number, document["id"], content, item), content)
-        except (RequestException, OSError):
-            # Exception messages can include session-bearing request URLs.
-            item.update(extractionStatus="request_failed", text="")
+        except (RequestException, OSError) as error:
+            # Exception messages can include session-bearing request URLs: only the step and the error's class.
+            item.update(extractionStatus="request_failed", text="", failure=f"{step} failed: {type(error).__name__}")
         finally:
             if response is not None:
                 try:
                     response.close()
-                except RequestException:
-                    item.update(extractionStatus="request_failed", text="")
+                except RequestException as error:
+                    item.update(
+                        extractionStatus="request_failed", text="", failure=f"close failed: {type(error).__name__}"
+                    )
         results.append(item)
     return results
+
+
+NO_LINK = "the process page gives no download link for this document"
+NO_ROUTE = "the process page gives no download link for any document (its download route was not found)"
+NOT_A_DOCUMENT = {"empty", "unsupported_content", "unrecognized_html", "session_expired", "access_denied"}
+LOGIN_PATH = re.compile(r"login|logon|openid|/realms/|/auth(?:/|$)", re.I)
+
+
+def _http_failure(response, config):
+    """``HTTP 404``, or for a redirect where it led (the login, another host, the portal), never the URL."""
+    status = response.status_code
+    if not 300 <= status < 400:
+        return f"HTTP {status}"
+    location = urlsplit(urljoin(f"https://{config.host}/", response.headers.get("Location") or ""))
+    if LOGIN_PATH.search(location.path):
+        where = "a login page"
+    elif location.hostname != config.host:
+        where = "another host"
+    else:
+        where = "another portal page"
+    return f"HTTP {status}: redirected to {where}"
 
 
 def _download(session, config, url):

@@ -73,10 +73,12 @@ por destinatário e é a ponte entre a comunicação DJEN e o PJe:
 4. **Ciência pendente exige permissão.** Abrir o ato (ou ler o documento da intimação com
    `pje_read_documents`) de uma comunicação com ciência pendente pode registrar a ciência da
    parte e iniciar o prazo. As duas ferramentas leem tudo o mais por padrão, mas recusam esses
-   casos e a mensagem lista os expedientes. **Pergunte ao usuário e só repita a chamada com
-   `acknowledgeCiencia=true` depois de um sim explícito.** Sem o sim, use apenas o texto DJEN.
+   casos e a mensagem lista os expedientes. **Só repita a chamada com
+   `acknowledgeCiencia=true` com autorização do usuário**: um sim agora, ou uma instrução dada
+   antes (o prompt da rotina agendada, ou "pode dar ciência nas leituras"), sem perguntar de
+   novo. Sem autorização, pergunte; sem o sim, use apenas o texto DJEN.
    O cliente pode liberar a leitura sem perguntar em `customers/<cliente>/settings.toml`
-   (`[pje] ciencia_on_read = "allow"`). Nesse caso, e também quando o usuário disse sim, o
+   (`[pje] ciencia_on_read = "allow"`). Nesse caso, e também quando o usuário autorizou, o
    resultado traz `ciencia.estado: "dada"` e `ciencia.intimacoes` (expedientes que estavam
    pendentes quando foram lidos), com o `ciencia.aviso`: **avise no chat e registre na descrição da tarefa** a linha `Ciência possivelmente registrada
    na leitura em {data}: expediente {id}, prazo {limite}`.

@@ -60,8 +60,8 @@ is not stored (rows keep the internal `processId` only).
   cheaper for a daily check.
 - Reading a pending communication's act (`pje_read_expediente_ato`) or its document
   (`pje_read_documents`) may register the party's ciência and start the deadline, so only those
-  need permission: they are refused unless the caller passes `acknowledgeCiencia=true` after the
-  user's explicit yes. Everything else is read by default. If the Expedientes tab cannot be read
+  need permission: they are refused unless the caller passes `acknowledgeCiencia=true` with the
+  user's authorization, given now or in advance (e.g. a scheduled task's prompt). Everything else is read by default. If the Expedientes tab cannot be read
   the check is skipped and `pje_read_documents` returns `cienciaChecked: false`. Whether PJe
   really registers ciência on such a read has not been tested; the gate assumes it does.
 - Per customer: `customers/<name>/settings.toml` with `[pje] ciencia_on_read = "allow"` makes the

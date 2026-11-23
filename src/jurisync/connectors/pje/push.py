@@ -24,6 +24,8 @@ PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}(?!\d)")
 INCIDENT_RE = re.compile(r"R\d+(?:\.\d+)*\.[A-Za-z]+")
 EMPTY_PUSH = re.compile(r"n[ãa]o\s+h[áa]\s+nenhum\s+processo\s+cadastrado\s+na\s+sua\s+lista", re.I)
 PUSH_TIMEOUT = 90
+# The registered-processes grid (TJRJ: j_id214:processosCadastradosTable), as opposed to "Processos relacionados".
+PUSH_GRID_ID = "processoscadastrados"
 
 
 def _safe_url(value, *, host=None, path_prefix="/pje/", path_exact=None):
@@ -67,32 +69,65 @@ def _own(table, name):
     return [node for node in table.find_all(name) if node.find_parent("table") is table]
 
 
+def _values(row):
+    return [" ".join(cell.stripped_strings) for cell in row.find_all("td", recursive=False)]
+
+
+def _push_grid(soup):
+    """The Push grid and its headers; None when no grid lists a process (an empty registry).
+
+    Candidates are the tables with a "Processo" column of their own. Tables without a process row (an empty
+    "Processos relacionados" tab, a layout table) drop out; then the Push list's own table wins (TJRJ:
+    ``processosCadastradosTable``, in the "Processos cadastrados" tab), then the full grid over one with only
+    the process column.
+    """
+    tables = []
+    for table in soup.find_all("table"):
+        heads = [" ".join(head.stripped_strings) for head in _own(table, "th")]
+        rows = "Processo" in heads and sum(bool(PROCESS_RE.search(" ".join(_values(r)))) for r in _own(table, "tr"))
+        ids = " ".join(node.get("id") or "" for node in (table, *table.parents)).casefold()
+        tables.append(
+            {
+                "table": table,
+                "heads": heads,
+                "rows": rows,
+                "push": PUSH_GRID_ID in ids,
+                "full": set(PUSH_COLUMNS) <= set(heads),
+            }
+        )
+    candidates = [t for t in tables if "Processo" in t["heads"]]
+    listed = [t for t in candidates if t["rows"]]
+    if not listed and (candidates or not PROCESS_RE.search(soup.get_text(" "))):
+        return None
+    for key in ("push", "full"):
+        listed = [t for t in listed if t[key]] or listed
+    if len(listed) != 1:
+        # Column names, ids and counts only: enough to fix the next portal without its data.
+        seen = "; ".join(
+            f"id={t['table'].get('id') or '-'} heads={[head[:40] for head in t['heads'][:8]]} rows={t['rows']}"
+            for t in (candidates or [t for t in tables if t["heads"]])[:8]
+        )
+        raise RuntimeError(f"Could not uniquely identify the PJe Push process grid; tables seen: {seen or 'none'}")
+    return listed[0]["table"], listed[0]["heads"]
+
+
 def parse_push_items(html):
     """Parse the processes registered in PJe Push (the source of Push emails).
 
-    The grid is the one table with a "Processo" column of its own. TRF5/TRF3/TJAP add the inclusion date, an
+    The grid is a table with a "Processo" column of its own (``_push_grid``). TRF5/TRF3/TJAP add the inclusion date, an
     alternate e-mail and an observation; TRF1 lists only the process (1,600 of them on one page), so the other
     columns are read by header name and left empty when the portal has none. A process registered twice
     shows twice, as the portal's own count does. Only the table's own headers and rows count: the layout tables
     around the grid hold it as a nested table, and TJRJ/TJPA put the paginator (another table) inside the grid.
     """
     soup = BeautifulSoup(html, "html.parser")
-    items = []
-    full, bare = [], []
-    for table in soup.find_all("table"):
-        heads = [" ".join(head.stripped_strings) for head in _own(table, "th")]
-        if "Processo" in heads:
-            (full if set(PUSH_COLUMNS) <= set(heads) else bare).append((table, heads))
-    # The full grid wins; a table with only the process column is the grid just where no full one exists.
-    grids = full or bare
-    if not grids and not PROCESS_RE.search(soup.get_text(" ")):
+    grid = _push_grid(soup)
+    if grid is None:
         return []
-    if len(grids) != 1:
-        raise RuntimeError("Could not uniquely identify the PJe Push process grid")
-    table, heads = grids[0]
+    table, heads = grid
+    items = []
     for row in _own(table, "tr"):
-        cells = row.find_all("td", recursive=False)
-        values = [" ".join(c.stripped_strings) for c in cells]
+        values = _values(row)
         match = PROCESS_RE.search(" ".join(values))
         if not match:
             continue
