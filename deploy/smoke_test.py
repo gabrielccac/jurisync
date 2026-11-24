@@ -4,12 +4,14 @@
     python deploy/smoke_test.py https://mcp.example.com.br --plan rollout/plan.json \
         --user advogada@victor.test=/root/victor.password --user advogada@herica.test=/root/herica.password
 
-Without users: /healthz, the OAuth metadata, the protected resource of /mcp and the 401 a client gets before signing
-in.
+Without users: /healthz, the OAuth metadata, the protected resources of /tribunais/mcp and /mcp and the 401 a client
+gets before signing in.
 With users (password read from a file, never from the command line): dynamic client registration, the sign-in page,
-PKCE code exchange, then MCP initialize + tools/list on /mcp. With --plan, each user's tools must be exactly the
-systems of the user's office, and a tool of a system the office lacks must be refused (tenant isolation). With
---call-saved-searches, djen_list_saved_searches runs for each user (reads the office's own profile; no portal).
+PKCE code exchange, then MCP initialize + tools/list on /tribunais/mcp (court systems and DJEN only), on the
+/<system>/mcp of each management system the office has (ADVBOX, Juridiq: that system's tools only) and on the
+deprecated /mcp. With --plan, the systems must be exactly the office's, and a tool of a system the office lacks must
+be refused (tenant isolation). With --call-saved-searches, djen_list_saved_searches runs for each user (reads the
+office's own profile; no portal).
 Exit status 1 when any check fails.
 """
 
@@ -38,6 +40,8 @@ PROBES = {
     "advbox": "advbox_list_members",
     "juridiq": "juridiq_list_users",
 }
+# Served together at /tribunais/mcp (registry ``group``); any other system has its own /<name>/mcp.
+COURTS = {"pje", "eproc", "esaj", "projudi", "stj", "tucujuris", "jpe", "djen"}
 failures = []
 
 
@@ -129,16 +133,20 @@ def public_checks(client, base):
     check(metadata.status_code == 200, f"metadados OAuth ({metadata.status_code})")
     if metadata.status_code == 200:
         check(metadata.json().get("issuer", "").rstrip("/") == base, "issuer igual ao endereço público")
-    resource = client.get("/.well-known/oauth-protected-resource/mcp")
-    check(resource.status_code == 200 and resource.json().get("resource") == f"{base}/mcp", "recurso protegido /mcp")
-    anonymous = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
-    check(
-        anonymous.status_code == 401 and "resource_metadata" in anonymous.headers.get("www-authenticate", ""),
-        "/mcp sem token responde 401 com resource_metadata",
-    )
+    for path in ("/tribunais/mcp", "/mcp"):
+        resource = client.get(f"/.well-known/oauth-protected-resource{path}")
+        check(
+            resource.status_code == 200 and resource.json().get("resource") == f"{base}{path}",
+            f"recurso protegido {path}",
+        )
+        anonymous = client.post(path, json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        check(
+            anonymous.status_code == 401 and "resource_metadata" in anonymous.headers.get("www-authenticate", ""),
+            f"{path} sem token responde 401 com resource_metadata",
+        )
 
 
-def sign_in(client, base, email, password):
+def sign_in(client, base, email, password, path="/mcp"):
     registered = client.post(
         "/register",
         json={
@@ -161,7 +169,7 @@ def sign_in(client, base, email, password):
             "code_challenge_method": "S256",
             "redirect_uri": CALLBACK,
             "state": secrets.token_urlsafe(8),
-            "resource": f"{base}/mcp",
+            "resource": f"{base}{path}",
         },
     )
     if authorize.status_code != 302:
@@ -186,8 +194,9 @@ def sign_in(client, base, email, password):
 
 
 class Session:
-    def __init__(self, client, token):
+    def __init__(self, client, token, path="/mcp"):
         self.client = client
+        self.path = path
         self.headers = {"Authorization": f"Bearer {token}", "Accept": "application/json, text/event-stream"}
         self.ids = iter(range(1, 10_000))
         self.send(
@@ -200,7 +209,7 @@ class Session:
         payload = {"jsonrpc": "2.0", "method": method, **({"params": params} if params is not None else {})}
         if not notify:
             payload["id"] = next(self.ids)
-        response = self.client.post("/mcp", json=payload, headers=self.headers)
+        response = self.client.post(self.path, json=payload, headers=self.headers)
         response.raise_for_status()
         if "mcp-session-id" in response.headers:
             self.headers["mcp-session-id"] = response.headers["mcp-session-id"]
@@ -214,6 +223,20 @@ class Session:
 
     def call(self, name, arguments=None):
         return self.send("tools/call", {"name": name, "arguments": arguments or {}})["result"]
+
+
+def endpoint_checks(client, base, email, password, courts, management):
+    """/tribunais/mcp lists the office's court systems and nothing else; each /<system>/mcp only that system."""
+    for path, expected in (("/tribunais/mcp", courts), *((f"/{name}/mcp", [name]) for name in management)):
+        if not expected:
+            continue
+        try:
+            tools = Session(client, sign_in(client, base, email, password, path), path).tools()
+        except (RuntimeError, OSError, KeyError) as error:
+            check(False, f"{email}: sessão MCP em {path} ({type(error).__name__}: {error})")
+            continue
+        systems = sorted({name.split("_", 1)[0] for name in tools})
+        check(systems == expected, f"{email}: {path} com {len(tools)} ferramentas de {expected} ({', '.join(systems)})")
 
 
 def office_of(plan, email):
@@ -264,6 +287,9 @@ def main(argv=None):
                     f"{email}: {probe} recusado (escritório sem {system})",
                 )
                 break
+        management = sorted(set(office["connectors"]) - COURTS) if office else sorted(set(systems) - COURTS)
+        courts = sorted(set(office["connectors"]) & COURTS) if office else sorted(set(systems) & COURTS)
+        endpoint_checks(client, base, email, password, courts, management)
         if args.call_saved_searches and "djen_list_saved_searches" in tools:
             result = session.call("djen_list_saved_searches")
             data = result.get("structuredContent") or {}

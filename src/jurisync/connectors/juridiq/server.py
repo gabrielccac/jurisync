@@ -310,7 +310,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_pending_publications",
         "List pending Juridiq publications",
-        "List unread Juridiq publications for the configured account (result). The listing reads at most 20 pages of 100 records; truncated=true means that cap stopped it before the end, so unread publications may be missing: narrow with juridiq_list_publications (date range). Read-only.",
+        "List unread publications. Reads at most 20 pages of 100; truncated=true means some may be missing: narrow with juridiq_list_publications (date range). Read-only.",
     )
     def list_pending_publications(maxResults: Annotated[int, Field(ge=1, le=500)] = 100) -> dict[str, Any]:
         return call(lambda: api.unread_publications(maxResults=maxResults))
@@ -318,7 +318,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_publications",
         "List Juridiq publications",
-        "List Juridiq publications using the API's native filters. To find recent records, request an appropriate date range or order and let the agent interpret the returned dates. Read-only.",
+        "List publications (paged). For recent ones pass a date range or orderBy. Read-only.",
     )
     def list_publications(
         page: Annotated[int, Field(ge=1)] = 1,
@@ -353,19 +353,19 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_lawsuits",
         "List Juridiq lawsuits",
-        "List lawsuits available to the configured account, up to maxResults. Read-only. The API response determines which records are open; do not assume an open-status filter that was not returned.",
+        "List lawsuits, up to maxResults. Not filtered by status: don't assume they are open. Read-only.",
     )
     def list_lawsuits(maxResults: Annotated[int, Field(ge=1, le=500)] = 100) -> dict[str, Any]:
         return call(lambda: api.all_lawsuits(maxResults=maxResults))
 
-    @read("juridiq_get_lawsuit", "Get Juridiq lawsuit", "Retrieve a Juridiq lawsuit by ID. Read-only.")
+    @read("juridiq_get_lawsuit", "Get Juridiq lawsuit", "Get a lawsuit by ID. Read-only.")
     def get_lawsuit(lawSuitId: Text) -> dict[str, Any]:
         return call(lambda: api.get_lawsuit(lawSuitId))
 
     @write(
         "juridiq_create_lawsuit",
         "Create Juridiq lawsuit",
-        "Create a lawsuit in the configured Juridiq account. Required payload fields are serviceStep, responsibleIds (UUIDs), and persons with name/personOrigin. personOrigin must be Cliente or Requerida. If Juridiq does not confirm the creation (timeout, connection error, 5xx) the error says the lawsuit MAY have been created: search with juridiq_find_lawsuit before retrying. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a lawsuit. Required: serviceStep, responsibleIds (UUIDs), persons (name, personOrigin Cliente|Requerida). If Juridiq doesn't confirm (timeout, connection error, 5xx) the lawsuit MAY have been created: check juridiq_find_lawsuit before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_lawsuit(payload: LawSuitCreate) -> dict[str, Any]:
@@ -374,7 +374,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_update_lawsuit",
         "Update Juridiq lawsuit",
-        "Update a lawsuit in the configured Juridiq account. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Update a lawsuit; only supplied fields are sent. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def update_lawsuit(lawSuitId: Id, patch: LawSuitUpdate) -> dict[str, Any]:
@@ -383,19 +383,19 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_delete_lawsuit",
         "Delete Juridiq lawsuit",
-        "Delete only the explicitly supplied lawsuit in the configured Juridiq account. dryRun=true deletes nothing and returns the lawsuit that would be deleted. expectProcessNumber refuses the call unless the lawsuit has that process number. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Delete only the given lawsuit. Preview with dryRun first. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def delete_lawsuit(
         lawSuitId: Id,
         dryRun: Annotated[
-            bool, Field(description="true deletes nothing and returns the lawsuit that would be deleted. Use it first.")
+            bool, Field(description="true: delete nothing, return the lawsuit that would be deleted.")
         ] = False,
         expectProcessNumber: Annotated[
             str,
             Field(
                 max_length=40,
-                description="Process number the lawsuit must have (punctuation ignored); the deletion is refused otherwise. Empty for no check.",
+                description="Refuse unless the lawsuit has this process number (punctuation ignored). Empty: no check.",
             ),
         ] = "",
     ) -> dict[str, Any]:
@@ -406,7 +406,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_lawsuit_movements",
         "List Juridiq lawsuit movements",
-        "List movements attached to a Juridiq lawsuit, including content, date, instance and tags. Read-only; useful for comparing a publication with its Juridiq process movement.",
+        "List a lawsuit's movements (content, date, instance, tags), e.g. to match a publication. Read-only.",
     )
     def list_lawsuit_movements(
         lawSuitId: Text,
@@ -419,7 +419,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_get_publication",
         "Get Juridiq publication",
-        "Retrieve the complete details of one Juridiq publication by ID, including content, dates, process number, official diary and read state. Read-only.",
+        "Get one publication by ID: full content, dates, process number, diary, read state. Read-only.",
     )
     def get_publication(publicationId: Text) -> dict[str, Any]:
         return call(lambda: api.get_publication(publicationId))
@@ -427,7 +427,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_events",
         "List Juridiq calendar events",
-        "List calendar items/events with process, person, responsible, date-range, completion, type and tag filters. Use lawSuitId to inspect events related to a process before creating anything. Read-only.",
+        "List calendar items (paged). Check a process's events (lawSuitId) before creating any. Read-only.",
     )
     def list_events(
         responsible: OneOrMany | None = None,
@@ -472,7 +472,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_get_event",
         "Get Juridiq event",
-        "Retrieve one calendar event by ID, including date, hours, linked process/person and responsibles. Read-only.",
+        "Get one calendar event by ID. Read-only.",
     )
     def get_event(eventId: Text) -> dict[str, Any]:
         return call(lambda: api.get_event(eventId))
@@ -480,23 +480,23 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_task_templates",
         "List Juridiq task templates",
-        "List live task templates for the configured account. Read-only.",
+        "List task templates. Read-only.",
     )
     def list_task_templates(limit: Limit = 100) -> dict[str, Any]:
         return call(lambda: api.task_templates(limit=limit))
 
-    @read("juridiq_list_users", "List Juridiq users", "List users in the configured office. Read-only.")
+    @read("juridiq_list_users", "List Juridiq users", "List office users. Read-only.")
     def list_users(limit: Limit = 100) -> dict[str, Any]:
         return call(lambda: api.users(limit=limit))
 
-    @read("juridiq_list_tags", "List Juridiq tags", "List tags in the configured office. Read-only.")
+    @read("juridiq_list_tags", "List Juridiq tags", "List office tags. Read-only.")
     def list_tags(limit: Limit = 100) -> dict[str, Any]:
         return call(lambda: api.tags(limit=limit))
 
     @read(
         "juridiq_list_task_columns",
         "List Juridiq task columns",
-        "List task board columns in the configured office. Read-only.",
+        "List task board columns. Read-only.",
     )
     def list_task_columns(limit: Limit = 100) -> dict[str, Any]:
         return call(lambda: api.task_columns(limit=limit))
@@ -504,7 +504,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_tasks",
         "List Juridiq tasks",
-        "List tasks using the API's filters. For publication deduplication, filter by lawSuitId and compare the semantic obligation, not only the task title. Read-only.",
+        "List tasks (paged). To dedupe a publication, filter by lawSuitId and compare the obligation, not just the title. Read-only.",
     )
     def list_tasks(
         page: Annotated[int, Field(ge=1)] = 1,
@@ -538,7 +538,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_tasks_kanban",
         "List Juridiq Kanban tasks",
-        "List tasks grouped by Kanban status. Use for board-oriented questions; use juridiq_list_tasks for filterable task records and deduplication. Read-only.",
+        "List tasks grouped by Kanban status, for board questions; dedupe with juridiq_list_tasks. Read-only.",
     )
     def list_tasks_kanban(
         page: Annotated[int, Field(ge=1)] = 1,
@@ -569,14 +569,14 @@ def create_server(allow_writes=None, api=None):
         options = _arguments()
         return call(lambda: api.kanban_tasks(**options))
 
-    @read("juridiq_get_task", "Get Juridiq task", "Retrieve a task by ID. Read-only.")
+    @read("juridiq_get_task", "Get Juridiq task", "Get a task by ID. Read-only.")
     def get_task(taskId: Text) -> dict[str, Any]:
         return call(lambda: api.get_task(taskId))
 
     @read(
         "juridiq_get_task_history",
         "Get Juridiq task history",
-        "Retrieve the history of a task, including actions, dates, users and Kanban transitions. Read-only.",
+        "Get a task's history (actions, dates, users, Kanban moves). Read-only.",
     )
     def get_task_history(taskId: Text) -> dict[str, Any]:
         return call(lambda: api.task_history(taskId))
@@ -584,7 +584,7 @@ def create_server(allow_writes=None, api=None):
     @read(
         "juridiq_list_task_comments",
         "List Juridiq task comments",
-        "List comments and replies for a task. Use to inspect human notes before deciding whether a publication is already covered. Read-only.",
+        "List a task's comments; check human notes before deciding a publication is covered. Read-only.",
     )
     def list_task_comments(taskId: Text) -> dict[str, Any]:
         return call(lambda: api.task_comments(taskId))
@@ -592,7 +592,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_task",
         "Create Juridiq task",
-        "Create a task in the configured Juridiq account. Required payload fields are title, priority (Baixa, Média or Alta), columnId (a Kanban column UUID from juridiq_list_task_columns), and initialDate. Use responsiblesId, not responsibleIds. lawSuitId is optional but recommended: pass it (find it with juridiq_find_lawsuit) so the task shows up in the process it belongs to; without it the task is created standalone. If Juridiq does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search with juridiq_list_tasks before retrying. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a task. Required: title, priority, columnId (UUID from juridiq_list_task_columns), initialDate. Use responsiblesId, not responsibleIds. Pass lawSuitId (juridiq_find_lawsuit) so the task shows in its process; else it is standalone. If Juridiq doesn't confirm (timeout, connection error, 5xx) the task MAY have been created: check juridiq_list_tasks before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_task(payload: TaskCreate) -> dict[str, Any]:
@@ -601,7 +601,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_update_task",
         "Update Juridiq task",
-        "Update a task in the configured Juridiq account. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Update a task; only supplied fields are sent. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def update_task(taskId: Id, patch: TaskUpdate) -> dict[str, Any]:
@@ -610,19 +610,19 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_delete_task",
         "Delete Juridiq task",
-        "Delete only the explicitly supplied task in the configured Juridiq account. dryRun=true deletes nothing and returns the task that would be deleted. expectTitle refuses the call unless the task's title contains that text. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Delete only the given task. Preview with dryRun first. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def delete_task(
         taskId: Id,
         dryRun: Annotated[
-            bool, Field(description="true deletes nothing and returns the task that would be deleted. Use it first.")
+            bool, Field(description="true: delete nothing, return the task that would be deleted.")
         ] = False,
         expectTitle: Annotated[
             str,
             Field(
                 max_length=255,
-                description="Text the task's title must contain (case ignored); the deletion is refused otherwise. Empty for no check.",
+                description="Refuse unless the task title contains this (case ignored). Empty: no check.",
             ),
         ] = "",
     ) -> dict[str, Any]:
@@ -631,7 +631,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_tag",
         "Create Juridiq tag",
-        "Create a tag (etiqueta) in the configured Juridiq account. modules chooses where it shows up: processos, tarefas, andamentos, pessoas, atendimentos, automacoes; defaults to tarefas. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a tag (etiqueta); modules sets where it shows. Needs JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_tag(payload: TagCreate) -> dict[str, Any]:
@@ -640,7 +640,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_update_tag",
         "Update Juridiq tag",
-        "Rename, recolor or change the modules of an existing tag. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Rename, recolor or change the modules of a tag. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def update_tag(tagId: Id, patch: TagUpdate) -> dict[str, Any]:
@@ -649,7 +649,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_delete_tag",
         "Delete Juridiq tag",
-        "Delete only the explicitly supplied tag. The API takes the id in a DELETE body, not in the path. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Delete only the given tag. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def delete_tag(tagId: Id) -> dict[str, Any]:
@@ -658,7 +658,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_task_template",
         "Create Juridiq task template",
-        "Create a task template (modelo de tarefa). title is required. priority is Baixa, Média or Alta; status of a subtask is Pendente, Em progresso or Concluída. tags take tag UUIDs (juridiq_list_tags), responsiblesId take user UUIDs (juridiq_list_users) and columnId takes a column UUID (juridiq_list_task_columns). Omitted fields get the same defaults the dashboard sends (points 0, priority Baixa, daysForDue 1, daysForStart 0). Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a task template (modelo de tarefa). UUIDs: tags from juridiq_list_tags, responsiblesId from juridiq_list_users, columnId from juridiq_list_task_columns. Omitted: points 0, priority Baixa, daysForDue 1, daysForStart 0. Needs JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_task_template(payload: TaskTemplateCreate) -> dict[str, Any]:
@@ -667,7 +667,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_update_task_template",
         "Update Juridiq task template",
-        "Update a task template; send only the fields that change. Sending subtasks replaces the whole list. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Update a task template; send only changed fields. subtasks replaces the whole list. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def update_task_template(templateId: Id, patch: TaskTemplateUpdate) -> dict[str, Any]:
@@ -676,7 +676,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_delete_task_template",
         "Delete Juridiq task template",
-        "Delete only the explicitly supplied task template (no body is sent). Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Delete only the given task template. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def delete_task_template(templateId: Id) -> dict[str, Any]:
@@ -685,7 +685,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_event",
         "Create Juridiq event",
-        "Create a calendar event in the configured Juridiq account. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Create a calendar event. Needs JURIDIQ_ALLOW_WRITES=true.",
         ADDITIVE,
     )
     def create_event(payload: EventCreate) -> dict[str, Any]:
@@ -694,7 +694,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_mark_publications_read",
         "Mark Juridiq publications read",
-        "Mark explicitly supplied publication IDs as read in the configured Juridiq account. Available only when JURIDIQ_ALLOW_WRITES=true.",
+        "Mark the given publication IDs as read. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,
     )
     def mark_publications_read(

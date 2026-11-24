@@ -36,6 +36,7 @@ import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from jurisync import customers, portals, registry
 from jurisync.install import credentials_bundle
@@ -56,6 +57,7 @@ class OfficePlan:
     name: str
     customer: str
     connectors: list = field(default_factory=list)
+    endpoints: list = field(default_factory=list)  # paths the office adds: /tribunais/mcp, then /advbox/mcp, ...
     portals: list = field(default_factory=list)  # portal keys stored in the vault, plus advbox/juridiq
     checks: list = field(default_factory=list)  # one `jurisync-hosted portal check` login each: every portal, service
     skipped: dict = field(default_factory=dict)  # portal -> reason
@@ -185,6 +187,7 @@ def plan_office(customer, values, *, name=None, ready=None):
     served = {portals.get(key).system for key in plan.portals if key not in SERVICES}
     served |= {key for key in plan.portals if key in SERVICES} | {"djen"}
     plan.connectors = [system for system in SYSTEM_ORDER if system in served]
+    plan.endpoints = registry.endpoints(plan.connectors)
     known = {name for setup in setups.values() for group in setup.secrets for name in group.split("|")}
     known |= set(customers.extra_variables(customer)[0]) | set(customers.extra_variables(customer)[1])
     unserved = sorted(
@@ -331,7 +334,7 @@ def summary(plan, values=None, files=None):
     services = [key for key in plan.portals if key in SERVICES]
     if services:
         pieces.append("+ " + ", ".join(services))
-    pieces.append(f"| conectores {','.join(plan.connectors)}")
+    pieces.append(f"| conectores {','.join(plan.connectors)} ({' '.join(plan.endpoints)})")
     if values is not None:
         pieces.append(f"| cofre: {values} nome(s), {files} arquivo(s)")
     lines = [" ".join(pieces)]
@@ -464,16 +467,20 @@ LOCAL_ONLY_TOOLS = re.compile(
 
 
 def remote_plugin(source, url, out, *, say=print):
-    """Copy an office plugin with its local MCP servers replaced by the hosted ``/mcp`` URL.
+    """Copy an office plugin with its local MCP servers replaced by the hosted ones: ``/tribunais/mcp`` for its court
+    systems and DJEN, ``/<name>/mcp`` for each management system (ADVBOX, Juridiq) it uses.
 
     Skills are copied as files (the plugin's symlinks point into customers/), customer profiles are left out: the
     server holds them. Returns the skills that name tools the server does not serve.
     """
     source, out = Path(source), Path(out)
     manifest = json.loads((source / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    if not url.startswith("https://") or not url.rstrip("/").endswith("/mcp"):
-        raise SystemExit("--url deve ser o endereço público do servidor, https://<host>/mcp")
-    manifest["mcpServers"] = {"jurisync": {"type": "http", "url": url.rstrip("/")}}
+    base = url.rstrip("/").removesuffix("/mcp")
+    if not base.startswith("https://") or not urlsplit(base).netloc or urlsplit(base).path:
+        raise SystemExit("--url deve ser o endereço público do servidor, https://<host>")
+    used = [name for name in manifest.get("mcpServers", {}) if name in registry.CONNECTORS]
+    paths = registry.endpoints(used or [registry.GROUPS[registry.COURTS][0]])
+    manifest["mcpServers"] = {path.split("/")[1]: {"type": "http", "url": base + path} for path in paths}
     manifest["description"] = manifest.get("description", "") + " (servidor remoto)"
     if out.exists():
         shutil.rmtree(out)
@@ -492,7 +499,10 @@ def remote_plugin(source, url, out, *, say=print):
         if found:
             local_only[Path(entry).name] = found
     (out / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-    say(f"Plugin remoto em {out}: servidor jurisync -> {url}")
+    say(
+        f"Plugin remoto em {out}: "
+        + ", ".join(f"{name} -> {entry['url']}" for name, entry in manifest["mcpServers"].items())
+    )
     for skill, tools in local_only.items():
         say(f"    {skill} usa ferramentas que o servidor não serve ({', '.join(tools)}): continua na instalação local")
     return local_only

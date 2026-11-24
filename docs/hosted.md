@@ -8,13 +8,24 @@ Connectors served to offices: every connector of `src/jurisync/registry.py` (PJe
 Tucujuris, JPe, DJEN, ADVBOX and Juridiq); `hosted/app.py`, `provision.py`, `cli.py` and `access.py` read that list.
 The PJe draft tools (`local_only_tools`) stay on the office's computer; ADVBOX and Juridiq write tools are listed and
 answer only for an office whose own grant (`ADVBOX_ALLOW_WRITES`/`JURIDIQ_ALLOW_WRITES` in its vault entry or
-`[env].set` of its profile) is `true` (`GRANTED_WRITES`); the server's environment never grants them.
+`[env].set` of its profile) is `true` (`GRANTED_WRITES`); the server's environment never grants them. A court write
+(juntada, protocolo) works the same way: its connector declares `write_grant`/`write_tools` in the registry, and the
+tools stay hidden and refused on `/tribunais/mcp` for an office without that grant.
 
 Deployment (VPS install, systemd, HTTPS, backups, smoke test): `deploy/README.md`.
 
-The office adds one URL in Claude or ChatGPT: `https://<host>/mcp`. It serves the tools of every connector enabled for
-that office (tool names start with their system, so `advbox_*` is absent for an office without ADVBOX). The
-per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
+Connectors an office adds in Claude or ChatGPT (`registry.endpoints`, also in each office's `plan.json`):
+
+| Connector | URL | Serves |
+|---|---|---|
+| Jurisync Tribunais | `https://<host>/tribunais/mcp` | Every court system the office has (PJe incl. PJe-JT, Eproc, e-SAJ, Projudi, STJ, JPe, Tucujuris) and DJEN: the connectors with `group="tribunais"` in the registry. |
+| Jurisync ADVBOX | `https://<host>/advbox/mcp` | ADVBOX, for an office that uses it. |
+| Jurisync Juridiq | `https://<host>/juridiq/mcp` | Juridiq, for an office that uses it. A future management system (CRM, ...) gets its own `/<name>/mcp` the same way. |
+
+Each URL lists only the systems enabled for the office and, per system, only its portals (tool names start with their
+system). `https://<host>/mcp` (every connector at one URL) is **deprecated**: it keeps working for the offices that
+added it (Victor), but new offices get the URLs above. The per-system court URLs (`/pje/mcp`, `/eproc/mcp`, ...) also
+stay for older setups.
 
 ## Pieces
 
@@ -25,27 +36,28 @@ per-connector URLs (`/pje/mcp`, `/advbox/mcp`, ...) stay for older setups.
 | Vault | `src/jurisync/hosted/vault.py` | One AES-256-GCM file per tenant; the tenant id is authenticated data; master key in `JURISYNC_VAULT_KEY`. |
 | Store | `src/jurisync/hosted/store.py` | SQLite: tenants, users (scrypt passwords), OAuth clients, codes and tokens (SHA-256 hashes only). |
 | OAuth | `src/jurisync/hosted/oauth.py` | The SDK's `OAuthAuthorizationServerProvider`: dynamic client registration, PKCE, a sign-in page, rotating refresh tokens. |
-| App | `src/jurisync/hosted/app.py` | OAuth endpoints at the root; `/mcp` and `/<connector>/mcp` behind a bearer token; `TenantGate` opens the tenant's credential scope per request; `Office` lists and calls only the office's connectors and records each call. |
+| App | `src/jurisync/hosted/app.py` | OAuth endpoints at the root; `/tribunais/mcp`, `/<connector>/mcp` and the deprecated `/mcp` behind a bearer token; `TenantGate` opens the tenant's credential scope per request; `Office` lists and calls only the office's connectors and records each call. |
 | CLI | `src/jurisync/hosted/cli.py` | `jurisync-hosted`: init, tenants, vault import, users, call log, serve. |
-| Provisioning | `src/jurisync/hosted/provision.py` | `provision export` (our machine: plan + sealed bundle per office from `customers/`), `provision apply` (server: tenants, vault, profiles, users), `provision plugin` (office plugin pointing at `/mcp`). |
+| Provisioning | `src/jurisync/hosted/provision.py` | `provision export` (our machine: plan + sealed bundle per office from `customers/`), `provision apply` (server: tenants, vault, profiles, users), `provision plugin` (office plugin pointing at `/tribunais/mcp` and one URL per management system). |
 
 ## Request flow
 
-1. The client calls `/mcp` without a token, gets `401` with the protected resource metadata URL, discovers the
+1. The client calls `/tribunais/mcp` (or another endpoint) without a token, gets `401` with the protected resource metadata URL, discovers the
    authorization server, registers itself and sends the user to `/authorize`.
 2. `/authorize` parks the request and redirects to `/login`. The user signs in with an office e-mail and password; the
    code records the user's tenant.
 3. `/token` exchanges the code (PKCE checked by the SDK) for a one-hour access token and a 30-day refresh token.
 4. On each MCP request the SDK validates the token; `TenantGate` checks the tenant still exists and the token was
-   issued for this resource (a token for `/mcp` works only on `/mcp`, one for `/pje/mcp` only there), then opens
-   `credentials.scope(tenant, vault values)`. A per-connector URL answers 403 when the connector is not enabled for the
-   tenant; on `/mcp`, `tools/list` shows only the enabled connectors' tools and a call to another one returns an error.
+   issued for this resource (a token for `/tribunais/mcp` works only there, one for `/advbox/mcp` only there), then
+   opens `credentials.scope(tenant, vault values)`. A URL answers 403 when none of its connectors is enabled for the
+   tenant; `tools/list` shows only the enabled connectors' tools and a call to another one returns an error.
    A tool's `portal` choices are only the portals the office has a login for (the connector's `configured_portals()`
    in the office's scope); a call naming another portal is refused, and a connector with no portal configured is not
-   listed for the office. `/healthz` answers `{"ok": true}` without a token.
+   listed for the office. The `portal` field says only "Portal key; see the enum"; the first tool of each system lists
+   the office's portals once with their hosts (`Portals: trf5-1g (pje1g.trf5.jus.br), ...`). `/healthz` answers `{"ok": true}` without a token.
 5. The SDK carries that context into the tool call (including the worker thread of a sync tool). The connector logs
    in with the tenant's A1 and TOTP; the session pool keeps that login apart from other tenants.
-6. Every tool call, on either URL, writes one row to the store: office, user, connector, tool, ok or error type,
+6. Every tool call, on any URL, writes one row to the store: office, user, connector, tool, ok or error type,
    duration. Arguments and results are never stored; rows older than 90 days are purged.
 
 ## Isolation guarantees
@@ -138,8 +150,8 @@ With `--portal`, only the names that portal declares in the customer's `portals.
 reported.
 
 Expose the server over HTTPS (Caddy, nginx, or a Cloudflare Tunnel pointing at `127.0.0.1:8080`); `--base-url` must be
-the public address. In Claude or ChatGPT, add a custom connector with `https://mcp.exemplo.com.br/mcp` and sign in on
-the page the server opens.
+the public address. In Claude or ChatGPT, add a custom connector with `https://mcp.exemplo.com.br/tribunais/mcp` (and
+`/advbox/mcp` or `/juridiq/mcp` for an office that uses them) and sign in on the page the server opens.
 
 ## Registering an office's access
 
@@ -182,8 +194,9 @@ Run for every office before it uses the server for real. Each step names what pr
    password or PIN, an expired A1 and a court that is down each show a clear message and store nothing.
 3. **Overview.** Every system the office set up shows its method and a successful test; the A1 shows holder and
    expiry.
-4. **Claude connection.** A user adds `https://<host>/mcp` in Claude (or ChatGPT) and signs in on the Jurisync page.
-   Proof: the tool list has only the office's systems, and `jurisync-hosted calls <office>` shows the user's first call.
+4. **Claude connection.** A user adds `https://<host>/tribunais/mcp` (plus `/advbox/mcp` or `/juridiq/mcp` when the
+   office uses them) in Claude (or ChatGPT) and signs in on the Jurisync page. Proof: each tool list has only the
+   office's systems, and `jurisync-hosted calls <office>` shows the user's first call.
 5. **One read per system, with the office's own account.** PJe panel counters, an Eproc process, a DJEN search
    with the office's OAB, ADVBOX tasks, Juridiq publications. Proof: the numbers match what the office sees in each
    portal when it signs in itself.

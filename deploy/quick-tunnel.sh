@@ -22,5 +22,5 @@ done
 umask 022
 printf 'JURISYNC_BASE_URL=%s\n' "$URL" >/etc/jurisync/base-url.env
 systemctl restart jurisync-hosted.service
-echo "Endereço temporário: ${URL}/mcp (o conector do Claude/ChatGPT usa este endereço até o domínio existir)"
+echo "Endereço temporário: ${URL}/tribunais/mcp (e ${URL}/advbox/mcp, ${URL}/juridiq/mcp; o conector do Claude/ChatGPT usa estes endereços até o domínio existir)"
 wait "$PID"

@@ -488,7 +488,7 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
 
     plugin_parser = provision.add_parser("plugin", help="cópia de um plugin do escritório apontando para o servidor")
     plugin_parser.add_argument("source", help="pasta do plugin, ex. plugins/victor")
-    plugin_parser.add_argument("--url", required=True, help="https://<host>/mcp")
+    plugin_parser.add_argument("--url", required=True, help="https://<host>: /tribunais/mcp e um por sistema de gestão")
     plugin_parser.add_argument("--out", required=True)
 
     run = commands.add_parser("serve")

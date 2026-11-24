@@ -26,7 +26,15 @@ from jurisync.connectors.eproc.client import (
     request,
     uses_a3,
 )
-from jurisync.core.mcp import READ_ONLY, load_env_file, require_success, serve, tool_errors
+from jurisync.core.mcp import (
+    PORTAL_HELP,
+    READ_ONLY,
+    load_env_file,
+    offer_portals,
+    require_success,
+    serve,
+    tool_errors,
+)
 from jurisync.core.session_pool import SessionExpired, SessionPool
 
 ERRORS = (ValueError, RuntimeError, OSError, KeyError)
@@ -67,10 +75,6 @@ def configured_portals():
     return customers.profile_portals(key for key in portals.keys("eproc") if ready(portals.eproc(key)))
 
 
-def describe(keys):
-    return ", ".join(f"{key} ({portals.eproc(key).host})" for key in keys)
-
-
 def expired(result):
     """A result whose page was the portal's login page. Such a read stopped before any document was opened."""
     if "session_expired" in result.get("diagnostics", []):
@@ -80,7 +84,7 @@ def expired(result):
 
 def create_server(keys=None):
     keys = tuple(keys or portals.keys("eproc"))
-    Portal = Literal[keys]  # noqa: N806 - a type built from the configured portals
+    Portal = Annotated[Literal[keys], Field(description=PORTAL_HELP)]  # noqa: N806 - built from the configured portals
     Queue = Literal[tuple(QUEUE_KINDS)]  # noqa: N806 - a type built from the queue kinds
     server = MCPServer("eproc", version="1.0.0")
 
@@ -99,19 +103,15 @@ def create_server(keys=None):
     @server.tool(
         name="eproc_list_notices",
         title="List Eproc notices",
-        description=(
-            "Read one citation/intimation queue of an Eproc portal. queue kinds: "
-            + ", ".join(QUEUE_KINDS)
-            + f". Portals: {describe(keys)}. Read-only."
-        ),
+        description="Read one citation/intimation queue of an Eproc portal. Read-only.",
         annotations=READ_ONLY,
     )
     def eproc_list_notices(
-        portal: Annotated[Portal, Field(description="Portal key from the list above, e.g. 'trf4-1g-rs'.")],
+        portal: Portal,
         queue: Annotated[
             Queue,
             Field(
-                description="Queue to read: 'open_deadlines' (prazo aberto, a deadline already running) or 'pending' (citação/intimação still waiting for ciência). See the description for all kinds."
+                description="'open_deadlines': prazo aberto, deadline running; 'pending': citação/intimação awaiting ciência."
             ),
         ],
     ) -> dict[str, Any]:
@@ -121,26 +121,18 @@ def create_server(keys=None):
         name="eproc_list_processes",
         title="List Eproc lawyer processes",
         description=(
-            "Read Relação de Processos for the authenticated lawyer, using the portal's default filters (TRF6 "
-            "excludes baixados by default). No CNJ required. Returns case numbers, parties, class, subject, last "
-            "event, dates and claim value. The portal shows 50 rows a page (500 on TJSC); maxPages (default 1, up to "
-            f"{MAX_REPORT_PAGES}) reads that many pages of its pager. pagination.totalItems is the portal's own count "
-            "of the whole list, pagination.pagesRead/totalPages say how far it was read, and pagination.complete is "
-            "true only when every row was read: when it is false, call again with a larger maxPages. This is not an "
-            "unrestricted court-wide search. Use eproc_get_process for details/documents. Requires the report link in "
-            f"the authenticated panel. Portals: {describe(keys)}. Read-only."
+            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters; TRF6 "
+            "excludes baixados); not a court-wide search. Rows: number, parties, class, subject, last event, dates, "
+            "claim value. pagination.totalItems is the portal's count; pagination.complete=false means rows remain "
+            "unread: call again with a larger maxPages. Details and documents: eproc_get_process. Read-only."
         ),
         annotations=READ_ONLY,
     )
     def eproc_list_processes(
-        portal: Annotated[Portal, Field(description="Portal key from the list above, e.g. 'trf6-1g'.")],
+        portal: Portal,
         maxPages: Annotated[
             int,
-            Field(
-                ge=1,
-                le=MAX_REPORT_PAGES,
-                description="How many pages of the portal's list to read (50 rows each, 500 on TJSC). Default 1.",
-            ),
+            Field(ge=1, le=MAX_REPORT_PAGES, description="Pages to read (50 rows each, 500 on TJSC)."),
         ] = 1,
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_processes(max_pages=maxPages, **context))
@@ -149,22 +141,19 @@ def create_server(keys=None):
         name="eproc_get_process",
         title="Get Eproc process context",
         description=(
-            "Read an Eproc process, parties, events, document inventory and up to five selected document texts. "
-            "Without documentIds no document is opened. With documentIds the documents are always opened. The "
-            "response always carries a top-level ciencia block, checked against the lawyer's pending queues: "
-            "estado 'nenhuma' (nothing pending involved), 'pendente' (a citação/intimação awaits ciência and no "
-            "document was opened), 'dada' (documents of a process with one were opened: the ciência may have been "
-            "registered and the deadline started) or 'desconhecida' (documents were opened but the queues could not "
-            "be checked; motivo says why), with intimacoes and an aviso. Always relay ciencia.aviso to the user and "
-            "note it in the task. With save=true each read document is stored in the "
-            "shared documents folder (HTML acts are rendered to PDF) and reported as savedAs, so a task can attach it "
-            "by file name. Not annotated read-only because of the save and ciência effects. "
-            f"Portals: {describe(keys)}."
+            "Read an Eproc process: parties, events, document inventory and the texts of documentIds (no document is "
+            "opened without them; with them they always are). Opening a document of a process with a pending "
+            "citação/intimação may register the ciência and start the deadline. The ciencia block, checked against "
+            "the lawyer's pending queues: estado 'nenhuma' (nothing pending involved), 'pendente' (one awaits ciência, "
+            "no document opened), 'dada' (documents opened: the ciência may be registered and the deadline started) "
+            "or 'desconhecida' (opened, queues not checked; motivo says why), with intimacoes and an aviso. Always "
+            "tell the user ciencia.aviso and note it in the task. save=true stores each read document (HTML as PDF) "
+            "in the shared documents folder."
         ),
         annotations=READS_AND_SAVES,
     )
     def eproc_get_process(
-        portal: Annotated[Portal, Field(description="Portal key from the list above.")],
+        portal: Portal,
         processNumber: Annotated[
             str,
             Field(min_length=1, description="CNJ process number with punctuation, e.g. '5004320-76.2026.4.04.7104'."),
@@ -172,21 +161,19 @@ def create_server(keys=None):
         scope: Annotated[
             Literal["latest", "page"],
             Field(
-                description="'page' (default): the timeline, up to 5 event pages (see pagination). 'latest': newest date only."
+                description="'page': the timeline, up to 5 event pages (see pagination). 'latest': newest date only."
             ),
         ] = "page",
         documentIds: Annotated[
             list[Annotated[str, Field(min_length=1)]],
             Field(
                 max_length=5,
-                description="Optional JSON list of up to 5 document ids from the documentInventory of the process; empty means no texts. Works with either scope: the ids are looked up in the whole inventory, not only in the events the scope returns.",
+                description="JSON list of document ids from documentInventory (looked up in all of it, whatever the scope).",
             ),
         ] = [],
         save: Annotated[
             bool,
-            Field(
-                description="true stores each read document in the shared documents folder and returns savedAs names for advbox_create_task."
-            ),
+            Field(description="true returns savedAs file names for advbox_create_task."),
         ] = False,
     ) -> dict[str, Any]:
         return call(
@@ -207,7 +194,9 @@ def main():
     load_env_file()
     keys = configured_portals() or portals.keys("eproc")
     sessions.only(keys)
-    serve(create_server(keys), on_exit=sessions.close)
+    server = create_server(keys)
+    offer_portals(server, keys)
+    serve(server, on_exit=sessions.close)
 
 
 if __name__ == "__main__":

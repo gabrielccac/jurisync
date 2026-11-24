@@ -23,6 +23,7 @@ class Connector:
     local_only_tools: frozenset = frozenset()  # tools that only work on the office's computer
     write_grant: str = ""  # variable that lets an office see and call the connector's writes
     write_tools: frozenset = frozenset()  # the tools that grant opens
+    group: str = ""  # hosted connector it is served in ("tribunais"); empty: its own, at /<name>/mcp
 
     @property
     def module(self):
@@ -48,6 +49,9 @@ class Connector:
         return server, (reduce(getattr, self.close.split("."), module) if self.close else None)
 
 
+# Court systems and DJEN: one hosted connector, so an office adds one URL for every court it has. A future court write
+# declares write_grant/write_tools like ADVBOX and stays hidden and refused there for an office without the grant.
+COURTS = "tribunais"
 CONNECTORS = {
     connector.name: connector
     for connector in (
@@ -55,6 +59,7 @@ CONNECTORS = {
             "pje",
             "PJe",
             attribute="server",
+            group=COURTS,
             # The filing run folders these read are on the computer that wrote the drafts; writes stay local too, and
             # so does the draft search of the same TRF5 filing workflow.
             local_only_tools=frozenset(
@@ -67,13 +72,13 @@ CONNECTORS = {
                 }
             ),
         ),
-        Connector("eproc", "Eproc"),
-        Connector("esaj", "e-SAJ"),
-        Connector("projudi", "Projudi"),
-        Connector("stj", "STJ"),
-        Connector("tucujuris", "Tucujuris"),
-        Connector("jpe", "JPe"),
-        Connector("djen", "DJEN", attribute="server", close=None),
+        Connector("eproc", "Eproc", group=COURTS),
+        Connector("esaj", "e-SAJ", group=COURTS),
+        Connector("projudi", "Projudi", group=COURTS),
+        Connector("stj", "STJ", group=COURTS),
+        Connector("tucujuris", "Tucujuris", group=COURTS),
+        Connector("jpe", "JPe", group=COURTS),
+        Connector("djen", "DJEN", attribute="server", close=None, group=COURTS),
         Connector(
             "advbox",
             "ADVBOX",
@@ -123,6 +128,18 @@ CONNECTORS = {
     )
 }
 SERVICES = tuple(name for name, connector in CONNECTORS.items() if connector.login)
+GROUPS = {COURTS: tuple(name for name, connector in CONNECTORS.items() if connector.group == COURTS)}
+
+
+def endpoints(names):
+    """The hosted paths an office with these connectors adds: its group once, then each ungrouped one."""
+    paths = []
+    for name in names:
+        group = CONNECTORS[name].group if name in CONNECTORS else ""
+        path = f"/{group or name}/mcp"
+        if path not in paths:
+            paths.append(path)
+    return paths
 
 
 def get(name):

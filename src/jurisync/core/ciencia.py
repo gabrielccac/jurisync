@@ -21,8 +21,8 @@ AUTHORIZATION = (
     "asking again, and still relay the ciencia block's aviso to the user and note it in the task"
 )
 ACKNOWLEDGE = (
-    "Leave empty. true reads even when a ciência may be pending, which may register the party's ciência and start "
-    "the deadline; only with the user's authorization, given now or in advance (e.g. a scheduled task's prompt)."
+    "Leave empty. true opens what may register a pending ciência and start the deadline; only with the user's "
+    "authorization, given now or in advance (see the tool description)."
 )
 
 

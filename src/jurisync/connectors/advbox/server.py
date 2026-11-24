@@ -36,36 +36,30 @@ DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempote
 LOCAL_WRITE = WRITE
 ERRORS = (ValueError, RuntimeError, OSError, KeyError, PermissionError, RequestException)
 
-Id = Annotated[
-    str, Field(pattern=r"^\d+$", description="Numeric ADVBOX ID, sent as a string of digits (e.g. '17519594').")
-]
-Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
-PageSize = Annotated[int, Field(ge=1, le=100, description="Rows per page, 1 to 100.")]
-Search = Annotated[str, Field(max_length=255, description="Free text to match; empty string means no filter.")]
+Id = Annotated[str, Field(pattern=r"^\d+$")]
+Page = Annotated[int, Field(ge=1)]
+PageSize = Annotated[int, Field(ge=1, le=100)]
+Search = Annotated[str, Field(max_length=255, description="Empty = no filter.")]
 OptionalDate = Annotated[
     str,
     Field(
         pattern=r"^(\d{4}-\d{2}-\d{2})?$",
-        description="Date as ISO YYYY-MM-DD (e.g. '2026-10-16'); empty string means none.",
     ),
 ]
-Date = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="Date as ISO YYYY-MM-DD (e.g. '2026-10-16').")]
-Hour = Annotated[
-    str, Field(pattern=r"^(\d{2}:\d{2})?$", description="Time as HH:MM, 24h (e.g. '14:30'); empty string means none.")
-]
+Date = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+Hour = Annotated[str, Field(pattern=r"^(\d{2}:\d{2})?$")]
 UserIds = Annotated[
     list[Annotated[int, Field(gt=0)]],
     Field(
         min_length=1,
         max_length=20,
-        description="List of 1 to 20 numeric user IDs from advbox_list_members, always a JSON list even for one user (e.g. [961]).",
     ),
 ]
 FilterUserIds = Annotated[
     list[Annotated[int, Field(gt=0)]] | None,
     Field(
         max_length=100,
-        description="Optional JSON list of numeric user IDs from advbox_list_members, even for one user (e.g. [961]); omit for everyone.",
+        description="User IDs (advbox_list_members), JSON list; omit for everyone.",
     ),
 ]
 
@@ -162,7 +156,7 @@ def write(handler):
 @server.tool(
     name="advbox_ensure_session",
     title="Ensure ADVBOX session",
-    description="Authenticate headlessly in ADVBOX using the configured trusted device. Read-only.",
+    description="Authenticate headlessly with the configured trusted device. Read-only.",
     annotations=READ_ONLY,
 )
 def ensure_session() -> dict[str, Any]:
@@ -172,17 +166,15 @@ def ensure_session() -> dict[str, Any]:
 @server.tool(
     name="advbox_verify_device",
     title="Verify ADVBOX device",
-    description="Finish ADVBOX's device verification: when a call says ADVBOX sent a code to verify this device, ask the client for it and pass it as code. A refused code can be typed again (3 attempts). Only when the user says the stored device stopped working and ADVBOX did not ask for a code by itself, call it with newDevice=true and no code: it starts a verification with a new device id, ADVBOX sends a code, and the next call passes it. Changes the account's trusted devices; never needs the write permission.",
+    description="When a call says ADVBOX sent a device code, ask the user and pass it (3 attempts). Only if the user says the stored device stopped working: newDevice=true, then pass the code sent. Changes the account's trusted devices; no write grant needed.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 async def verify_device(
     code: Annotated[
         str,
-        Field(max_length=32, description="The code ADVBOX sent, as the client typed it; empty with newDevice=true."),
+        Field(max_length=32, description="Code ADVBOX sent; empty with newDevice=true."),
     ] = "",
-    newDevice: Annotated[
-        bool, Field(description="true starts a verification with a new device id; only when the user asks for it.")
-    ] = False,
+    newDevice: Annotated[bool, Field(description="Only when the user asks.")] = False,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
     session = client.session
@@ -206,7 +198,7 @@ async def verify_device(
 @server.tool(
     name="advbox_list_customers",
     title="List ADVBOX customers",
-    description="Search and paginate customers in ADVBOX. Read-only.",
+    description="Search and page customers. Read-only.",
     annotations=READ_ONLY,
 )
 def list_customers(page: Page = 1, pageSize: PageSize = 50, search: Search = "") -> dict[str, Any]:
@@ -216,7 +208,7 @@ def list_customers(page: Page = 1, pageSize: PageSize = 50, search: Search = "")
 @server.tool(
     name="advbox_list_lawsuits",
     title="List ADVBOX lawsuits",
-    description="Search and paginate lawsuits in ADVBOX. Supports sorting (created = lawsuits.created_at, movement = date_last_movement — often unpopulated upstream, prefer created) and a created-date range (YYYY-MM-DD). Read-only.",
+    description="Search and page lawsuits. Read-only.",
     annotations=READ_ONLY,
 )
 def list_lawsuits(
@@ -225,18 +217,14 @@ def list_lawsuits(
     search: Search = "",
     sortBy: Annotated[
         Literal["parties", "type", "created", "movement"],
-        Field(
-            description="Sort column: 'created' (recommended, creation date), 'parties', 'type', or 'movement' (often empty upstream)."
-        ),
+        Field(description="'created' recommended; 'movement' is often empty."),
     ] = "parties",
-    sortDir: Annotated[Literal["asc", "desc"], Field(description="'asc' or 'desc'.")] = "asc",
+    sortDir: Literal["asc", "desc"] = "asc",
     dateFrom: Annotated[
         OptionalDate,
-        Field(description="Created-date range start, YYYY-MM-DD (e.g. '2026-10-01'); empty string for none."),
+        Field(description="Created from; empty = none."),
     ] = "",
-    dateUntil: Annotated[
-        OptionalDate, Field(description="Created-date range end, YYYY-MM-DD; empty string for none.")
-    ] = "",
+    dateUntil: Annotated[OptionalDate, Field(description="Created until; empty = none.")] = "",
 ) -> dict[str, Any]:
     sort = {"parties": 0, "type": 1, "created": 3, "movement": 5}[sortBy]
     return call(
@@ -255,61 +243,36 @@ def list_lawsuits(
 @server.tool(
     name="advbox_search_tasks",
     title="Search ADVBOX tasks",
-    description=(
-        "Search tasks (Tarefas) by free text and/or the Tarefas screen filters. search matches the task title, "
-        "comment, customer and process number (e.g. a CNJ number, an NB, a client name or an atom like 'ABRIR "
-        "INTIMAÇÃO'). Filters: situation (pending or completed), responsibles, start-date range, task type, lawsuit "
-        "stage, group, lawsuit type and priority; filter ids come from advbox_task_filters. Without responsible, a "
-        "text search covers every member and a listing without text only the logged-in user (allResponsibles "
-        "overrides). Completed tasks need dateFrom and dateTo. ADVBOX refuses a filter matching several thousand "
-        "tasks: narrow it. Returns compact tasks (postId, task, detail, customer, lawsuitId, taskTypeId, start, "
-        "deadline, overdue, responsible; important/urgent/viewed only for your own tasks), total and hasMore. For "
-        "a lawsuit's full history use advbox_lawsuit_report. Read-only."
-    ),
+    description="Search tasks (Tarefas) by text and/or filters (ids from advbox_task_filters). search matches title, comment, customer, process number (CNJ, NB, atoms like 'ABRIR INTIMAÇÃO'). Without responsible, a text search covers every member, a listing without text only you. Completed tasks need dateFrom and dateTo. Filters matching thousands of tasks are refused. Returns compact tasks (important/urgent/viewed only for your own), total and hasMore. Read-only.",
     annotations=READ_ONLY,
 )
 def search_tasks(
     search: Search = "",
     completed: Annotated[
         Literal["pendentes", "concluidas"],
-        Field(description="'pendentes' (default) or 'concluidas'. Completed tasks need dateFrom/dateTo."),
+        Field(description="'concluidas' needs dateFrom/dateTo."),
     ] = "pendentes",
     responsible: FilterUserIds = None,
     allResponsibles: Annotated[
         bool | None,
-        Field(
-            description="true: every member; false: only the logged-in user. Default: every member when search is given."
-        ),
+        Field(description="true: every member; false: only you."),
     ] = None,
-    dateFrom: Annotated[Date | None, Field(description="Start-date range start YYYY-MM-DD, e.g. '2026-10-15'.")] = None,
-    dateTo: Annotated[Date | None, Field(description="Start-date range end YYYY-MM-DD, e.g. '2026-10-15'.")] = None,
+    dateFrom: Annotated[Date | None, Field(description="Task start from.")] = None,
+    dateTo: Annotated[Date | None, Field(description="Task start until.")] = None,
     taskType: Annotated[
         str,
         Field(
             pattern=r"^(\d+|publications|schedule)?$",
-            description="Task type id from advbox_task_filters taskTypes, or 'publications' / 'schedule'; empty for all.",
+            description="taskTypes id; empty = all.",
         ),
     ] = "",
-    stage: Annotated[
-        str, Field(pattern=r"^\d*$", description="Lawsuit stage id (Etapa) from advbox_task_filters; empty for all.")
-    ] = "",
-    groups: Annotated[
-        list[Annotated[int, Field(gt=0)]] | None,
-        Field(description="JSON list of group ids from advbox_task_filters; omit for all."),
-    ] = None,
-    lawsuitTypes: Annotated[
-        list[Annotated[int, Field(gt=0)]] | None,
-        Field(description="JSON list of lawsuit (action) type ids from advbox_task_filters; omit for all."),
-    ] = None,
-    priorities: Annotated[
-        list[Literal["normal", "urgente", "importante"]] | None,
-        Field(description="Subset of ['normal', 'urgente', 'importante']; omit for all."),
-    ] = None,
+    stage: Annotated[str, Field(pattern=r"^\d*$", description="Empty = all.")] = "",
+    groups: list[Annotated[int, Field(gt=0)]] | None = None,
+    lawsuitTypes: list[Annotated[int, Field(gt=0)]] | None = None,
+    priorities: list[Literal["normal", "urgente", "importante"]] | None = None,
     page: Page = 1,
     pageSize: PageSize = 25,
-    detailChars: Annotated[
-        int, Field(ge=0, le=5000, description="Max characters of each task comment (detail); 0 removes it.")
-    ] = 400,
+    detailChars: Annotated[int, Field(ge=0, le=5000, description="Max chars of each detail; 0 removes it.")] = 400,
 ) -> dict[str, Any]:
     return call(
         lambda: client.search_tasks(
@@ -334,7 +297,7 @@ def search_tasks(
 @server.tool(
     name="advbox_task_filters",
     title="List ADVBOX task filter options",
-    description="Options for advbox_search_tasks filters, read from the Tarefas screen: taskTypes (task templates, plus 'publications' and 'schedule'), stages, groups, lawsuitTypes, situations and priorities, each as {id, label}. Read-only.",
+    description="Filter options ({id, label}) for advbox_search_tasks: taskTypes, stages, groups, lawsuitTypes, situations, priorities. Read-only.",
     annotations=READ_ONLY,
 )
 def task_filters() -> dict[str, Any]:
@@ -344,34 +307,30 @@ def task_filters() -> dict[str, Any]:
 @server.tool(
     name="advbox_list_publications",
     title="List ADVBOX publications (intimações)",
-    description="List the intimações (publications) that ADVBOX received for the office, with the post ID that opens each one, customer, date, court, process number, responsible and status (pendente/concluida). Choose a period (today, 3d, 7d, 30d) or both dateFrom and dateTo, and optionally filter by tribunal sigla (for example TRF5), exact CNJ process number or responsible ID (advbox_list_members). Pages hold at most 200 records (default 50); use page while hasMore is true. The text of one intimação is read with advbox_activity_details using its postId. Fails with a clear message when the account has no Intimações module. Read-only.",
+    description="Intimações received by the office, with postId and status. Give period or dateFrom+dateTo; page while hasMore. Text: advbox_activity_details(postId). Fails if the account lacks the Intimações module. Read-only.",
     annotations=READ_ONLY,
 )
 def list_publications(
     period: Annotated[
         Literal["today", "3d", "7d", "30d"] | None,
-        Field(
-            description="Shortcut window ending today: 'today', '3d', '7d' or '30d'. Use it alone, or use dateFrom/dateTo instead."
-        ),
+        Field(description="Window ending today; or use dateFrom/dateTo."),
     ] = None,
-    dateFrom: Annotated[Date | None, Field(description="Start date YYYY-MM-DD, e.g. '2026-10-01'.")] = None,
-    dateTo: Annotated[Date | None, Field(description="End date YYYY-MM-DD, e.g. '2026-10-15'.")] = None,
-    tribunal: Annotated[
-        str, Field(max_length=40, description="Court acronym, e.g. 'TRF5' or 'TJPE'. Empty for all courts.")
-    ] = "",
+    dateFrom: Date | None = None,
+    dateTo: Date | None = None,
+    tribunal: Annotated[str, Field(max_length=40, description="Court acronym, e.g. 'TRF5'; empty = all.")] = "",
     processNumber: Annotated[
         str,
         Field(
             pattern=r"^(\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4})?$",
-            description="Exact CNJ number with punctuation, e.g. '0800963-61.2024.4.05.8308'. Empty for none.",
+            description="Exact CNJ with punctuation.",
         ),
     ] = "",
     responsible: Annotated[
         int | None,
-        Field(gt=0, description="Optional single numeric user ID from advbox_list_members (a number, not a list)."),
+        Field(gt=0, description="One user ID from advbox_list_members (a number, not a list)."),
     ] = None,
     page: Page = 1,
-    pageSize: Annotated[int, Field(ge=1, le=200, description="Records per page, 1 to 200; default 50.")] = 50,
+    pageSize: Annotated[int, Field(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
     return call(
         lambda: client.list_publications(
@@ -390,7 +349,7 @@ def list_publications(
 @server.tool(
     name="advbox_list_members",
     title="List ADVBOX members",
-    description="List all collaborators (users with IDs, names, usernames) and sector groups (squad ID, name, member IDs) available as task responsibles. Read-only.",
+    description="Collaborators and sector groups (with member ids) usable as task responsibles. Read-only.",
     annotations=READ_ONLY,
 )
 def list_members() -> dict[str, Any]:
@@ -400,7 +359,7 @@ def list_members() -> dict[str, Any]:
 @server.tool(
     name="advbox_list_lawsuit_partners",
     title="List ADVBOX lawsuit partners",
-    description="List external partners (PARCEIRO) attached to one lawsuit by its ID; appended to the responsible select when creating a task. Empty when the lawsuit has none. Read-only.",
+    description="External partners (PARCEIRO) of one lawsuit, also selectable as task responsibles. Read-only.",
     annotations=READ_ONLY,
 )
 def list_lawsuit_partners(lawsuitId: Id) -> dict[str, Any]:
@@ -410,7 +369,7 @@ def list_lawsuit_partners(lawsuitId: Id) -> dict[str, Any]:
 @server.tool(
     name="advbox_list_workflows",
     title="List ADVBOX task templates",
-    description="List all workflow templates (task models) with IDs and names, used as the Tarefa template when creating a task. Resolve steps with advbox_workflow_tasks. Read-only.",
+    description="Workflow templates (task models); steps via advbox_workflow_tasks. Read-only.",
     annotations=READ_ONLY,
 )
 def list_workflows() -> dict[str, Any]:
@@ -420,7 +379,7 @@ def list_workflows() -> dict[str, Any]:
 @server.tool(
     name="advbox_workflow_tasks",
     title="Get ADVBOX workflow steps",
-    description="Resolve one workflow template into its ordered steps: template task IDs, default responsible user IDs, and titles. Needed to build the create-task payload. Read-only.",
+    description="Ordered steps of a workflow template (task ids, default responsibles) for advbox_create_task. Read-only.",
     annotations=READ_ONLY,
 )
 def workflow_tasks(workflowId: Id) -> dict[str, Any]:
@@ -430,7 +389,7 @@ def workflow_tasks(workflowId: Id) -> dict[str, Any]:
 @server.tool(
     name="advbox_activity_details",
     title="Get ADVBOX activity details",
-    description="Retrieve full details of one activity (Atividade) by its post ID: status, event date, creator, linked lawsuit CNJ number, parties with phone, action group/type, and lawsuit responsible. Does not mark the activity as viewed. Read-only.",
+    description="Details of one activity (Atividade) by postId. Does not mark it viewed. Read-only.",
     annotations=READ_ONLY,
 )
 def activity_details(postId: Id) -> dict[str, Any]:
@@ -440,32 +399,22 @@ def activity_details(postId: Id) -> dict[str, Any]:
 @server.tool(
     name="advbox_lawsuit_report",
     title="Get ADVBOX lawsuit report",
-    description="Retrieve the lawsuit report: phase, court (comarca/vara), electronic system, action type, responsible, intimações (court notices with full text), and task/movement history (completed tasks included) with dates and responsibles. Long reports can exceed tool limits: taskSearch keeps only tasks whose text contains it (for example a DJEN ID, to check whether a communication was already handled), maxTasks and maxNotices cap the lists, maxTextChars shortens each text; a compact block reports totals before cutting. Read-only.",
+    description="Lawsuit report: phase, court, action type, responsible, intimações with full text, task/movement history. To fit output limits use taskSearch (e.g. a DJEN id, to check whether it was handled), maxTasks, maxNotices, maxTextChars; the compact block reports totals before cutting. Read-only.",
     annotations=READ_ONLY,
 )
 def lawsuit_report(
     lawsuitId: Id,
-    includeMovements: Annotated[bool, Field(description="Include the movement history. Default true.")] = True,
-    includePublications: Annotated[
-        bool, Field(description="Include the intimações (court notices). Default true.")
-    ] = True,
-    includeTasks: Annotated[bool, Field(description="Include the task history. Default true.")] = True,
-    includeTransactions: Annotated[
-        bool, Field(description="Include the financial section (fees, commissions). Default true.")
-    ] = True,
+    includeMovements: bool = True,
+    includePublications: bool = True,
+    includeTasks: bool = True,
+    includeTransactions: bool = True,
     taskSearch: Annotated[
         str,
-        Field(max_length=255, description="Keep only tasks whose text contains this, e.g. a DJEN id. Empty for all."),
+        Field(max_length=255, description="Keep only tasks containing this text."),
     ] = "",
-    maxTasks: Annotated[
-        int, Field(ge=0, le=500, description="Max tasks listed, 0 to 500; 0 means the default cap.")
-    ] = 0,
-    maxNotices: Annotated[
-        int, Field(ge=0, le=100, description="Max intimações listed, 0 to 100; 0 means the default cap.")
-    ] = 0,
-    maxTextChars: Annotated[
-        int, Field(ge=0, le=20000, description="Max characters per text, 0 to 20000; 0 means no cut.")
-    ] = 0,
+    maxTasks: Annotated[int, Field(ge=0, le=500, description="0 = default cap.")] = 0,
+    maxNotices: Annotated[int, Field(ge=0, le=100, description="0 = default cap.")] = 0,
+    maxTextChars: Annotated[int, Field(ge=0, le=20000, description="Max chars per text; 0 = no cut.")] = 0,
 ) -> dict[str, Any]:
     return call(
         lambda: compact_lawsuit_report(
@@ -487,16 +436,14 @@ def lawsuit_report(
 @server.tool(
     name="advbox_list_files",
     title="List ADVBOX customer files",
-    description="List cloud folders and files attached to a customer (documents are customer-scoped in ADVBOX; lawsuit modals show the customer tree). Returns folder paths with item counts and per-folder zip URLs, and file names with direct download URLs. Pass folder path to list inside a subfolder. Read-only.",
+    description="Folders (with zipUrl) and files (with url) of a customer; files are customer-scoped. Read-only.",
     annotations=READ_ONLY,
 )
 def list_files(
     customerId: Id,
     folder: Annotated[
         str,
-        Field(
-            max_length=255, description="Subfolder path inside the customer, as listed earlier; empty lists the root."
-        ),
+        Field(max_length=255, description="Subfolder path as listed; empty = root."),
     ] = "",
 ) -> dict[str, Any]:
     return call(lambda: documents.list_customer_files(customerId, folder))
@@ -509,7 +456,7 @@ def _text(value):
 @server.tool(
     name="advbox_download_file",
     title="Download ADVBOX file",
-    description="Download one file listed by advbox_list_files using its url/downloadUrl, or a whole folder zip using its zipUrl. Saves a new local file under downloaded_files/advbox without overwriting existing files. PDFs return extracted text to the caller.",
+    description="Save a file (url) or folder zip (zipUrl) from advbox_list_files as a new local file (never overwrites); PDFs return text.",
     annotations=LOCAL_WRITE,
 )
 def download_file(
@@ -518,12 +465,12 @@ def download_file(
         Field(
             min_length=1,
             max_length=2048,
-            description="Direct download URL of the file, as returned by advbox_list_files.",
+            description="URL from advbox_list_files.",
         ),
     ],
     filename: Annotated[
         str | None,
-        Field(min_length=1, max_length=255, description="Name to save the file as; default is the name from the URL."),
+        Field(min_length=1, max_length=255, description="Save-as name; default from the URL."),
     ] = None,
 ) -> CallToolResult:
     metadata = call(lambda: documents.download_file(url, filename=filename))
@@ -537,18 +484,14 @@ def download_file(
 @server.tool(
     name="advbox_download_folder",
     title="Download and parse ADVBOX folder",
-    description="Read up to maxFiles from a customer folder and nested folders using bounded file downloads. Returns per-file metadata and extracted PDF text, with totals and a truncation flag. Read the folder tree first with advbox_list_files.",
+    description="Download and parse up to maxFiles of a customer folder and subfolders: PDF text per file, totals, truncation flag.",
     annotations=LOCAL_WRITE,
 )
 def download_folder(
     customerId: Id,
-    folder: Annotated[
-        str, Field(min_length=1, max_length=255, description="Folder path to download, as listed by advbox_list_files.")
-    ],
-    maxFiles: Annotated[int, Field(ge=1, le=100, description="Max files to download, 1 to 100; default 50.")] = 50,
-    ocr: Annotated[
-        bool, Field(description="Run OCR on scanned PDFs so their text is searchable. Default true; slower.")
-    ] = True,
+    folder: Annotated[str, Field(min_length=1, max_length=255, description="Folder path from advbox_list_files.")],
+    maxFiles: Annotated[int, Field(ge=1, le=100)] = 50,
+    ocr: Annotated[bool, Field(description="OCR scanned PDFs (slower).")] = True,
 ) -> CallToolResult:
     result = call(lambda: documents.download_folder(customerId, folder, max_files=maxFiles, ocr=ocr))
     files = result.pop("files")
@@ -562,22 +505,20 @@ def download_folder(
 @server.tool(
     name="advbox_save_folder",
     title="Save an ADVBOX folder into the shared documents folder",
-    description="Save the files of a customer folder (and nested folders), unparsed, into a named subfolder of the shared documents folder, for a workflow that needs the whole set, such as filing_prepare. Never overwrites: a repeated name is suffixed. A name the shared folder does not accept (other symbols, a leading dot or underscore, over 181 characters) is adjusted and the entry reports renamedFrom with the ADVBOX name. Read the folder tree first with advbox_list_files.",
+    description="Copy a customer folder (with subfolders), unparsed, into a shared-documents subfolder (e.g. for filing_prepare). Never overwrites (repeated names get a suffix); refused names are adjusted and reported with renamedFrom.",
     annotations=LOCAL_WRITE,
 )
 def save_folder(
     customerId: Id,
-    folder: Annotated[
-        str, Field(min_length=1, max_length=255, description="Folder path to save, as listed by advbox_list_files.")
-    ],
+    folder: Annotated[str, Field(min_length=1, max_length=255, description="Folder path from advbox_list_files.")],
     into: Annotated[
         str,
         Field(
             pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
-            description="Name of the shared-documents subfolder to save into, e.g. the filing runId.",
+            description="Shared-documents subfolder, e.g. the filing runId.",
         ),
     ],
-    maxFiles: Annotated[int, Field(ge=1, le=100, description="Max files to save, 1 to 100; default 50.")] = 50,
+    maxFiles: Annotated[int, Field(ge=1, le=100)] = 50,
 ) -> dict[str, Any]:
     return call(lambda: documents.save_folder(customerId, folder, into, max_files=maxFiles))
 
@@ -623,8 +564,7 @@ FolderPath = Annotated[
     Field(
         max_length=255,
         pattern=r"^[^\\\x00-\x1f]*$",
-        description="Customer folder path exactly as advbox_list_files lists it (e.g. '00-PROTOCOLAR' or "
-        "'00-PROTOCOLAR/Anexos'); empty string means the customer's root.",
+        description="Customer folder path as advbox_list_files lists it; empty = root.",
     ),
 ]
 
@@ -632,17 +572,13 @@ FolderPath = Annotated[
 @server.tool(
     name="advbox_create_folder",
     title="Create ADVBOX customer folder",
-    description="Create a folder in a customer's files (documents are customer-scoped in ADVBOX: get the customerId from advbox_list_customers or the lawsuit). ADVBOX folders are flat: there are no subfolders. Idempotent: when a folder of the same name (ignoring case) already exists it is returned with existing=true and nothing is created, so a retry never duplicates it. Names: one level, 1 to 40 characters, no slash. With dryRun=true nothing is sent: the existing folder, or the request that would be sent, is returned. If ADVBOX does not confirm the creation the folder is looked up again; when still unknown the error says it MAY have been created. Requires ADVBOX_ALLOW_WRITES=true.",
+    description="Create a flat (one level) folder in a customer's files. Idempotent: an existing same-name folder is returned with existing=true. If creation is unconfirmed the error says it MAY exist. Needs ADVBOX_ALLOW_WRITES.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 )
 def create_folder(
     customerId: Id,
-    name: Annotated[
-        str, Field(min_length=1, max_length=40, description="New folder name, one level, e.g. 'Documentos pessoais'.")
-    ],
-    dryRun: Annotated[
-        bool, Field(description="true checks for an existing folder and sends nothing. Use it first.")
-    ] = False,
+    name: Annotated[str, Field(min_length=1, max_length=40, description="One level, e.g. 'Documentos pessoais'.")],
+    dryRun: Annotated[bool, Field(description="Send nothing. Use first.")] = False,
 ) -> dict[str, Any]:
     def run():
         return documents.create_folder(customerId, name, dry_run=dryRun)
@@ -653,26 +589,24 @@ def create_folder(
 @server.tool(
     name="advbox_upload_files",
     title="Upload files into an ADVBOX customer folder",
-    description="Upload 1 to 10 files from the shared documents folder (the savedAs names returned by pje_read_documents with save=true, advbox_download_file, etc.) into an existing customer folder (create it first with advbox_create_folder). Each file is stored by ADVBOX under its own name (<name>_<number>.<ext>); the result lists, per file, the storedName, fileId, url and whether the folder listing shows it. All-or-nothing on a clear refusal: files already uploaded by the call are deleted again and the error says so. If ADVBOX does not answer (timeout, connection error, 5xx) the error says the file MAY have been uploaded and which ones were confirmed or not sent: list the folder with advbox_list_files before retrying and send only what is missing; the call is never replayed. Not idempotent: repeating it uploads copies. With dryRun=true the folder and files are checked and nothing is sent. Types: pdf, png, jpg, jpeg, mp3, txt, doc, docx, odt, xls, xlsx; at most 25 MB each. Requires ADVBOX_ALLOW_WRITES=true.",
+    description="Upload files from the shared documents folder (savedAs names from court tools or advbox_download_file) into an existing customer folder. Stored as <name>_<number>.<ext> (storedName). On a clear refusal, files already uploaded are deleted again. If ADVBOX does not answer, the error says which files MAY be uploaded: list the folder and send only what is missing. Not idempotent: repeating uploads copies. Types: pdf, png, jpg, jpeg, mp3, txt, doc, docx, odt, xls, xlsx; max 25 MB each. Needs ADVBOX_ALLOW_WRITES.",
     annotations=WRITE,
 )
 def upload_files(
     customerId: Id,
     folder: Annotated[
         FolderPath,
-        Field(min_length=1, description="Target folder path as listed by advbox_list_files, e.g. '00-PROTOCOLAR'."),
+        Field(min_length=1, description="Folder path from advbox_list_files, e.g. '00-PROTOCOLAR'."),
     ],
     files: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=128)]],
         Field(
             min_length=1,
             max_length=MAX_UPLOAD_FILES,
-            description='JSON list of file names in the shared documents folder, e.g. ["procuracao.pdf"]. Plain names only, no paths.',
+            description='Shared-documents file names, no paths, e.g. ["procuracao.pdf"].',
         ),
     ],
-    dryRun: Annotated[
-        bool, Field(description="true checks the folder and reads the files without uploading. Use it first.")
-    ] = False,
+    dryRun: Annotated[bool, Field(description="Check without uploading. Use first.")] = False,
 ) -> dict[str, Any]:
     def run():
         loaded = _saved_files(files, UPLOAD_SUFFIXES)
@@ -685,17 +619,14 @@ StageId = Annotated[
     str,
     Field(
         pattern=r"^\d+$",
-        description="Lawsuit stage id (the screen's Fase: Judicial, Recursal...), from advbox_task_filters stages, "
-        "e.g. '3'.",
+        description="Stage id (Fase) from advbox_task_filters stages, e.g. '3'.",
     ),
 ]
 SubStageId = Annotated[
     str,
     Field(
         pattern=r"^\d*$",
-        description="Optional sub-stage id inside that stage (the screen's Etapa, e.g. 'AJUIZADO/EM ANDAMENTO'), "
-        "from subStageOptions of a dryRun. Empty: a new stage gets its first sub-stage, as the screen does; the "
-        "same stage keeps the current one.",
+        description="Sub-stage (Etapa) from a dryRun's subStageOptions. Empty: first of a new stage, else current.",
     ),
 ]
 
@@ -703,7 +634,7 @@ SubStageId = Annotated[
 @server.tool(
     name="advbox_create_task",
     title="Create ADVBOX task",
-    description="Create a task on a lawsuit with a task-type ID (tasksId), responsible guest IDs (guests: a JSON list of 1 or more user IDs from advbox_list_members; a task cannot be created with no responsible), a date in YYYY-MM-DD, and comments. Attachments can be given inline as base64 (attachments) or by file name from the shared documents folder (attachmentFiles, the savedAs names returned by pje_read_documents with save=true); at most 5 files in total. With dryRun=true nothing is sent: the task body and files are validated and returned. dedupeKey (e.g. the DJEN communication id) makes a retry safe: a pending task of this lawsuit already marked [ref:<dedupeKey>] is returned with duplicate=true and nothing is created; otherwise the marker becomes the last line of the comment. If ADVBOX does not confirm the creation (timeout, connection error, 5xx) the error says the task MAY have been created: search the lawsuit's tasks before retrying, the call is never replayed. stageId (optional, with subStageId) also moves the lawsuit to that stage after the task is created, like advbox_update_lawsuit_stage: an unknown stage is refused before the task is written; if the move fails after the task exists, the result keeps the new postId and reports stage.error and warnings (call advbox_update_lawsuit_stage, never create the task again). The result's stage block has previous and new stage. Creating requires ADVBOX_ALLOW_WRITES=true; attachments also need ADVBOX_UPLOAD_FOLDER.",
+    description="Create a task on a lawsuit. Attachments: base64 or savedAs names (attachmentFiles), max 5 total. dedupeKey: a pending task marked [ref:<dedupeKey>] is returned (duplicate=true) instead of a new one. If creation is unconfirmed the error says it MAY exist: search the lawsuit's tasks before retrying. stageId then moves the lawsuit; if that fails, stage.error is set: use advbox_update_lawsuit_stage, never recreate the task. Needs ADVBOX_ALLOW_WRITES; attachments also ADVBOX_UPLOAD_FOLDER.",
     annotations=WRITE,
 )
 def create_task(
@@ -712,57 +643,53 @@ def create_task(
         str,
         Field(
             pattern=r"^\d+$",
-            description="Task template ID (the task type), from advbox_workflow_tasks steps or advbox_list_workflows.",
+            description="Task type id (advbox_workflow_tasks).",
         ),
     ],
-    guests: UserIds,
+    guests: Annotated[UserIds, Field(description="User IDs from advbox_list_members, always a JSON list, e.g. [961].")],
     date: Date,
     workflowId: Annotated[
         str,
         Field(
             pattern=r"^\d*$",
-            description="Workflow template id from advbox_list_workflows; empty to create one task without a workflow.",
+            description="Workflow template id; empty for a single task.",
         ),
     ] = "",
-    workflowSequence: Annotated[
-        str, Field(pattern=r"^\d*$", description="Position of this task in the workflow, starting at '1'.")
-    ] = "1",
+    workflowSequence: Annotated[str, Field(pattern=r"^\d*$", description="Position in the workflow.")] = "1",
     workflowLimit: Annotated[
-        str, Field(pattern=r"^\d*$", description="Max number of workflow steps to create; empty for all.")
+        str, Field(pattern=r"^\d*$", description="Max workflow steps to create; empty = all.")
     ] = "",
-    hour: Hour = "",
-    deadline: OptionalDate = "",
-    comments: Annotated[str, Field(max_length=2000, description="Task note, up to 2000 characters. Plain text.")] = "",
+    hour: Annotated[Hour, Field(description="HH:MM 24h.")] = "",
+    deadline: Annotated[OptionalDate, Field(description="YYYY-MM-DD.")] = "",
+    comments: Annotated[str, Field(max_length=2000, description="Plain-text task note.")] = "",
     attachments: Annotated[
         list[Attachment],
         Field(
             max_length=MAX_ATTACHMENTS,
-            description="Inline files as base64 objects (filename, contentBase64, contentType). Count together with attachmentFiles, max 5 total.",
+            description="Inline base64 files; max 5 with attachmentFiles.",
         ),
     ] = [],
     attachmentFiles: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=128)]],
         Field(
             max_length=5,
-            description='JSON list of file names saved by pje_read_documents (save=true) or advbox_download_file, e.g. ["ata.pdf"]. Max 5 total with attachments.',
+            description='savedAs names in the shared documents folder, e.g. ["ata.pdf"].',
         ),
     ] = [],
-    dryRun: Annotated[
-        bool, Field(description="true validates and returns the body without sending. Use it first.")
-    ] = False,
+    dryRun: Annotated[bool, Field(description="Return the body without sending. Use first.")] = False,
     dedupeKey: Annotated[
         str,
         Field(
             max_length=80,
             pattern=r"^[^\[\]\r\n]*$",
-            description="Optional reference that identifies what this task answers, e.g. the DJEN communication id '747498033'. One line, no square brackets. When given, an existing pending task of the lawsuit marked [ref:<dedupeKey>] is returned (duplicate=true) instead of creating a second one.",
+            description="What this task answers, e.g. a DJEN communication id.",
         ),
     ] = "",
     stageId: Annotated[
         str,
         Field(
             pattern=r"^\d*$",
-            description="Optional lawsuit stage id from advbox_task_filters stages (e.g. '3' Judicial): after the task is created the lawsuit moves to it. Empty leaves the stage alone.",
+            description="Stage to move the lawsuit to after creation (advbox_task_filters stages).",
         ),
     ] = "",
     subStageId: SubStageId = "",
@@ -807,58 +734,48 @@ def create_task(
 @server.tool(
     name="advbox_update_task",
     title="Update ADVBOX task",
-    description="Edit a PENDING task the way the ADVBOX screen does: change its comment (comments replaces, appendComments adds a paragraph), date, hour, deadline or guests, and add or remove attachments. Fields left out stay as they are; hour or deadline set to an empty string clear them. IMPORTANT: ADVBOX replaces the task, so the result has a NEW postId (replacedPostId is the old one, which no longer exists). Existing attachments are kept; new files come from attachmentFiles (names saved by pje_read_documents) or base64 attachments; removeFiles names attachments to delete. Use expectComments (a text the current comment must contain) so the edit is refused if the post ID points at a different task. With dryRun=true nothing is sent and the body that would be sent is returned. Once the replacement exists the call does not fail: a file that could not be removed is listed in removeErrors and warnings, next to the new postId. If ADVBOX does not confirm the edit (timeout, connection error, 5xx) the error says the task MAY have been replaced: search the lawsuit's tasks before retrying. Do not edit completed tasks. Requires ADVBOX_ALLOW_WRITES=true.",
+    description="Edit a PENDING task; omitted fields stay. IMPORTANT: ADVBOX replaces the task, so the result has a NEW postId (replacedPostId no longer exists). Existing attachments stay. Use expectComments to avoid editing the wrong task. Unremoved files go to removeErrors. If unconfirmed the error says the task MAY have been replaced: search the lawsuit's tasks before retrying. Needs ADVBOX_ALLOW_WRITES.",
     annotations=DESTRUCTIVE,
 )
 def update_task(
     postId: Id,
     comments: Annotated[
-        str | None, Field(max_length=20000, description="Replaces the whole comment. Leave empty to keep it.")
+        str | None, Field(max_length=20000, description="Replaces the whole comment; omit to keep.")
     ] = None,
     appendComments: Annotated[
         str | None,
-        Field(max_length=5000, description="Adds a paragraph to the end of the comment without replacing it."),
+        Field(max_length=5000, description="Paragraph added to the end of the comment."),
     ] = None,
-    date: Annotated[
-        Date | None, Field(description="New date YYYY-MM-DD, e.g. '2026-10-20'. Leave empty to keep it.")
-    ] = None,
-    hour: Annotated[
-        Hour | None, Field(description="New time HH:MM, 24h. Empty string clears it; leave out to keep it.")
-    ] = None,
-    deadline: Annotated[
-        OptionalDate | None, Field(description="New deadline YYYY-MM-DD. Empty string clears it; leave out to keep it.")
-    ] = None,
+    date: Annotated[Date | None, Field(description="Omit to keep.")] = None,
+    hour: Annotated[Hour | None, Field(description="'' clears; omit to keep.")] = None,
+    deadline: Annotated[OptionalDate | None, Field(description="'' clears; omit to keep.")] = None,
     guests: Annotated[
         UserIds | None,
-        Field(
-            description="New responsible user ids, JSON list from advbox_list_members, e.g. [961]. Leave out to keep them."
-        ),
+        Field(description="User IDs, JSON list, e.g. [961]; omit to keep."),
     ] = None,
     attachments: Annotated[
         list[Attachment],
         Field(
             max_length=MAX_ATTACHMENTS,
-            description="New inline files as base64 objects. Count with attachmentFiles, max 5 total.",
+            description="Inline base64 files; max 5 with attachmentFiles.",
         ),
     ] = [],
     attachmentFiles: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=128)]],
-        Field(max_length=5, description='JSON list of saved file names to attach, e.g. ["ata.pdf"]. Max 5 total.'),
+        Field(max_length=5, description='savedAs names, e.g. ["ata.pdf"].'),
     ] = [],
     removeFiles: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=255)]],
-        Field(max_length=10, description="JSON list of attachment names to delete from the task, max 10."),
+        Field(max_length=10, description="Attachment names to delete."),
     ] = [],
     expectComments: Annotated[
         str,
         Field(
             max_length=255,
-            description="Text the current comment must contain; the edit is refused otherwise. Guards against editing the wrong task.",
+            description="Text the current comment must contain, else refused.",
         ),
     ] = "",
-    dryRun: Annotated[
-        bool, Field(description="true returns the body that would be sent, without sending. Use it first.")
-    ] = False,
+    dryRun: Annotated[bool, Field(description="Return the body without sending. Use first.")] = False,
 ) -> dict[str, Any]:
     def run():
         if len(attachments) + len(attachmentFiles) > MAX_ATTACHMENTS:
@@ -896,18 +813,16 @@ ExpectComments = Annotated[
     str,
     Field(
         max_length=255,
-        description="Text the task's current comment must contain; the call is refused otherwise. Guards against acting on the wrong task.",
+        description="Text the current comment must contain, else refused.",
     ),
 ]
-DryRun = Annotated[
-    bool, Field(description="true changes nothing and returns the task that would be affected. Use it first.")
-]
+DryRun = Annotated[bool, Field(description="Change nothing; return the task. Use first.")]
 
 
 @server.tool(
     name="advbox_complete_task",
     title="Complete ADVBOX task",
-    description="Mark a PENDING task completed by its post ID. With dryRun=true nothing is sent and the task that would be completed is returned (type, guests, dates, comment, files). expectComments refuses the call when the task's comment does not contain that text. The result is confirmed (the task left the pending list); when ADVBOX does not confirm it the call fails instead of reporting success. Requires ADVBOX_ALLOW_WRITES=true.",
+    description="Mark a PENDING task completed. Fails unless ADVBOX confirms. Needs ADVBOX_ALLOW_WRITES.",
     annotations=DESTRUCTIVE,
 )
 def complete_task(postId: Id, expectComments: ExpectComments = "", dryRun: DryRun = False) -> dict[str, Any]:
@@ -920,20 +835,16 @@ def complete_task(postId: Id, expectComments: ExpectComments = "", dryRun: DryRu
 @server.tool(
     name="advbox_delete_task",
     title="Delete ADVBOX task",
-    description="Soft-delete a task by its post ID (scope this/future/all for recurring tasks). The task leaves listings; attachments survive. With dryRun=true nothing is sent and the task that would be deleted is returned. expectComments refuses the call when the task's comment does not contain that text. The deletion is confirmed from ADVBOX's answer; without that confirmation the call fails instead of returning deleted=false. Requires ADVBOX_ALLOW_WRITES=true.",
+    description="Soft-delete a task (scope for recurring tasks); it leaves listings, attachments survive. Destructive: confirm with the user first. Fails unless ADVBOX confirms. Needs ADVBOX_ALLOW_WRITES.",
     annotations=DESTRUCTIVE,
 )
 def delete_task(
     postId: Id,
     scope: Annotated[
         Literal["this", "future", "all"],
-        Field(
-            description="Which tasks to delete: 'this' (default, only this one), 'future' or 'all' (recurring copies). Destructive: confirm with the user first."
-        ),
+        Field(description="'this' only, or 'future'/'all' recurring copies."),
     ] = "this",
-    comments: Annotated[
-        str, Field(max_length=2000, description="Optional note recorded with the deletion, up to 2000 characters.")
-    ] = "",
+    comments: Annotated[str, Field(max_length=2000, description="Note recorded with the deletion.")] = "",
     expectComments: ExpectComments = "",
     dryRun: DryRun = False,
 ) -> dict[str, Any]:
@@ -948,16 +859,14 @@ def delete_task(
 @server.tool(
     name="advbox_update_lawsuit_stage",
     title="Change ADVBOX lawsuit stage",
-    description="Move a lawsuit to another stage (the screen's Fase: Negociação, Administrativo, Judicial, Recursal...; ids from advbox_task_filters stages) and sub-stage (the screen's Etapa inside it). Sends the lawsuit screen's own save with only these two fields changed; every other field is sent back as the form holds it and is compared after the save. Unknown stage or sub-stage ids are refused before anything is sent. Without subStageId a new stage gets its first sub-stage, as the screen does. Returns previous and new {stageId, stage, subStageId, subStage}: call again with previous to undo. Confirmed by reading the lawsuit form again; when that read does not show the new stage the call fails saying the change is NOT confirmed. The change is logged in the lawsuit history. With dryRun=true nothing is sent and the plan plus the target stage's subStageOptions are returned. Requires ADVBOX_ALLOW_WRITES=true.",
+    description="Move a lawsuit to another stage (Fase; ids from advbox_task_filters stages) and sub-stage (Etapa); nothing else changes. Unknown ids are refused before sending. Returns previous and new stage: call with previous to undo. Confirmed by re-reading the lawsuit, otherwise fails saying NOT confirmed. dryRun also returns the stage's subStageOptions. Needs ADVBOX_ALLOW_WRITES.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True),
 )
 def update_lawsuit_stage(
     lawsuitId: Id,
     stageId: StageId,
     subStageId: SubStageId = "",
-    dryRun: Annotated[
-        bool, Field(description="true checks the ids and returns the plan without sending. Use it first.")
-    ] = False,
+    dryRun: Annotated[bool, Field(description="Return the plan without sending. Use first.")] = False,
 ) -> dict[str, Any]:
     def run():
         return client.update_lawsuit_stage(lawsuitId, stageId, subStageId, dry_run=dryRun)

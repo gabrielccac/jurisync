@@ -210,7 +210,14 @@ class ServerGuardsTest(unittest.TestCase):
 
         user = mock.Mock()
         user.access_token = mock.Mock(claims={"tenant": "victor"}, resource=None)
-        gate = TenantGate(app, connector="advbox", store=self.store, vault=self.vault, resource="https://x/advbox/mcp")
+        gate = TenantGate(
+            app,
+            connectors=("advbox",),
+            name="advbox",
+            store=self.store,
+            vault=self.vault,
+            resource="https://x/advbox/mcp",
+        )
         import anyio
 
         with mock.patch("jurisync.hosted.app.AuthenticatedUser", mock.Mock):
@@ -225,7 +232,14 @@ class ServerGuardsTest(unittest.TestCase):
 
         user = mock.Mock()
         user.access_token = mock.Mock(claims={"tenant": tenant}, resource=None)
-        gate = TenantGate(app, connector="advbox", store=self.store, vault=self.vault, resource="https://x/advbox/mcp")
+        gate = TenantGate(
+            app,
+            connectors=("advbox",),
+            name="advbox",
+            store=self.store,
+            vault=self.vault,
+            resource="https://x/advbox/mcp",
+        )
         import anyio
 
         with mock.patch("jurisync.hosted.app.AuthenticatedUser", mock.Mock):
@@ -287,7 +301,7 @@ class CredentialSaverTest(unittest.TestCase):
             )
             vault.put("office-a", {"ADVBOX_DEVICE_ID": "old", "ADVBOX_EMAIL": "a@x.br"}, {"cert.pfx": b"x"})
             vault.put("office-b", {"ADVBOX_DEVICE_ID": "other"})
-            gate = TenantGate(None, connector=None, store=store, vault=vault, resource="https://mcp.test")
+            gate = TenantGate(None, connectors=None, store=store, vault=vault, resource="https://mcp.test")
             with credentials.scope("office-a", {"ADVBOX_DEVICE_ID": "old"}, saver=gate._saver("office-a")):
                 credentials.save("ADVBOX_DEVICE_ID", "new")
                 self.assertEqual(credentials.env("ADVBOX_DEVICE_ID"), "new")
@@ -315,7 +329,9 @@ class CredentialSaverTest(unittest.TestCase):
                 return values
 
             gates = [
-                TenantGate(None, connector=name, store=store, vault=vault, resource=f"https://mcp.test/{name}")
+                TenantGate(
+                    None, connectors=name and (name,), store=store, vault=vault, resource=f"https://mcp.test/{name}"
+                )
                 for name in (None, "advbox")
             ]
             with mock.patch.object(vault, "get", side_effect=slow_get):

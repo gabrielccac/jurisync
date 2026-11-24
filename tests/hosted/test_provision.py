@@ -152,6 +152,7 @@ class PlanTest(ProvisionCase):
         alfa, beta, gama = offices["alfa"], offices["beta"], offices["gama"]
         self.assertEqual(alfa.portals, ["trf5-1g", "trf1-1g", "advbox"])
         self.assertEqual(alfa.connectors, ["pje", "djen", "advbox"])
+        self.assertEqual(alfa.endpoints, ["/tribunais/mcp", "/advbox/mcp"])
         self.assertEqual(alfa.checks, alfa.portals)  # every served portal and service gets its first login
         self.assertTrue(any("MINDCHAT_API_KEY" in note for note in alfa.notes))
         # Legacy names count once renamed; the portal without its password is left out with the reason.
@@ -159,6 +160,7 @@ class PlanTest(ProvisionCase):
         self.assertIn("TRF4_1G_RS_USERNAME", beta.skipped["trf4-1g-rs"])
         self.assertEqual(beta.renamed["TRF4_1G_SC_USUARIO"], "TRF4_1G_SC_USERNAME")
         self.assertEqual(beta.connectors, ["eproc", "djen"])
+        self.assertEqual(beta.endpoints, ["/tribunais/mcp"])
         # The A3 portal stays out; the password portal goes in, flagged because the local install used the token.
         self.assertEqual(gama.portals, ["trf1-1g"])
         self.assertIn("A3", gama.skipped["tjpe-1g"])
@@ -540,14 +542,22 @@ class RemotePluginTest(unittest.TestCase):
             (plugin / "skills").mkdir()
             for name in ("triagem", "protocolo"):
                 (plugin / "skills" / name).symlink_to(skills / name)
-            manifest = {"name": "x", "skills": ["./skills/triagem", "./skills/protocolo"],
-                        "mcpServers": {"pje": {"command": "jurisync-pje", "env": {"JURISYNC_CUSTOMER": "x"}}}}  # fmt: skip
+            local = {name: {"command": f"jurisync-{name}"} for name in ("pje", "djen", "advbox", "filing")}
+            manifest = {"name": "x", "skills": ["./skills/triagem", "./skills/protocolo"], "mcpServers": local}
             (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
             out = root / "remote"
             local_only = provision.remote_plugin(plugin, "https://mcp.exemplo.com.br/mcp", out, say=lambda _: None)
             written = json.loads((out / ".claude-plugin" / "plugin.json").read_text())
             self.assertEqual(
-                written["mcpServers"], {"jurisync": {"type": "http", "url": "https://mcp.exemplo.com.br/mcp"}}
+                written["mcpServers"],
+                {
+                    "tribunais": {"type": "http", "url": "https://mcp.exemplo.com.br/tribunais/mcp"},
+                    "advbox": {"type": "http", "url": "https://mcp.exemplo.com.br/advbox/mcp"},
+                },
+            )
+            provision.remote_plugin(plugin, "https://mcp.exemplo.com.br", out, say=lambda _: None)  # base address
+            self.assertEqual(
+                json.loads((out / ".claude-plugin" / "plugin.json").read_text())["mcpServers"], written["mcpServers"]
             )
             self.assertFalse((out / "skills" / "triagem").is_symlink())
             self.assertEqual(local_only, {"protocolo": ["filing_prepare", "pje_draft_write"]})

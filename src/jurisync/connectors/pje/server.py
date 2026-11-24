@@ -30,6 +30,7 @@ from jurisync.connectors.pje.push import read_push
 from jurisync.core import certificate, ciencia, credentials
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.mcp import (
+    PORTAL_HELP,
     READ_ONLY,
     load_env_file,
     offer_portals,
@@ -42,18 +43,7 @@ from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
 
-
-def _portal_description():
-    names = ", ".join(
-        f"'{key}' ({portals.pje(key).tribunal} {portals.pje(key).instance})" for key in portals.keys("pje")
-    )
-    return (
-        f"PJe portal key: {names}. TRF5 and the portals registered with a certificate log in with the A1 certificate "
-        "(PJE_A1_P12/PJE_A1_PIN); any other portal can opt in with <PREFIX>_CERT=true and otherwise uses password + TOTP."
-    )
-
-
-Portal = Annotated[Literal[portals.keys("pje")], Field(description=_portal_description())]
+Portal = Annotated[Literal[portals.keys("pje")], Field(description=PORTAL_HELP)]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
 DraftReadStage = Literal["classification", "subject-options", "pending"]
 DraftWriteStage = Literal[
@@ -95,11 +85,6 @@ def configured_portals():
     return customers.profile_portals(key for key in portals.keys("pje") if ready(key))
 
 
-def describe(keys):
-    names = ", ".join(f"'{key}' ({portals.pje(key).tribunal} {portals.pje(key).instance})" for key in keys)
-    return f"PJe portal key, one of the portals configured for this account: {names}."
-
-
 sessions = SessionPool(
     login=lambda portal: login_portal(portal)[0],
     refresh=lambda portal, session: session if is_authenticated(session, portal) else None,
@@ -128,7 +113,7 @@ def _notifications(portal, read, process_number=None):
 @server.tool(
     name="pje_get_process",
     title="Get PJe process context",
-    description="Retrieve a read-only PJe process result from the selected portal with metadata, parties, bounded timeline pages and the document inventory (ids and titles only: read document texts with pje_read_documents, which checks for a pending ciência first). TRF5 1º Grau/JEF uses certificate login. scope=latest returns the newest date bucket; scope=page returns the first timeline page; scope=all merges the bounded pages returned by the search layer. It also returns expedientes from the process Expedientes tab: each communication per recipient with channel, notice date, days and the deadline date PJe computed (limite), plus the ones still open (abertos); expedientes.complete=false means the list was not read in full. This returns movements, not confirmed publications.",
+    description="Read a PJe process: metadata, parties, timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. The timeline is movements, not confirmed publications. Read-only.",
     annotations=READ_ONLY,
 )
 def get_process(
@@ -138,9 +123,7 @@ def get_process(
     portal: Portal,
     scope: Annotated[
         Literal["latest", "page", "all"],
-        Field(
-            description="'page' (default): first timeline page. 'latest': newest date only. 'all': merges bounded pages, slower."
-        ),
+        Field(description="'page': first timeline page. 'latest': newest date only. 'all': every page, slower."),
     ] = "page",
 ) -> dict[str, Any]:
     with tool_errors("PJe", *ERRORS):
@@ -155,9 +138,9 @@ def get_process(
 @server.tool(
     name="pje_read_documents",
     title="Read PJe documents",
-    description="Read 1-5 joined documents of a PJe process by ID, without returning the timeline. Returns each document's extraction status and text, and for one not read a failure saying why (no download link, HTTP status or redirect, the request step that failed, or what was served instead) (PDFs, HTML including documents that omit the process number as extracted_unnumbered, or short_html for a short cover page whose text is returned but not vouched for, and audio when transcription is installed). A short cover (a petição typed in the PJe editor as only its title) comes with anexos: the documents attached to it in the same timeline entry, read in the same call (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline in days), which hold the client's deadline. With save=true the original file is stored in the shared documents folder and reported as savedAs, so advbox_create_task can attach it by file name. Use textLimit to bound long texts. Everything is read by default except what may belong to a communication whose ciência is not registered yet: its act, the documents attached to that act, and any document of a process that has a pending communication with no document id. Reading those may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
+    description="Read 1-5 documents of a PJe process by id. Each has its status and text, or a failure saying why it was not read; status extracted_unnumbered: the text omits the process number; short_html: a short cover page, text not vouched for. A short cover (a petição typed as only its title) comes with anexos, the documents attached in the same timeline entry (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline days), which hold the client's deadline. save=true stores the original files in the shared documents folder as savedAs, for advbox_create_task. Ciência: reading the act of a communication whose ciência is pending, the documents attached to it, or any document of a process with a pending communication that has no document id may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
     + ciencia.AUTHORIZATION
-    + ". The read is also refused, with nothing opened, when the process' expedientes could not be read or not in full (the error starts with 'ciência not checked'): retry later, or use acknowledgeCiencia=true under the same authorization. A customer whose settings.toml says [pje] ciencia_on_read = 'allow' reads them by default. Every result has a ciencia block: estado 'nenhuma' (nothing read was pending), 'dada' (a communication whose ciência was pending was read, so it may now be registered and its deadline started; intimacoes lists it) or 'desconhecida' (read with acknowledgeCiencia although the expedientes could not be checked), with an aviso in Portuguese: unless it is 'nenhuma', tell the user and note it in the task.",
+    + ". When the expedientes could not be read in full the read is refused with nothing opened (error starts 'ciência not checked'): retry later, or acknowledgeCiencia=true under the same authorization. settings.toml [pje] ciencia_on_read = 'allow' reads them by default. The ciencia block: estado 'nenhuma' (nothing pending read), 'dada' (a pending communication was read: its ciência may be registered and deadline started; see intimacoes) or 'desconhecida' (read with acknowledgeCiencia, expedientes unchecked), with an aviso: unless 'nenhuma', tell the user and note it in the task.",
     # With acknowledgeCiencia a read may register the ciência and start a deadline, and save=true writes a file.
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
@@ -169,15 +152,13 @@ def read_documents_tool(
         Field(
             min_length=1,
             max_length=5,
-            description='JSON list of 1 to 5 numeric document ids (documentId from pje_get_process), e.g. ["195268244"].',
+            description='JSON list of documentId values from pje_get_process, e.g. ["195268244"].',
         ),
     ],
-    textLimit: Annotated[
-        int, Field(ge=200, le=100000, description="Max characters per text, 200 to 100000; default 20000.")
-    ] = 20000,
+    textLimit: Annotated[int, Field(ge=200, le=100000, description="Max characters per text.")] = 20000,
     save: Annotated[
         bool,
-        Field(description="true stores the original files in the shared documents folder and returns savedAs names."),
+        Field(description="true returns savedAs file names."),
     ] = False,
     acknowledgeCiencia: Annotated[
         bool | None,
@@ -211,9 +192,9 @@ def read_documents_tool(
 @server.tool(
     name="pje_read_expediente_ato",
     title="Read the act behind a PJe expediente",
-    description="Open the act of one communication listed in the process Expedientes tab (see expedientes in pje_get_process): the expediente box (recipient, days, deadline, closed), the full text of the act and the documents attached to it (documentId, title: read them with pje_read_documents). Communications whose notice (ciência) is already registered are opened by default. A pending one is refused (error in ato.error) because opening it may register the party's ciência and start the deadline. "
+    description="Open the act of one communication from the process Expedientes (pje_get_process expedientes or pje_list_inbox): the expediente box (recipient, days, deadline, closed), the act's full text and its attached documents (documentId, title; read them with pje_read_documents). Acts whose ciência is registered open by default. Opening a pending one may register the party's ciência and start the deadline, so it is refused (ato.error) without acknowledgeCiencia. "
     + ciencia.AUTHORIZATION
-    + " (customers with ciencia_on_read = 'allow' in settings.toml open them by default). Every result has a ciencia block: estado 'nenhuma' (the ciência was already registered, or nothing was opened), 'dada' (a pending one was opened now: its ciência may be registered and the deadline started) or 'pendente' (pending and not opened), with intimacoes (the communication) and an aviso in Portuguese: unless it is 'nenhuma', tell the user and note it in the task.",
+    + ". settings.toml [pje] ciencia_on_read = 'allow' opens them by default. The ciencia block: estado 'nenhuma' (already registered, or nothing opened), 'dada' (a pending one opened now: its ciência may be registered and deadline started) or 'pendente' (pending, not opened), with intimacoes and an aviso: unless 'nenhuma', tell the user and note it in the task.",
     # Opening a pending act registers the ciência and starts a deadline: not a read-only, repeatable call.
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
 )
@@ -224,15 +205,13 @@ def read_expediente_ato_tool(
         str,
         Field(
             pattern=r"^[0-9]+$",
-            description="Numeric expediente id from pje_list_inbox or pje_get_process expedientes, e.g. '34932797'.",
+            description="Expediente id from pje_list_inbox or pje_get_process expedientes.",
         ),
     ],
-    textLimit: Annotated[
-        int, Field(ge=200, le=100000, description="Max characters of the act text, 200 to 100000; default 20000.")
-    ] = 20000,
+    textLimit: Annotated[int, Field(ge=200, le=100000, description="Max characters of the act text.")] = 20000,
     acknowledgeCiencia: Annotated[
         bool | None,
-        Field(description="Pending ciência is refused without it. " + ciencia.ACKNOWLEDGE),
+        Field(description=ciencia.ACKNOWLEDGE),
     ] = None,
 ) -> dict[str, Any]:
     # An expired session shows up before the act is served, so a repeat never opens it twice.
@@ -271,19 +250,17 @@ def read_expediente_ato_tool(
 @server.tool(
     name="pje_list_expediente_counters",
     title="List PJe Expedientes counters",
-    description="Read the PJe lawyer panel's Expedientes buckets (the same for every login) with their counts. With regions=true each bucket that has items also lists its regions and inboxes with counts (jurisdictions, boxes the profile has), which vary per user; that walks every bucket and is slow. To see the regions of one bucket pass bucket instead (its index or part of its label). Opening a bucket or expanding a region does not notify anyone; no expediente row is opened and nothing is acknowledged.",
+    description="Read the PJe panel's Expedientes buckets with their counts; regions or bucket add the regions and inboxes under them. Read-only: opens no expediente, acknowledges nothing.",
     annotations=READ_ONLY,
 )
 def expediente_counters(
     portal: Portal,
     regions: Annotated[
-        bool, Field(description="true also lists regions and inboxes under each non-empty bucket.")
+        bool, Field(description="true lists regions and inboxes under every non-empty bucket (slow).")
     ] = False,
     bucket: Annotated[
         str | None,
-        Field(
-            description="Bucket index (e.g. '0') or part of its label: lists the regions and inboxes of that bucket only. Leave empty for counts only."
-        ),
+        Field(description="Bucket index (e.g. '0') or part of its label: regions and inboxes of that bucket only."),
     ] = None,
 ) -> dict[str, Any]:
     return _notifications(
@@ -294,7 +271,7 @@ def expediente_counters(
 @server.tool(
     name="pje_list_inbox",
     title="List PJe Expedientes inbox rows",
-    description="List the communications of a PJe panel bucket (default: Pendentes de ciência ou de resposta, index 0; on the PJe-JT portals, TRT/TST, Meus Expedientes; pass its index or part of its label, and an index the portal does not have is an error that lists the valid ones) from the panel's inboxes, region by region, all pages up to maxPages (40 rows per page). Each row has the expediente id, type, recipient, channel, expedition date, notice (ciência) and whether it is still pending, days, PJe's deadline (limite), the process number and the last movement; read the act with pje_read_expediente_ato and the process with pje_get_process. regions keeps only inboxes whose path contains one of the texts. processNumber, expedidoDe/expedidoAte (YYYY-MM-DD, expedition date interval) and expedienteId run the inbox's own search. inboxes[].complete is true only when the rows read equal the total PJe reports. Read-only: it never takes ciência, replies, selects or distributes expedientes.",
+    description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
     annotations=READ_ONLY,
 )
 def list_inbox(
@@ -302,36 +279,32 @@ def list_inbox(
     bucket: Annotated[
         str | None,
         Field(
-            description="Bucket index (e.g. '0') or part of its label, e.g. 'Pendentes de ciência'. Leave empty for the default pending bucket; indexes differ on TRT/TST portals. See pje_list_expediente_counters."
+            description="Bucket index or part of its label (see pje_list_expediente_counters). Empty: Pendentes de ciência ou de resposta (Meus Expedientes on TRT/TST). An unknown index errors listing the valid ones."
         ),
     ] = None,
     regions: Annotated[
         list[str] | None,
         Field(
-            description='JSON list of texts; keeps inboxes whose path contains any of them, e.g. ["Serra Talhada"]. Not a plain string.'
+            description='JSON list, not a plain string: keeps inboxes whose path contains any text, e.g. ["Serra Talhada"].'
         ),
     ] = None,
-    processNumber: Annotated[
-        str | None, Field(description="CNJ process number with punctuation, runs the inbox search.")
-    ] = None,
+    processNumber: Annotated[str | None, Field(description="CNJ process number with punctuation.")] = None,
     expedidoDe: Annotated[
         Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
         Field(
-            description="Start of expedition date, ISO YYYY-MM-DD (e.g. '2026-10-15'). DD/MM/AAAA is refused.",
+            description="Expedited from, ISO YYYY-MM-DD (DD/MM/AAAA is refused).",
         ),
     ] = None,
     expedidoAte: Annotated[
         Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
         Field(
-            description="End of expedition date, ISO YYYY-MM-DD. Use the same day as expedidoDe for one day.",
+            description="Expedited until, ISO YYYY-MM-DD; same as expedidoDe for one day.",
         ),
     ] = None,
     expedienteId: Annotated[
-        Annotated[str, Field(pattern=r"^[0-9]+$")] | None, Field(description="Numeric expediente id to find one row.")
+        Annotated[str, Field(pattern=r"^[0-9]+$")] | None, Field(description="Finds one row.")
     ] = None,
-    maxPages: Annotated[
-        int, Field(ge=1, le=50, description="Pages of 40 rows to read per inbox, 1 to 50; default 5.")
-    ] = 5,
+    maxPages: Annotated[int, Field(ge=1, le=50, description="Pages of 40 rows per inbox.")] = 5,
 ) -> dict[str, Any]:
     filters = {
         key: value
@@ -355,15 +328,15 @@ def list_inbox(
 @server.tool(
     name="pje_list_watched_processes",
     title="List PJe Push watched processes",
-    description="Read the authenticated PJe Push watched-process registry (the 'Processos cadastrados' list; the page's 'Processos relacionados' tab is not registrations and is not listed): limit rows (default 100) starting at offset, reading the registry's pages as needed, with total and hasMore; call again with offset += limit while hasMore is true. total is null when pages were left unread and the portal shows no count; complete is true only when the whole registry was read. processNumber reads the whole registry and returns only that process' registrations (total 0 means it is not watched). It reports registered processes, not movement or publication email text; no page replay or watch mutations are performed.",
+    description="List the PJe Push registry (Processos cadastrados): limit rows from offset, with total and hasMore; while hasMore, call again with offset += limit. total is null when pages were left unread and the portal shows no count; complete is true only when the whole registry was read. processNumber returns only that process' registrations (total 0: not watched). Registrations only, no movements. Read-only.",
     annotations=READ_ONLY,
 )
 def watched_processes(
     portal: Portal,
-    limit: Annotated[int, Field(ge=1, le=500, description="Rows to return, 1 to 500; default 100.")] = 100,
-    offset: Annotated[int, Field(ge=0, description="Rows to skip; default 0.")] = 0,
+    limit: Annotated[int, Field(ge=1, le=500, description="Rows to return.")] = 100,
+    offset: Annotated[int, Field(ge=0, description="Rows to skip.")] = 0,
     processNumber: Annotated[
-        str | None, Field(description="CNJ process number with punctuation: keeps only that process' rows.")
+        str | None, Field(description="CNJ process number with punctuation: only that process.")
     ] = None,
 ) -> dict[str, Any]:
     return _notifications(
@@ -378,7 +351,7 @@ def watched_processes(
 @server.tool(
     name="pje_list_processes",
     title="List the lawyer's PJe processes (Acervo)",
-    description="List the lawyer's processes from the PJe panel's Acervo tab: jurisdiction by jurisdiction, each box (Caixa de entrada and the lawyer's own boxes, e.g. Arquivados) and every page up to maxPages. Each item has the process number, class, subject, parties as shown, órgão julgador, distribution date, last movement (date and text) when shown, the jurisdiction and box. On the PJe-JT portals (TRT/TST) it reads the panel's Acervo Geral and Arquivados buckets, whose rows carry number, class, parties, órgão julgador and the filing and archiving dates but no last movement. regions keeps the jurisdictions whose name contains one of the texts. complete is true only when every box was read to the total PJe shows and the boxes add up to each jurisdiction's counter. Not available on TRF5's PJe 1.x (trf5-legacy). Read-only: it never opens a process, an act or an expediente and takes no ciência; read a process with pje_get_process.",
+    description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject, parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box; on TRT/TST the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. Not on trf5-legacy. Read-only: opens nothing, takes no ciência.",
     annotations=READ_ONLY,
 )
 def list_processes(
@@ -386,10 +359,10 @@ def list_processes(
     regions: Annotated[
         list[str] | None,
         Field(
-            description='JSON list of texts; keeps jurisdictions whose name contains any of them, e.g. ["Belo Horizonte"]. Not a plain string.'
+            description='JSON list, not a plain string: keeps jurisdictions whose name contains any text, e.g. ["Belo Horizonte"].'
         ),
     ] = None,
-    maxPages: Annotated[int, Field(ge=1, le=50, description="Pages to read per box, 1 to 50; default 5.")] = 5,
+    maxPages: Annotated[int, Field(ge=1, le=50, description="Pages to read per box.")] = 5,
 ) -> dict[str, Any]:
     return _notifications(
         portal,
@@ -495,7 +468,7 @@ def draft_inspect(
             min_length=1, max_length=200, description="Text to search subjects; required for stage 'subject-options'."
         ),
     ] = None,
-    page: Annotated[int, Field(ge=1, le=50, description="Page of results, 1 to 50; default 1.")] = 1,
+    page: Annotated[int, Field(ge=1, le=50, description="Page of results.")] = 1,
 ) -> dict[str, Any]:
     if stage == "subject-options" and not (search or "").strip():
         raise ToolError("Subject search text is required")
@@ -525,7 +498,7 @@ def search_pending_drafts(
 @server.tool(
     name="pje_draft_write",
     title="Create or fill TRF5 PJe draft",
-    description="Create or fill a TRF5 1G draft using a reviewed payload.json in a named local filing run. Writes a checkpoint immediately after Incluir and leaves the draft in Não Protocolados. Never protocols or submits the process. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill, fill and resume run in the background and return at once: follow them with pje_draft_status. After a failed or interrupted run call resume: it continues the same draft from where it stopped and uploads only the documents PJe's list still lacks (never create-fill again). The single-stage calls (documents, characteristics, ...) run inside the tool call, which can expire on a slow portal, so prefer resume. Individual stages support recovery and review.",
+    description="Create or fill a TRF5 1G draft from the reviewed payload.json of a named filing run; it stays in Não Protocolados and is never protocolled. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill, fill and resume run in the background and return at once: follow them with pje_draft_status. After a failed or interrupted run use resume: it continues the same draft and uploads only the documents PJe still lacks (never create-fill again). Single stages run within the call and can time out on a slow portal, so prefer resume.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
@@ -576,7 +549,7 @@ def draft_status(runId: RunId, checkPje: bool = False) -> dict[str, Any]:
 def main():
     load_env_file()
     keys = configured_portals() or portals.keys("pje")
-    offer_portals(server, keys, describe)
+    offer_portals(server, keys)
     sessions.only(keys)
     serve(server, on_exit=sessions.close)
 

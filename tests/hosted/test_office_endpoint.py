@@ -1,4 +1,4 @@
-"""The combined ``/mcp`` endpoint, the per-call audit log and the pooled login check."""
+"""The hosted endpoints (/mcp, /tribunais/mcp, per connector), the per-call audit log and the pooled login check."""
 
 import json
 import os
@@ -14,6 +14,7 @@ from starlette.testclient import TestClient
 
 from jurisync import portals
 from jurisync.core import credentials
+from jurisync.core.mcp import PORTAL_HELP
 from jurisync.core.session_pool import LoginRejected
 from jurisync.hosted import access, cli
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
@@ -196,14 +197,36 @@ class PortalChoicesTest(OfficeCase):
         field = office_a["projudi_get_process"]["inputSchema"]["properties"]["portal"]
         self.assertEqual(field["enum"], ["tjam-1g"])
         self.assertNotIn("default", field)  # tjgo-1g: no login there
-        self.assertIn("tjam-1g", field["description"])
+        self.assertEqual(field["description"], PORTAL_HELP)
+        self.assertTrue(
+            office_a["projudi_get_process"]["description"].endswith("\nPortals: tjam-1g (projudi.tjam.jus.br).")
+        )
         self.assertEqual(office_a["projudi_get_process"]["inputSchema"]["required"], ["number", "portal"])
         self.assertEqual(set(office_b), {"projudi_get_process", "projudi_list_intimations", "stj_get_process"})
         self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["properties"]["portal"]["enum"],
                          ["tjgo-1g", "tjam-1g"])  # fmt: skip
         self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["required"], ["number"])
-        shared = self.servers["projudi"]._tool_manager.get_tool("projudi_get_process").parameters
-        self.assertEqual(shared["properties"]["portal"]["enum"], ["tjgo-1g", "tjam-1g"])  # never changed in place
+        self.assertNotIn("Portals: ", office_b["projudi_list_intimations"]["description"] or "")  # once per system
+        shared = self.servers["projudi"]._tool_manager.get_tool("projudi_get_process")
+        self.assertEqual(shared.parameters["properties"]["portal"]["enum"], ["tjgo-1g", "tjam-1g"])  # never in place
+        self.assertNotIn("Portals: ", shared.description or "")
+
+    def test_tribunais_serves_every_court_system_of_the_office_with_its_own_audience(self):
+        with TestClient(self.app, base_url=BASE) as client:
+            metadata = client.get("/.well-known/oauth-protected-resource/tribunais/mcp").json()
+            self.assertEqual(metadata["resource"].rstrip("/"), f"{BASE}/tribunais/mcp")
+            token = self.token(client, "user@office-b.test", resource=f"{BASE}/tribunais/mcp")
+            courts = self.tools(self.mcp(client, token, "/tribunais/mcp"))
+            self.assertEqual(set(courts), {"projudi_get_process", "projudi_list_intimations", "stj_get_process"})
+            self.assertEqual(ping(client, token, "/mcp").status_code, 401)
+            self.assertEqual(
+                ping(client, self.token(client, resource=f"{BASE}/mcp"), "/tribunais/mcp").status_code, 401
+            )
+            send = self.mcp(client, self.token(client, resource=f"{BASE}/tribunais/mcp"), "/tribunais/mcp")
+            refused = self.call(send, "projudi_get_process", {"number": "1", "portal": "tjgo-1g"})
+            self.assertIn("no login is configured for tjgo-1g", refused["content"][0]["text"])
+            self.assertEqual(ping(client, self.token(client, resource=f"{BASE}/projudi/mcp"), "/projudi/mcp").status_code,
+                             200)  # fmt: skip
 
     def test_a_portal_without_login_is_refused_before_the_connector(self):
         with TestClient(self.app, base_url=BASE) as client:
@@ -234,6 +257,36 @@ class HealthTest(OfficeCase):
         with TestClient(self.app, base_url=BASE) as client:
             response = client.get("/healthz")
         self.assertEqual((response.status_code, response.json()), (200, {"ok": True}))
+
+
+class GroupTest(OfficeCase):
+    """alpha stands for a court system (group "tribunais") with a granted write; beta for a management system."""
+
+    def setUp(self):
+        with mock.patch.dict("jurisync.registry.GROUPS", {"tribunais": ("alpha",)}, clear=True):
+            super().setUp()
+        self.store.add_tenant("office-c", "office-c", connectors=["beta"])
+        self.store.add_user("user@office-c.test", "office-c", PASSWORD)
+        self.vault.put("office-c", {})
+        self.vault.put("office-b", {"ALPHA_ALLOW_WRITES": "true"})
+
+    def test_the_group_serves_its_systems_and_hides_writes_without_the_grant(self):
+        patch = mock.patch.dict("jurisync.hosted.app.GRANTED_WRITES", {"alpha": ("ALPHA_ALLOW_WRITES", {"alpha_fail"})})
+        with patch, TestClient(self.app, base_url=BASE) as client:
+            resource = f"{BASE}/tribunais/mcp"
+            office_a = self.mcp(client, self.token(client, resource=resource), "/tribunais/mcp")
+            office_b = self.mcp(client, self.token(client, "user@office-b.test", resource=resource), "/tribunais/mcp")
+            self.assertEqual(self.names(office_a), {"alpha_whoami"})
+            self.assertEqual(self.names(office_b), {"alpha_whoami", "alpha_fail"})  # no beta_* here
+            refused = self.call(office_a, "alpha_fail", {"number": "1"})
+            self.assertIn("writes are not enabled for this office", refused["content"][0]["text"])
+            self.assertTrue(self.call(office_b, "beta_whoami")["isError"])
+            beta = self.mcp(client, self.token(client, "user@office-b.test", resource=f"{BASE}/beta/mcp"), "/beta/mcp")
+            self.assertEqual(self.names(beta), {"beta_whoami"})
+            only_beta = self.token(client, "user@office-c.test", resource=resource)
+            self.assertEqual(ping(client, only_beta, "/tribunais/mcp").status_code, 403)
+        calls = [(row["tenant"], row["tool"]) for row in self.store.calls("office-a")]
+        self.assertIn(("office-a", "alpha_fail"), calls)
 
 
 class CombinedAudienceTest(OfficeCase):

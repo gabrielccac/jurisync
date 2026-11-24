@@ -1,4 +1,7 @@
-"""The hosted HTTP app: OAuth endpoints at the root, every connector at ``/mcp`` and each one at ``/<name>/mcp``.
+"""The hosted HTTP app: OAuth endpoints at the root and the MCP endpoints behind a bearer token.
+
+``/tribunais/mcp`` serves every court system and DJEN (registry ``group``); a management system (ADVBOX, Juridiq) has
+its own ``/<name>/mcp``. ``/mcp`` (every connector, deprecated) and ``/<court>/mcp`` stay for older setups.
 
 Per request, ``TenantGate`` resolves the token's tenant, refuses connectors the tenant does not have, and opens a
 ``credentials.scope`` with that tenant's vault entry. The MCP SDK carries the request's context into the tool call, so
@@ -43,6 +46,7 @@ from starlette.routing import Mount, Route
 
 from jurisync import registry
 from jurisync.core import credentials
+from jurisync.core.mcp import PORTAL_HELP, with_portal_note
 from jurisync.hosted import access
 from jurisync.hosted.oauth import SCOPE, BrowserBinding, Provider, login_routes
 from jurisync.hosted.throttle import IP_MAX_FAILURES, Throttle
@@ -70,6 +74,7 @@ METADATA_PATH = "/.well-known/oauth-authorization-server"
 # Keep "https://host" as written: OAuth clients compare the issuer as an exact string.
 EXACT_URL = TypeAdapter(AnyHttpUrl, config=ConfigDict(url_preserve_empty_path=True))
 SYSTEMS = {name: connector.label for name, connector in registry.CONNECTORS.items()}
+GROUP_LABELS = {registry.COURTS: "Tribunais"}
 # (tenant row, user e-mail) of the request, set by TenantGate.
 caller = contextvars.ContextVar("jurisync_caller", default=None)
 
@@ -113,8 +118,9 @@ def portal_field(server, name):
     return ((server._tool_input_schema(name) or {}).get("properties") or {}).get("portal")
 
 
-def offer(tool, field, offered, label):
-    """A copy of ``tool`` whose ``portal`` takes only the offered portals; None when it would take none.
+def offer(tool, field, offered, note=False):
+    """A copy of ``tool`` whose ``portal`` takes only the offered portals; None when it would take none. With ``note``
+    its description also lists those portals with their hosts (once per connector: the other fields point at the enum).
 
     A copy: the tools of the connector server are shared by every office.
     """
@@ -129,13 +135,16 @@ def offer(tool, field, offered, label):
     field = {
         **{key: value for key, value in field.items() if key != "default" or value in keys},
         "enum": keys,
-        "description": f"{label} portal key, one of the portals configured for this office: {', '.join(keys)}.",
+        "description": PORTAL_HELP,
     }
     schema = {**tool.input_schema, "properties": {**tool.input_schema["properties"], "portal": field}}
     if "default" not in field:
         # The connector's default is not this office's: the model has to name one of its portals.
         schema["required"] = [*(name for name in schema.get("required", []) if name != "portal"), "portal"]
-    return tool.model_copy(update={"input_schema": schema})
+    update = {"input_schema": schema}
+    if note:
+        update["description"] = with_portal_note(tool.description, keys)
+    return tool.model_copy(update=update)
 
 
 class Office(MCPServer):
@@ -162,12 +171,15 @@ class Office(MCPServer):
         for connector, server in self.servers.items():
             if connector not in tenant["connectors"]:
                 continue
-            offered = offered_portals(connector)
+            offered, noted = offered_portals(connector), False
             for tool in await server.list_tools():
                 if not granted(connector, tool.name):
                     continue
                 if offered is not None:
-                    tool = offer(tool, portal_field(server, tool.name), offered, SYSTEMS.get(connector, connector))
+                    field = portal_field(server, tool.name)
+                    note = not noted and field is not None and "const" not in field
+                    tool = offer(tool, field, offered, note)
+                    noted = noted or (note and tool is not None)
                 if tool is not None:
                     tools.append(tool)
         return tools
@@ -223,11 +235,15 @@ class Office(MCPServer):
 
 
 class TenantGate:
-    """``connector=None`` is the combined ``/mcp``: every connector passes here and ``Office`` filters per tool."""
+    """``connectors`` are the ones served at this path; None is the combined ``/mcp``. The office needs one of them
+    (403 otherwise); ``Office`` then filters per tool."""
 
-    def __init__(self, app, *, connector, store, vault, resource, open_tenant=None, require_resource=False):
+    def __init__(
+        self, app, *, connectors, store, vault, resource, name="mcp", open_tenant=None, require_resource=False
+    ):
         self.app = app
-        self.connector = connector
+        self.connectors = connectors
+        self.name = name
         self.store = store
         self.vault = vault
         self.resource = resource
@@ -245,7 +261,7 @@ class TenantGate:
         self._logged.add(key)
         log.info(
             "token without resource accepted on %s (client %s, office %s); %s=1 would refuse it",
-            self.connector or "mcp",
+            self.name,
             token.client_id,
             tenant_id,
             REQUIRE_RESOURCE_FLAG,
@@ -278,11 +294,11 @@ class TenantGate:
                 )(scope, receive, send)
             if not audience:
                 self._note_missing_resource(token, tenant["id"])
-        if self.connector and self.connector not in tenant["connectors"]:
+        if self.connectors is not None and not set(self.connectors) & set(tenant["connectors"]):
             return await JSONResponse(
                 {
                     "error": "insufficient_scope",
-                    "error_description": f"{self.connector} is not enabled for this office",
+                    "error_description": f"{self.name} is not enabled for this office",
                 },
                 status_code=403,
             )(scope, receive, send)
@@ -383,35 +399,59 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
         if close:
             closers.append(close)
     systems = ", ".join(SYSTEMS.get(name, name) for name in servers)
+    # path name -> (Office, connectors it serves; None: all). Tool names already carry their connector, and Office
+    # refuses a name served twice.
     offices = {
-        name: Office({name: server}, store, name=server.name, version=server.version, instructions=server.instructions)
+        name: (
+            Office({name: server}, store, name=server.name, version=server.version, instructions=server.instructions),
+            (name,),
+        )
         for name, server in servers.items()
     }
-    # One URL per office; tool names already carry their connector, and Office refuses a name served twice.
-    offices[""] = Office(
-        servers,
-        store,
-        name="jurisync",
-        version="1.0.0",
-        instructions=f"Jurisync: {systems}. Each tool name starts with its system; you see the systems your office has.",
+    for group, members in registry.GROUPS.items():
+        members = tuple(name for name in members if name in servers)
+        if not members:
+            continue
+        labels = ", ".join(SYSTEMS.get(name, name) for name in members)
+        office = Office(
+            {name: servers[name] for name in members},
+            store,
+            name=f"jurisync-{group}",
+            version="1.0.0",
+            instructions=f"Jurisync {GROUP_LABELS.get(group, group)}: {labels}. Each tool name starts with its "
+            "system; you see the systems and portals your office has.",
+        )
+        offices[group] = (office, members)
+    # Deprecated: every connector at one URL, kept for the offices that added it before /tribunais/mcp.
+    offices[""] = (
+        Office(
+            servers,
+            store,
+            name="jurisync",
+            version="1.0.0",
+            instructions=f"Jurisync: {systems}. Each tool name starts with its system; you see the systems your office "
+            "has.",
+        ),
+        None,
     )
     apps = {}
     security = transport_security(base_url)
     require_resource = flag(REQUIRE_RESOURCE_FLAG)
-    for name, office in offices.items():
+    for name, (office, served) in offices.items():
         path = f"/{name}/mcp" if name else "/mcp"
         resource = base_url + path
         routes += create_protected_resource_routes(
             resource_url=AnyHttpUrl(resource),
             authorization_servers=[issuer],
             scopes_supported=[SCOPE],
-            resource_name=f"Jurisync {name}" if name else "Jurisync",
+            resource_name=f"Jurisync {GROUP_LABELS.get(name) or SYSTEMS.get(name, name)}" if name else "Jurisync",
         )
         sub = office.streamable_http_app(streamable_http_path="/mcp", transport_security=security)
         apps[path] = sub
         gate = TenantGate(
             sub,
-            connector=name or None,
+            connectors=served,
+            name=name or "mcp",
             store=store,
             vault=vault,
             resource=resource,

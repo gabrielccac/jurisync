@@ -1,6 +1,8 @@
 # Deploying the hosted server
 
-One VPS serves every office at `https://<host>/mcp` (see `docs/hosted.md` for the design and
+One VPS serves every office at `https://<host>/tribunais/mcp` (every court system and DJEN) plus
+`https://<host>/advbox/mcp` and `https://<host>/juridiq/mcp` for the offices that use them; `https://<host>/mcp`
+(everything at one URL) is deprecated and kept for existing setups (see `docs/hosted.md` for the design and
 `docs/roadmap.md` for the order of the offices). Everything here is a script; the only manual
 inputs are the VPS address, the domain (or none yet) and the CAPTCHA key.
 
@@ -99,15 +101,23 @@ sudo /opt/jurisync/app/deploy/check-office.sh victor     # one login per portal,
 sudo jurisync-admin calls victor --limit 20
 ```
 
-In Claude (Settings → Connectors → Add custom connector) or ChatGPT (developer mode connector), the URL is
-`https://<host>/mcp`; the sign-in page asks for the user's e-mail and password. After Claude and ChatGPT have both
+The smoke test signs in on `/tribunais/mcp` (only the office's court systems, no `advbox_*`/`juridiq_*` there), on
+`/advbox/mcp` and `/juridiq/mcp` for an office that has them (that system's tools only) and on the deprecated `/mcp`.
+
+In Claude (Settings → Connectors → Add custom connector) or ChatGPT (developer mode connector), add "Jurisync
+Tribunais" at `https://<host>/tribunais/mcp` and, for an office with ADVBOX or Juridiq, "Jurisync ADVBOX" at
+`https://<host>/advbox/mcp` / "Jurisync Juridiq" at `https://<host>/juridiq/mcp` (the office's `endpoints` in
+`plan.json`); the sign-in page asks for the user's e-mail and password, once per connector. After Claude and ChatGPT have both
 signed in once, set `JURISYNC_REQUIRE_TOKEN_RESOURCE=1` in `/etc/jurisync/jurisync.env` and restart.
 
 Office plugins (skills) for Claude Code / Cowork pointing at the server:
 
 ```bash
-uv run jurisync-hosted provision plugin plugins/victor --url https://<host>/mcp --out dist/victor-remote
+uv run jurisync-hosted provision plugin plugins/victor --url https://<host> --out dist/victor-remote
 ```
+
+The copy has one server `tribunais` (`/tribunais/mcp`) for the plugin's court systems and DJEN and one per management
+system it uses (`advbox` → `/advbox/mcp`).
 
 Skills that use filing or PJe draft writes (`victor-pje-filing`) are flagged: those stay on the local install.
 

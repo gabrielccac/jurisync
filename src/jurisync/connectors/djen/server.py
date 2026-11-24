@@ -26,9 +26,8 @@ REQUEST_ERRORS = (DjenError, ValueError, urllib.error.URLError, TimeoutError)
 server = MCPServer("djen", version="1.0.0")
 
 FORMAT_HELP = (
-    "'json' (default) returns the items for routing. 'linhas' returns checks plus one line per item; 'resumo' returns "
-    "checks, counts by category and the items grouped by category with the operative sentence. Both text views are "
-    "for reading and triage; textLimit sets the characters of that sentence (default 140)."
+    "'json': items. 'linhas' (line per item) or 'resumo' (by category; operative sentence of textLimit chars, "
+    "default 140): checks + triage text."
 )
 
 
@@ -47,11 +46,7 @@ def as_text(items, declared, pages, complete, formato, text_limit, merged=0):
     return {"checagem": check, "texto": render.checks_line(check) + "\n" + body}
 
 
-OAB_VARIANTS_HELP = (
-    "The API matches numeroOab exactly, so by default the search runs once per registration suffix (none, -A, -B, -E, "
-    "-N, -O, -S) and merges the results by communication id; oabVariants lists each suffix's count. false sends "
-    "numeroOab exactly as given."
-)
+OAB_VARIANTS_HELP = "true: also OAB suffixes -A -B -E -N -O -S, merged; false: exact numeroOab."
 MAX_SAVED_WINDOW_DAYS = 31
 MAX_PARALLEL_SEARCHES = 4
 
@@ -102,71 +97,63 @@ DIGITS_AS_TEXT = BeforeValidator(lambda value: str(value) if type(value) is int 
 @server.tool(
     name="djen_search_communications",
     title="Search DJEN communications",
-    description="Read one page of public DJEN communications for a date window and at least one search key: OAB + UF, advogado name (nomeAdvogado), party name, free text (texto) or process number, with optional tribunal and meio (D = Diário, E = eletrônico). Returns normalized text and metadata; routing decisions belong to the skill. Each item has portal: the court system that issued it (portal key such as 'trf5-1g' or 'trf5-2g', read from the communication link host; from the CNJ number when there is no link, which can list several keys like 'trf5-1g/trf5-2g'). A full 50-item page can exceed tool output limits: compact=true keeps one copy of the text plus the fields routing needs, and textLimit cuts each text (texto_chars keeps the original length; the full text stays available through djen_get_certidao_text). No authentication or poll-state mutation.",
+    description="One page of public DJEN communications for a date window and at least one key (OAB + UF, nomeAdvogado, nomeParte, texto, numeroProcesso). Item portal = issuing system key ('trf5-1g'); when inferred from the CNJ number it can list several ('trf5-1g/trf5-2g'). compact/textLimit shrink big pages (texto_chars = original length; full text: djen_get_certidao_text). No authentication or poll-state mutation.",
     annotations=READ_ONLY,
 )
 def search_communications(
     inicio: Annotated[
         date,
-        Field(
-            description="Start of the availability window, ISO YYYY-MM-DD (e.g. '2026-10-15'). DD/MM/AAAA is refused."
-        ),
+        Field(description="YYYY-MM-DD."),
     ],
-    fim: Annotated[
-        date, Field(description="End of the window, ISO YYYY-MM-DD, inclusive. Same day as inicio for one day.")
-    ],
+    fim: Annotated[date, Field(description="YYYY-MM-DD, inclusive.")],
     numeroOab: Annotated[
         Annotated[str, DIGITS_AS_TEXT, Field(pattern=r"(?i)^\d+(?:-[ABENOS])?$")] | None,
         Field(
-            description="OAB number without the UF, e.g. '14663' (supplementary registrations: '14663-A'). Requires ufOab.",
+            description="OAB number without UF, e.g. '14663' or '14663-A'. Requires ufOab.",
         ),
     ] = None,
     ufOab: Annotated[
         Annotated[str, Field(pattern=r"(?i)^[A-Z]{2}$")] | None,
-        Field(description="Two-letter UF of the OAB, e.g. 'PB'."),
+        Field(description="e.g. 'PB'."),
     ] = None,
     nomeAdvogado: Annotated[
         str | None,
         Field(
             min_length=3,
             max_length=120,
-            description="Lawyer name as it appears in the publication, 3 to 120 characters, e.g. 'VICTOR HUGO VALERIANO PINTO'.",
+            description="As published.",
         ),
     ] = None,
-    nomeParte: Annotated[
-        str | None, Field(min_length=3, max_length=120, description="Party name, 3 to 120 characters.")
-    ] = None,
+    nomeParte: Annotated[str | None, Field(min_length=3, max_length=120)] = None,
     texto: Annotated[
         str | None,
-        Field(min_length=3, max_length=200, description="Free text found in the publication, 3 to 200 characters."),
+        Field(min_length=3, max_length=200),
     ] = None,
     numeroProcesso: Annotated[
         Annotated[str, DIGITS_AS_TEXT, Field(pattern=r"^\d{7,25}$")] | None,
         Field(
-            description="Process number with DIGITS ONLY, no dots or dashes: '50043207620264047104' for 5004320-76.2026.4.04.7104. A formatted number is refused.",
+            description="Digits only, no punctuation.",
         ),
     ] = None,
     meio: Annotated[
         Literal["D", "E"] | None,
-        Field(description="Medium: 'D' = Diário (Diário de Justiça), 'E' = eletrônico. Other values are refused."),
+        Field(description="'D' = Diário, 'E' = eletrônico."),
     ] = None,
     tribunal: Annotated[
         Annotated[str, Field(pattern=r"(?i)^[A-Z0-9]+$")] | None,
         Field(
-            description="Court acronym, letters and digits, e.g. 'TRF5', 'TJSP'. Leave empty for all courts.",
+            description="e.g. 'TRF5'; empty = all.",
         ),
     ] = None,
-    pagina: Annotated[int, Field(ge=1, description="Page of results, starting at 1.")] = 1,
-    itens: Annotated[int, Field(ge=5, le=50, description="Items per page, 5 to 50; default 10.")] = 10,
-    compact: Annotated[
-        bool, Field(description="true keeps one copy of the text plus the routing fields, which reduces output size.")
-    ] = False,
+    pagina: Annotated[int, Field(ge=1)] = 1,
+    itens: Annotated[int, Field(ge=5, le=50)] = 10,
+    compact: Annotated[bool, Field(description="Routing fields + one text copy.")] = False,
     textLimit: Annotated[
         int,
         Field(
             ge=0,
             le=100_000,
-            description="Max characters per text when compact is used; 0 means no cut. texto_chars keeps the original length.",
+            description="Max chars per text when compact; 0 = no cut.",
         ),
     ] = 0,
     formato: Annotated[
@@ -213,7 +200,7 @@ def search_communications(
 @server.tool(
     name="djen_get_certidao_text",
     title="Read DJEN certidão text",
-    description="Fetch a public DJEN certidão PDF by communication hash and return extracted text with extraction status. Scanned PDFs may report ocr_needed.",
+    description="Text of a public DJEN certidão PDF by hash, with extractionStatus (scanned: ocr_needed) and textTruncated.",
     annotations=READ_ONLY,
 )
 def get_certidao_text(
@@ -221,12 +208,10 @@ def get_certidao_text(
         str,
         Field(
             pattern=r"^[A-Za-z0-9]{1,128}$",
-            description="The 'hash' field of a DJEN item from djen_search_communications, letters and digits only.",
+            description="Item 'hash' from djen_search_communications.",
         ),
     ],
-    textLimit: Annotated[
-        int, Field(ge=1, le=100_000, description="Max characters of the extracted text, 1 to 100000; default 50000.")
-    ] = 50_000,
+    textLimit: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
 ) -> dict[str, Any]:
     with tool_errors("DJEN", *REQUEST_ERRORS):
         pdf = fetch_certidao(hash)
@@ -243,29 +228,23 @@ def get_certidao_text(
 @server.tool(
     name="djen_calculate_deadline",
     title="Calculate DJEN judicial deadline",
-    description="Count a verified number of procedural business days (CPC art. 219) from DJEN availability. Returns publication, first counted day, counted dates, and the fatal date (ISO and DD/MM/AAAA). The base calendar covers any year: weekends, national holidays, the CPC art. 220 suspension (20/12 to 20/01, not counted) and, for Federal Justice courts, Lei 5.010/66 art. 62 (recess 20/12-06/01, Carnival, Holy Week, 11/08, 01/11, 02/11, 08/12) and Corpus Christi. A court's sourced local calendar adds its own closures for the period it covers; outside it, or for a court without one, calendarComplete is false and warnings says which local holidays must still be checked before fixing the date. Does not infer a period from notice text and does not count calendar-day (criminal) terms.",
+    description="Count procedural business days (CPC art. 219) from DJEN availability to the fatal date. Base calendar: weekends, national holidays, CPC art. 220 suspension (20/12-20/01); Federal Justice also Lei 5.010/66 art. 62 and Corpus Christi. Without a local calendar for the court and period, calendarComplete is false and warnings lists local holidays to check before fixing the date. Does not infer the term from notice text nor count calendar-day (criminal) terms.",
     annotations=READ_ONLY,
 )
 def deadline(
     availableOn: Annotated[
         date,
-        Field(
-            description="Date the communication became available in the DJEN, ISO YYYY-MM-DD. The publication is the next business day and counting starts after it."
-        ),
+        Field(description="DJEN availability date, YYYY-MM-DD."),
     ],
-    days: Annotated[
-        int, Field(ge=1, le=365, description="Number of business days in the procedural term, 1 to 365, e.g. 5.")
-    ],
+    days: Annotated[int, Field(ge=1, le=365, description="Business days.")],
     calendar: Annotated[
         Literal["jfpe-2026-q4"] | None,
-        Field(
-            description="Legacy local calendar id; 'jfpe-2026-q4' means court JFPE. Prefer court. Dates past the local calendar are computed with the base calendar and flagged."
-        ),
+        Field(description="Legacy; same as court='JFPE'. Prefer court."),
     ] = None,
     court: Annotated[
         Annotated[str, Field(pattern=r"^[A-Za-z0-9]{2,12}$")] | None,
         Field(
-            description="Court acronym whose calendar applies, e.g. 'JFPE', 'JFPB', 'TRF5', 'TJSP'. Default: the office's [djen] court setting, else JFPE. Only JFPE has a local calendar today; other courts use the base calendar with calendarComplete=false."
+            description="Court calendar, e.g. 'JFPE', 'TRF5'. Default: office setting, else JFPE (the only local calendar)."
         ),
     ] = None,
 ) -> dict[str, Any]:
@@ -306,7 +285,7 @@ def saved_searches():
 @server.tool(
     name="djen_list_saved_searches",
     title="List the office's saved DJEN searches",
-    description="List the DJEN searches saved for this office (OAB + UF, lawyer name, party or text, optional court), the same ones djen_search_saved runs. Read-only.",
+    description="Saved DJEN searches of this office (run by djen_search_saved). Read-only.",
     annotations=READ_ONLY,
 )
 def list_saved_searches() -> dict[str, Any]:
@@ -317,21 +296,23 @@ def list_saved_searches() -> dict[str, Any]:
 @server.tool(
     name="djen_search_saved",
     title="Run the office's saved DJEN searches",
-    description="Run every saved DJEN search of this office for one date window (at most 31 days) and one page, and merge the communications without duplicates (same id). Each search reports its count and whether more pages exist; call again with pagina+1 while any search has more. An OAB search runs once per registration suffix (oabVariants, default true) and reports each suffix's count. A search that fails does not discard the others: it reports error, and complete is false, so its communications are missing from this result. tribunal narrows every search to one court (e.g. 'TRF5'). compact and textLimit work as in djen_search_communications. Read-only.",
+    description="Run all saved DJEN searches for one window (max 31 days) and page, merged; items as in djen_search_communications plus savedSearch. Repeat with pagina+1 while any search has more. A failed search reports error and complete=false (its items are missing). Read-only.",
     annotations=READ_ONLY,
 )
 def search_saved(
-    inicio: Annotated[date, Field(description="Start of the availability window, ISO YYYY-MM-DD.")],
-    fim: Annotated[date, Field(description="End of the window, ISO YYYY-MM-DD, inclusive.")],
+    inicio: Annotated[date, Field(description="YYYY-MM-DD.")],
+    fim: Annotated[date, Field(description="YYYY-MM-DD, inclusive.")],
     tribunal: Annotated[
         Annotated[str, Field(pattern=r"(?i)^[A-Z0-9]+$")] | None,
-        Field(description="Court acronym for every search, e.g. 'TRF5'. Empty keeps each search's own court."),
+        Field(description="Overrides each search's court."),
     ] = None,
     meio: Annotated[Literal["D", "E"] | None, Field(description="'D' = Diário, 'E' = eletrônico.")] = None,
-    pagina: Annotated[int, Field(ge=1, description="Page of every search, starting at 1.")] = 1,
-    itens: Annotated[int, Field(ge=5, le=50, description="Items per page and search, 5 to 50; default 50.")] = 50,
-    compact: Annotated[bool, Field(description="true keeps one copy of the text plus the routing fields.")] = True,
-    textLimit: Annotated[int, Field(ge=0, le=100_000, description="Max characters per text when compact.")] = 1500,
+    pagina: Annotated[int, Field(ge=1)] = 1,
+    itens: Annotated[int, Field(ge=5, le=50, description="Per search.")] = 50,
+    compact: Annotated[bool, Field(description="Routing fields + one text copy.")] = True,
+    textLimit: Annotated[
+        int, Field(ge=0, le=100_000, description="Max chars per text when compact; 0 = no cut.")
+    ] = 1500,
     formato: Annotated[Literal["json", "linhas", "resumo"], Field(description=FORMAT_HELP)] = "json",
     oabVariants: Annotated[bool, Field(description=OAB_VARIANTS_HELP)] = True,
 ) -> dict[str, Any]:

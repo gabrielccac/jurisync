@@ -1,7 +1,11 @@
 # Guia: conectar cada escritório ao Jurisync remoto
 
-Um servidor atende todos os escritórios em `https://<domínio>/mcp`. Cada advogado entra com o próprio e-mail e
-senha; o servidor mostra só os portais e sistemas daquele escritório. Nada é instalado no computador do escritório.
+Um servidor atende todos os escritórios. Cada escritório adiciona o conector **Jurisync Tribunais**
+(`https://<domínio>/tribunais/mcp`: todos os tribunais dele e o DJEN) e, se usa ADVBOX ou Juridiq, um conector para
+cada um (`https://<domínio>/advbox/mcp`, `https://<domínio>/juridiq/mcp`). Cada advogado entra com o próprio e-mail e
+senha; o servidor mostra só os portais e sistemas daquele escritório. O endereço antigo `https://<domínio>/mcp` (tudo
+num conector só) continua funcionando para quem já usa (Victor), mas está descontinuado: escritório novo recebe os
+endereços acima. Nada é instalado no computador do escritório.
 Exceção: escritórios com token A3 (barbara, cinthia) continuam na instalação local (`settings.toml` →
 `[hosted] mode = "local"`).
 
@@ -34,7 +38,7 @@ curl -s https://<domínio>/healthz                     # {"ok": true}
    ```
 
    A saída lista, por escritório, os portais que vão para o servidor e os que ficam de fora com o motivo (A3, segredo
-   faltando, portal não atendido). Corrigir o que for erro nosso e exportar de novo.
+   faltando, portal não atendido), e os endereços que o escritório vai adicionar (`endpoints` no `plan.json`). Corrigir o que for erro nosso e exportar de novo.
 3. Em `~/rollout/plan.json`, pôr os e-mails dos advogados na lista `users` do escritório e exportar outra vez (os
    usuários são mantidos).
 
@@ -82,8 +86,10 @@ reiniciar o servidor.
 
 ### A5. Entregar o acesso
 
-1. Mandar a cada advogado a Parte B, com o endereço `https://<domínio>/mcp`, o e-mail dele e a senha (a senha por
-   outro canal: WhatsApp separado, ligação). Depois apagar `new-user-passwords.txt`.
+1. Mandar a cada advogado a Parte B, com os endereços do escritório (`endpoints` do `plan.json`: sempre
+   `https://<domínio>/tribunais/mcp`; mais `/advbox/mcp` ou `/juridiq/mcp` se ele usa), o e-mail dele e a senha (a
+   senha por outro canal: WhatsApp separado, ligação). Na Parte B, apagar o passo do ADVBOX/Juridiq se o escritório
+   não usa. Depois apagar `new-user-passwords.txt`.
 2. Acompanhar o primeiro uso: `sudo jurisync-admin calls <nome> --limit 20`.
 
 ### A6. Manutenção
@@ -100,7 +106,8 @@ reiniciar o servidor.
 | Escritório passa a ser só local (A3) | `[hosted] mode = "local"` no `settings.toml` e repetir A2–A3 |
 
 Skills do escritório no Claude Code / Cowork apontando para o servidor:
-`uv run jurisync-hosted provision plugin plugins/<nome> --url https://<domínio>/mcp --out dist/<nome>-remote`.
+`uv run jurisync-hosted provision plugin plugins/<nome> --url https://<domínio> --out dist/<nome>-remote` (um servidor
+`tribunais` e um por sistema de gestão que o plugin usa).
 
 ---
 
@@ -108,18 +115,20 @@ Skills do escritório no Claude Code / Cowork apontando para o servidor:
 
 > **Como conectar o Jurisync ao seu Claude**
 >
-> Você vai precisar de: o endereço `https://<domínio>/mcp`, seu e-mail e a senha que enviamos.
+> Você vai precisar de: os endereços abaixo, seu e-mail e a senha que enviamos.
 >
 > **No Claude (site claude.ai ou aplicativo do computador)**
 > 1. Abra **Configurações → Conectores**.
 > 2. Clique em **Adicionar conector personalizado**.
-> 3. Nome: `Jurisync`. URL: `https://<domínio>/mcp`. Clique em **Adicionar**.
+> 3. Nome: `Jurisync Tribunais`. URL: `https://<domínio>/tribunais/mcp`. Clique em **Adicionar**.
 > 4. Clique em **Conectar**. Abre a página **Entrar no Jurisync**: digite seu e-mail e a senha e confirme.
-> 5. Pronto. Numa conversa, peça por exemplo: *"Liste minhas intimações pendentes no PJe do TRF1"* ou
+> 5. Se o escritório usa ADVBOX, repita os passos 2 a 4 com o nome `Jurisync ADVBOX` e a URL
+>    `https://<domínio>/advbox/mcp` (Juridiq: `Jurisync Juridiq`, `https://<domínio>/juridiq/mcp`).
+> 6. Pronto. O conector Tribunais traz todos os tribunais do escritório (PJe, Eproc, e-SAJ, Projudi...) e o DJEN. Numa conversa, peça por exemplo: *"Liste minhas intimações pendentes no PJe do TRF1"* ou
 >    *"Abra o processo 0000000-00.0000.0.00.0000 e resuma a última decisão"*.
 >
 > Em planos Team/Enterprise, o administrador da conta pode adicionar o conector para todos (Configurações da
-> organização → Conectores); cada advogado ainda faz o passo 4 com o próprio e-mail.
+> organização → Conectores); cada advogado ainda faz o passo 4 (em cada conector) com o próprio e-mail.
 >
 > O conector também aparece no aplicativo do celular depois de configurado na conta.
 >

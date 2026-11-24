@@ -215,6 +215,7 @@ def test_main_logs_in_only_where_a_login_is_set(monkeypatch):
     monkeypatch.setattr(server, "load_env_file", lambda: None)
     monkeypatch.setattr(server, "serve", lambda srv, on_exit: None)
     monkeypatch.setattr(server, "create_server", built.append)
+    monkeypatch.setattr(server, "offer_portals", lambda srv, keys: None)
     monkeypatch.setattr(server, "configured_portals", lambda: ("tjal-esaj",))
     monkeypatch.setattr(server.sessions, "_only", None)
     server.main()

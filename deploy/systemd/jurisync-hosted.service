@@ -1,5 +1,5 @@
 [Unit]
-Description=Jurisync hosted MCP server (one /mcp for every office)
+Description=Jurisync hosted MCP server (/tribunais/mcp and one URL per management system, for every office)
 Documentation=file:///opt/jurisync/app/deploy/README.md
 After=network-online.target
 Wants=network-online.target
