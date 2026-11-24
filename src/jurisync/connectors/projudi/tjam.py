@@ -534,6 +534,11 @@ class TjamAdapter(legacy.LegacyAdapter):
             raise RuntimeError(f"Projudi list page failed (HTTP {response.status_code})")
         return parsers.decode(response.content)
 
+    def _awaiting(self, session, portal):
+        """Process numbers with an intimação awaiting ciência, and whether that is all of them."""
+        response = self.request(session, portal, "POST", DESK, data={"selectedIcon": "tabIntimacoes"})
+        return pending_intimations(parsers.decode(response.content))
+
     def list_intimations(self, session, portal, *, lists=None, instances=("1",), max_pages=10):
         """The desk's intimação and citação lists (default: the ones awaiting reading or with a running deadline),
         per instance, without opening any. Rows of ``novas`` await reading: opening them registers the ciência."""
@@ -549,8 +554,7 @@ class TjamAdapter(legacy.LegacyAdapter):
                 for row in read["rows"]:
                     row["cienciaPendente"] = key == "novas"
                 result.append({"list": key, **read})
-        response = self.request(session, portal, "POST", DESK, data={"selectedIcon": "tabIntimacoes"})
-        numbers, agenda_complete = pending_intimations(parsers.decode(response.content))
+        numbers, agenda_complete = self._awaiting(session, portal)
         return {
             "lists": result,
             "awaitingCiencia": {"processNumbers": sorted(numbers), "complete": agenda_complete},
@@ -671,8 +675,7 @@ class TjamAdapter(legacy.LegacyAdapter):
     def download(self, session, portal, document_id, hash_value):
         """A file, only when the desk's intimação agenda lists nothing pending for the process that is open."""
         number = self._process_files(session)["number"]
-        response = self.request(session, portal, "POST", DESK, data={"selectedIcon": "tabIntimacoes"})
-        numbers, complete = pending_intimations(parsers.decode(response.content))
+        numbers, complete = self._awaiting(session, portal)
         if number in numbers or not complete:
             raise legacy.DocumentsBlocked(
                 "This process has an intimação awaiting ciência for this account (or the agenda could not be read in "

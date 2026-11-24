@@ -438,7 +438,7 @@ PORTALS = {
         # keycloak.tjrr.jus.br) with CPF + password + TOTP. TJAM: local form, certificate internal to Projudi.
         # TJPI: Projudi 1.9.8, local form, CAPTCHA. Credentials, when wired, use <PREFIX>_USERNAME/_PASSWORD/_2FA_DATA.
         Portal("tjpr-projudi-1g", "projudi", "TJPR", "1g", "projudi.tjpr.jus.br", "/projudi/", "password_totp",
-               "TJPR_PROJUDI_1G", region="16", justice="8", wired=False, guess_by_number=False,
+               "TJPR_PROJUDI_1G", region="16", justice="8", guess_by_number=False,
                flavor="legacy-keycloak"),
         Portal("tjrr-1g", "projudi", "TJRR", "1g", "projudi.tjrr.jus.br", "/projudi/", "password_totp", "TJRR_1G",
                legacy_env_prefixes=("TJRR_PROJUDI",), region="23", justice="8", wired=False, guess_by_number=False,

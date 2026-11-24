@@ -168,13 +168,22 @@ class KeycloakAdapter(legacy.LegacyAdapter):
             raise RuntimeError("Projudi SSO returned a page the connector does not recognize")
         return kind
 
+    def _entry_url(self, session, config):
+        """The Projudi page that starts the OIDC redirect."""
+        return config.url(sso_for(config).entry)
+
+    def _logged_in(self, session, config, page):
+        """What a generation keeps from the first authenticated page."""
+
     def login(self, portal, *, session=None):
         config = portals.projudi(portal)
-        sso = sso_for(config)
         username, password = login_credentials(config)  # nothing is requested before the credentials exist
         session = session or requests.Session()
         first = session.get(
-            config.url(sso.entry), impersonate=impersonate_for(config), allow_redirects=False, timeout=TIMEOUT
+            self._entry_url(session, config),
+            impersonate=impersonate_for(config),
+            allow_redirects=False,
+            timeout=TIMEOUT,
         )
         page = self._follow(session, config, first)
         if self._classify(config, page) != "login":
@@ -200,6 +209,7 @@ class KeycloakAdapter(legacy.LegacyAdapter):
             raise RuntimeError("Projudi login did not return to the portal")
         if self.refresh(portal, session) is None:
             raise RuntimeError("Projudi login did not reach an authenticated page")
+        self._logged_in(session, config, response)
         return session
 
     def refresh(self, portal, session):

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, keycloak, server
+from jurisync.connectors.projudi import base, keycloak, server, tjpr
 from jurisync.core import totp
 from jurisync.core.http import UnsafeUrlError
 from jurisync.core.session_pool import LoginRejected
@@ -138,10 +138,11 @@ def wired(test):
 
 
 class RegistryTest(unittest.TestCase):
-    def test_tjpr_projudi_stays_unwired_and_unregistered(self):
-        self.assertFalse(portals.PORTALS[KEY].wired)
+    def test_tjpr_projudi_is_wired_and_tjrr_is_not(self):
+        self.assertTrue(portals.PORTALS[KEY].wired)
+        self.assertFalse(portals.PORTALS["tjrr-1g"].wired)  # same generation, no login proven live
+        self.assertIs(server.adapter_for(KEY), tjpr.ADAPTER)
         self.assertEqual(portals.PORTALS[KEY].flavor, "legacy-keycloak")
-        self.assertNotIn("legacy-keycloak", server.ADAPTERS)  # no MCP tool reaches it until a live smoke proves it
         self.assertEqual(portals.PORTALS[KEY].login_url, APP + "autenticacao.do")
 
     def test_courts_of_other_generations_have_no_keycloak_configuration(self):

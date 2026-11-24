@@ -5,6 +5,7 @@ Projudi serves servlet-rendered HTML with no stable contract, so every parser fa
 would read as "no movements" or "no documents".
 """
 
+import codecs
 import json
 import re
 
@@ -20,16 +21,16 @@ def _clean(value):
     return " ".join((value or "").split())
 
 
+def _latin1(error):
+    return error.object[error.start : error.end].decode("iso-8859-1"), error.end
+
+
+codecs.register_error("projudi-latin1", _latin1)
+
+
 def decode(content):
-    """Projudi pages and JSON are ISO-8859-1 unless they declare otherwise."""
-    if isinstance(content, str):
-        return content
-    for encoding in ("utf-8", "iso-8859-1"):
-        try:
-            return content.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return content.decode("iso-8859-1", "replace")
+    """Projudi pages are UTF-8 or ISO-8859-1, and TJPR mixes both in one page: bytes that are not UTF-8 are ISO-8859-1."""
+    return content if isinstance(content, str) else content.decode("utf-8", "projudi-latin1")
 
 
 def page_title(html):
