@@ -3,6 +3,7 @@
 import argparse
 import fnmatch
 import io
+import json
 import logging
 import os
 import re
@@ -245,14 +246,23 @@ class JurisyncServer(MCPServer):
 
 
 def compact_text(name, result):
-    """Replace the SDK's indented text copy of a structured answer with compact JSON; log an answer over the budget."""
+    """Replace the SDK's indented text copy of a structured answer with compact JSON, keeping any other block (the
+    ADVBOX downloads add extracted Markdown); log an answer over the budget."""
     structured = getattr(result, "structured_content", None)
-    if structured is None:
+    content = list(getattr(result, "content", None) or [])
+    if structured is None or not content or not isinstance(content[0], TextContent):
         return result
-    text = responses.compact(structured)
-    if len(text) > responses.BUDGET:
-        log.warning("tool %s answered %d characters, over the %d budget", name, len(text), responses.BUDGET)
-    return result.model_copy(update={"content": [TextContent(type="text", text=text)]})
+    try:
+        copy = json.loads(content[0].text)
+    except ValueError:
+        return result
+    if copy != structured:
+        return result
+    content[0] = TextContent(type="text", text=responses.compact(structured))
+    size = sum(len(block.text) for block in content if isinstance(block, TextContent))
+    if size > responses.BUDGET:
+        log.warning("tool %s answered %d characters, over the %d budget", name, size, responses.BUDGET)
+    return result.model_copy(update={"content": content})
 
 
 # The ``portal`` field of every tool: the enum holds the keys, and one tool of the server lists them with their hosts.

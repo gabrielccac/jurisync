@@ -6,6 +6,8 @@ import unittest
 from typing import Any
 from unittest import mock
 
+from mcp.types import CallToolResult, TextContent
+
 from jurisync.connectors.pje import server as pje_server
 from jurisync.core import responses
 from jurisync.core.mcp import JurisyncServer
@@ -28,7 +30,7 @@ class FitTextsTest(unittest.TestCase):
         self.assertEqual(reads[0]["text"], "456789")
 
     def test_without_an_offset_no_next_offset_is_promised_and_an_earlier_cut_is_kept(self):
-        reads = [{"text": "x" * 30_000, "textTruncated": True}, {"text": "y" * 30_000}]
+        reads = [{"text": "x" * 30_000, "textTruncated": True}, {"text": "y" * 30_000}, {"text": "z" * 30_000}]
         self.assertEqual(responses.fitted(reads)["note"][:16], "Texts were cut t")
         self.assertNotIn("nextOffset", reads[1]["truncated"])
         self.assertTrue(reads[0]["textTruncated"])
@@ -51,6 +53,26 @@ class CompactTextTest(unittest.TestCase):
         result = asyncio.run(server.call_tool("exemplo_get_process", {}))
         self.assertEqual(result.content[0].text, '{"success":true,"parties":[{"name":"Parte Fictícia"}]}')
         self.assertEqual(json.loads(result.content[0].text), result.structured_content)
+
+    def test_extra_blocks_such_as_extracted_markdown_are_kept(self):
+        server = JurisyncServer("exemplo")
+
+        @server.tool(name="exemplo_download_document")
+        def exemplo_download_document() -> CallToolResult:
+            return CallToolResult(
+                content=[TextContent(type="text", text='{"saved": true}'), TextContent(type="text", text="# Texto")],
+                structured_content={"saved": True, "textReturned": True},
+            )
+
+        result = asyncio.run(server.call_tool("exemplo_download_document", {}))
+        self.assertEqual([block.text for block in result.content], ['{"saved": true}', "# Texto"])
+
+
+class FittedTest(unittest.TestCase):
+    def test_a_document_read_alone_is_never_cut_below_the_connector_cap(self):
+        reads = [{"text": "x" * 55_000}]
+        self.assertEqual(responses.fitted(reads, alone=60_000), {})
+        self.assertEqual(len(reads[0]["text"]), 55_000)
 
 
 class PjeReadDocumentsBudgetTest(unittest.TestCase):

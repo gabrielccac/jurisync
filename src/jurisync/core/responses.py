@@ -31,9 +31,10 @@ def _shares(wanted, budget):
     return shares
 
 
-def fitted(documents):
-    """fit_texts for a tool without an offset; the note it returns says to read fewer documents at a time."""
-    if fit_texts(documents, resumable=False):
+def fitted(documents, alone=BUDGET):
+    """fit_texts for a tool without an offset, whose connector already caps each text at ALONE: the budget never cuts
+    a document read by itself, so the note's advice (fewer documents per call) reaches the whole text."""
+    if fit_texts(documents, resumable=False, budget=max(TEXT_BUDGET, alone)):
         return {"note": "Texts were cut to fit the answer: read fewer documents per call to see more of each one."}
     return {}
 
