@@ -12,6 +12,12 @@ from jurisync.connectors.djen import server as djen_server
 from jurisync.connectors.djen.client import OAB_VARIANTS, DjenError
 from jurisync.core import credentials
 
+
+def tool(name):
+    """The function behind a DJEN tool, called directly."""
+    return djen_server.create_server()._tool_manager.get_tool(name).fn
+
+
 RAW_ITEM = {
     "id": 1,
     "numero_processo": "0800123-45.2026.4.05.8300",
@@ -24,11 +30,11 @@ RAW_ITEM = {
 
 class DjenServerTest(unittest.IsolatedAsyncioTestCase):
     async def call(self, name, arguments):
-        async with Client(djen_server.server) as client:
+        async with Client(djen_server.create_server()) as client:
             return await client.call_tool(name, arguments)
 
     async def test_lists_read_only_tools(self):
-        async with Client(djen_server.server) as client:
+        async with Client(djen_server.create_server()) as client:
             tools = (await client.list_tools()).tools
         self.assertEqual(
             sorted(tool.name for tool in tools),
@@ -202,12 +208,12 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             result = await self.call("djen_get_certidao_text", {"hash": "offline", "textLimit": 100})
         self.assertTrue(result.is_error)
         text = result.content[0].text
-        self.assertIn("DJEN request failed: certidão failed at [url] [redacted]", text)
+        self.assertIn("[portal_error] DJEN: certidão failed at [url] [redacted]", text)
         self.assertNotIn("https://", text)
         self.assertNotIn("secret", text)
 
     async def test_unexpected_errors_do_not_leak_text(self):
-        with mock.patch.object(djen_server, "fetch_certidao", side_effect=RuntimeError("internal detail")):
+        with mock.patch.object(djen_server, "fetch_certidao", side_effect=KeyError("internal detail")):
             result = await self.call("djen_get_certidao_text", {"hash": "offline"})
         self.assertTrue(result.is_error)
         self.assertNotIn("internal detail", result.content[0].text)
@@ -280,11 +286,11 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_deadline_uses_the_office_court_setting(self):
         with mock.patch.object(djen_server.customers, "settings", return_value={"djen": {"court": "JFPB"}}):
-            result = djen_server.deadline(date(2026, 10, 1), 5)
+            result = tool("djen_calculate_deadline")(date(2026, 10, 1), 5)
         self.assertEqual(result["court"], "JFPB")
         self.assertFalse(any("Nenhum tribunal" in w for w in result["warnings"]))
         with mock.patch.object(djen_server.customers, "settings", return_value={}):
-            default = djen_server.deadline(date(2026, 10, 1), 5)
+            default = tool("djen_calculate_deadline")(date(2026, 10, 1), 5)
         self.assertEqual((default["court"], default["courtSource"]), ("JFPE", "default (JFPE)"))
         self.assertTrue(any("Nenhum tribunal" in w for w in default["warnings"]))
 
@@ -301,7 +307,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             credentials.scope("office-a", {"DJEN_SEARCHES": json.dumps(searches)}),
             mock.patch.object(djen_server, "search_page", side_effect=page) as search,
         ):
-            return djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 2), **arguments), search
+            return tool("djen_search_saved")(date(2026, 10, 1), date(2026, 10, 2), **arguments), search
 
     async def test_saved_searches_run_together_without_duplicates(self):
         searches = [
@@ -371,7 +377,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             credentials.scope("office-a", {"DJEN_SEARCHES": searches, "DJEN_MARK": "office-a"}),
             mock.patch.object(djen_server, "search_page", side_effect=page),
         ):
-            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1))
+            tool("djen_search_saved")(date(2026, 10, 1), date(2026, 10, 1))
         self.assertEqual(seen, ["office-a"] * 6)
 
     async def test_saved_search_window_is_checked_before_any_request(self):
@@ -381,9 +387,9 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(djen_server, "search_page") as search,
         ):
             with self.assertRaises(ToolError):
-                djen_server.search_saved(date(2026, 10, 2), date(2026, 10, 1))
+                tool("djen_search_saved")(date(2026, 10, 2), date(2026, 10, 1))
             with self.assertRaises(ToolError) as too_long:
-                djen_server.search_saved(date(2026, 1, 1), date(2026, 10, 1))
+                tool("djen_search_saved")(date(2026, 1, 1), date(2026, 10, 1))
         self.assertIn("máximo é 31 dias", str(too_long.exception))
         search.assert_not_called()
 
@@ -392,14 +398,14 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 djen_server.saved_searches()
         with credentials.scope("office-a", {"DJEN_SEARCHES": "[]"}), self.assertRaises(ToolError):
-            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1))
+            tool("djen_search_saved")(date(2026, 10, 1), date(2026, 10, 1))
         empty = {"status": "success", "count": 0, "items": []}
         searches = json.dumps([{"label": "x", "numeroOab": "1", "ufOab": "PE", "tribunal": "TRF5"}])
         with (
             credentials.scope("office-a", {"DJEN_SEARCHES": searches}),
             mock.patch.object(djen_server, "search_page", return_value=empty) as search,
         ):
-            djen_server.search_saved(date(2026, 10, 1), date(2026, 10, 1), tribunal="TRF1")
+            tool("djen_search_saved")(date(2026, 10, 1), date(2026, 10, 1), tribunal="TRF1")
         self.assertEqual(search.call_args.args[0]["siglaTribunal"], "TRF1")
 
     def test_victor_profile_has_his_three_oabs(self):

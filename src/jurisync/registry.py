@@ -16,7 +16,6 @@ from jurisync import portals
 class Connector:
     name: str
     label: str
-    attribute: str = "create_server()"  # the module's server, or "create_server()" to build one
     close: str | None = "sessions.close"  # attribute path called on exit
     login: tuple = ()  # account variables of a service without portals (ADVBOX, Juridiq)
     settings: tuple = ()  # other variables of that service an office may set
@@ -49,9 +48,7 @@ class Connector:
     def load(self, **options):
         """``(MCPServer, close callback or None)``; ``options`` go to ``create_server``."""
         module = importlib.import_module(self.module)
-        server = getattr(module, self.attribute.removesuffix("()"))
-        server = server(**options) if self.attribute.endswith("()") else server
-        return server, (reduce(getattr, self.close.split("."), module) if self.close else None)
+        return module.create_server(**options), (reduce(getattr, self.close.split("."), module) if self.close else None)
 
 
 # Court systems and DJEN: one hosted connector, so an office adds one URL for every court it has. A future court write
@@ -63,7 +60,6 @@ CONNECTORS = {
         Connector(
             "pje",
             "PJe",
-            attribute="server",
             group=COURTS,
             # The filing run folders these read are on the computer that wrote the drafts; writes stay local too, and
             # so does the draft search of the same TRF5 filing workflow.
@@ -83,11 +79,10 @@ CONNECTORS = {
         Connector("stj", "STJ", group=COURTS),
         Connector("tucujuris", "Tucujuris", group=COURTS),
         Connector("jpe", "JPe", group=COURTS),
-        Connector("djen", "DJEN", attribute="server", close=None, group=COURTS),
+        Connector("djen", "DJEN", close=None, group=COURTS),
         Connector(
             "advbox",
             "ADVBOX",
-            attribute="server",
             close="client.close",
             login=("ADVBOX_EMAIL", "ADVBOX_PASSWORD"),
             settings=("ADVBOX_DEVICE_ID", "ADVBOX_UPLOAD_FOLDER"),

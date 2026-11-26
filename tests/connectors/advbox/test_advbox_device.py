@@ -269,7 +269,7 @@ class ElicitationTest(DeviceCase):
 
         async def run():
             options = {"elicitation_callback": elicit} if answers else {}
-            async with Client(server.server, mode=mode, **options) as client:
+            async with Client(server.create_server(), mode=mode, **options) as client:
                 return await client.call_tool(name, arguments or {})
 
         return asyncio.run(run())
@@ -327,6 +327,23 @@ class ElicitationTest(DeviceCase):
             result = self.call("advbox_delete_task", {"postId": "1"}, answers=[CODE])
         self.assertTrue(result.is_error)
         self.assertIn("was not repeated", self.text(result))
+        self.assertRegex(self.text(result), r"ref=c-[0-9a-f]{8}$")
+
+    def test_the_elicited_retry_keeps_the_ref_of_the_call(self):
+        refs = []
+        original = server.calls.new_id
+
+        def new_id():
+            refs.append(original())
+            return refs[-1]
+
+        with (
+            mock.patch.object(server.calls, "new_id", new_id),
+            mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "true"}),
+        ):
+            result = self.call("advbox_delete_task", {"postId": "1"}, answers=[CODE])
+        self.assertEqual(len(refs), 1)
+        self.assertIn(f"ref={refs[0]}", self.text(result))
 
 
 # The real page (23/11): the code form posts back to /login and leaves _device for the page's FingerprintJS to fill.

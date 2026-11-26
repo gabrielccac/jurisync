@@ -17,6 +17,12 @@ from jurisync.connectors.advbox.documents import AdvboxDocuments, is_download_ur
 from jurisync.connectors.advbox.session import AdvboxSession
 from jurisync.core.documents_dir import resolve_saved_folder
 
+
+def tool(name):
+    """The function behind an ADVBOX tool, called directly."""
+    return server.create_server()._tool_manager.get_tool(name).fn
+
+
 FORM = {
     "editing": "100",
     "createToken": "tok",
@@ -254,7 +260,7 @@ class DuplicateCreation(WriteCase):
 
     def test_tool_passes_the_key(self):
         with mock.patch.object(server.client, "create_task", return_value={"postId": "1"}) as create:
-            server.create_task(lawsuitId="9", tasksId="2", guests=[1], date="2026-10-09", dedupeKey="747498033")
+            tool("advbox_create_task")(lawsuitId="9", tasksId="2", guests=[1], date="2026-10-09", dedupeKey="747498033")
         self.assertEqual(create.call_args.kwargs, {"dedupe_key": "747498033"})
 
 
@@ -304,7 +310,7 @@ class CompleteAndDelete(WriteCase):
         from mcp.client.client import Client
 
         async def tools():
-            async with Client(server.server) as client:
+            async with Client(server.create_server()) as client:
                 return {tool.name: tool for tool in (await client.list_tools()).tools}
 
         listed = asyncio.run(tools())
@@ -319,10 +325,10 @@ class CompleteAndDelete(WriteCase):
             mock.patch.object(server.client, "complete_task", return_value={"dryRun": True}) as complete,
             mock.patch.object(server.client, "delete_task", return_value={"dryRun": True}) as delete,
         ):
-            server.complete_task("100", expectComments="x", dryRun=True)
-            server.delete_task("100", dryRun=True)
+            tool("advbox_complete_task")("100", expectComments="x", dryRun=True)
+            tool("advbox_delete_task")("100", dryRun=True)
             with self.assertRaises(Exception) as caught:
-                server.delete_task("100")
+                tool("advbox_delete_task")("100")
         self.assertIn("ADVBOX_ALLOW_WRITES", str(caught.exception))
         self.assertEqual(complete.call_args.kwargs, {"expect_comments": "x", "dry_run": True})
         self.assertEqual(delete.call_count, 1)

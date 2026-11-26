@@ -289,7 +289,7 @@ class CreateTaskWithStageTest(StageCase):
 
 class ToolTest(unittest.TestCase):
     def call(self, name, arguments):
-        return asyncio.run(server.server.call_tool(name, arguments))
+        return asyncio.run(server.create_server().call_tool(name, arguments))
 
     def test_tool_passes_ids_and_dry_run(self):
         with mock.patch.object(server, "client") as fake:

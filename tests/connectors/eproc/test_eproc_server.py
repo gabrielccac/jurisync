@@ -9,6 +9,7 @@ from mcp.client.client import Client
 
 from jurisync import portals
 from jurisync.connectors.eproc import server
+from jurisync.core import errors
 
 
 class EprocServerTest(unittest.TestCase):
@@ -198,7 +199,8 @@ class EprocServerTest(unittest.TestCase):
         code = (
             "import sys; import jurisync.connectors.eproc.server as s; import jurisync.connectors.eproc.certificate; "
             "loaded = sorted(m for m in sys.modules if m.split('.')[0] in ('selenium', 'seleniumbase')); "
-            "assert not loaded, loaded; assert s.anticipated_errors() == s.ERRORS"
+            "from jurisync.core import errors; assert not loaded, loaded; "
+            "assert 'WebDriverException' not in [kind.__name__ for kind in errors._network_errors()]"
         )
         result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])
@@ -206,7 +208,7 @@ class EprocServerTest(unittest.TestCase):
     def test_browser_failures_are_anticipated_once_selenium_is_loaded(self):
         from selenium.common.exceptions import WebDriverException
 
-        self.assertIn(WebDriverException, server.anticipated_errors())
+        self.assertIn(WebDriverException, errors._network_errors())
         srv = server.create_server(["trf4-1g-sc"])
         with mock.patch.object(server.sessions, "_login", side_effect=WebDriverException("chrome crashed")):
             result = self.call(srv, "eproc_list_notices", {"portal": "trf4-1g-sc", "queue": "pending"})

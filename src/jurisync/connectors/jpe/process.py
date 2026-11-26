@@ -23,6 +23,7 @@ from jurisync.core import ciencia
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.documents_dir import save_document
+from jurisync.core.errors import NotFound
 
 MAX_TEXT_CHARACTERS = 60_000
 STATUSES = tuple(parsers.COMMUNICATION_MENU)
@@ -48,7 +49,7 @@ class CienciaUnchecked(ValueError):
     """The "Pendentes de Leitura" list could not be read in full, so a pending ciência cannot be ruled out."""
 
 
-class ProcessNotFound(LookupError):
+class ProcessNotFound(NotFound):
     pass
 
 

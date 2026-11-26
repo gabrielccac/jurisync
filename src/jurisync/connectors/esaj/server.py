@@ -6,18 +6,17 @@ The documents of a process with an intimação without ciência open only with a
 
 from typing import Annotated, Any, Literal
 
-from curl_cffi.requests.exceptions import RequestException
-from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from jurisync import customers, portals
 from jurisync.connectors.esaj import base, parsers
-from jurisync.core import ciencia
+from jurisync.core import ciencia, errors
 from jurisync.core.mcp import (
     PORTAL_HELP,
     READ_ONLY,
+    JurisyncServer,
     load_env_file,
     offer_portals,
     sanitize_diagnostics,
@@ -83,12 +82,14 @@ def refusal(error):
     It is an error result, not a ``success: false`` payload: a client that checks only the tool's error flag must not
     take a folder the viewer never listed for an empty one.
     """
-    message = sanitize_diagnostics(parsers.redact_text(error)) or "unknown"
-    return ToolError(f"e-SAJ request failed [{error.reason}]: {message}")
+    problem = errors.Problem(
+        error.reason, parsers.redact_text(error), errors.PortalError.next_step, False, errors.AGENT
+    )
+    return ToolError(errors.render("e-SAJ", problem, sanitize_diagnostics))
 
 
 def call(portal, read):
-    with tool_errors("e-SAJ", ValueError, RuntimeError, OSError, RequestException):
+    with tool_errors("e-SAJ"):
         key = portals.esaj(portal).key
         try:
             value = sessions.run(key, read)
@@ -100,7 +101,7 @@ def call(portal, read):
 def open_document(portal, read):
     """``call`` for a read that opens documents: a ciência refusal is a result carrying its ``ciencia`` block; any
     other refusal is a tool error."""
-    with tool_errors("e-SAJ", ValueError, RuntimeError, OSError, RequestException):
+    with tool_errors("e-SAJ"):
         key = portals.esaj(portal).key
         try:
             value = sessions.run(key, read)
@@ -135,7 +136,7 @@ def create_server(keys=None):
     Portal = Literal[keys]  # noqa: N806 - a type built from the configured portals
     portal_field = Field(description=PORTAL_HELP)
     number_field = Field(description="CNJ number with punctuation.", min_length=25, max_length=25)
-    server = MCPServer("esaj", version="1.0.0")
+    server = JurisyncServer("esaj")
 
     @server.tool(
         title="Get e-SAJ session",

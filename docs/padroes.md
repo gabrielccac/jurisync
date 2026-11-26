@@ -73,11 +73,33 @@ cliente; as travas reais (concessão de escrita por escritório, `acknowledgeCie
 
 ## 5. Erros
 
-- Falha prevista (portal recusou, login faltando, entrada inválida, portal fora do ar) vira `ToolError`, que o SDK
-  entrega como `isError: true` para o agente se corrigir. Erro de protocolo (`MCPError`) não é usado para isso.
-- Falha inesperada (bug) não vaza texto: o agente recebe só uma falha genérica e o detalhe fica no log.
+Um modelo só, em `jurisync.core.errors`. Toda falha prevista chega ao agente como `isError: true` neste formato:
+
+```text
+[otp_refused] PJe: the portal refused the authenticator code
+Próximo passo: não repita agora; o código do autenticador foi recusado: confira a conta escolhida no QR (...).
+retryable=false · quem resolve: usuário · ref=c-7f3a9e
+```
+
+- **Código** estável em snake_case: os motivos de login de `session_pool.REASONS` (`otp_refused`,
+  `credentials_refused`...) ou o `code` da classe: `invalid_input`, `not_found`, `portal_error`,
+  `portal_unavailable`, `not_configured`, `writes_disabled`, `busy`.
+- **Próximo passo** em português, dizendo se vale repetir e o que mudar.
+- **Quem resolve**: `agente` (corrige e repete), `usuário` (o advogado age no portal ou na própria instalação) ou
+  `suporte`. Configuração (login, certificado, liberação de escrita) é do usuário na instalação local e do suporte no
+  modo hospedado; a mensagem muda sozinha conforme o modo (`errors.SETUP`), então nunca escreva "edite o .env" à mão.
+- **ref**: id da chamada (`core.calls`), o mesmo que o suporte procura no log.
+
+Como usar num conector:
+
+- Envolva a chamada com `with tool_errors("PJe"):`; não há mais tupla de exceções por servidor.
+- Levante a classe que diz o que houve: `InputError`, `NotFound`, `PortalError`, `PortalUnavailable`,
+  `NotConfigured(setting=...)`, `WritesDisabled(setting=...)`, ou os erros de login do `session_pool`. Fora de
+  `tool_errors`, use `raise tool_error("PJe", InputError(...))`.
+- `ValueError` e `RuntimeError` levantados de propósito ainda são previstos (`invalid_request`, `portal_error`) e
+  erros de rede viram `portal_unavailable`. `KeyError`, `AttributeError`, `TypeError` e afins são bug: o agente
+  recebe só `[unexpected] ... ref=...` e o detalhe fica no log.
 - Toda mensagem passa por `sanitize_diagnostics` (sem URL, caminho, cookie, token ou CPF).
-- Login que falha carrega um dos códigos de `session_pool.REASONS`.
 
 ## 6. Respostas
 
@@ -101,7 +123,7 @@ src/jurisync/connectors/<portal>/
   __init__.py
   client.py     HTTP e login: requisições, guarda de rotas, nada de MCP
   parsers.py    funções puras: HTML/JSON do portal -> dict; testadas com fixtures
-  server.py     MCP: create_server(keys=None), tools, configured_portals(), sessions, main()
+  server.py     MCP: create_server(keys=None) -> JurisyncServer, tools, configured_portals(), sessions, main()
 tests/connectors/<portal>/
   fixtures/     respostas do portal com dados fictícios
   test_<portal>_parsers.py, test_<portal>_server.py
@@ -123,3 +145,4 @@ Passos para um conector novo:
 | Logging com `%`-args, sem `print` de depuração | regras `G`, `LOG`, `T10` do ruff |
 | Comprehensions e literais simples | regras `C4`, `PIE`, `ISC` do ruff |
 | Molde de conector válido | `tests/core/test_connector_template.py` |
+| Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |

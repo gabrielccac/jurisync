@@ -530,8 +530,6 @@ if __name__ == "__main__":
 
 
 def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(monkeypatch):
-    import copy
-
     from jurisync.connectors.pje import server
     from jurisync.core.mcp import PORTAL_HELP, offer_portals
 
@@ -553,26 +551,24 @@ def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(mo
     assert "trt7-1g" not in keys  # the A1 alone is not enough: the SSO asks the code
     assert "trf5-legacy" in keys  # PJe 1.x: no SSO, the A1 alone logs in
 
-    saved = {t.name: (copy.deepcopy(t.parameters), t.description) for t in server.server._tool_manager.list_tools()}
+    srv = server.create_server()
     try:
-        offer_portals(server.server, keys)
+        offer_portals(srv, keys)
         server.sessions.only(keys)
         schema = {
             t.name: t.parameters["properties"]["portal"]
-            for t in server.server._tool_manager.list_tools()
+            for t in srv._tool_manager.list_tools()
             if "portal" in t.parameters.get("properties", {})
         }
         assert all(field["enum"] == list(keys) for field in schema.values())
         assert all(field["description"] == PORTAL_HELP for field in schema.values())
-        noted = [t.description for t in server.server._tool_manager.list_tools() if "Portals: " in t.description]
+        noted = [t.description for t in srv._tool_manager.list_tools() if "Portals: " in t.description]
         assert len(noted) == 1 and "trf5-1g (pje1g.trf5.jus.br)" in noted[0]
         with pytest.raises(ValueError, match="No login is configured for trf1-2g"):
             with server.sessions.session("trf1-2g"):
                 pass
     finally:
         server.sessions._only = None
-        for tool in server.server._tool_manager.list_tools():
-            tool.parameters, tool.description = saved[tool.name]
 
 
 def test_pje1x_needs_only_the_a1_and_never_the_password(monkeypatch):
