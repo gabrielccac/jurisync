@@ -278,7 +278,7 @@ class ElicitationTest(DeviceCase):
         return " ".join(item.text for item in result.content)
 
     def test_an_accepted_code_finishes_the_original_call(self):
-        result = self.call("advbox_ensure_session", answers=[CODE])
+        result = self.call("advbox_get_session", answers=[CODE])
         self.assertFalse(result.is_error, self.text(result))
         self.assertTrue(result.structured_content["authenticated"])
         self.assertEqual(len(self.prompts), 1)
@@ -286,7 +286,7 @@ class ElicitationTest(DeviceCase):
         self.assertIn("advbox_session", self.cache.read_text(encoding="utf-8"))
 
     def test_a_wrong_code_is_asked_again(self):
-        result = self.call("advbox_ensure_session", answers=["999999", CODE])
+        result = self.call("advbox_get_session", answers=["999999", CODE])
         self.assertFalse(result.is_error, self.text(result))
         self.assertEqual(self.advbox.codes, ["999999", CODE])
         self.assertIn("recusou o código (2 tentativa(s) restante(s))", self.prompts[1])
@@ -298,19 +298,19 @@ class ElicitationTest(DeviceCase):
         save.assert_called_once_with("ADVBOX_DEVICE_ID", self.advbox.devices[-1])
 
     def test_declined_falls_back_to_the_tool(self):
-        result = self.call("advbox_ensure_session", answers=[None])
+        result = self.call("advbox_get_session", answers=[None])
         self.assertTrue(result.is_error)
         self.assertIn("call advbox_verify_device", self.text(result))
         self.assertIsNotNone(advbox_session.pending_verification())
 
     def test_a_connection_without_a_back_channel_gets_the_fallback(self):
-        result = self.call("advbox_ensure_session", answers=[CODE], mode="auto")
+        result = self.call("advbox_get_session", answers=[CODE], mode="auto")
         self.assertTrue(result.is_error)
         self.assertIn("call advbox_verify_device", self.text(result))
         self.assertEqual(self.advbox.codes, [])
 
     def test_a_client_without_elicitation_gets_the_fallback_and_the_tool_finishes_it(self):
-        result = self.call("advbox_ensure_session")
+        result = self.call("advbox_get_session")
         self.assertTrue(result.is_error)
         self.assertIn("sent a code to j***@dominio.com", self.text(result))
         refused = self.call("advbox_verify_device", {"code": "000000"})

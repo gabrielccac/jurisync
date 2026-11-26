@@ -9,7 +9,7 @@ referência). Registre sempre o que foi lido (IDs de movimento e documento) e o 
 O mesmo processo pode estar em dois PJe do TRF5, com o **mesmo número**: o recurso
 inominado sobe para a Turma Recursal sem mudar o CNJ. Por isso o número sozinho não decide.
 
-1. **`portal` da comunicação DJEN** (vem em cada item de `djen_search_communications`,
+1. **`portal` da comunicação DJEN** (vem em cada item de `djen_search_comunicacoes`,
    lido do host do link): `trf5-1g` → `pje1g.trf5.jus.br`; `trf5-2g` → `pje2g.trf5.jus.br`
    (Turmas Recursais de PE e PB, relatorias, e o Tribunal); `trf5-tru` → `pjett.trf5.jus.br`
    (Turma Regional de Uniformização). Use esse portal. Outros portais do Victor pelo host do link:
@@ -21,13 +21,13 @@ inominado sobe para a Turma Recursal sem mudar o CNJ. Por isso o número sozinho
    vara federal ou JEF → `trf5-1g`.
 3. **Processo não encontrado** no portal escolhido: tente o outro uma vez e registre na
    prévia em qual achou. Não alterne mais que isso.
-4. **Partindo do PJe** (sem DJEN): `pje_list_inbox` e `pje_list_expediente_counters` de cada
+4. **Partindo do PJe** (sem DJEN): `pje_list_intimacoes` e `pje_get_counters` de cada
    portal mostram de onde vem o expediente; os do `trf5-2g` são das Turmas Recursais.
 5. O mesmo certificado e autenticador valem para os dois. Uma sessão de cada vez por portal.
 
 Verificado em 20/10/2026: painel do `trf5-2g` com as caixas "Turma Recursal de Pernambuco" e
 "Turma Recursal da Paraíba"; `pje_get_process`, `pje_read_documents`,
-`pje_read_expediente_ato`, `pje_list_inbox` e Push funcionaram. O rascunho de protocolo
+`pje_read_expediente_ato`, `pje_list_intimacoes` e Push funcionaram. O rascunho de protocolo
 (`pje_draft_*`) existe só no `trf5-1g`.
 
 Ferramentas: `pje_get_process` (portal do §0, `scope: page` ou `all`: linha do tempo,
@@ -137,7 +137,7 @@ Suba de nível só quando o anterior deixar um campo obrigatório de `tarefas.md
   português. A transcrição é aproximada; use só para confirmar fatos que também
   estejam no PDF. Leva minutos por gravação.
 - **Link público da notícia** (`link` do DJEN) exige login e não traz o ato. A
-  **certidão pública** (`djen_get_certidao_text`) traz o teor completo e a regra de
+  **certidão pública** (`djen_read_certidao`) traz o teor completo e a regra de
   publicação, mas **não** a tabela de prazos.
 - **Sigilo:** o PJe autenticado abre os autos. Use o mínimo de dados pessoais (menores,
   saúde) na descrição.

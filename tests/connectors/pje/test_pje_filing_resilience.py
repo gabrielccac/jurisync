@@ -535,7 +535,7 @@ class ServerResumeTests(unittest.TestCase):
             self.server._fill_job("run1", "fill")
         self.assertIn("did not reach an authenticated", self.server.fill_errors[("", "run1")])
         with mock.patch.object(self.server, "_draft_stage", return_value={"result": {"state": "failed"}}):
-            status = self.server.create_server()._tool_manager.get_tool("pje_draft_status").fn("run1")
+            status = self.server.create_server()._tool_manager.get_tool("pje_get_draft_status").fn("run1")
         self.assertIn("authenticated", status["result"]["lastStartError"])
 
 

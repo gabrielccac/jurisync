@@ -79,7 +79,7 @@ def test_djen_public_search_and_deadline():
         "jurisync.connectors.djen.server",
         [
             (
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-10-01", "fim": "2026-10-02", "itens": 5},
             ),
             ("djen_calculate_deadline", {"availableOn": "2026-10-01", "days": 5}),
@@ -94,9 +94,9 @@ def test_pje_trf1_reuses_session_across_calls():
     results = call_all(
         "jurisync.connectors.pje.server",
         [
-            ("pje_list_expediente_counters", {"portal": "trf1-1g"}),
+            ("pje_get_counters", {"portal": "trf1-1g"}),
             ("pje_get_process", {"portal": "trf1-1g", "processNumber": "1024853-70.2023.4.01.3400", "scope": "latest"}),
-            ("pje_list_expediente_counters", {"portal": "trf1-1g"}),
+            ("pje_get_counters", {"portal": "trf1-1g"}),
             ("pje_get_process", {"portal": "trf1-2g", "processNumber": "1016572-38.2026.4.01.0000", "scope": "latest"}),
         ],
     )
@@ -113,7 +113,7 @@ def test_pje_trf5_certificate_login():
     (_, counters), (_, process) = call_all(
         "jurisync.connectors.pje.server",
         [
-            ("pje_list_expediente_counters", {"portal": "trf5-1g"}),
+            ("pje_get_counters", {"portal": "trf5-1g"}),
             ("pje_get_process", {"portal": "trf5-1g", "processNumber": "0001271-74.2026.4.05.8304", "scope": "latest"}),
         ],
     )
@@ -137,8 +137,8 @@ def test_victor_pje_portal_reads(portal):
     (_, counters), (_, inbox) = call_all(
         "jurisync.connectors.pje.server",
         [
-            ("pje_list_expediente_counters", {"portal": portal}),
-            ("pje_list_inbox", {"portal": portal, "maxPages": 1}),
+            ("pje_get_counters", {"portal": portal}),
+            ("pje_list_intimacoes", {"portal": portal, "maxPages": 1}),
         ],
         **env,
     )
@@ -170,8 +170,8 @@ def test_eproc_logs_in_once_then_reuses(portal, prefix):
     (first, open_deadlines), (second, pending) = call_all(
         "jurisync.connectors.eproc.server",
         [
-            ("eproc_list_notices", {"portal": portal, "queue": "open_deadlines"}),
-            ("eproc_list_notices", {"portal": portal, "queue": "pending"}),
+            ("eproc_list_intimacoes", {"portal": portal, "queue": "open_deadlines"}),
+            ("eproc_list_intimacoes", {"portal": portal, "queue": "pending"}),
         ],
     )
     assert ok(open_deadlines)["success"]
@@ -184,7 +184,7 @@ def test_advbox_reads():
     require("ADVBOX_EMAIL", "ADVBOX_DEVICE_ID")
     (_, session), (_, customers) = call_all(
         "jurisync.connectors.advbox.server",
-        [("advbox_ensure_session", {}), ("advbox_list_customers", {"pageSize": 1})],
+        [("advbox_get_session", {}), ("advbox_list_customers", {"pageSize": 1})],
     )
     assert ok(session)["authenticated"]
     assert ok(customers)["records"]

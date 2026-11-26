@@ -118,10 +118,10 @@ def pkce():
 
 # Tools only an office's own computer serves (registry ``local_only_tools``).
 LOCAL_ONLY = {
-    "pje_draft_write",
-    "pje_draft_delete",
-    "pje_draft_status",
-    "pje_draft_inspect",
+    "pje_fill_draft",
+    "pje_delete_draft",
+    "pje_get_draft_status",
+    "pje_get_draft",
     "pje_search_pending_drafts",
 }
 

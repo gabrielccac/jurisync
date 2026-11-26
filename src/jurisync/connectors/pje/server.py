@@ -123,7 +123,7 @@ def draft_paths(run_id):
 
 BACKGROUND_STAGES = frozenset({"create-fill", "fill", "resume"})
 # Fills take minutes, longer than a tool call may last, so they run in a thread of this server and report through
-# pje_draft_status. A fill that fails before its checkpoint exists can only leave its error here. Both are keyed
+# pje_get_draft_status. A fill that fails before its checkpoint exists can only leave its error here. Both are keyed
 # by (tenant, runId), the identity the session pool uses: two offices may pick the same run name.
 fill_jobs = {}
 fill_errors = {}
@@ -174,7 +174,7 @@ def _start_fill(run_id, requested):
         "success": True,
         "stage": requested,
         "state": "started",
-        "next": "Call pje_draft_status with this runId to follow progress; it finishes on its own.",
+        "next": "Call pje_get_draft_status with this runId to follow progress; it finishes on its own.",
     }
 
 
@@ -287,7 +287,7 @@ def create_server():
     @server.tool(
         name="pje_read_expediente_ato",
         title="Read the act behind a PJe expediente",
-        description="Open the act of one communication from the process Expedientes (pje_get_process expedientes or pje_list_inbox): the expediente box (recipient, days, deadline, closed), the act's full text and its attached documents (documentId, title; read them with pje_read_documents). Acts whose ciência is registered open by default. Opening a pending one may register the party's ciência and start the deadline, so it is refused (ato.error) without acknowledgeCiencia. "
+        description="Open the act of one communication from the process Expedientes (pje_get_process expedientes or pje_list_intimacoes): the expediente box (recipient, days, deadline, closed), the act's full text and its attached documents (documentId, title; read them with pje_read_documents). Acts whose ciência is registered open by default. Opening a pending one may register the party's ciência and start the deadline, so it is refused (ato.error) without acknowledgeCiencia. "
         + ciencia.AUTHORIZATION
         + ". settings.toml [pje] ciencia_on_read = 'allow' opens them by default. The ciencia block: estado 'nenhuma' (already registered, or nothing opened), 'dada' (a pending one opened now: its ciência may be registered and deadline started) or 'pendente' (pending, not opened), with intimacoes and an aviso: unless 'nenhuma', tell the user and note it in the task.",
         # Opening a pending act registers the ciência and starts a deadline: not a read-only, repeatable call.
@@ -300,7 +300,7 @@ def create_server():
             str,
             Field(
                 pattern=r"^[0-9]+$",
-                description="Expediente id from pje_list_inbox or pje_get_process expedientes.",
+                description="Expediente id from pje_list_intimacoes or pje_get_process expedientes.",
             ),
         ],
         textLimit: Annotated[int, Field(ge=200, le=100000, description="Max characters of the act text.")] = 20000,
@@ -346,7 +346,7 @@ def create_server():
         )
 
     @server.tool(
-        name="pje_list_expediente_counters",
+        name="pje_get_counters",
         title="List PJe Expedientes counters",
         description="Read the PJe panel's Expedientes buckets with their counts; regions or bucket add the regions and inboxes under them. Read-only: opens no expediente, acknowledges nothing.",
         annotations=READ_ONLY,
@@ -366,7 +366,7 @@ def create_server():
         )
 
     @server.tool(
-        name="pje_list_inbox",
+        name="pje_list_intimacoes",
         title="List PJe Expedientes inbox rows",
         description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
         annotations=READ_ONLY,
@@ -376,7 +376,7 @@ def create_server():
         bucket: Annotated[
             str | None,
             Field(
-                description="Bucket index or part of its label (see pje_list_expediente_counters). Empty: Pendentes de ciência ou de resposta (Meus Expedientes on TRT/TST). An unknown index errors listing the valid ones."
+                description="Bucket index or part of its label (see pje_get_counters). Empty: Pendentes de ciência ou de resposta (Meus Expedientes on TRT/TST). An unknown index errors listing the valid ones."
             ),
         ] = None,
         regions: Annotated[
@@ -465,7 +465,7 @@ def create_server():
         )
 
     @server.tool(
-        name="pje_draft_inspect",
+        name="pje_get_draft",
         title="Inspect TRF5 PJe draft",
         description="Read current TRF5 1G classification choices, subject search results, or whether an existing draft appears in Não Protocolados. Uses payload.json and checkpoint.json in a named local filing run. No draft mutation.",
         annotations=READ_ONLY,
@@ -508,9 +508,9 @@ def create_server():
         return _draft_stage("PJe pending search", "pending-search", name=name, cpf=cpf)
 
     @server.tool(
-        name="pje_draft_write",
+        name="pje_fill_draft",
         title="Create or fill TRF5 PJe draft",
-        description="Create or fill a TRF5 1G draft from the reviewed payload.json of a named filing run; it stays in Não Protocolados and is never protocolled. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill, fill and resume run in the background and return at once: follow them with pje_draft_status. After a failed or interrupted run use resume: it continues the same draft and uploads only the documents PJe still lacks (never create-fill again). Single stages run within the call and can time out on a slow portal, so prefer resume.",
+        description="Create or fill a TRF5 1G draft from the reviewed payload.json of a named filing run; it stays in Não Protocolados and is never protocolled. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill, fill and resume run in the background and return at once: follow them with pje_get_draft_status. After a failed or interrupted run use resume: it continues the same draft and uploads only the documents PJe still lacks (never create-fill again). Single stages run within the call and can time out on a slow portal, so prefer resume.",
         annotations=WRITE,
     )
     def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
@@ -519,7 +519,7 @@ def create_server():
         return _draft_stage("PJe draft", stage, runId)
 
     @server.tool(
-        name="pje_draft_delete",
+        name="pje_delete_draft",
         title="Delete a TRF5 PJe draft",
         description="Delete one draft from Não Protocolados by its draft number. The row must show the author's name, otherwise nothing is deleted. Uses the portal's own Remover action and confirms the draft is gone from a fresh search. Irreversible. Requires PJE_ALLOW_DRAFT_WRITES=true.",
         annotations=DESTRUCTIVE,
@@ -531,7 +531,7 @@ def create_server():
         return _draft_stage("PJe draft delete", "delete-draft", name=authorName, draft_id=draftId)
 
     @server.tool(
-        name="pje_draft_status",
+        name="pje_get_draft_status",
         title="TRF5 PJe draft run status",
         description="Report where a filing run stands: running, interrupted, failed or complete; which phases are recorded; the current step and the latest steps with durations. checkPje=true also reads the draft in PJe and compares its documents with the payload, which is the real test that a draft is complete. Read only.",
         annotations=READ_ONLY,

@@ -1,8 +1,8 @@
 # PJe lawyer panel: Expedientes inboxes
 
 Observed in mitmproxy on TRF5 1G (2026-10-09, PJe 2.11.2.0-39) and walked live on TRF1 1G.
-Code: `src/jurisync/connectors/pje/inbox.py`. Tools: `pje_list_expediente_counters`,
-`pje_list_inbox`.
+Code: `src/jurisync/connectors/pje/inbox.py`. Tools: `pje_get_counters`,
+`pje_list_intimacoes`.
 
 ## Shape
 

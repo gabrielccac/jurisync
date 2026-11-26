@@ -551,8 +551,8 @@ class RemotePluginTest(unittest.TestCase):
             root = Path(directory)
             skills = root / "customers" / "x" / "skills"
             for name, text in (
-                ("triagem", "Use pje_list_inbox."),
-                ("protocolo", "Use filing_prepare e pje_draft_write."),
+                ("triagem", "Use pje_list_intimacoes."),
+                ("protocolo", "Use filing_prepare e pje_fill_draft."),
             ):
                 (skills / name).mkdir(parents=True)
                 (skills / name / "SKILL.md").write_text(text, encoding="utf-8")
@@ -580,6 +580,6 @@ class RemotePluginTest(unittest.TestCase):
                 written["mcpServers"],
             )
             self.assertFalse((out / "skills" / "triagem").is_symlink())
-            self.assertEqual(local_only, {"protocolo": ["filing_prepare", "pje_draft_write"]})
+            self.assertEqual(local_only, {"protocolo": ["filing_prepare", "pje_fill_draft"]})
             with self.assertRaises(SystemExit):
                 provision.remote_plugin(plugin, "http://127.0.0.1:8080/mcp", out, say=lambda _: None)

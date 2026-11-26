@@ -400,11 +400,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(
             set(tools),
             {
-                "jpe_get_counters", "jpe_list_communications", "jpe_list_processes", "jpe_get_process",
+                "jpe_get_counters", "jpe_list_intimacoes", "jpe_list_processes", "jpe_get_process",
                 "jpe_read_documents", "jpe_download_document",
             },
         )  # fmt: skip
-        for name in ("jpe_get_counters", "jpe_list_communications", "jpe_list_processes", "jpe_get_process"):
+        for name in ("jpe_get_counters", "jpe_list_intimacoes", "jpe_list_processes", "jpe_get_process"):
             self.assertTrue(tools[name].annotations.read_only_hint)
         for name in ("jpe_read_documents", "jpe_download_document"):
             self.assertFalse(tools[name].annotations.read_only_hint)

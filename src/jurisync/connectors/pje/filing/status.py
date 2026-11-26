@@ -83,7 +83,7 @@ def next_step(state, result):
     if state == "running":
         return "wait: the fill is still running"
     if state in ("failed", "interrupted", "unknown") or result.get("conclusion") == "incomplete":
-        return "resume: call pje_draft_write with stage resume"
+        return "resume: call pje_fill_draft with stage resume"
     return None
 
 

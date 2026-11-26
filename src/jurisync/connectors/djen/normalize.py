@@ -70,7 +70,7 @@ def compact_item(item, text_limit=0):
 
     ``texto`` and ``texto_limpo`` are the same text for plain-text records, so the compact view keeps the clean one
     as ``texto``. ``text_limit`` > 0 cuts it and sets ``texto_truncado``; the full text stays reachable through
-    ``djen_get_certidao_text``.
+    ``djen_read_certidao``.
     """
     compact = {key: item.get(key) for key in COMPACT_KEYS}
     compact["orgao"] = (item.get("orgao") or {}).get("nome")

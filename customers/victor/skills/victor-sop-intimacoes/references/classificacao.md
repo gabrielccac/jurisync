@@ -51,7 +51,7 @@ mero expediente sem ordem, `Arquivado Definitivamente`, `Baixa Definitiva`,
 ## 4. Padrões
 
 "Cover" = texto DJEN curto (≤ ~700 caracteres) só com cabeçalho e frase padrão: o
-comando pode estar na certidão (`djen_get_certidao_text`) ou no PJe.
+comando pode estar na certidão (`djen_read_certidao`) ou no PJe.
 
 | # | Padrão | Sinal no texto DJEN / `tipo_documento` | Tarefa (`tarefas.md`) | Nível PJe |
 |---|---|---|---|---|

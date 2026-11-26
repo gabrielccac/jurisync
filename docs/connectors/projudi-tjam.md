@@ -18,7 +18,7 @@ de F5/reCAPTCHA.
 
 ## Listas da mesa (implementado e validado em 2026-11-23)
 
-`projudi_list_intimations` e `projudi_list_processes` aceitam `portal="tjam-1g"` (antes só TJGO). Validação ao vivo
+`projudi_list_intimacoes` e `projudi_list_processes` aceitam `portal="tjam-1g"` (antes só TJGO). Validação ao vivo
 com a conta da Thaile, **1 login**, nenhuma intimação aberta (o link "Visualizar" → `processo/intimacao.do`, que
 registra a leitura, nunca é seguido; nenhum link de linha sai no resultado).
 

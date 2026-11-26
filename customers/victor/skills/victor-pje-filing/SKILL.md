@@ -51,25 +51,25 @@ Prepare an initial filing for `trf5-1g` only. Victor's office defaults live in
    `ready: true` and `payload.json` exists.
 3. Show the user the reviewed facts, selected subjects, address status,
    document list and classifications, and unresolved limitations. Use
-   `pje_draft_inspect` with `stage: classification` and the run ID to check
+   `pje_get_draft` with `stage: classification` and the run ID to check
    current PJe choices. Search
    **Não Protocolados** with `pje_search_pending_drafts` using the author's CPF
    before creating a new draft; show possible existing drafts for review.
-4. When the user has asked to create the draft, call `pje_draft_write` with
+4. When the user has asked to create the draft, call `pje_fill_draft` with
    `stage: create-fill` and the same run ID. Draft writes require
    `PJE_ALLOW_DRAFT_WRITES=true` in the PJe MCP process. The adapter writes
    `checkpoint.json` immediately after **Incluir**. If filling later fails,
    inspect that checkpoint and the live draft. Correct case facts and
    regenerate `payload.json` with `finalize --review <run-directory>/review.json
    --facts <facts.json>` rather than editing it by hand. Resume with the
-   targeted `pje_draft_write` stage (`characteristics`, then `documents`, for
+   targeted `pje_fill_draft` stage (`characteristics`, then `documents`, for
    a characteristics failure); do not repeat `create` or `create-fill`. After a
-   failed or interrupted run call `pje_draft_write` with `stage: resume`: it
+   failed or interrupted run call `pje_fill_draft` with `stage: resume`: it
    continues the same draft in the background and uploads only the documents
-   PJe's list still lacks. Read `pje_draft_status` with `checkPje: true`: its
+   PJe's list still lacks. Read `pje_get_draft_status` with `checkPje: true`: its
    `onDraft`, `missing` and `wrongType` lists show what is really in the draft
    and `next` says whether to resume or fix by hand.
-5. Call `pje_draft_inspect` with `stage: pending` to confirm the draft appears
+5. Call `pje_get_draft` with `stage: pending` to confirm the draft appears
    in **Não Protocolados**. Return the draft ID/URL and report which fields and
    PDFs were actually saved. Have the user review the draft in PJe before any
    final filing. There is no Protocolar tool in this workflow.
@@ -95,7 +95,7 @@ always passes `profile: "victor"`**. Steps 1, 3, 4 and 5 above are unchanged; re
    for a duplicate such as a `.docx` copy of the petition). `filing_review` shows the run again.
 4. `filing_finalize` with `profile: "victor"` and `overrides` writes `payload.json` only when the checks pass (one main
    petition; the claim value and CPF appear in the petition). Show its summary to the user before creating the draft.
-5. `pje_draft_write` with `create-fill` starts the fill in the background. Follow it with `pje_draft_status`, and use
-   `checkPje: true` to confirm the draft in PJe. `pje_draft_delete` removes a draft by number (it asks first).
+5. `pje_fill_draft` with `create-fill` starts the fill in the background. Follow it with `pje_get_draft_status`, and use
+   `checkPje: true` to confirm the draft in PJe. `pje_delete_draft` removes a draft by number (it asks first).
 
 The filing root (`JURISYNC_FILING_DIR`) is shared by both servers, so the same `runId` works in each.

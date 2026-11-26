@@ -173,7 +173,7 @@ class BackgroundFillTests(unittest.TestCase):
                 first = server._start_fill("run1", "create-fill")
                 started.wait(5)
                 again = server._start_fill("run1", "create-fill")
-                status = server.create_server()._tool_manager.get_tool("pje_draft_status").fn("run1")
+                status = server.create_server()._tool_manager.get_tool("pje_get_draft_status").fn("run1")
                 release.set()
                 server.fill_jobs[("", "run1")].join(5)
         self.assertEqual(first["state"], "started")
@@ -239,10 +239,10 @@ class BackgroundFillTests(unittest.TestCase):
             with mock.patch.object(server, "sessions", Pool()):
                 with credentials.scope("office-a", {}):
                     server._fill_job("same-run", "fill")
-                    failed = server.create_server()._tool_manager.get_tool("pje_draft_status").fn("same-run")
+                    failed = server.create_server()._tool_manager.get_tool("pje_get_draft_status").fn("same-run")
                 with credentials.scope("office-b", {}):
                     with self.assertRaisesRegex(Exception, "no checkpoint yet"):
-                        server.create_server()._tool_manager.get_tool("pje_draft_status").fn("same-run")
+                        server.create_server()._tool_manager.get_tool("pje_get_draft_status").fn("same-run")
         self.assertEqual(list(server.fill_errors), [("office-a", "same-run")])
         error = failed["result"]["error"]
         self.assertEqual(failed["result"]["state"], "failed")
@@ -286,8 +286,8 @@ class BackgroundFillTests(unittest.TestCase):
         )
         for name in (
             "pje_get_process",
-            "pje_list_inbox",
-            "pje_list_expediente_counters",
+            "pje_list_intimacoes",
+            "pje_get_counters",
             "pje_list_watched_processes",
             "pje_list_processes",
         ):
@@ -304,7 +304,7 @@ class BackgroundFillTests(unittest.TestCase):
         self.assertEqual((properties["limit"]["default"], properties["limit"]["maximum"]), (100, 500))
         self.assertEqual(properties["offset"]["default"], 0)
         self.assertIn("processNumber", properties)
-        self.assertIn("bucket", tools["pje_list_expediente_counters"].input_schema["properties"])
+        self.assertIn("bucket", tools["pje_get_counters"].input_schema["properties"])
 
 
 if __name__ == "__main__":

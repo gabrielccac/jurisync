@@ -194,7 +194,7 @@ class CreateTaskToolTest(unittest.TestCase):
             mock.patch.object(server.client, "list_lawsuits", return_value={}) as lawsuits,
         ):
             tool("advbox_search_tasks")(dateFrom="2026-11-01", dateTo="2026-11-30")
-            tool("advbox_list_publications")(dateFrom="2026-10-01", dateTo="2026-10-09")
+            tool("advbox_list_publicacoes")(dateFrom="2026-10-01", dateTo="2026-10-09")
             tool("advbox_list_lawsuits")(dateFrom="2026-10-01")
             with self.assertRaises(Exception):
                 tool("advbox_search_tasks")(dateFrom="2026-02-30", dateTo="2026-03-01")

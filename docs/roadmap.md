@@ -79,7 +79,7 @@ Todo login falho traz um motivo fixo (`core/session_pool.REASONS`) com a explica
 - Listagens que faltavam (branch `feat/listing-gaps`, validadas ao vivo em 23/11):
   - PJe: `pje_list_processes` lista o Acervo do painel (jurisdição → caixa → páginas; no PJe-JT, Acervo Geral +
     Arquivados pela API). Juliana: tjmg-pje-1g 197/197 em 53 jurisdições, tjce-1g 19/19, `complete`. PJe 1.x fora.
-  - Projudi TJAM: `projudi_list_intimations` (listas de intimações/citações da mesa, "Novas" com `cienciaPendente`)
+  - Projudi TJAM: `projudi_list_intimacoes` (listas de intimações/citações da mesa, "Novas" com `cienciaPendente`)
     e `projudi_list_processes` (1º/2º grau por situação). Thaile: 1 processo, 2 intimações com prazo perdido,
     0 aguardando ciência.
   - e-SAJ: `esaj_list_processes` lista os processos de 1º grau pela consulta por OAB de cada OAB da sessão
@@ -106,9 +106,9 @@ Todo login falho traz um motivo fixo (`core/session_pool.REASONS`) com a explica
    contadores, caixa, processos ativos), ferramentas de fluxo (`jurisync_whats_new`, `jurisync_agenda`,
    `jurisync_process_overview`), API HTTP para a página do escritório e relatórios. Começa com uns 5 escritórios no
    servidor.
-4. **Padronizar nomes de ferramentas entre sistemas.** As de caixa de intimações hoje: `pje_list_inbox`,
-   `eproc_list_notices`, `projudi_list_intimations`, `tucujuris_list_intimacoes`, `jpe_list_communications`,
-   `esaj_list_messages`, `stj_list_inbox`. Renomear junto com as skills e plugins dos escritórios, conector por
+4. **Padronizar nomes de ferramentas entre sistemas.** As de caixa de intimações hoje: `pje_list_intimacoes`,
+   `eproc_list_intimacoes`, `projudi_list_intimacoes`, `tucujuris_list_intimacoes`, `jpe_list_intimacoes`,
+   `esaj_list_messages`, `stj_list_intimacoes`. Renomear junto com as skills e plugins dos escritórios, conector por
    conector; nunca renomear sem atualizar as skills na mesma entrega.
 
 ## Pendências conhecidas

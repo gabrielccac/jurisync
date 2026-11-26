@@ -160,12 +160,12 @@ class HostedAppTest(unittest.TestCase):
         def whoami() -> dict:
             return {"tenant": credentials.tenant(), "pin": credentials.env("PJE_A1_PIN")}
 
-        @fake.tool(name="pje_draft_write")
+        @fake.tool(name="pje_fill_draft")
         def write() -> str:
             return "written"
 
         with (
-            mock.patch.dict("jurisync.hosted.app.LOCAL_ONLY_TOOLS", {"fake": {"pje_draft_write"}}),
+            mock.patch.dict("jurisync.hosted.app.LOCAL_ONLY_TOOLS", {"fake": {"pje_fill_draft"}}),
             mock.patch("jurisync.hosted.app.TENANT_READY", ("fake",)),
         ):
             self.app, _ = build_app(BASE, self.store, self.vault, ["fake"], load=lambda name: (fake, None))
@@ -264,7 +264,7 @@ class HostedAppTest(unittest.TestCase):
             _, result_b = self.call_whoami(client, token_b["access_token"])
         self.assertEqual(result_a, {"tenant": "office-a", "pin": "pin-a"})
         self.assertEqual(result_b, {"tenant": "office-b", "pin": "pin-b"})
-        self.assertNotIn("pje_draft_write", names)
+        self.assertNotIn("pje_fill_draft", names)
 
     def test_wrong_password_and_disabled_connector_are_refused(self):
         with TestClient(self.app, base_url=BASE) as client:
@@ -308,7 +308,7 @@ class RealServerTest(unittest.TestCase):
             build_app(BASE, store, vault, ["pje"], load=capture)  # a second app in the same process must not fail
             for server in built:
                 after = {tool.name for tool in server._tool_manager.list_tools()}
-                self.assertFalse({"pje_draft_write", "pje_draft_delete"} & after)
+                self.assertFalse({"pje_fill_draft", "pje_delete_draft"} & after)
                 self.assertIn("pje_get_process", after)
 
 

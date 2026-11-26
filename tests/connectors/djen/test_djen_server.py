@@ -40,9 +40,9 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             sorted(tool.name for tool in tools),
             [
                 "djen_calculate_deadline",
-                "djen_get_certidao_text",
                 "djen_list_saved_searches",
-                "djen_search_communications",
+                "djen_read_certidao",
+                "djen_search_comunicacoes",
                 "djen_search_saved",
             ],
         )
@@ -51,7 +51,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_invalid_oab_before_any_request(self):
         with mock.patch.object(djen_server, "search_page") as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroOab": "invalid", "ufOab": "PB", "inicio": "2026-09-29", "fim": "2026-09-29"},
             )
         self.assertTrue(result.is_error)
@@ -64,7 +64,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         )
         with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {**nulls, "nomeAdvogado": "ELISANDRA BECKER", "inicio": "2026-10-20", "fim": "2026-10-20"},
             )
         self.assertFalse(result.is_error)
@@ -73,7 +73,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
     async def test_formatted_process_number_is_still_refused(self):
         with mock.patch.object(djen_server, "search_page") as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroProcesso": "5004320-76.2026.4.04.7104", "inicio": "2026-10-20", "fim": "2026-10-20"},
             )
         self.assertTrue(result.is_error)
@@ -83,7 +83,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         payload = {"status": "success", "count": 0, "items": []}
         with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {
                     "numeroOab": "61216",
                     "ufOab": "RS",
@@ -103,7 +103,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         payload = {"status": "success", "count": 0, "items": []}
         with mock.patch.object(djen_server, "search_page", return_value=payload) as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {
                     "numeroOab": 61216,
                     "ufOab": "RS",
@@ -121,9 +121,9 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
             djen_server, "search_page", side_effect=ValueError("pesquisa exige uma chave")
         ) as search:
             no_uf = await self.call(
-                "djen_search_communications", {"numeroOab": "61216", "inicio": "2026-09-03", "fim": "2026-10-03"}
+                "djen_search_comunicacoes", {"numeroOab": "61216", "inicio": "2026-09-03", "fim": "2026-10-03"}
             )
-            no_key = await self.call("djen_search_communications", {"inicio": "2026-09-03", "fim": "2026-10-03"})
+            no_key = await self.call("djen_search_comunicacoes", {"inicio": "2026-09-03", "fim": "2026-10-03"})
         self.assertTrue(no_uf.is_error and no_key.is_error)
         self.assertEqual(search.call_count, 1)  # the OAB check fails before any request
 
@@ -131,7 +131,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         page = {"status": "success", "count": 1, "items": [dict(RAW_ITEM)]}
         with mock.patch.object(djen_server, "search_page", return_value=page) as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-09-29", "fim": "2026-09-30", "tribunal": "TRF5"},
             )
         self.assertFalse(result.is_error)
@@ -159,7 +159,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         page = {"status": "success", "count": 2, "items": [turma, vara]}
         with mock.patch.object(djen_server, "search_page", return_value=page):
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-10-19", "fim": "2026-10-19", "compact": True},
             )
         self.assertEqual(
@@ -172,7 +172,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         page = {"status": "success", "count": 1, "items": [raw]}
         with mock.patch.object(djen_server, "search_page", return_value=page):
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {
                     "numeroOab": "14663",
                     "ufOab": "PB",
@@ -195,7 +195,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         page = {"status": "success", "count": 1, "items": [raw]}
         with mock.patch.object(djen_server, "search_page", return_value=page):
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroOab": "14663", "ufOab": "PB", "inicio": "2026-10-06", "fim": "2026-10-06", "compact": True},
             )
         item = result.structured_content["items"][0]
@@ -205,7 +205,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
     async def test_certidao_failure_is_sanitized_tool_error(self):
         error = DjenError("certidão failed at https://comunicaapi.pje.jus.br/x session=secret")
         with mock.patch.object(djen_server, "fetch_certidao", side_effect=error):
-            result = await self.call("djen_get_certidao_text", {"hash": "offline", "textLimit": 100})
+            result = await self.call("djen_read_certidao", {"hash": "offline", "textLimit": 100})
         self.assertTrue(result.is_error)
         text = result.content[0].text
         self.assertIn("[portal_error] DJEN: certidão failed at [url] [redacted]", text)
@@ -214,7 +214,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_unexpected_errors_do_not_leak_text(self):
         with mock.patch.object(djen_server, "fetch_certidao", side_effect=KeyError("internal detail")):
-            result = await self.call("djen_get_certidao_text", {"hash": "offline"})
+            result = await self.call("djen_read_certidao", {"hash": "offline"})
         self.assertTrue(result.is_error)
         self.assertNotIn("internal detail", result.content[0].text)
 
@@ -226,11 +226,11 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(djen_server, "search_page", side_effect=page) as search:
             result = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {"numeroOab": "14663-a", "ufOab": "PB", "inicio": "2026-09-29", "fim": "2026-09-29"},
             )
             exact = await self.call(
-                "djen_search_communications",
+                "djen_search_comunicacoes",
                 {
                     "numeroOab": "14663",
                     "ufOab": "PB",
@@ -255,7 +255,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
     async def test_inverted_window_is_refused_before_any_request(self):
         with mock.patch.object(djen_server, "search_page") as search:
             result = await self.call(
-                "djen_search_communications", {"nomeParte": "FULANO", "inicio": "2026-10-03", "fim": "2026-10-01"}
+                "djen_search_comunicacoes", {"nomeParte": "FULANO", "inicio": "2026-10-03", "fim": "2026-10-01"}
             )
         self.assertTrue(result.is_error)
         search.assert_not_called()

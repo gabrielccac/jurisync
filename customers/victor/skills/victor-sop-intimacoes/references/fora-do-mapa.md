@@ -75,6 +75,6 @@ revisar o classificador e as tarefas, não como acusação:
    muda o resultado). A tarefa de teste (lawsuit `18175173`, responsável CONTROLADORIA,
    comentário "TESTE DE INTEGRAÇÃO") está hoje no post `285556799` depois de duas edições
    de teste; pode ser excluída.
-4a. Validar `djen_search_communications(compact=true)` ao vivo quando o DJEN voltar.
+4a. Validar `djen_search_comunicacoes(compact=true)` ao vivo quando o DJEN voltar.
 5. Perícia do tipo médica × social em 0004089-96 (o ADVBOX tem `AVISAR PERÍCIA MÉDICA`;
    o mandado do PJe é de perícia social).

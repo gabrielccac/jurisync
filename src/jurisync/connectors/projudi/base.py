@@ -280,7 +280,7 @@ def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
         if unchecked:
             raise CienciaUnchecked(
                 f"ciência not checked: {unchecked}, so it is unknown whether this process has a communication whose "
-                "ciência is still pending. Nothing was opened. Try again later (projudi_list_intimations shows the "
+                "ciência is still pending. Nothing was opened. Try again later (projudi_list_intimacoes shows the "
                 "list when it can be read). Opening it anyway may register the party's ciência and start the "
                 f"deadline. {AUTHORIZATION}.",
                 {

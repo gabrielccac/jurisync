@@ -419,7 +419,7 @@ class GuardTest(JuridiqTestCase):
                 tools = {tool.name: tool for tool in (await client.list_tools()).tools}
                 preview = await client.call_tool("juridiq_delete_task", {"taskId": task, "dryRun": True})
                 refused = await client.call_tool("juridiq_delete_task", {"taskId": task, "expectTitle": "Recurso"})
-                pending = await client.call_tool("juridiq_list_pending_publications", {})
+                pending = await client.call_tool("juridiq_list_pending_publicacoes", {})
                 return tools, preview, refused, pending
 
         tools, preview, refused, pending = asyncio.run(run())
@@ -442,7 +442,7 @@ class ServerTest(JuridiqTestCase):
 
     def test_write_tools_registered_only_when_enabled(self):
         readonly, writable = self.tools(False), self.tools(True)
-        self.assertIn("juridiq_list_publications", readonly)
+        self.assertIn("juridiq_list_publicacoes", readonly)
         self.assertNotIn("juridiq_create_task", readonly)
         self.assertNotIn("juridiq_create_task_template", readonly)
         self.assertIn("juridiq_create_task", writable)
@@ -537,7 +537,7 @@ class ServerTest(JuridiqTestCase):
 
         async def run():
             async with Client(create_server(allow_writes=False, api=JuridiqApi(send=fake))) as client:
-                return await client.call_tool("juridiq_find_lawsuit", {"processNumber": "1"})
+                return await client.call_tool("juridiq_search_lawsuits", {"processNumber": "1"})
 
         self.assertEqual(asyncio.run(run()).structured_content, {"result": [{"id": "law-1", "processNumber": "1"}]})
 
@@ -573,7 +573,7 @@ WRITE_CALLS = {
             "responsibleIds": [UUID],
         }
     },
-    "juridiq_mark_publications_read": {"publicationIds": ["publication-1"]},
+    "juridiq_mark_publicacoes_read": {"publicationIds": ["publication-1"]},
 }
 
 

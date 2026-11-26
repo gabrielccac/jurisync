@@ -48,7 +48,7 @@ also receive the updated code. This repository change alone does not update thos
 
 ## Measured
 
-Server log of `pje_list_expediente_counters(trf5-1g, regions=true)` followed by `pje_list_inbox(trf5-1g,
+Server log of `pje_get_counters(trf5-1g, regions=true)` followed by `pje_list_intimacoes(trf5-1g,
 expedidoDe=expedidoAte=2026-10-30)`:
 
 - Certificate login (A1 + TOTP): about 2 s. Not the bottleneck.
@@ -69,10 +69,10 @@ session: no login was needed in this round. Mean gap between consecutive PJe req
 
 | # | Tool and arguments | Total | Portal | PJe requests | Notes |
 |---|---|---|---|---|---|
-| 1 | `pje_list_expediente_counters` | 12.4 s | under 1 s | 1 | One panel page |
-| 2 | `pje_list_expediente_counters` regions=true | 103.5 s | 74.4 s | 62 | Expands 13 jurisdictions in each of the 6 non-empty buckets |
-| 3 | `pje_list_inbox` regions=["Serra Talhada"], today | 22.7 s | 8.4 s | 7 | Filtered: 2 inboxes |
-| 12 | `pje_list_inbox` all jurisdictions, today | 59.8 s | 43.3 s | 43 | 14 inboxes, 13 of them empty for the date |
+| 1 | `pje_get_counters` | 12.4 s | under 1 s | 1 | One panel page |
+| 2 | `pje_get_counters` regions=true | 103.5 s | 74.4 s | 62 | Expands 13 jurisdictions in each of the 6 non-empty buckets |
+| 3 | `pje_list_intimacoes` regions=["Serra Talhada"], today | 22.7 s | 8.4 s | 7 | Filtered: 2 inboxes |
+| 12 | `pje_list_intimacoes` all jurisdictions, today | 59.8 s | 43.3 s | 43 | 14 inboxes, 13 of them empty for the date |
 | 4 | `pje_get_process` scope=latest | 21.9 s | 9.1 s | 6 | |
 | 5 | `pje_get_process` scope=page | 23.4 s | 10.2 s | 7 | 28 movements, 48 documents, 10 expedientes |
 | 6 | `pje_read_documents` 1 document | 26.4 s | 11.2 s | 7 | Returned only the HTML cover ("Laudo Pericial"); the content is in the attachments |
@@ -80,7 +80,7 @@ session: no login was needed in this round. Mean gap between consecutive PJe req
 | 8 | `pje_read_expediente_ato` closed expediente | 27.0 s | 12.5 s | 8 | |
 | 9 | `pje_list_watched_processes` | 55.5 s | not logged | not logged | 9,053 watched processes, 1.36 million characters: too large for the model to read |
 | 10 | `pje_search_pending_drafts` by name | 19.4 s | not logged | not logged | |
-| 11 | `pje_draft_status`, `pje_draft_inspect` | 19.5 s | none | 0 | No filing run on the server: errors, as expected |
+| 11 | `pje_get_draft_status`, `pje_get_draft` | 19.5 s | none | 0 | No filing run on the server: errors, as expected |
 
 ### Findings from this round
 
@@ -91,8 +91,8 @@ session: no login was needed in this round. Mean gap between consecutive PJe req
 - The counters with regions are the most expensive call (62 requests): each bucket's tree is expanded even when the
   caller wants one bucket.
 - `pje_list_watched_processes` returns everything (9,053 rows). It needs pagination or a filter (process number, date).
-- `pje_draft_inspect` returned a server file path in its error message: diagnostics must strip local paths.
-- `pje_draft_status` and `pje_draft_inspect` only work with a filing run on the same machine; filing is not hosted, so
+- `pje_get_draft` returned a server file path in its error message: diagnostics must strip local paths.
+- `pje_get_draft_status` and `pje_get_draft` only work with a filing run on the same machine; filing is not hosted, so
   they should be removed from the hosted server like the draft writes.
 - The Push, pending-draft and filing requests do not appear in the server log: their HTTP calls bypass the request
   logging, so their timing cannot be measured yet.
@@ -120,7 +120,7 @@ layer, which both share; the MCP layer decides how much data reaches the model a
 |---|---|
 | Progress notifications from long tools ("inbox 5 of 14") | The caller sees progress instead of a silent wait |
 | Output budgets and compact mode on large results (process timeline, document inventory, Push) | Answers fit in the model's context; less to read |
-| Remove tools that cannot work remotely (`pje_draft_status`, `pje_draft_inspect`) | Fewer useless tools for the model to consider |
+| Remove tools that cannot work remotely (`pje_get_draft_status`, `pje_get_draft`) | Fewer useless tools for the model to consider |
 | Tool descriptions that steer to the cheap call (filter by region, `scope=latest`) | The model picks the fast path by default |
 
 ### HTTP API layer

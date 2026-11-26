@@ -484,8 +484,8 @@ class ServerTest(unittest.TestCase):
         listed = asyncio.run(tools())
         self.assertEqual(
             sorted(listed),
-            ["stj_download_document", "stj_get_counters", "stj_get_process", "stj_list_inbox", "stj_list_processes",
-             "stj_list_publications", "stj_read_documents"],
+            ["stj_download_document", "stj_get_counters", "stj_get_process", "stj_list_intimacoes", "stj_list_processes",
+             "stj_list_publicacoes", "stj_read_documents"],
         )  # fmt: skip
         for tool in listed.values():
             self.assertEqual(tool.annotations.read_only_hint, tool.name != "stj_download_document")
@@ -555,14 +555,14 @@ class ServerTest(unittest.TestCase):
         self.assertFalse(error)
         self.assertEqual([item["oab"] for item in data["oabs"]], ["BA000002"])
         self.assertEqual(data["total"], 7)
-        data, error = self.call("stj_list_publications", {"oab": "BA0000002"})
+        data, error = self.call("stj_list_publicacoes", {"oab": "BA0000002"})
         self.assertFalse(error)
         self.assertEqual(data["oab"], "BA000002")
 
     def test_inbox_lists_vistas_and_djen_notices(self):
         self.vista_routes([VISTA])
         with mock.patch.object(server.djen, "fetch_page", return_value={"count": 1, "items": [DJEN_ITEM]}) as fetch:
-            data, error = self.call("stj_list_inbox", {"days": 10, "include_text": True})
+            data, error = self.call("stj_list_intimacoes", {"days": 10, "include_text": True})
         self.assertFalse(error)
         self.assertEqual(fetch.call_args.args[:2], ("2", "BA"))
         self.assertEqual(fetch.call_args.args[4], "STJ")
@@ -578,7 +578,7 @@ class ServerTest(unittest.TestCase):
     def test_inbox_without_vistas_or_text(self):
         self.vista_routes([])
         with mock.patch.object(server.djen, "fetch_page", return_value={"count": 0, "items": []}):
-            data, error = self.call("stj_list_inbox", {})
+            data, error = self.call("stj_list_intimacoes", {})
         self.assertFalse(error)
         self.assertEqual((data["vistas"], data["notices"]), ([], []))
 
@@ -597,7 +597,7 @@ class ServerTest(unittest.TestCase):
         self.vista_routes([VISTA])
         with mock.patch.object(client, "require_read", side_effect=spy):
             with mock.patch.object(server.djen, "fetch_page", return_value={"count": 0, "items": []}):
-                results = {"stj_list_inbox": self.call("stj_list_inbox", {})}
+                results = {"stj_list_intimacoes": self.call("stj_list_intimacoes", {})}
             for name, arguments in (
                 ("stj_get_counters", {}),
                 ("stj_get_process", {"process": CNJ}),

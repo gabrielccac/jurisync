@@ -11,7 +11,7 @@ fim). Substituiu as fases C–E de `docs/archive/rollout-plan.md` e detalha `doc
 | Situação em 16/11 | Custo |
 |---|---|
 | `pje_get_process` → `pje_read_documents` → `pje_read_expediente_ato` no mesmo processo | 6–8 requisições cada (23/11: a busca fica 180 s na sessão, 1–2 requisições; a aba Expedientes é sempre relida) |
-| `pje_list_inbox` em todas as regiões | ~43 requisições; contadores com `regions=true`: 62 |
+| `pje_list_intimacoes` em todas as regiões | ~43 requisições; contadores com `regions=true`: 62 |
 | `djen_search_saved` | N buscas × 7 variantes de OAB (buscas já em paralelo) |
 | `eproc_get_process` com documentos | relia as 4 filas pendentes a cada chamada (23/11: guardadas 120 s por sessão) |
 | e-SAJ / Projudi | refazem inventário ou reabrem o processo por documento |
@@ -158,7 +158,7 @@ Exporta CSV/PDF; envio semanal por e-mail opcional.
 | 1. Medição | `UsageMeter` + `usage_events` + relatório de uso básico | uma chamada de cada sistema gera linha com requisições e logins corretos |
 | 2. Ciência | Listing/Opening separados; anotações corrigidas | teste de alcance do sincronizador |
 | 3. Cache ao vivo + single-flight | TTLs do §4 em PJe, Eproc, e-SAJ, Projudi | `get_process`+`read_documents` ≤ 2 requisições; medido no `usage_events` |
-| 4. Read model + sync | store por escritório; jobs DJEN, contadores, caixa, processos ativos; `asOf/stale/maxAgeMinutes` | `pje_list_inbox` responde < 1 s do store; requisições/dia por escritório caem (comparar etapa 1) |
+| 4. Read model + sync | store por escritório; jobs DJEN, contadores, caixa, processos ativos; `asOf/stale/maxAgeMinutes` | `pje_list_intimacoes` responde < 1 s do store; requisições/dia por escritório caem (comparar etapa 1) |
 | 5. Ferramentas de fluxo e relatórios | `whats_new`, `agenda`, `process_overview`, `usage_report`, página do escritório | rotina diária do Victor usa só ferramentas de fluxo |
 | 6. Proteções e OTel | token bucket, circuit breaker, spans | portal derrubado responde do store em < 1 s |
 

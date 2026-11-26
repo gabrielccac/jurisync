@@ -301,15 +301,15 @@ def create_server(allow_writes=None, api=None):
         return lambda fn: fn
 
     @read(
-        "juridiq_list_pending_publications",
+        "juridiq_list_pending_publicacoes",
         "List pending Juridiq publications",
-        "List unread publications. Reads at most 20 pages of 100; truncated=true means some may be missing: narrow with juridiq_list_publications (date range). Read-only.",
+        "List unread publications. Reads at most 20 pages of 100; truncated=true means some may be missing: narrow with juridiq_list_publicacoes (date range). Read-only.",
     )
     def list_pending_publications(maxResults: Annotated[int, Field(ge=1, le=500)] = 100) -> dict[str, Any]:
         return call(lambda: api.unread_publications(maxResults=maxResults))
 
     @read(
-        "juridiq_list_publications",
+        "juridiq_list_publicacoes",
         "List Juridiq publications",
         "List publications (paged). For recent ones pass a date range or orderBy. Read-only.",
     )
@@ -339,7 +339,7 @@ def create_server(allow_writes=None, api=None):
             )
         )
 
-    @read("juridiq_find_lawsuit", "Find Juridiq lawsuit", "Find lawsuits by exact process number. Read-only.")
+    @read("juridiq_search_lawsuits", "Find Juridiq lawsuit", "Find lawsuits by exact process number. Read-only.")
     def find_lawsuit(processNumber: Text) -> dict[str, Any]:
         return call(lambda: api.find_lawsuits(processNumber))
 
@@ -358,7 +358,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_lawsuit",
         "Create Juridiq lawsuit",
-        "Create a lawsuit. Required: serviceStep, responsibleIds (UUIDs), persons (name, personOrigin Cliente|Requerida). If Juridiq doesn't confirm (timeout, connection error, 5xx) the lawsuit MAY have been created: check juridiq_find_lawsuit before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
+        "Create a lawsuit. Required: serviceStep, responsibleIds (UUIDs), persons (name, personOrigin Cliente|Requerida). If Juridiq doesn't confirm (timeout, connection error, 5xx) the lawsuit MAY have been created: check juridiq_search_lawsuits before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
         WRITE,
     )
     def create_lawsuit(payload: LawSuitCreate) -> dict[str, Any]:
@@ -410,7 +410,7 @@ def create_server(allow_writes=None, api=None):
         return call(lambda: api.lawsuit_movements(lawSuitId, tagId=tagId, content=content, instance=instance))
 
     @read(
-        "juridiq_get_publication",
+        "juridiq_get_publicacao",
         "Get Juridiq publication",
         "Get one publication by ID: full content, dates, process number, diary, read state. Read-only.",
     )
@@ -585,7 +585,7 @@ def create_server(allow_writes=None, api=None):
     @write(
         "juridiq_create_task",
         "Create Juridiq task",
-        "Create a task. Required: title, priority, columnId (UUID from juridiq_list_task_columns), initialDate. Use responsiblesId, not responsibleIds. Pass lawSuitId (juridiq_find_lawsuit) so the task shows in its process; else it is standalone. If Juridiq doesn't confirm (timeout, connection error, 5xx) the task MAY have been created: check juridiq_list_tasks before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
+        "Create a task. Required: title, priority, columnId (UUID from juridiq_list_task_columns), initialDate. Use responsiblesId, not responsibleIds. Pass lawSuitId (juridiq_search_lawsuits) so the task shows in its process; else it is standalone. If Juridiq doesn't confirm (timeout, connection error, 5xx) the task MAY have been created: check juridiq_list_tasks before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
         WRITE,
     )
     def create_task(payload: TaskCreate) -> dict[str, Any]:
@@ -685,7 +685,7 @@ def create_server(allow_writes=None, api=None):
         return call(lambda: api.create_event(_payload(payload)))
 
     @write(
-        "juridiq_mark_publications_read",
+        "juridiq_mark_publicacoes_read",
         "Mark Juridiq publications read",
         "Mark the given publication IDs as read. Needs JURIDIQ_ALLOW_WRITES=true.",
         DESTRUCTIVE,

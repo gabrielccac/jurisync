@@ -2,7 +2,7 @@
 
 Source: `GET /posts/create` (embeds full roster + workflow list) + `POST workflow/tasks` (steps).
 Mapped 2026-09-28. Member list is global (same for any lawsuit); partners are lawsuit-scoped via `POST lawsuits/network` (empty for 17519594).
-Tools: `advbox_list_members`, `advbox_list_lawsuit_partners`, `advbox_list_workflows`, `advbox_workflow_tasks`.
+Tools: `advbox_list_members`, `advbox_list_lawsuit_partners`, `advbox_list_workflows`, `advbox_list_workflow_tasks`.
 
 ## Members
 

@@ -78,7 +78,7 @@ def create_server():
         return call(lambda session: {"success": True, "portal": client.PORTAL, **process.counters(session)})
 
     @server.tool(
-        name="jpe_list_communications",
+        name="jpe_list_intimacoes",
         title="List JPe comunicações",
         description=(
             "List JPe comunicações of one status ('pendentes_leitura' = ciência pending; 'pendentes_manifestacao' = "
@@ -87,7 +87,7 @@ def create_server():
         ),
         annotations=READ_ONLY,
     )
-    def jpe_list_communications(
+    def jpe_list_intimacoes(
         status: Annotated[
             Literal["pendentes_leitura", "pendentes_manifestacao", "lidas", "manifestadas"],
             Field(),

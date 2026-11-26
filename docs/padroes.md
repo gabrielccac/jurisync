@@ -55,14 +55,27 @@ Verbos (inglês, fechados):
 | `read` | texto de documentos | leitura que pode dar ciência |
 | `download` | salva arquivo na pasta compartilhada | leitura que salva arquivo |
 | `calculate` | cálculo local sem consulta (prazo) | leitura |
-| `create` / `update` / `delete` / `upload` / `complete` | escrita no sistema | escrita / destrutiva |
+| `create` / `update` / `delete` / `upload` / `complete` / `fill` / `mark` | escrita no sistema | escrita / destrutiva |
+| `verify` / `save` | confirma um código / salva arquivos localmente | escrita |
 
 Objetos (português para o domínio jurídico, inglês para o resto): `intimacoes` (tudo que aguarda ciência ou corre
 prazo: caixa, expedientes, comunicações pendentes), `publicacoes` (diário), `comunicacoes` (DJEN), `counters`,
 `processes`, `process`, `documents`, `document`, `tasks`, `customers`, `members`, `files`, `folders`.
 
-Renomear uma tool mantém o nome antigo como alias (aceito em `tools/call`, fora do `tools/list`). Remover um alias
-depende de decisão do Gabriel. Skills e plugins são atualizados no mesmo PR da renomeação.
+Renomear uma tool mantém o nome antigo como alias em `jurisync.core.names`: aceito em `tools/call` (local e
+hospedado, inclusive na checagem de concessão de escrita), fora do `tools/list`. Remover um alias depende de decisão do
+Gabriel. Skills, plugins e docs são atualizados no mesmo PR da renomeação; relatórios de validação antigos ficam como
+estão (são registro do que rodou).
+
+Nomes trocados na F4 (o antigo continua funcionando): `pje_list_inbox` -> `pje_list_intimacoes`,
+`pje_list_expediente_counters` -> `pje_get_counters`, `pje_draft_write` -> `pje_fill_draft`, `pje_draft_delete` ->
+`pje_delete_draft`, `pje_draft_status` -> `pje_get_draft_status`, `pje_draft_inspect` -> `pje_get_draft`,
+`eproc_list_notices`, `projudi_list_intimations`, `stj_list_inbox` e `jpe_list_communications` ->
+`<portal>_list_intimacoes`, `stj_list_publications` -> `stj_list_publicacoes`, `djen_search_communications` ->
+`djen_search_comunicacoes`, `djen_get_certidao_text` -> `djen_read_certidao`, e no ADVBOX e no Juridiq os verbos
+que faltavam (`advbox_get_activity`, `advbox_get_lawsuit_report`, `advbox_list_task_filters`,
+`advbox_list_workflow_tasks`, `advbox_get_session`, `juridiq_search_lawsuits`) e `publicacoes` no lugar de
+`publications`. A tabela completa é `names.ALIASES`.
 
 ## 4. Annotations MCP
 
@@ -172,4 +185,5 @@ Passos para um conector novo:
 | Molde de conector válido | `tests/core/test_connector_template.py` |
 | Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |
 | Orçamento, offset e JSON compacto (pior caso do `pje_read_documents`) | `tests/core/test_responses.py` |
+| Nomes no vocabulário; todo alias aponta para uma tool listada e funciona | `tests/core/test_names.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |

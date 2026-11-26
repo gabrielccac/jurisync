@@ -15,16 +15,16 @@ Leia quando aplicavel:
 
 Fluxo:
 
-1. Use `juridiq_list_pending_publications` for the production triage. Use
-   `juridiq_list_publications` with `isHandled=true` or an explicit date/order
+1. Use `juridiq_list_pending_publicacoes` for the production triage. Use
+   `juridiq_list_publicacoes` with `isHandled=true` or an explicit date/order
    filter only when the user asks for historical records; they include already
    handled publications and must not be reprocessed as new work. Interpret
    returned dates semantically when the user asks for the most recent records;
    there is no local `recentOnly` flag.
    Use `juridiq_list_lawsuits` when the user asks for a general process list;
-   use `juridiq_find_lawsuit` only for a known process number.
+   use `juridiq_search_lawsuits` only for a known process number.
 2. Normalize e deduplicate por ato/processo/data; prefira a versao com teor.
-3. Resolva processo com `juridiq_find_lawsuit` quando faltar `lawSuitId`.
+3. Resolva processo com `juridiq_search_lawsuits` quando faltar `lawSuitId`.
 4. Avalie teor e necessidade de contexto.
 5. Quando necessario, use `pje_get_process`, priorizando o processo, a data e
    os movimentos imediatamente relacionados. Movimento retornado pelo PJe nao
@@ -38,7 +38,7 @@ Fluxo:
 8. As ferramentas de escrita Juridiq existem somente quando o administrador
    iniciou o conector com `JURIDIQ_ALLOW_WRITES=true`. A ausencia delas significa
    modo somente leitura; informe os rascunhos sem tentar contornar esse limite.
-9. So use `juridiq_mark_publications_read` depois de concluir a tarefa; falha,
+9. So use `juridiq_mark_publicacoes_read` depois de concluir a tarefa; falha,
    falta de ferramenta de escrita ou duvida permanece nao lida.
 10. Toda evidencia deve citar um `sourceId` conhecido e um trecho exato dessa
     mesma fonte. Conflito ou ambiguidade exige revisao humana.

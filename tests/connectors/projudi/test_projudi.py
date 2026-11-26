@@ -469,7 +469,7 @@ class ServerTest(unittest.TestCase):
                 return {tool.name: tool for tool in (await client.list_tools()).tools}
 
         listed = asyncio.run(tools())
-        lists = listed["projudi_list_intimations"].input_schema["properties"]["portal"]
+        lists = listed["projudi_list_intimacoes"].input_schema["properties"]["portal"]
         self.assertEqual((lists.get("default"), lists.get("enum", [lists.get("const")])), ("tjam-1g", ["tjam-1g"]))
         portal = listed["projudi_get_process"].input_schema["properties"]["portal"]
         self.assertEqual((portal.get("default"), portal.get("enum", [portal.get("const")])), ("tjam-1g", ["tjam-1g"]))
@@ -486,7 +486,7 @@ class ServerTest(unittest.TestCase):
                 "projudi_download_document",
                 "projudi_get_process",
                 "projudi_list_documents",
-                "projudi_list_intimations",
+                "projudi_list_intimacoes",
                 "projudi_list_processes",
                 "projudi_read_documents",
             ],
@@ -509,7 +509,7 @@ class ServerTest(unittest.TestCase):
                     self.assertNotIn("acknowledgeCiencia", tool.input_schema.get("required", []))
 
     def test_list_options_are_tjam_only_and_reach_its_adapter(self):
-        refused = self.call("projudi_list_intimations", {"portal": "tjgo-1g", "lists": ["novas"]})
+        refused = self.call("projudi_list_intimacoes", {"portal": "tjgo-1g", "lists": ["novas"]})
         self.assertTrue(refused.is_error)
         tjam_adapter = mock.Mock(flavor="legacy-local")
         tjam_adapter.list_processes.return_value = {"situation": "todos", "groups": [], "complete": True}
