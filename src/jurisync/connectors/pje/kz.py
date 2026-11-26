@@ -616,6 +616,21 @@ _memo = weakref.WeakKeyDictionary()  # session -> {process number: (time, proces
 _memo_guard = threading.Lock()
 
 
+MEMO_PROCESSES = 20  # per session: a batch walking hundreds of processes keeps only the last ones
+
+
+def memo_store(entries, number, entry):
+    """Put ``entry`` (whose first item is its time) in one session's process memo (here and in ``search``),
+    dropping the expired entries and, past ``MEMO_PROCESSES``, the oldest."""
+    now = entry[0]
+    for key in [key for key, value in entries.items() if now - value[0] > MEMO_SECONDS]:
+        del entries[key]
+    entries.pop(number, None)
+    entries[number] = entry
+    while len(entries) > MEMO_PROCESSES:
+        del entries[next(iter(entries))]
+
+
 def _recall(session, number):
     with _memo_guard:
         entry = _memo.get(session, {}).get(number)
@@ -627,10 +642,10 @@ def _recall(session, number):
 def _remember(session, number, process_id, process, parties, raw):
     try:
         with _memo_guard:
-            _memo.setdefault(session, {})[number] = (
-                time.monotonic(),
-                process_id,
-                *copy.deepcopy((process, parties, raw)),
+            memo_store(
+                _memo.setdefault(session, {}),
+                number,
+                (time.monotonic(), process_id, *copy.deepcopy((process, parties, raw))),
             )
     except TypeError:
         pass  # a session that cannot be weakly referenced is not remembered
