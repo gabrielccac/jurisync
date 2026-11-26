@@ -18,7 +18,7 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER, portal_totp_account
-from jurisync.core import mtls
+from jurisync.core import a3, mtls
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code
 
@@ -120,8 +120,6 @@ def _logged_in(response, config):
 
 def login(portal, *, signer=None):
     """Return ``(session, panel_html, panel_url)`` for an eproc portal via the A3 token + its TOTP."""
-    from jurisync.connectors.pje.auth import a3
-
     config = portals.eproc(portal)
     session = requests.Session()
     try:
@@ -134,14 +132,8 @@ def login(portal, *, signer=None):
         if not host:
             raise NoKeycloakCertificate(f"{config.key} login page offers no Keycloak X.509 certificate login")
 
-        def run(token):
-            return _keycloak_x509(session, page, host.group(1), token)
-
-        if signer is not None:
-            response = run(signer)
-        else:
-            with a3.token_lock(), a3.A3Signer() as token:
-                response = run(token)
+        with a3.held_token(signer) as token:
+            response = _keycloak_x509(session, page, host.group(1), token)
         response = _submit_otp(session, response, portal)
         if not _logged_in(response, config):
             reason = eproc_message(response.url, response.text)

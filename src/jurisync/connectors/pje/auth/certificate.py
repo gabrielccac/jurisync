@@ -17,7 +17,7 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
 from jurisync.connectors.pje.auth.sso import alert_text, https_pje, require_allowed_url
-from jurisync.core import awswaf, credentials
+from jurisync.core import a3, awswaf, credentials
 from jurisync.core.certificate import credential_names, load_configured
 from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
 from jurisync.core.redaction import url_shape
@@ -236,8 +236,6 @@ def a3_cert_login(portal, session=None, *, signer=None):
     The token is held under a cross-process lock for the whole login, so parallel calls (or another server
     using the same A3) never interleave PIN logins. The TOTP account is read only if the SSO asks for it.
     """
-    from jurisync.connectors.pje.auth import a3
-
     config = portals.pje(portal)
     session = session or requests.Session()
 
@@ -247,9 +245,7 @@ def a3_cert_login(portal, session=None, *, signer=None):
             raise MissingLogin(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
         return found
 
-    if signer is not None:
-        return _login(session, config, account, signer)
-    with a3.token_lock(), a3.A3Signer() as token:
+    with a3.held_token(signer) as token:
         return _login(session, config, account, token)
 
 

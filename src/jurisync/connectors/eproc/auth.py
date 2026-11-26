@@ -282,12 +282,11 @@ def _classic_cert_login(driver, config):
     """
     from urllib.parse import parse_qsl, urlsplit
 
-    from jurisync.connectors.pje.auth import a3
-    from jurisync.core import mtls
+    from jurisync.core import a3, mtls
 
     cert_url = config.url("priv/login_cert.php?acao_origem=")
     cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
-    with a3.token_lock(), a3.A3Signer() as token:
+    with a3.held_token() as token:
         cert = mtls.fetch(cert_url, signer=token, cookies=cookies)
     if not cert.certificate_sent:
         raise RuntimeError("eproc did not ask for the certificate at login_cert.php")
