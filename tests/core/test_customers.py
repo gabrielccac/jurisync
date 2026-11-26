@@ -57,6 +57,31 @@ def test_invalid_setup_fails_loudly(root):
         customers.load_setup("acme")
 
 
+def test_a_certificate_method_switches_the_portal_to_the_a1_login(root):
+    (root / "acme" / "portals.toml").write_text(
+        '[trf1-1g]\nmethod = "certificate_totp"\n[trf3-1g]\nmethod = "password_totp"\n[trf4-2g]\nmethod = "certificate_mtls"\n'
+        '[env]\nset = { ADVBOX_ALLOW_WRITES = "true" }\n'
+    )
+    assert customers.fixed_variables("acme") == {
+        "PJE_1G_CERT": "true",
+        "TRF4_2G_CERT": "true",
+        "ADVBOX_ALLOW_WRITES": "true",
+    }
+
+
+def test_a_pinned_switch_that_contradicts_the_method_fails_loudly(root):
+    (root / "acme" / "portals.toml").write_text(
+        '[trf1-1g]\nmethod = "password_totp"\n[env]\nset = { PJE_1G_CERT = "true" }\n'
+    )
+    with pytest.raises(ValueError, match="PJE_1G_CERT"):
+        customers.load_setup("acme")
+    (root / "acme" / "portals.toml").write_text(
+        '[trf1-1g]\nmethod = "certificate_totp"\n[env]\nset = { PJE_1G_CERT = "false" }\n'
+    )
+    with pytest.raises(ValueError, match="contradicts"):
+        customers.load_setup("acme")
+
+
 def test_customer_name_cannot_escape_directory(root):
     with pytest.raises(ValueError):
         customers.customer_dir("../etc")

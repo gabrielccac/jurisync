@@ -52,5 +52,5 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPE_2G_2FA_DATA|TJPE_2G_2FA_QR"]
 [env]
 secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]
 # Pinned values: Victor's ADVBOX server may create and edit tasks (writes are off by default elsewhere), and his
-# TRF1, TRF3 and TJPE portals log in with the A1 certificate instead of a password.
-set = { ADVBOX_ALLOW_WRITES = "true", PJE_1G_CERT = "true", PJE_2G_CERT = "true", TJPE_1G_CERT = "true", TJPE_2G_CERT = "true", PJE_TRF3_1G_CERT = "true", PJE_TRF3_2G_CERT = "true" }
+# TRF1, TRF3 and TJPE portals log in with the A1 certificate because their method is certificate_totp.
+set = { ADVBOX_ALLOW_WRITES = "true" }

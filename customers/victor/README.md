@@ -305,9 +305,9 @@ is one row in `src/jurisync/portals.py` plus one section per customer that uses 
 | TRF5 1º grau/JEF | `trf5-1g` | A1 + authenticator | counters, inbox, Push, process, documents, expediente act |
 | TRF5 2º grau / Turmas Recursais | `trf5-2g` | A1 + authenticator | same as `trf5-1g` |
 | TRF5 Turma Regional de Uniformização | `trf5-tru` | A1 + authenticator (`PJE_TRF5_2FA_DATA`) | counters, inbox, process, documents |
-| TRF1 1º and 2º grau | `trf1-1g`, `trf1-2g` | A1 + authenticator (`PJE_1G_CERT`, `PJE_2G_CERT` pinned) | counters, inbox, process, documents |
-| TRF3 1º and 2º grau (Turmas Recursais de SP) | `trf3-1g`, `trf3-2g` | A1 + authenticator (`PJE_TRF3_1G_CERT`, `PJE_TRF3_2G_CERT` pinned) | counters, inbox, process, documents |
-| TJPE 1º and 2º grau | `tjpe-1g`, `tjpe-2g` | A1 + authenticator (`TJPE_1G_CERT`, `TJPE_2G_CERT` pinned) | counters, inbox, Push, process, documents, expediente act |
+| TRF1 1º and 2º grau | `trf1-1g`, `trf1-2g` | A1 + authenticator (`PJE_1G_CERT`, `PJE_2G_CERT` from the method) | counters, inbox, process, documents |
+| TRF3 1º and 2º grau (Turmas Recursais de SP) | `trf3-1g`, `trf3-2g` | A1 + authenticator (`PJE_TRF3_1G_CERT`, `PJE_TRF3_2G_CERT` from the method) | counters, inbox, process, documents |
+| TJPE 1º and 2º grau | `tjpe-1g`, `tjpe-2g` | A1 + authenticator (`TJPE_1G_CERT`, `TJPE_2G_CERT` from the method) | counters, inbox, Push, process, documents, expediente act |
 
 The authenticator export is the same for every portal but each portal reads it from its own prefix
 (`PJE_TRF5_2FA_DATA`, `PJE_1G_2FA_DATA`, `PJE_2G_2FA_DATA`, `PJE_TRF3_1G_2FA_DATA`, `PJE_TRF3_2G_2FA_DATA`,

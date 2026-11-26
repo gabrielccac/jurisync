@@ -69,7 +69,7 @@ secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 method = "certificate_challenge"
 secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 
-# Validados ao vivo com A1 + TOTP (eproc: <PREFIX>_CERT em [env].set; TJPR 2G e TJGO com o perfil GO22729).
+# Validados ao vivo com A1 + TOTP (o A1 vem do method; TJPR 2G e TJGO com o perfil GO22729).
 [trf2-1g-rj]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF2_1G_RJ_2FA_DATA|TRF2_1G_RJ_2FA_QR"]
@@ -217,7 +217,7 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TNU_2FA_DATA|TNU_2FA_QR"]
 optional = ["OPENROUTER_API_KEY"]
 secrets = ["EASYJUR_EMAIL", "EASYJUR_PASSWORD", "CHATGURU_EMAIL", "CHATGURU_PASSWORD"]
 # Pinned values: A1 opt-ins and the OAB profile picked where the portal lists several.
-set = { TRF2_1G_RJ_CERT = "true", TRF2_1G_ES_CERT = "true", TRF2_2G_CERT = "true", TRF4_1G_RS_CERT = "true", TRF4_1G_SC_CERT = "true", TRF4_1G_PR_CERT = "true", TRF4_2G_CERT = "true", TJPR_2G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJAP_1G_CERT = "true", TJPR_2G_USER_PROFILE = "GO022729", TJPR_1G_CERT = "true", TJPR_1G_USER_PROFILE = "GO022729", TJSP_1G_CERT = "true", TJSP_2G_CERT = "true", TJSP_1G_USER_PROFILE = "SP527617", TJSP_2G_USER_PROFILE = "SP527617", TJGO_1G_USER_PROFILE = "GO22729" , TNU_CERT = "true", PJE_1G_CERT = "true", PJE_2G_CERT = "true", PJE_TRF3_1G_CERT = "true", PJE_TRF3_2G_CERT = "true", TJPE_1G_CERT = "true", TJSC_1G_CERT = "true", TJSC_2G_CERT = "true", TJRJ_1G_CERT = "true", TJRS_1G_CERT = "true", TJMG_1G_CERT = "true", TJSC_1G_USER_PROFILE = "GO022729", TJSC_2G_USER_PROFILE = "GO022729" }
+set = { TJPR_2G_USER_PROFILE = "GO022729", TJPR_1G_USER_PROFILE = "GO022729", TJSP_1G_USER_PROFILE = "SP527617", TJSP_2G_USER_PROFILE = "SP527617", TJGO_1G_USER_PROFILE = "GO22729", TJSC_1G_USER_PROFILE = "GO022729", TJSC_2G_USER_PROFILE = "GO022729" }
 
 # TJMT 2G: PJe em pje2.tjmt.jus.br/pje2/ (cadastrado em 17/11). Mesmo A1 e mesmo autenticador do TJMT 1G (SSO nacional).
 [tjmt-2g]
