@@ -23,11 +23,6 @@ from cryptography.hazmat.primitives.serialization import Encoding
 
 from jurisync.core.certificate import pkipath_encode
 
-try:
-    import fcntl
-except ImportError:  # Windows
-    fcntl = None
-
 DEFAULT_MODULES = {
     "darwin": "/Applications/tokenadmin.app/Contents/Frameworks/libaetpkss.dylib",
     "win32": "aetpkss1.dll",
@@ -68,7 +63,7 @@ def token_lock():
     path = lock_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
-        if fcntl is None:  # Windows: msvcrt locks a byte range and blocks while another process holds it.
+        if sys.platform == "win32":  # msvcrt locks a byte range and blocks while another process holds it.
             import msvcrt
 
             msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
@@ -77,6 +72,8 @@ def token_lock():
             finally:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             return
+        import fcntl
+
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             yield
