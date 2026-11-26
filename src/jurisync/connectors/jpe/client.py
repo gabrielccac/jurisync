@@ -38,10 +38,9 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.jpe import parsers
-from jurisync.connectors.pje.jsf import a4j_submit
-from jurisync.connectors.pje.parsers import jsf_data, response_html
 from jurisync.core.documents import read_limited
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
+from jurisync.core.jsf import a4j_submit, jsf_data, response_html
 from jurisync.core.keycloak import OTP_FORM, PDPJ_SSO_HOST, credential_refusal, credentials_form, login_form_id
 from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginRejected, MissingLogin, SessionExpired
