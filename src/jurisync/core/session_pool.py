@@ -60,6 +60,7 @@ class LoginFailed(RuntimeError):
     """A login that did not go through; ``reason`` is one of ``REASONS``."""
 
     reason = "unexpected"
+    flow_error = False  # a Keycloak flow broke before anything was refused: one fresh login may follow
 
     def __init__(self, message="", *, reason=None):
         super().__init__(message)
