@@ -245,8 +245,7 @@ def read_customer_env(customer):
 
 
 def all_customers():
-    root = customers.customers_dir()
-    return sorted(path.name for path in root.iterdir() if (path / "portals.toml").is_file())
+    return [name for name in customers.names() if (customers.customer_dir(name) / "portals.toml").is_file()]
 
 
 def write_private(path, text):

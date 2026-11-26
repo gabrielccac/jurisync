@@ -23,7 +23,7 @@ Em validação (12/09/2026), o texto retornado por `pje_get_process` (tanto em c
 
 - **Não copiar o texto bruto extraído diretamente** para descrição de tarefa ou resumo sem antes verificar/normalizar a acentuação.
 - Se não for possível confirmar que o encoding foi corrigido, sinalizar no resumo que a descrição da tarefa pode conter caracteres corrompidos, para revisão humana.
-- Re-testar com o processo de exemplo `1053017-92.2025.4.01.3200` (documentos `2226603925`, `2226604785`, `2251061353`) antes de remover este aviso.
+- Re-testar com o processo de exemplo `1000049-00.2025.4.01.3200` (documentos `2226603925`, `2226604785`, `2251061353`) antes de remover este aviso.
 
 ## Fluxo
 

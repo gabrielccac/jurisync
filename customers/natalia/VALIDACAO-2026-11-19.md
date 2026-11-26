@@ -6,14 +6,14 @@ Testes ao vivo com `JURISYNC_CUSTOMER=natalia`, só leitura e em modo headless, 
 
 | Portal | Login | Contadores/caixa | Processos | Processo (timeline) | Documento | Observação |
 |---|---|---|---|---|---|---|
-| `trf1-1g` | ✅ | ✅ todos os buckets em 0; caixa vazia | ✅ Push: 8 | ✅ 1002241-74.2020.4.01.3811: 29 movimentos, 42 documentos, 5 expedientes (0 abertos) | ✅ Substabelecimento (1138465260), 1.121 caracteres | Senha e perfil de OTP confirmados hoje |
-| `trf3-1g` | ✅ | ✅ 3 pendentes, 1 com prazo findo, 9 respondidos; caixa: 3 linhas em 3 caixas | ✅ Push: 47 | ✅ 5039217-49.2023.4.03.6301: 15 movimentos, 18 documentos, 1 expediente (0 aberto) | ✅ Certidão de Trânsito em Julgado (375787504), 518 caracteres | Escolhi um processo fora da caixa de pendentes |
-| `trf3-2g` | ✅ | ✅ tudo em 0; caixa vazia | ✅ Push: 8 | ✅ 5001511-66.2024.4.03.6343: 20 movimentos, 114 documentos, 7 expedientes (0 abertos) | ✅ Certidão de Trânsito em Julgado (368480817), 749 caracteres | |
-| `trf5-1g` | ✅ | ✅ 1 pendente, 1 sem prazo; caixa: 1 linha | ✅ Push: 3 | ✅ 0011194-71.2023.4.05.8000: 14 movimentos, 16 documentos, 4 expedientes (0 abertos) | ⚠️ Procuração/Habilitação (42449182): PDF baixado (HTTP 200), mas `ocr_needed` e 0 caracteres | Sem A1, entrou por senha + TOTP. O PDF é digitalizado, por isso não veio texto |
+| `trf1-1g` | ✅ | ✅ todos os buckets em 0; caixa vazia | ✅ Push: 8 | ✅ 1000075-00.2020.4.01.3811: 29 movimentos, 42 documentos, 5 expedientes (0 abertos) | ✅ Substabelecimento (1138465260), 1.121 caracteres | Senha e perfil de OTP confirmados hoje |
+| `trf3-1g` | ✅ | ✅ 3 pendentes, 1 com prazo findo, 9 respondidos; caixa: 3 linhas em 3 caixas | ✅ Push: 47 | ✅ 5000076-00.2023.4.03.6301: 15 movimentos, 18 documentos, 1 expediente (0 aberto) | ✅ Certidão de Trânsito em Julgado (375787504), 518 caracteres | Escolhi um processo fora da caixa de pendentes |
+| `trf3-2g` | ✅ | ✅ tudo em 0; caixa vazia | ✅ Push: 8 | ✅ 5000077-00.2024.4.03.6343: 20 movimentos, 114 documentos, 7 expedientes (0 abertos) | ✅ Certidão de Trânsito em Julgado (368480817), 749 caracteres | |
+| `trf5-1g` | ✅ | ✅ 1 pendente, 1 sem prazo; caixa: 1 linha | ✅ Push: 3 | ✅ 0000078-00.2023.4.05.8000: 14 movimentos, 16 documentos, 4 expedientes (0 abertos) | ⚠️ Procuração/Habilitação (42449182): PDF baixado (HTTP 200), mas `ocr_needed` e 0 caracteres | Sem A1, entrou por senha + TOTP. O PDF é digitalizado, por isso não veio texto |
 | `tjrj-1g` (PJe TJRJ) | ✅ | ✅ tudo em 0; caixa vazia | Push: 0 | não testado | não testado | **Login ok, sem processos** visíveis no Push e na caixa. O conector não lista o acervo, então um processo fora do Push não aparece aqui |
-| `tjpa-1g` | ✅ | ✅ tudo em 0; caixa vazia | ✅ Push: 2 | ✅ 0802512-14.2023.8.14.0013: 40 movimentos, 59 documentos, 12 expedientes (0 abertos) | ⚠️ Documento de Comprovação (98734222): PDF baixado, `ocr_needed`, 0 caracteres | O TJPA aceitou o login; a "senha expirada" vista antes não apareceu. O PDF é uma imagem (prints) |
-| `tjba-1g` | ✅ | ✅ 1 pendente, 1 "apenas pendente de ciência", 1 "pendente de ciência pelo judiciário"; caixa: 1 linha | ✅ Push: 3 | ✅ 8003997-24.2025.8.05.0110: 39 movimentos, 70 documentos, 15 expedientes (0 abertos) | ✅ Certidão (584087369), HTML, 390 caracteres | O processo com intimação pendente (8007444-83.2026.8.05.0110) não foi aberto |
-| `tjmg-pje-1g` | ✅ | ⚠️ contadores ok (15 pendentes, 13 com ciência do Judiciário, 11 com prazo findo, 2 sem prazo, 8 respondidos), mas a **caixa veio vazia** (0 caixas, 0 linhas, `complete=true`) | ✅ Push: 20 | ✅ 5004935-56.2020.8.13.0261: 30 movimentos, 109 documentos, 16 expedientes (0 abertos) | ✅ Documento de Comprovação (1025694800), PDF, 3.392 caracteres | Bug na leitura da caixa (ver abaixo) |
+| `tjpa-1g` | ✅ | ✅ tudo em 0; caixa vazia | ✅ Push: 2 | ✅ 0800079-00.2023.8.14.0013: 40 movimentos, 59 documentos, 12 expedientes (0 abertos) | ⚠️ Documento de Comprovação (98734222): PDF baixado, `ocr_needed`, 0 caracteres | O TJPA aceitou o login; a "senha expirada" vista antes não apareceu. O PDF é uma imagem (prints) |
+| `tjba-1g` | ✅ | ✅ 1 pendente, 1 "apenas pendente de ciência", 1 "pendente de ciência pelo judiciário"; caixa: 1 linha | ✅ Push: 3 | ✅ 8000080-00.2025.8.05.0110: 39 movimentos, 70 documentos, 15 expedientes (0 abertos) | ✅ Certidão (584087369), HTML, 390 caracteres | O processo com intimação pendente (8000081-00.2026.8.05.0110) não foi aberto |
+| `tjmg-pje-1g` | ✅ | ⚠️ contadores ok (15 pendentes, 13 com ciência do Judiciário, 11 com prazo findo, 2 sem prazo, 8 respondidos), mas a **caixa veio vazia** (0 caixas, 0 linhas, `complete=true`) | ✅ Push: 20 | ✅ 5000082-00.2020.8.13.0261: 30 movimentos, 109 documentos, 16 expedientes (0 abertos) | ✅ Documento de Comprovação (1025694800), PDF, 3.392 caracteres | Bug na leitura da caixa (ver abaixo) |
 | `tst` | ❌ | — | — | — | — | `LoginRejected: The portal rejected the username/password` (o formulário `kc-otp-login-form` não voltou de `sso.cloud.pje.jus.br/auth/realms/pje/login-actions/authenticate`). **Parei todos os logins seguintes** |
 | `trt1-1g` | não tentado | — | — | — | — | Bloqueado pela regra de parada depois da recusa no TST |
 | `trt1-2g` | não tentado | — | — | — | — | idem |
@@ -62,11 +62,11 @@ O conector passou a usar a rota de senha ("Entrar", `index.php`) como padrão no
 
 | Portal | Login | Avisos | Processos | Processo (timeline) | Documento | Observação |
 |---|---|---|---|---|---|---|
-| `tjrj-eproc-1g` | ✅ | 1 prazo aberto; pendentes 0 | 4 | 3001751-83.2026.8.19.0024: 24 eventos | ✅ petição inicial, 19.902 caracteres | |
-| `trf2-1g-rj` (JFRJ) | ✅ | 2 prazos abertos; pendentes 0 | 4 | 5073707-33.2026.4.02.5101: 23 eventos | ✅ petição inicial, ~30 mil caracteres | Antes da correção o conector mandava a senha pela rota do certificado |
-| `trf2-1g-es` (JFES) | ✅ | tudo 0 | 3 | 5006345-17.2026.4.02.5003: 17 eventos | ✅ petição inicial, ~20 mil caracteres | idem |
-| `tjms-eproc-1g` | ✅ | tudo 0 | 1 | 5000145-03.2026.8.12.0049: 28 eventos | ✅ petição inicial, ~29 mil caracteres | Entrou por senha, sem A3 |
-| `tjmg-1g` | ✅ | 24 prazos abertos; 4 pendentes; pauta 1 | 50 | 1001391-96.2026.8.13.0042: 6 eventos | ✅ petição inicial, ~15 mil caracteres | O portal abre "Alterar Cadastro" depois do código; o conector segue para o painel sem enviar nada. Os 50 processos podem ser uma página só (conferir paginação). 3 logins hoje (2 para corrigir o reconhecimento do painel), todos aceitos |
+| `tjrj-eproc-1g` | ✅ | 1 prazo aberto; pendentes 0 | 4 | 3000083-00.2026.8.19.0024: 24 eventos | ✅ petição inicial, 19.902 caracteres | |
+| `trf2-1g-rj` (JFRJ) | ✅ | 2 prazos abertos; pendentes 0 | 4 | 5000084-00.2026.4.02.5101: 23 eventos | ✅ petição inicial, ~30 mil caracteres | Antes da correção o conector mandava a senha pela rota do certificado |
+| `trf2-1g-es` (JFES) | ✅ | tudo 0 | 3 | 5000085-00.2026.4.02.5003: 17 eventos | ✅ petição inicial, ~20 mil caracteres | idem |
+| `tjms-eproc-1g` | ✅ | tudo 0 | 1 | 5000086-00.2026.8.12.0049: 28 eventos | ✅ petição inicial, ~29 mil caracteres | Entrou por senha, sem A3 |
+| `tjmg-1g` | ✅ | 24 prazos abertos; 4 pendentes; pauta 1 | 50 | 1000087-00.2026.8.13.0042: 6 eventos | ✅ petição inicial, ~15 mil caracteres | O portal abre "Alterar Cadastro" depois do código; o conector segue para o painel sem enviar nada. Os 50 processos podem ser uma página só (conferir paginação). 3 logins hoje (2 para corrigir o reconhecimento do painel), todos aceitos |
 | `trf6-1g` | ❌ | — | — | — | — | "Nome de usuário ou senha inválida" também com o CPF só dígitos. A cliente precisa confirmar a senha do eproc do TRF6 |
 | `trf6-2g` | não tentado | — | — | — | — | Mesma credencial do 1G |
 
@@ -78,22 +78,22 @@ A recusa no TST (17/11 e 19/11) era o formato do usuário: a tela do PJe-JT (tem
 
 | Portal | Login | Contadores (Acervo / Meus exp. / Arquivados) | Processo (timeline) | Documento |
 |---|---|---|---|---|
-| `trt1-1g` | ✅ | 9 / 4 / 2; caixa com 4 linhas | 0100854-63.2025.5.01.0069 | ✅ Certidão de Publicação |
-| `trt1-2g` | ✅ | 1 / 0 / 1 | 0101698-25.2024.5.01.0432 | ✅ Habilitação |
-| `trt2-1g` | ✅ | 4 / 0 / 2 | 1000666-39.2024.5.02.0332 | ✅ Certidão de Oficial de Justiça |
-| `trt3-1g` | ✅ | 96 / 9 / 247; Push 15 | 0010405-28.2022.5.03.0160 | ✅ Despacho |
-| `trt3-2g` | ✅ | 26 / 10 / 67 | 0010894-41.2024.5.03.0113 | ✅ Certidão de Publicação |
+| `trt1-1g` | ✅ | 9 / 4 / 2; caixa com 4 linhas | 0100088-00.2025.5.01.0069 | ✅ Certidão de Publicação |
+| `trt1-2g` | ✅ | 1 / 0 / 1 | 0100089-00.2024.5.01.0432 | ✅ Habilitação |
+| `trt2-1g` | ✅ | 4 / 0 / 2 | 1000090-00.2024.5.02.0332 | ✅ Certidão de Oficial de Justiça |
+| `trt3-1g` | ✅ | 96 / 9 / 247; Push 15 | 0000091-00.2022.5.03.0160 | ✅ Despacho |
+| `trt3-2g` | ✅ | 26 / 10 / 67 | 0000092-00.2024.5.03.0113 | ✅ Certidão de Publicação |
 | `trt5-1g` | ✅ | 2 / 0 / 3 | 0000631-66.2026.5.05.0551 | ✅ Intimação com ciência já dada |
 | `trt6-1g` | ✅ | 1 / 0 / 1 | 0000613-80.2026.5.06.0401 | ✅ Manifestação |
 | `trt10-1g` | ✅ | 3 / 1 / 3 | 0000566-73.2026.5.10.0861 | ✅ Manifestação |
-| `trt12-1g` | ✅ | 1 / 0 / 0 | 0001988-15.2025.5.12.0004 | ✅ Alvará |
-| `trt15-1g` | ✅ | 6 / 0 / 10 | 0010591-51.2023.5.15.0073 | ✅ Manifestação |
-| `trt17-1g` | ✅ | 3 / 1 / 0; Push 3 | 0001395-59.2025.5.17.0161 | ✅ Certidão de Publicação |
-| `trt18-1g` | ✅ | 3 / 1 / 3 | 0001204-07.2025.5.18.0122 | ✅ Certidão de Remessa |
+| `trt12-1g` | ✅ | 1 / 0 / 0 | 0000093-00.2025.5.12.0004 | ✅ Alvará |
+| `trt15-1g` | ✅ | 6 / 0 / 10 | 0000094-00.2023.5.15.0073 | ✅ Manifestação |
+| `trt17-1g` | ✅ | 3 / 1 / 0; Push 3 | 0000095-00.2025.5.17.0161 | ✅ Certidão de Publicação |
+| `trt18-1g` | ✅ | 3 / 1 / 3 | 0000096-00.2025.5.18.0122 | ✅ Certidão de Remessa |
 | `trt19-1g` | ✅ (2ª tentativa) | 1 / 0 / 4 | 0000216-14.2026.5.19.0060 | ✅ Manifestação |
-| `trt24-1g` | ✅ | 1 / 0 / 4 | 0024351-16.2026.5.24.0072 | ✅ Intimação com ciência já dada |
-| `tst` | ✅ | 10 / 3 / 10 | 0010024-18.2024.5.03.0041 | ✅ Certidão de redistribuição |
-| `tjmg-pje-tr` | ✅ | 2 pendentes; caixa com 2 linhas | 5006706-93.2025.8.13.0261 | ✅ Embargos de Declaração |
+| `trt24-1g` | ✅ | 1 / 0 / 4 | 0000097-00.2026.5.24.0072 | ✅ Intimação com ciência já dada |
+| `tst` | ✅ | 10 / 3 / 10 | 0000098-00.2024.5.03.0041 | ✅ Certidão de redistribuição |
+| `tjmg-pje-tr` | ✅ | 2 pendentes; caixa com 2 linhas | 5000099-00.2025.8.13.0261 | ✅ Embargos de Declaração |
 
 Expedientes com ciência pendente (não abertos): TRT1 1G, TRT3 1G, TRT18 1G, TST e Turma Recursal do TJMG.
 

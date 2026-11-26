@@ -41,6 +41,27 @@ LIBREOFFICE_BIN=/machine/soffice # the local build
 ADVBOX_TIMEOUT_SECONDS=90
 """
 MACHINE = {"JURISYNC_DOCUMENTS_DIR", "JURISYNC_CHROME_PATH", "LIBREOFFICE_BIN", "ADVBOX_TIMEOUT_SECONDS"}
+SHARED_WRITES = ("PJE_ALLOW_DRAFT_WRITES", "JURIDIQ_ALLOW_WRITES")
+
+
+def test_a_write_grant_in_the_shared_file_reaches_no_office(files):
+    own, shared = files
+    own.write_text("PJE_1G_USERNAME=acme-user\n")
+    shared.write_text(SHARED)
+    os.environ["JURISYNC_CUSTOMER"] = "acme"
+    load_env_file(shared)
+    for name in SHARED_WRITES:
+        assert name not in os.environ
+
+
+def test_an_office_grants_its_own_writes(files):
+    own, shared = files
+    own.write_text("JURIDIQ_ALLOW_WRITES=true\n")
+    shared.write_text("PJE_ALLOW_DRAFT_WRITES=true\n")
+    os.environ["JURISYNC_CUSTOMER"] = "acme"
+    load_env_file(shared)
+    assert os.environ["JURIDIQ_ALLOW_WRITES"] == "true"
+    assert "PJE_ALLOW_DRAFT_WRITES" not in os.environ
 
 
 def test_with_a_customer_the_shared_file_gives_machine_settings_only(files, caplog):
@@ -57,10 +78,9 @@ def test_with_a_customer_the_shared_file_gives_machine_settings_only(files, capl
     assert os.environ["JURISYNC_CHROME_PATH"] == "/machine/chrome"
     assert os.environ["LIBREOFFICE_BIN"] == "/machine/soffice"
     assert os.environ["ADVBOX_TIMEOUT_SECONDS"] == "90"
-    shared_writes = {"PJE_ALLOW_DRAFT_WRITES", "JURIDIQ_ALLOW_WRITES"}  # write flags are shared on purpose
-    assert set(os.environ) - before == {"PJE_1G_USERNAME", "ADVBOX_ALLOW_WRITES", *shared_writes, *MACHINE}
+    assert set(os.environ) - before == {"PJE_1G_USERNAME", "ADVBOX_ALLOW_WRITES", *MACHINE}
     skipped = caplog.records[-1].getMessage()
-    for name in ("PJE_1G_PASSWORD", "PJE_1G_CERT", "JURIDIQ_LOGIN_URL", "JURISYNC_VAULT_KEY"):
+    for name in ("PJE_1G_PASSWORD", "PJE_1G_CERT", "JURIDIQ_LOGIN_URL", "JURISYNC_VAULT_KEY", *SHARED_WRITES):
         assert name in skipped
     for value in ("shared-password", "shared-totp", "vault-key", "elsewhere"):
         assert value not in caplog.text
@@ -124,6 +144,8 @@ def test_an_installed_office_reads_its_whole_user_file(files, named_by):
         ("PJE_TRF5_1G_SESSION_ACCOUNT", False),
         ("TYPESAFE_API_KEY", False),
         ("JURIDIQ_API_BASE_URL", False),
+        ("ADVBOX_ALLOW_WRITES", False),
+        ("PJE_ALLOW_DRAFT_WRITES", False),
         ("ESAJ_BRIDGE_CDP", False),
     ],
 )

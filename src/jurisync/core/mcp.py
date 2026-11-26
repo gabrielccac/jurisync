@@ -34,13 +34,12 @@ def is_secret_name(name):
 # With a customer selected, the shared file provides only these: settings about this computer, never about an office.
 # JURISYNC_* are locations, binaries and limits; the *_PATH/_BIN/_CACHE names point at installed programs and
 # libraries; DJEN_BRIDGE_* is the server's own route to the CNJ API; the ADVBOX numbers are local limits; DISPLAY is
-# the screen a launched browser opens on. The write flags are shared on purpose (writes stay on for every office
-# unless its portals.toml pins them off). Everything else (credentials, *_CERT, *_SESSION_ACCOUNT, *_OTP_PROFILE_*, *_LOGIN_URL and base URLs,
-# session files, browser profiles, API keys billed to an office) comes from customers/<name>/.env or portals.toml.
+# the screen a launched browser opens on. Everything else (credentials, write grants such as *_ALLOW_WRITES, *_CERT,
+# *_SESSION_ACCOUNT, *_OTP_PROFILE_*, *_LOGIN_URL and base URLs, session files, browser profiles, API keys billed to an
+# office) comes from customers/<name>/.env or portals.toml, so turning writes on for one office leaves the others off.
 MACHINE_PATTERNS = (
     "JURISYNC_*", "LIBREOFFICE_BIN", "*_CHROME_PATH", "PDFIUM_LIB_PATH", "ORT_DYLIB_PATH", "PDF_INSPECTOR_MODEL_CACHE",
-    "DJEN_BRIDGE_*", "PJE_SESSION_DIR", "*_ALLOW_WRITES", "*_ALLOW_DRAFT_WRITES", "ADVBOX_TIMEOUT_SECONDS",
-    "ADVBOX_MAX_DOWNLOAD_BYTES",
+    "DJEN_BRIDGE_*", "PJE_SESSION_DIR", "ADVBOX_TIMEOUT_SECONDS", "ADVBOX_MAX_DOWNLOAD_BYTES",
     "ADVBOX_MAX_PDF_TEXT_CHARS", "DISPLAY", "WAYLAND_DISPLAY",
 )  # fmt: skip
 NEVER_SHARED = ("JURISYNC_VAULT_KEY",)

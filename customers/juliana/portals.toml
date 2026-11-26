@@ -4,7 +4,7 @@
 # Portais escolhidos pelas publicações do DJEN (set–nov/2026, 781 comunicações) e pelas contas do autenticador.
 # Cada <PREFIX>_2FA_DATA guarda só a conta daquele tribunal (otpauth://totp), escolhida pelo emissor da exportação.
 
-# Eproc: A1 + autenticador do tribunal (<PREFIX>_CERT em [env].set).
+# Eproc: A1 + autenticador do tribunal (o method certificate_* liga o <PREFIX>_CERT).
 [tjmg-1g]
 method = "certificate_mtls"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJMG_1G_2FA_DATA"]
@@ -166,4 +166,4 @@ secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 # Sem conector: Eproc TJAL e TJSE, Projudi TJBA.
 
 [env]
-set = { TJMG_1G_CERT = "true", TJMG_2G_CERT = "true", TJSP_1G_CERT = "true", TJSP_2G_CERT = "true", TJSC_1G_CERT = "true", TJSC_2G_CERT = "true", TJRJ_1G_CERT = "true", TJRJ_2G_CERT = "true", TJMS_1G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJRS_1G_CERT = "true", TJPR_1G_CERT = "true", TJPR_2G_CERT = "true", TRF6_CERT = "true", TJMG_PJE_1G_CERT = "true", TJMG_PJE_TR_CERT = "true", TJAP_1G_CERT = "true", TJPE_1G_CERT = "true", PJE_TRF3_1G_CERT = "true", PJE_1G_CERT = "true", TJSP_1G_USER_PROFILE = "MG144366", TJSP_2G_USER_PROFILE = "MG144366", TJGO_1G_USER_PROFILE = "MG144366" }
+set = { TJSP_1G_USER_PROFILE = "MG144366", TJSP_2G_USER_PROFILE = "MG144366", TJGO_1G_USER_PROFILE = "MG144366" }

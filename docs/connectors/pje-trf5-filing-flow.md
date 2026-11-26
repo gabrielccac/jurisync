@@ -69,7 +69,7 @@ the observed flow and this implementation scope.
 Draft `4167920` was created through direct requests by selecting the captured
 area, jurisdiction, and class, then submitting **Incluir**. Subject `11946` was
 added to that same draft. The browser later removed its author, and direct
-requests added the author back using CPF `12433377617`. Reloading the Partes
+requests added the author back using CPF `00000000191`. Reloading the Partes
 tab showed the author. Direct requests then associated the captured attorney,
 INSS in the passive pole, CEAB-DJ INSS as **ÓRGÃO DE CUMPRIMENTO**, and
 Ministério Público da União as **FISCAL DA LEI**. A subsequent unified fill run
@@ -80,7 +80,7 @@ the script.
 
 The live portal had advanced from version `2.11.2.0-38` in the first capture
 to `2.11.2.0-39` during this verification. A fresh browser capture showed that
-the CPF input mask sends `124.333.776-17`; sending unmasked digits caused the
+the CPF input mask sends `000.000.001-91`; sending unmasked digits caused the
 person-confirmation request to redirect to `errorUnexpected.seam`. After
 applying the mask, that confirmation succeeded. The browser also opened the
 **Endereços** tab before **Inserir Parte**. This tab is optional for address

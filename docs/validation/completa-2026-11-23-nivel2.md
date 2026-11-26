@@ -78,17 +78,17 @@ Por isso a fonte foi o passo 3: processo público do mesmo tribunal e da mesma i
 - **`trf5-2g`:**
   - `pje_list_processes`: 3,5 s, 10 req (login), 0 itens, `complete=true`.
   - DJEN público TRF5 de 1ª Relatoria TR/SE, host `pje2g.trf5.jus.br`.
-  - `pje_get_process` 0012814-39.2024.4.05.8500: 10,2 s, 8 req, 129 docs, 16 eventos, 12 expedientes `complete=true` (3 pendentes das partes).
+  - `pje_get_process` 0000186-00.2024.4.05.8500: 10,2 s, 8 req, 129 docs, 16 eventos, 12 expedientes `complete=true` (3 pendentes das partes).
   - `pje_read_documents`: Acórdão 30913737, fora dos expedientes, `extracted`, 2.000 caracteres (textLimit), 2 req, `ciencia=nenhuma`.
 - **`trf5-tru`:**
   - `pje_list_processes`: 4,6 s, 0 itens, `complete=true`.
   - DJEN público TRF5 de Gabinete de desembargador, host `pjett.trf5.jus.br`.
-  - `pje_get_process` 0003579-66.2026.4.05.0000: 10,8 s, 50 docs, 16 expedientes `complete=true`.
+  - `pje_get_process` 0000187-00.2026.4.05.0000: 10,8 s, 50 docs, 16 expedientes `complete=true`.
   - Leitura: Acórdão 14119705, `extracted`, 2 req, `nenhuma`.
 - **`tjmg-2g`:**
   - Lista: 4,8 s, 0, completa.
   - DJEN público TJMG pelo host `eproc2g.tjmg.jus.br`: só 2 comunicações em 3 semanas, do "1º Núcleo – Especializado".
-  - `eproc_get_process` 5258603-82.2023.8.13.0024 (42 eventos, 6 docs) e 5204136-90.2022.8.13.0024 (27 eventos, 3 docs): `nenhuma`.
+  - `eproc_get_process` 5200188-00.2023.8.13.0024 (42 eventos, 6 docs) e 5200189-00.2022.8.13.0024 (27 eventos, 3 docs): `nenhuma`.
   - Documento: ⚠️ roteiro.
 - **`tjms-eproc-1g`:**
   - Lista: 3,5 s, 0, completa.
@@ -106,7 +106,7 @@ Por isso a fonte foi o passo 3: processo público do mesmo tribunal e da mesma i
 - **`trf2-2g`:**
   - Lista: 3,3 s, 0, completa.
   - DJEN público TRF2, host `eproc.trf2.jus.br`. O 1º candidato foi pulado pela trava do roteiro.
-  - 5014548-39.2026.4.02.0000: 36 eventos, 7 docs, `nenhuma`.
+  - 5000190-00.2026.4.02.0000: 36 eventos, 7 docs, `nenhuma`.
   - Leitura (`scope=page` + 1 id): Acórdão, `extracted`, 6.262 caracteres, 5 req, `nenhuma`.
 - **`tjpr-2g`:**
   - Lista: 9,4 s, 0, completa.
@@ -115,7 +115,7 @@ Por isso a fonte foi o passo 3: processo público do mesmo tribunal e da mesma i
 - **`tnu`:**
   - Lista: 5,5 s, 16 req, 0, completa.
   - DJEN público, tribunal `CJF`, host `eproctnu.cjf.jus.br`. O filtro `TNU` deu HTTP 500 ou 429 no DJEN.
-  - 5009038-33.2023.4.04.7004: 108 eventos (2 páginas), 26 docs, `nenhuma`.
+  - 5000191-00.2023.4.04.7004: 108 eventos (2 páginas), 26 docs, `nenhuma`.
   - Leitura: Acórdão, `extracted`, 3.378 caracteres, 6 req, `nenhuma`.
 
 ### denis
@@ -127,7 +127,7 @@ Por isso a fonte foi o passo 3: processo público do mesmo tribunal e da mesma i
 - **`tjsp-2g`:**
   - Lista: 12,2 s, 0, completa.
   - DJEN público TJSP, host `eproc2g.tjsp.jus.br`.
-  - 1054260-80.2024.8.26.0224: 46 eventos, 5 docs, `nenhuma`.
+  - 1000192-00.2024.8.26.0224: 46 eventos, 5 docs, `nenhuma`.
   - Leitura: Acórdão, `extracted`, 2.866 caracteres, 5 req, `nenhuma`.
 
 ### max
@@ -142,7 +142,7 @@ Por isso a fonte foi o passo 3: processo público do mesmo tribunal e da mesma i
 
   A correção está confirmada ao vivo. A caixa para no balde "Intimações / Pendentes" (índice 2, 0 itens) e não abre RPV/PRC nem Pauta: de 49 s caiu para cerca de 12 s, como o esperado de cerca de 11 s.
   - `pje_list_processes`: recusado, como documentado.
-  - `pje_get_process` com 3 números antigos do 2º grau do TRF5, achados no DJEN e hoje no pjett: 0802341-91.2017, 0804155-70.2019 e 0805039-70.2017.4.05.0000. Os três deram "Process not found in the PJe 1.x search (the account may not see it)", em cerca de 3 s e 2 req cada.
+  - `pje_get_process` com 3 números antigos do 2º grau do TRF5, achados no DJEN e hoje no pjett: 0802341-91.2017, 0804155-70.2019 e 0800193-00.2017.4.05.0000. Os três deram "Process not found in the PJe 1.x search (the account may not see it)", em cerca de 3 s e 2 req cada.
   - O DJEN não tem nenhum link para `pje.trf5.jus.br` em 120 dias: as buscas pelo host só trazem `pjett` e `pje1g`. O detalhe do processo e a leitura de documento no PJe 1.x continuam sem validação ao vivo.
 - **`trt20-2g`:**
   - `pje_list_processes`: 12,7 s, 15 req, **2 processos**, `complete=true`.
@@ -185,12 +185,12 @@ Código: o mesmo worktree, agora em `7fcee69` (o KZ já preenche `failure` no `h
 
 | Conta | Portal | Fonte do número | Processo | Documento lido | Resultado |
 |---|---|---|---|---|---|
-| fernanda | `tjmg-2g` | DJEN público (rodada 1) | 5258603-82.2023.8.13.0024: 11,0 s, 17 req (login), `nenhuma` | Decisão, `extracted`, 3.423 car., 5,6 s, `nenhuma` | ✅ |
-| fernanda | `tjms-eproc-1g` | DJEN público (rodada 1) | 5001671-31.2026.8.12.0008: 22,2 s (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.734 car., 2,5 s, `nenhuma` | ✅ |
-| fernanda | `trf6-2g` | DJEN público (rodada 1) | 6009736-57.2025.4.06.0000: 18,2 s (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.998 car., 7,8 s, `nenhuma` | ✅ |
-| max | `tjrj-eproc-2g` | DJEN público (rodada 1) | 3019804-87.2026.8.19.0000: 9,8 s (login), `nenhuma` | Decisão monocrática, `extracted`, 6.709 car., 4,2 s, `nenhuma` | ✅ |
+| fernanda | `tjmg-2g` | DJEN público (rodada 1) | 5200188-00.2023.8.13.0024: 11,0 s, 17 req (login), `nenhuma` | Decisão, `extracted`, 3.423 car., 5,6 s, `nenhuma` | ✅ |
+| fernanda | `tjms-eproc-1g` | DJEN público (rodada 1) | 5000194-00.2026.8.12.0008: 22,2 s (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.734 car., 2,5 s, `nenhuma` | ✅ |
+| fernanda | `trf6-2g` | DJEN público (rodada 1) | 6000195-00.2025.4.06.0000: 18,2 s (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.998 car., 7,8 s, `nenhuma` | ✅ |
+| max | `tjrj-eproc-2g` | DJEN público (rodada 1) | 3000196-00.2026.8.19.0000: 9,8 s (login), `nenhuma` | Decisão monocrática, `extracted`, 6.709 car., 4,2 s, `nenhuma` | ✅ |
 | max | `trt20-2g` | lista própria (Acervo) | 0000185-40.2023.5.20.0005: 6,8 s, 227 docs, 20 exp. (0 pendentes) | 3 de 5 lidos. Os 2 Acórdãos de 2º grau: `http_error`, `failure="HTTP 500"` | ⚠️ (ver abaixo) |
-| herica | `tjpr-2g` | **DJEN por número gerado** (ver abaixo) | 6000016-20.2026.8.16.0000 (3ª Câmara Cível): 9,8 s, 18 req (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.806 car., 3,5 s, `nenhuma` | ✅ |
+| herica | `tjpr-2g` | **DJEN por número gerado** (ver abaixo) | 6000197-00.2026.8.16.0000 (3ª Câmara Cível): 9,8 s, 18 req (login), `nenhuma` | Despacho/Decisão, `extracted`, 1.806 car., 3,5 s, `nenhuma` | ✅ |
 | max | `trf5-legacy` | DJEN público (rodada 1). Não há outro número | 3 × "Process not found in the PJe 1.x search" | — | ⚠️ sem processo no sistema |
 
 **Resultado:**
@@ -225,7 +225,7 @@ Ficou sem teste um documento de 2º grau que não seja ato de magistrado, como o
 ### `tjpr-2g` (herica): como saiu o número
 
 - **(b) DJEN por texto (365 dias, TJPR):** "eproc2g" deu 1 resultado (Projudi) e "acórdão eproc" deu 0. A busca por texto não vê o host do link. Por isso a rodada 1 concluiu, sem razão, que não havia comunicação.
-- **(c) DJEN por número gerado:** o Eproc do TJPR numera a partir de 6000000, como mostra o 1º grau da herica (6000139-92.2026.8.16.0137, host `eproc1g.tjpr`). Gerei 6000001 a 6000030 de 2026, origem `.8.16.0000`, com o dígito verificador CNJ, e busquei `numeroProcesso` no DJEN entre 23/11/2025 e 23/11/2026. **26 de 30 existem, todos com host `eproc2g.tjpr.jus.br`.** As comunicações são de 10/08 a 26/10/2026, de Câmaras Cíveis e de Gabinetes de desembargador.
+- **(c) DJEN por número gerado:** o Eproc do TJPR numera a partir de 6000000, como mostra o 1º grau da herica (6000040-00.2026.8.16.0137, host `eproc1g.tjpr`). Gerei 6000001 a 6000030 de 2026, origem `.8.16.0000`, com o dígito verificador CNJ, e busquei `numeroProcesso` no DJEN entre 23/11/2025 e 23/11/2026. **26 de 30 existem, todos com host `eproc2g.tjpr.jus.br`.** As comunicações são de 10/08 a 26/10/2026, de Câmaras Cíveis e de Gabinetes de desembargador.
   - Ou seja, o eproc 2º grau do TJPR publica no DJEN desde agosto de 2026.
   - A varredura por texto da rodada 1 (10 a 23/11) só não pegou essas comunicações.
 - **(a) Não usada:** não foi preciso logar no `tjpr-1g`. O único processo da herica lá é de 2026 e não tem remessa.

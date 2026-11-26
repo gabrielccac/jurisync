@@ -3,7 +3,9 @@
 A customer is a directory under ``customers/``. Two files describe its access:
 
 * ``portals.toml`` (committed, no values): for each portal key, the login ``method`` and
-  the environment variables that must be set. Alternatives are joined with ``|``.
+  the environment variables that must be set. Alternatives are joined with ``|``. The method decides
+  the login: a PJe or Eproc portal declared with a certificate method gets ``<PREFIX>_CERT=true``
+  without repeating it in ``[env].set``.
 * ``.env`` (gitignored, the secrets): the values of those variables.
 
 An optional ``settings.toml`` (committed) holds the customer's choices, e.g.
@@ -24,6 +26,11 @@ from jurisync.core import credentials
 
 # Methods a customer may declare. Connectors decide how each one logs in.
 METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate_challenge", "browser_totp")
+# Systems whose portals switch to the A1 login with <PREFIX>_CERT (Portal.uses_certificate), and the methods that mean
+# it. The switch only acts where an A1 is configured: an A3 login (PJE_AUTH/EPROC_AUTH=a3) is chosen before it.
+CERTIFICATE_SYSTEMS = ("pje", "eproc")
+CERTIFICATE_METHODS = ("certificate_totp", "certificate_mtls")
+TRUE = ("1", "true", "yes", "on")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,7 +81,25 @@ def load_setup(name):
         if not isinstance(secrets, list) or not all(isinstance(item, str) and item for item in secrets):
             raise ValueError(f"{name}/{key}: secrets must be a list of variable names")
         setups[key] = PortalSetup(key, method, tuple(secrets))
+    pinned = data.get(RESERVED_TABLE, {}).get("set") or {}
+    for variable, on in certificate_switches(setups).items():
+        if variable in pinned and (str(pinned[variable]).strip().lower() in TRUE) != on:
+            raise ValueError(
+                f"{name}: [env].set {variable} = {pinned[variable]!r} contradicts the method declared for its portal"
+            )
     return setups
+
+
+def certificate_switches(setups):
+    """``<PREFIX>_CERT`` of each declared PJe/Eproc portal: on when its method is a certificate login."""
+    switches = {}
+    for key, setup in setups.items():
+        portal = portals.get(key)
+        if portal.system not in CERTIFICATE_SYSTEMS or not portal.env_prefix:
+            continue
+        variable = portal.env_name("CERT")
+        switches[variable] = switches.get(variable, False) or setup.method in CERTIFICATE_METHODS
+    return switches
 
 
 RESERVED_TABLE = "env"  # [env] lists variables that belong to no portal (ADVBOX login, CPF, API keys)
@@ -102,13 +127,15 @@ def extra_variables(name):
 
 
 def fixed_variables(name):
-    """Variables the customer's ``[env].set`` table pins to a value (e.g. ADVBOX_ALLOW_WRITES = "true")."""
+    """Variables the profile pins to a value: ``<PREFIX>_CERT=true`` of each portal declared with a certificate method,
+    then the ``[env].set`` table (e.g. ADVBOX_ALLOW_WRITES = "true")."""
     path = customer_dir(name) / "portals.toml"
     try:
         table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
     except FileNotFoundError:
         return {}
-    return {str(key): str(value) for key, value in (table.get("set") or {}).items()}
+    switches = {variable: "true" for variable, on in certificate_switches(load_setup(name)).items() if on}
+    return {**switches, **{str(key): str(value) for key, value in (table.get("set") or {}).items()}}
 
 
 CIENCIA_POLICIES = ("ask", "allow")
@@ -153,6 +180,44 @@ def hosted_mode(name):
 def customer_env_path(name=None):
     name = name or customer_name()
     return customer_dir(name) / ".env" if name else None
+
+
+def names():
+    """Every customer folder (``_template`` and other ``_``/``.`` folders are not customers)."""
+    root = customers_dir()
+    if not root.is_dir():
+        return []
+    return sorted(path.name for path in root.iterdir() if path.is_dir() and not path.name.startswith(("_", ".")))
+
+
+def validate(name):
+    """What keeps a customer folder from working, one line each; empty when it is ready. Reads no secret values."""
+    folder = customer_dir(name)
+    try:
+        setups = load_setup(name)
+        required, optional = extra_variables(name)
+    except (ValueError, tomllib.TOMLDecodeError) as error:
+        return [str(error)]
+    problems = []
+    if not setups and not required:
+        problems.append(f"{name}: portals.toml declares no portal and no [env] secrets")
+    for read in (ciencia_on_read, hosted_mode):
+        try:
+            read(name)
+        except (ValueError, tomllib.TOMLDecodeError) as error:
+            problems.append(f"{name}: {error}")
+    example = folder / ".env.example"
+    if example.is_file():
+        listed = {
+            line.lstrip("# ").split("=", 1)[0].strip()
+            for line in example.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+        }
+        groups = [group for setup in setups.values() for group in setup.secrets] + list(required)
+        for group in dict.fromkeys(groups):
+            if not any(variable.strip() in listed for variable in group.split("|")):
+                problems.append(f"{name}: .env.example lacks {group}")
+    return problems
 
 
 def check(name):

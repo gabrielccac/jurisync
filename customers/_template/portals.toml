@@ -1,0 +1,27 @@
+# Acesso do escritório aos portais: só o método de login e os NOMES das variáveis, nunca valores.
+# Os valores vão no customers/<nome>/.env (ignorado pelo git) ou, no servidor hospedado, no cofre do escritório.
+# "A|B" quer dizer que qualquer uma das duas basta.
+#
+# Chave da seção = chave do portal em src/jurisync/portals.py (trf1-1g, trf4-2g, tjsp-esaj...).
+# method decide o login:
+#   password_totp          usuário + senha + autenticador (PJe pelo SSO)
+#   certificate_totp       certificado A1 + autenticador; em PJe e Eproc liga <PREFIXO>_CERT sozinho
+#   certificate_mtls       certificado A1 por TLS mútuo (Eproc, STJ); em Eproc também liga <PREFIXO>_CERT
+#   certificate_challenge  certificado A1 assinando um desafio (e-SAJ, Projudi)
+#   browser_totp           login no navegador + autenticador (Eproc, e-SAJ)
+# Confira com: jurisync-setup check-customer <nome>
+
+[trf1-1g]
+method = "password_totp"
+secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+
+[trf4-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF4_2G_2FA_DATA|TRF4_2G_2FA_QR"]
+
+# Variáveis que não pertencem a um portal (ADVBOX, Juridiq, chaves de API) e valores fixos do escritório.
+# Escrita no ADVBOX/Juridiq só com a concessão do próprio escritório, aqui ou no .env dele.
+[env]
+secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]
+# optional = ["ADVBOX_UPLOAD_FOLDER"]
+# set = { ADVBOX_ALLOW_WRITES = "true" }

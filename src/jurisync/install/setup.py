@@ -6,6 +6,7 @@ check the logins, and register the servers with Claude.
     jurisync-setup export --customer elisandra --out elisandra.jurisync   # operator: encrypted bundle
     jurisync-setup import elisandra.jurisync                              # customer machine: passphrase on a local page
     jurisync-setup skills --customer elisandra                            # install/update the customer's skills from GitHub
+    jurisync-setup check-customer [elisandra ...]                         # check customer folders (all by default)
 
 Secrets go to one file (``~/.config/jurisync/.env`` unless ``--env-file``), created with owner-only permissions,
 and are never printed. Servers read that file at startup, so Claude Desktop and Claude Code share the same login.
@@ -642,6 +643,19 @@ def import_main(argv, *, ask_secret, say, stdin=None):
     return 1 if verify_and_register(checks, args, say, servers=set(opened["servers"]) or None) else 0
 
 
+def check_customer_main(argv, *, say):
+    parser = argparse.ArgumentParser(
+        prog="jurisync-setup check-customer", description="Confere a pasta de escritórios sem ler segredos."
+    )
+    parser.add_argument("names", nargs="*", help="escritórios (padrão: todos em customers/)")
+    args = parser.parse_args(argv)
+    problems = [problem for name in args.names or customers.names() for problem in customers.validate(name)]
+    for problem in problems:
+        say(f"  {problem}")
+    say(f"{len(problems)} problema(s)." if problems else "Tudo certo.")
+    return 1 if problems else 0
+
+
 def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -649,6 +663,8 @@ def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
             return export_main(argv[1:], ask_secret=ask_secret, say=say)
         if argv[:1] == ["import"]:
             return import_main(argv[1:], ask_secret=ask_secret, say=say)
+        if argv[:1] == ["check-customer"]:
+            return check_customer_main(argv[1:], say=say)
         if argv[:1] == ["verificar"]:
             return verify_main(argv[1:], say=say)
         if argv[:1] == ["skills"]:

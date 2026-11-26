@@ -76,12 +76,12 @@ helpers do smoke test (`sign_in`), uma sessão MCP por chamada:
 |---|---|
 | `tools/list` | 31 ferramentas. `portal` das 6 ferramentas PJe: enum com os 22 portais PJe da fernanda; das 3 Eproc: os 19 Eproc. Nenhum `pje_draft_*` nem `pje_search_pending_drafts`. |
 | `pje_list_inbox` trf1-1g `maxPages=1` | ok, 5,3 s (com o login). Caixa "Pendentes de ciência ou de resposta": 4 de 4, `complete=true`; todas com `cienciaPendente=false` (Diário Eletrônico). |
-| `pje_get_process` 1027808-06.2026.4.01.4100 `scope=latest` | ok, 4,2 s. 16 documentos no inventário, 3 expedientes (2 citações, 1 intimação), todos com ciência já registrada. |
+| `pje_get_process` 1000145-00.2026.4.01.4100 `scope=latest` | ok, 4,2 s. 16 documentos no inventário, 3 expedientes (2 citações, 1 intimação), todos com ciência já registrada. |
 | `pje_read_documents` doc 2299541720 (Petição inicial, sem expediente) `textLimit=500` | ok, 1,6 s. PDF 205 249 bytes, `extractionStatus=extracted`. Bloco `ciencia: {"estado": "nenhuma"}` presente. `acknowledgeCiencia` não enviado. |
 | `eproc_list_notices` tjsc-1g `open_deadlines` | ok, 8,7 s (com o login). 202 itens, `complete=true`. |
 | `eproc_list_notices` tjsc-1g `pending` | ok, 2,6 s, sem login novo. 18 itens. |
 | `djen_search_saved` 16–23/11 | erro esperado: `This office has no saved DJEN searches` (fernanda não tem `DJEN_SEARCHES`). |
-| `djen_search_communications` processo 10278080620264014100, 01–23/11 | ok, 330 ms, 1 comunicação. (Primeira tentativa com o número formatado foi recusada pela validação, como a descrição do campo avisa.) |
+| `djen_search_communications` processo 10002090020264014100, 01–23/11 | ok, 330 ms, 1 comunicação. (Primeira tentativa com o número formatado foi recusada pela validação, como a descrição do campo avisa.) |
 
 Sessões:
 

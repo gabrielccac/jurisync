@@ -70,9 +70,15 @@ cp .env.example .env
 
 Fill in only the connectors you use; `.env.example` documents every variable.
 
-Claude Code picks up `.mcp.json` from the project root. Each server runs as
-`.venv/bin/python -m jurisync.connectors.<name>.server` and loads `.env` on
-startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
+```bash
+cp .mcp.json.example .mcp.json
+```
+
+Claude Code picks up `.mcp.json` from the project root. The file is gitignored, so each machine keeps its own copy;
+the versioned `.mcp.json.example` runs every server as `uv run --project <checkout> python -m <module>`, which
+works on Windows, Linux and macOS, and loads `.env` on startup. To work as one office, add
+`JURISYNC_CUSTOMER=<name>` to `.env` (or to the environment): every server then reads `customers/<name>/.env` and
+`customers/<name>/portals.toml`. Restart Claude Code (or reload MCP servers) after changing `.env`.
 
 ## Installing on another machine (Claude and Codex)
 
@@ -179,18 +185,20 @@ Shared code never imports from `customers/`.
   (`python -m jurisync.workflows.filing --help`, profile `victor`); TRF1
   spreadsheet watcher (`python -m customers.victor.workflows.pje1g_watch --help`).
 
-Add a customer by creating `customers/<name>/` with a README, its skills under
-`skills/`, and a symlink in `.claude/skills/` for each skill.
+Add a customer by copying `customers/_template/` to `customers/<name>/` and following its README: `portals.toml`
+(login method and variable names per portal), `settings.toml`, `.env.example` and a README. `jurisync-setup
+check-customer <name>` checks the folder without reading secrets, and the test suite runs the same check on every
+folder. Skills go under `skills/`, with a symlink in `.claude/skills/` for each one.
 
 ## Command line
 
 ```bash
-.venv/bin/python -m jurisync.connectors.pje.process --portal trf1-1g --process-number 1024853-70.2023.4.01.3400
+.venv/bin/python -m jurisync.connectors.pje.process --portal trf1-1g --process-number 1000001-00.2023.4.01.3400
 ```
 
 ```bash
 .venv/bin/python -m jurisync.connectors.eproc.client processes --portal trf6-1g
-.venv/bin/python -m jurisync.connectors.eproc.client process --portal trf4-1g-sc --process-number 5000436-79.2026.4.04.7220
+.venv/bin/python -m jurisync.connectors.eproc.client process --portal trf4-1g-sc --process-number 5000002-00.2026.4.04.7220
 ```
 
 ```bash

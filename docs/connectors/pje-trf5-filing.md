@@ -237,16 +237,16 @@ queries. The grid displays at most 16 rows per page.
 
 | Process | Rows seen / reported | Relevant saved types |
 | --- | ---: | --- |
-| `0005394-06.2026.4.05.8308` | 16 / 18 | Laudos → Laudo Médico; PA → Processo Administrativo; quesitos and procuração → Outros Documentos |
-| `0009696-30.2025.4.05.8303` | 16 / 32 | Later identity/residence bundle and certificates → Outros Documentos; initial package is beyond the visible page |
-| `0011038-42.2026.4.05.8303` | 12 / 12 | Comunicado, laudos, quesitos → Documento Comprobatório; PA → Processo Administrativo |
-| `0004131-48.2026.4.05.8304` | 15 / 15 | Comunicado and laudos → Documento Comprobatório; PA → Processo Administrativo |
-| `0004131-36.2026.4.05.8308` | 16 / 16 | Comunicado → Carta de Concessão; comunicado de cessação → Carta de Indeferimento; laudos → Laudo Médico; contrato de honorários → Documento Comprobatório |
-| `0007999-71.2025.4.05.8303` | 16 / 18 | PA → Documento Comprobatório; procuração → Outros Documentos |
-| `0012409-41.2026.4.05.8303` | 10 / 10 | Comunicado → Carta de Indeferimento; contrato e procuração → Instrumento de Procuração; PA → Processo Administrativo |
-| `0006822-23.2026.4.05.8308` | 14 / 14 | Comunicado and laudos → Documento Comprobatório; procuração → Instrumento de Procuração; PA → Processo Administrativo |
-| `0003232-87.2025.4.05.8303` | 11 / 11 | Comunicado and laudos → Documento Comprobatório; procuração → Outros Documentos |
-| `0001748-37.2025.4.05.8303` | 14 / 14 | Comunicado and laudos → Documento Comprobatório; procuração e contrato → Outros Documentos |
+| `0000100-00.2026.4.05.8308` | 16 / 18 | Laudos → Laudo Médico; PA → Processo Administrativo; quesitos and procuração → Outros Documentos |
+| `0000101-00.2025.4.05.8303` | 16 / 32 | Later identity/residence bundle and certificates → Outros Documentos; initial package is beyond the visible page |
+| `0000103-00.2026.4.05.8303` | 12 / 12 | Comunicado, laudos, quesitos → Documento Comprobatório; PA → Processo Administrativo |
+| `0000102-00.2026.4.05.8304` | 15 / 15 | Comunicado and laudos → Documento Comprobatório; PA → Processo Administrativo |
+| `0000104-00.2026.4.05.8308` | 16 / 16 | Comunicado → Carta de Concessão; comunicado de cessação → Carta de Indeferimento; laudos → Laudo Médico; contrato de honorários → Documento Comprobatório |
+| `0000105-00.2025.4.05.8303` | 16 / 18 | PA → Documento Comprobatório; procuração → Outros Documentos |
+| `0000106-00.2026.4.05.8303` | 10 / 10 | Comunicado → Carta de Indeferimento; contrato e procuração → Instrumento de Procuração; PA → Processo Administrativo |
+| `0000107-00.2026.4.05.8308` | 14 / 14 | Comunicado and laudos → Documento Comprobatório; procuração → Instrumento de Procuração; PA → Processo Administrativo |
+| `0000109-00.2025.4.05.8303` | 11 / 11 | Comunicado and laudos → Documento Comprobatório; procuração → Outros Documentos |
+| `0000108-00.2025.4.05.8303` | 14 / 14 | Comunicado and laudos → Documento Comprobatório; procuração e contrato → Outros Documentos |
 
 For a **new initial petition** payload, use the stable filename rules first
 and inspect content when the type remains uncertain:
@@ -271,14 +271,14 @@ failed. Personal names and benefit numbers are omitted here.
 
 | Process | PDF content | Saved PJe type | Content-based route |
 | --- | --- | --- | --- |
-| `0011038-42.2026.4.05.8303` | Medical review did not recognize incapacity; an existing benefit was not extended | Documento Comprobatório | Review as non-extension/cessation |
-| `0004131-48.2026.4.05.8304` | BPC right not recognized; request denied | Documento Comprobatório | Carta de Indeferimento |
-| `0004131-36.2026.4.05.8308` (decision) | Explicit *Deferimento do Pedido* and recognized right to benefit | Carta de Concessão | Carta de Concessão |
-| `0004131-36.2026.4.05.8308` (cessation) | Rehabilitation completed; existing benefit ended | Carta de Indeferimento | Review as cessation; it is not an initial denial |
-| `0012409-41.2026.4.05.8303` | Explicit *Indeferimento do Pedido* | Carta de Indeferimento | Carta de Indeferimento |
-| `0006822-23.2026.4.05.8308` | Explicit *NEGADO* | Documento Comprobatório | Carta de Indeferimento |
-| `0003232-87.2025.4.05.8303` | Explicit *Indeferimento do Pedido* | Documento Comprobatório | Carta de Indeferimento |
-| `0001748-37.2025.4.05.8303` | Explicit *NEGADO* | Documento Comprobatório | Carta de Indeferimento |
+| `0000103-00.2026.4.05.8303` | Medical review did not recognize incapacity; an existing benefit was not extended | Documento Comprobatório | Review as non-extension/cessation |
+| `0000102-00.2026.4.05.8304` | BPC right not recognized; request denied | Documento Comprobatório | Carta de Indeferimento |
+| `0000104-00.2026.4.05.8308` (decision) | Explicit *Deferimento do Pedido* and recognized right to benefit | Carta de Concessão | Carta de Concessão |
+| `0000104-00.2026.4.05.8308` (cessation) | Rehabilitation completed; existing benefit ended | Carta de Indeferimento | Review as cessation; it is not an initial denial |
+| `0000106-00.2026.4.05.8303` | Explicit *Indeferimento do Pedido* | Carta de Indeferimento | Carta de Indeferimento |
+| `0000107-00.2026.4.05.8308` | Explicit *NEGADO* | Documento Comprobatório | Carta de Indeferimento |
+| `0000109-00.2025.4.05.8303` | Explicit *Indeferimento do Pedido* | Documento Comprobatório | Carta de Indeferimento |
+| `0000108-00.2025.4.05.8303` | Explicit *NEGADO* | Documento Comprobatório | Carta de Indeferimento |
 
 Thus, the title *Comunicado de decisão* does not determine the type, but the
 decision text usually does: five of eight are direct denials, one is a grant,

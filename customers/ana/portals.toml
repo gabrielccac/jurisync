@@ -1,0 +1,5 @@
+# Ana: only ADVBOX for now, no court portal (an empty profile offers no portal, never all of them).
+# Values go in the gitignored customers/ana/.env (see .env.example).
+
+[env]
+secrets = ["ADVBOX_EMAIL", "ADVBOX_PASSWORD", "ADVBOX_DEVICE_ID"]

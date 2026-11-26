@@ -18,6 +18,8 @@ __pycache__/
 *.bak.*
 .claude/worktrees/
 .claude/settings.local.json
+# Claude Code's server list for this checkout: copy .mcp.json.example and adjust locally
+.mcp.json
 
 # Certificates, keys, and authenticator QR codes
 *.p12
@@ -47,7 +49,8 @@ conversions/
 *.log
 *.tmp
 
-# Customers whose data stays on this machine: the repository is public
+# Customers whose data stays on this machine (the repository is private, but office data stays out of git).
+# Prefer JURISYNC_CUSTOMERS_DIR pointing outside the checkout: listing a name here already reveals it.
 customers/allan/
 customers/max/
 customers/anaflavia/
