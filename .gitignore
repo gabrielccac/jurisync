@@ -14,6 +14,9 @@ __pycache__/
 !.env.example
 .env.bak*
 *.env.bak*
+*.bak-*
+*.bak.*
+.claude/worktrees/
 .claude/settings.local.json
 
 # Certificates, keys, and authenticator QR codes
@@ -46,6 +49,7 @@ conversions/
 
 # Customers whose data stays on this machine: the repository is public
 customers/allan/
+customers/max/
 customers/anaflavia/
 customers/denis/
 customers/patricia/

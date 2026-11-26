@@ -58,4 +58,4 @@ Ler peças não registra ciência: o STJ intima pelo DJEN, e a ciência antecipa
 
 ## Validação
 
-Feita ao vivo em 16/11/2026 com a anaflavia: veja `docs/validation/stj-2026-11-16.md`.
+Feita ao vivo em 16/11/2026 com a anaflavia: veja `docs/archive/validation-2026-11-16/stj-2026-11-16.md`.
