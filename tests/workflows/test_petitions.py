@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from decimal import Decimal
@@ -470,6 +471,7 @@ class WriteTest(unittest.TestCase):
             self.assertIn("Resolve: cliente", texts)
             self.assertEqual(len(document.tables), 1)
 
+    @unittest.skipUnless(shutil.which("pdftoppm"), "pdftoppm (poppler-utils) not installed")
     def test_pdf_proof_becomes_trimmed_pictures(self):
         with tempfile.TemporaryDirectory() as folder:
             pdf = Path(folder) / "prova.pdf"
