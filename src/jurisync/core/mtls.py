@@ -102,7 +102,7 @@ class TokenRSAKey(RSAKey):
 
 def tls_settings():
     settings = HandshakeSettings()
-    settings.minVersion = settings.maxVersion = (3, 3)
+    settings.minVersion = settings.maxVersion = (3, 3)  # pyright: ignore[reportAttributeAccessIssue]
     settings.rsaSchemes = ["pkcs1"]  # what the token does with CKM_RSA_PKCS
     settings.rsaSigHashes = ["sha256", "sha384", "sha512"]
     return settings
@@ -137,7 +137,7 @@ class RenegotiatingTLSConnection(TLSConnection):
 
     def __init__(self, sock):
         super().__init__(sock)
-        self.client_credentials = None  # (tlslite chain, key, settings, server name)
+        self.client_credentials: tuple | None = None  # (tlslite chain, key, settings, server name)
         self.renegotiations = 0
         self._client_verify_data = None
         self._renegotiating = False
@@ -158,11 +158,11 @@ class RenegotiatingTLSConnection(TLSConnection):
             if result in (0, 1):
                 yield result
                 continue
-            header, parser = result
+            header, parser = result  # pyright: ignore[reportGeneralTypeIssues]
             if (
                 not self._renegotiating
                 and self.session is not None
-                and header.type == ContentType.handshake
+                and header.type == ContentType.handshake  # pyright: ignore[reportAttributeAccessIssue]
                 and parser.bytes[:1] == bytearray([HandshakeType.hello_request])
             ):
                 # Answered inline: an exception would unwind through tlslite's readAsync, which closes the socket.
@@ -180,7 +180,8 @@ class RenegotiatingTLSConnection(TLSConnection):
         self._renegotiating = True
         self.closed = True  # tlslite starts a handshake only on a connection it considers closed
         try:
-            yield from self.handshakeClientCert(chain, key, settings=settings, serverName=server_name, async_=True)
+            handshake = self.handshakeClientCert(chain, key, settings=settings, serverName=server_name, async_=True)
+            yield from handshake  # pyright: ignore[reportOptionalIterable]
         finally:
             self._renegotiating = False
 

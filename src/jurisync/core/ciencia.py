@@ -29,7 +29,7 @@ ACKNOWLEDGE = (
 def report(state, aviso="", intimacoes=()):
     if state not in STATES:
         raise ValueError(f"ciência state must be one of {', '.join(STATES)}")
-    block = {"estado": state}
+    block: dict[str, object] = {"estado": state}
     if intimacoes:
         block["intimacoes"] = list(intimacoes)
     if aviso:

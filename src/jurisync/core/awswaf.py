@@ -85,7 +85,7 @@ def _tiles(png):
 def _jpeg64(image, scale=2):
     from PIL import Image
 
-    image = image.resize((image.width * scale, image.height * scale), Image.LANCZOS)
+    image = image.resize((image.width * scale, image.height * scale), Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=90)
     return base64.b64encode(buffer.getvalue()).decode()
@@ -95,7 +95,7 @@ def pick_tiles(instruction, tiles, *, api_key, model, timeout=90):
     """Ask the vision model which of the 9 tiles match; return 0-based indices."""
     from curl_cffi import requests
 
-    content = [{"type": "text", "text": PROMPT.format(instruction=instruction)}]
+    content: list[dict] = [{"type": "text", "text": PROMPT.format(instruction=instruction)}]
     for index, tile in enumerate(tiles, 1):
         content.append({"type": "text", "text": f"Tile {index}:"})
         content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + _jpeg64(tile)}})

@@ -173,7 +173,7 @@ def _png64(image, scale=1):
 
     image = image.convert("RGB")
     if scale != 1:
-        image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
+        image = image.resize((int(image.width * scale), int(image.height * scale)), Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode()

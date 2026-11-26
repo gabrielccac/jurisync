@@ -3,6 +3,7 @@
 import os
 import time
 from pathlib import Path
+from typing import Literal
 
 from jurisync.core import ocr as ocr_settings
 
@@ -58,7 +59,14 @@ def ocr_deadline(clock=time.monotonic):
     return clock() + ocr_settings._setting("JURISYNC_OCR_SECONDS", ocr_settings.SECONDS)
 
 
-def extract_pdf_with_ocr(content, *, max_text_chars=500_000, mode="auto", deadline=None, clock=time.monotonic):
+def extract_pdf_with_ocr(
+    content,
+    *,
+    max_text_chars=500_000,
+    mode: Literal["off", "auto", "force"] = "auto",
+    deadline=None,
+    clock=time.monotonic,
+):
     """pdf-inspector's selective OCR, bounded as ``core.ocr``: never on a PDF of more than ``ocr_max_pages()`` pages,
     never once ``deadline`` passed, never with OCR off (``JURISYNC_OCR=off``), and never downloading a model.
 

@@ -26,7 +26,7 @@ def _load_model():
     global _model, _model_name
     name = os.environ.get("JURISYNC_WHISPER_MODEL", DEFAULT_MODEL)
     if _model is None or _model_name != name:
-        from faster_whisper import WhisperModel
+        from faster_whisper import WhisperModel  # pyright: ignore[reportMissingImports]
 
         _model = WhisperModel(name, device="cpu", compute_type="int8", download_root=str(_model_dir()))
         _model_name = name
@@ -38,7 +38,7 @@ def transcribe_bytes(content, *, language=DEFAULT_LANGUAGE):
     if not content:
         return "empty", ""
     try:
-        import faster_whisper  # noqa: F401
+        import faster_whisper  # noqa: F401  # pyright: ignore[reportMissingImports]
     except ImportError:
         return "transcription_unavailable", ""
     try:

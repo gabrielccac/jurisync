@@ -16,7 +16,7 @@ from mcp.types import ToolAnnotations
 
 from jurisync.core.session_pool import REASONS
 
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 
 log = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ def http_settings(host="127.0.0.1", public_host=None):
     """
     from mcp.server.transport_security import TransportSecuritySettings
 
-    names = list(LOOPBACK)
+    names: list[str] = list(LOOPBACK)
     if host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::", ""):
         names.append(f"[{host}]" if ":" in host else host)
     hosts = [*names, *(f"{name}:*" for name in names)]

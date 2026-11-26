@@ -21,6 +21,7 @@ the next call logs in with the new credentials.
 import os
 import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 
 from jurisync.core import credentials
@@ -111,7 +112,7 @@ def login_reason(error):
     return "unexpected"
 
 
-def _env_number(name, default, convert=float):
+def _env_number(name, default, convert: Callable = float):
     try:
         return convert(os.environ.get(name) or default)
     except ValueError:

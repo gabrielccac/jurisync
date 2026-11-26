@@ -53,7 +53,7 @@ captcha-ocr = ["ddddocr==1.6.1"]
 pdf-ocr = ["pypdfium2==4.30.0", "onnxruntime==1.30.0"]
 
 [dependency-groups]
-dev = ["pytest==9.1.1", "ruff==0.16.10"]
+dev = ["pytest==9.1.1", "pyright==1.1.414", "ruff==0.16.10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -67,6 +67,11 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q --import-mode=importlib -m 'not live'"
 markers = ["live: read-only calls against real portals (opt-in: pytest -m live)"]
+
+[tool.pyright]
+include = ["src/jurisync/core"]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"
 
 [tool.ruff]
 line-length = 120
