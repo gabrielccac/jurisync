@@ -132,22 +132,13 @@ def table_path(kind, *, page=1, pageSize=50, search="", sortColumn=None, sortDir
         )
     pairs = list(query.items())
     if kind == "customers":
-        extra = {name: "" for name in ("type", "state", "city", "partner_id", "date_from", "date_until")}
+        extra = dict.fromkeys(("type", "state", "city", "partner_id", "date_from", "date_until"), "")
     else:
         pairs.append(("captured", "all"))
         pairs += [("steps_id[]", str(step)) for step in DEFAULT_STEPS]
-        extra = {
-            name: ""
-            for name in (
-                "customer",
-                "customer_type",
-                "systems_id",
-                "partner_id",
-                "contingency",
-                "date_from",
-                "date_until",
-            )
-        }
+        extra = dict.fromkeys(
+            ("customer", "customer_type", "systems_id", "partner_id", "contingency", "date_from", "date_until"), ""
+        )
     if dateFrom:
         extra["date_from"] = dateFrom
     if dateUntil:

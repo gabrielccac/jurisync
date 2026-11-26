@@ -45,18 +45,24 @@ ACKNOWLEDGE = Field(description=ciencia.ACKNOWLEDGE)
 REFUSED = {
     "intimacao_pending": (
         ciencia.PENDING,
-        "Este processo tem intimação sem ciência no painel; nada foi aberto. Abrir os documentos pode registrar a "
-        "ciência e iniciar o prazo: pergunte ao usuário.",
+        (
+            "Este processo tem intimação sem ciência no painel; nada foi aberto. Abrir os documentos pode registrar a "
+            "ciência e iniciar o prazo: pergunte ao usuário."
+        ),
     ),
     "receipt_required": (
         ciencia.PENDING,
-        "O próprio portal pede a confirmação de recebimento da intimação antes de mostrar este documento; nada foi "
-        "aberto. Se o advogado decidir receber, a confirmação é feita no portal; depois a leitura funciona aqui.",
+        (
+            "O próprio portal pede a confirmação de recebimento da intimação antes de mostrar este documento; nada foi "
+            "aberto. Se o advogado decidir receber, a confirmação é feita no portal; depois a leitura funciona aqui."
+        ),
     ),
     "ciencia_unchecked": (
         ciencia.NONE,
-        "Nada foi aberto: não foi possível verificar se o processo tem intimação sem ciência. Abrir os documentos "
-        "pode registrá-la e iniciar o prazo: pergunte ao usuário.",
+        (
+            "Nada foi aberto: não foi possível verificar se o processo tem intimação sem ciência. Abrir os documentos "
+            "pode registrá-la e iniciar o prazo: pergunte ao usuário."
+        ),
     ),
 }
 

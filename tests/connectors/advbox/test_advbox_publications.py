@@ -19,8 +19,10 @@ ROW = [
     "0013886-02.2026.4.05.8303",
     '<img src="https://example.test/files/profiles/321.jpg" class="profile" title="Ana Responsavel">',
     '<a href="posts/9001/edit" class="bt_publication show-event done"><i>done</i> Concluído</a>',
-    "&nbsp;<div><a href='posts/9001/edit' title='Ver intimação'></a>"
-    '<a href="customers/555/edit" class="icon popup"></a><a href="lawsuits/777/edit" class="icon popup"></a></div>',
+    (
+        "&nbsp;<div><a href='posts/9001/edit' title='Ver intimação'></a>"
+        '<a href="customers/555/edit" class="icon popup"></a><a href="lawsuits/777/edit" class="icon popup"></a></div>'
+    ),
 ]
 PENDING_ROW = [*ROW[:2], "&nbsp;", *ROW[3:5], '<a href="posts/9002/edit"><i>description</i> Pendente</a>', ROW[6]]
 COURTS_HTML = (

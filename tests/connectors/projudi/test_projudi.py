@@ -88,8 +88,10 @@ def pdf_with_text(text):
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Contents 4 0 R "
+            b"/Resources << /Font << /F1 5 0 R >> >> >>"
+        ),
     ]
     stream = f"BT /F1 12 Tf 10 50 Td ({text}) Tj ET".encode()
     objects.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
