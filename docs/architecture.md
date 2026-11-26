@@ -102,5 +102,7 @@ JPe use it.
    and, for logins, `core.session_pool`.
 2. Add it to `CONNECTORS` in `src/jurisync/registry.py` (serve, setup and the hosted server read it from there).
 3. Add offline tests under `tests/connectors/<name>/`.
-4. Add the server to `.mcp.json.example` and its variables to `.env.example`.
+4. Add the server to `.mcp.json.example`, and each portal to `portals.py` with its usual login (`auth`, the default
+   when an office declares no `method`) and its `<PREFIX>`. An office's variables go in its
+   `customers/<name>/portals.toml` (see `customers/_template/`); `jurisync-setup check-customer <name>` checks them.
 5. Validate the read tools live and read-only before enabling any write.

@@ -166,9 +166,9 @@ for an installed package and beside the code in a checkout.
 
 | Server | Tools | Login | Writes |
 |---|---|---|---|
-| `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_inbox`, `pje_list_watched_processes`, `pje_list_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | TRF1/TRF3/TJAP: password + TOTP by default, or the A1 certificate with `<PREFIX>_CERT=true` (e.g. `PJE_1G_CERT=true`; the SSO asks for TOTP only when it requires one). TRF5 (1G and 2G): A1 certificate + TOTP | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
+| `pje` | `pje_get_process`, `pje_list_expediente_counters`, `pje_list_inbox`, `pje_list_watched_processes`, `pje_list_processes`, `pje_draft_inspect`, `pje_search_pending_drafts`, `pje_draft_write`* | The `method` the customer's `portals.toml` declares for the portal: `certificate_totp` (A1 certificate; the SSO asks for TOTP only when it requires one) or `password_totp` (password + TOTP); the A3 token with `<PREFIX>_AUTH=a3` or `PJE_AUTH=a3`. Without a customer profile, the registry's default: password + TOTP (A1 with `<PREFIX>_CERT=true`), A1 + TOTP on TRF5 and the TRTs | `PJE_ALLOW_DRAFT_WRITES=true` (drafts only; never protocols) |
 | `filing` | `filing_profiles`, `filing_subjects`, `filing_prepare`*, `filing_review`, `filing_finalize`* (every tool that needs one takes a `profile` name; a profile is `customers/<name>/filing-profile.json`) | none: it prepares a folder of documents the agent pulled with the office's own connector (ADVBOX: `advbox_save_folder`) | local run files under `JURISYNC_FILING_DIR`; Jev (outside classifier) off unless `useJev` |
-| `eproc` | `eproc_list_notices`, `eproc_list_processes`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `trf4-1g-pr`, `trf4-2g`, `trf2-2g`, `trf2-1g-rj`, `trf2-1g-es`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | Browser login + TOTP, or the A1 certificate over mutual TLS with `<PREFIX>_CERT=true` (TRF4); once per portal | none |
+| `eproc` | `eproc_list_notices`, `eproc_list_processes`, `eproc_get_process` (argument `portal`: `trf4-1g-sc`, `trf4-1g-rs`, `trf4-1g-pr`, `trf4-2g`, `trf2-2g`, `trf2-1g-rj`, `trf2-1g-es`, `tjrs-1g`; also `trf6-1g`/`trf6-2g` when configured) | The declared `method`: `browser_totp` (browser login + TOTP) or `certificate_totp`/`certificate_mtls` (A1 certificate); the A3 token with `<PREFIX>_AUTH=a3` or `EPROC_AUTH=a3`. Without a profile, browser login unless `<PREFIX>_CERT=true`; once per portal | none |
 | `projudi` | `projudi_get_process`, `projudi_list_documents`, `projudi_read_documents`, `projudi_download_document` (argument `portal`, default `tjgo-1g`) | A1 certificate over mutual TLS (`PJE_A1_P12`/`PJE_A1_PIN`, or `PROJUDI_A1_*`) | none |
 | `stj` | `stj_get_counters`, `stj_list_inbox`, `stj_list_processes`, `stj_get_process`, `stj_read_documents`, `stj_download_document`*, `stj_list_publications` (STJ notices come from `djen`, tribunal STJ) | A1 e-CPF over mutual TLS, no TOTP (`STJ_A1_P12`/`STJ_A1_PIN`, else `PJE_A1_*`); the lawyer must already be registered in the CPE | none toward the STJ (endpoints that write are refused) |
 | `djen` | `djen_search_communications`, `djen_get_certidao_text`, `djen_calculate_deadline` | public | none |
@@ -190,7 +190,8 @@ Shared code never imports from `customers/`.
   spreadsheet watcher (`python -m customers.victor.workflows.pje1g_watch --help`).
 
 Add a customer by copying `customers/_template/` to `customers/<name>/` and following its README: `portals.toml`
-(login method and variable names per portal), `settings.toml`, `.env.example` and a README. `jurisync-setup
+(login method and variable names per portal; the declared `method` is the login the connectors use, whatever else the
+`.env` holds), `settings.toml`, `.env.example` and a README. `jurisync-setup
 check-customer <name>` checks the folder without reading secrets, and the test suite runs the same check on every
 folder. Skills go under `skills/`, with a symlink in `.claude/skills/` for each one.
 

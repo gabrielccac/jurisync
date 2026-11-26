@@ -16,7 +16,8 @@ Documento único de planejamento. Substitui `implementation-plan.md`, `rollout-p
   Escritórios com token A3 ficam locais: `customers/<nome>/settings.toml` com `[hosted] mode = "local"` (hoje barbara
   e cinthia). No servidor eles existem só como registro, sem credenciais, usuários nem ferramentas.
 - **Servidor hospedado** (`jurisync-hosted`, `src/jurisync/hosted/`): OAuth por escritório, cofre AES-256-GCM por
-  escritório, uma URL (`/mcp`) com as ferramentas dos conectores do escritório; cada ferramenta só oferece os portais
+  escritório, uma URL por conector (`/tribunais/mcp`, `/advbox/mcp`, `/juridiq/mcp`; o `/mcp` antigo está
+  descontinuado) com as ferramentas dos conectores do escritório; cada ferramenta só oferece os portais
   em que o escritório tem login. `provision export/apply` monta escritórios a partir de `customers/`. Detalhes em
   `hosted.md`; implantação em `deploy/README.md`.
 - **Registro único** (`src/jurisync/registry.py`): a lista de conectores que `install/serve`, `install/setup` e

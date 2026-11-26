@@ -3,7 +3,9 @@
 # "A|B" quer dizer que qualquer uma das duas basta.
 #
 # Chave da seção = chave do portal em src/jurisync/portals.py (trf1-1g, trf4-2g, tjsp-esaj...).
-# method decide o login:
+# method decide o login, mesmo que o .env tenha outras credenciais (um A1, a senha de outro portal); o método do
+# registro (Portal.auth em portals.py) só vale para portal sem method. O token A3 continua com <PREFIXO>_AUTH=a3
+# (ou PJE_AUTH/EPROC_AUTH=a3) no .env da máquina do escritório.
 #   password_totp          usuário + senha + autenticador (PJe pelo SSO)
 #   certificate_totp       certificado A1 + autenticador; em PJe e Eproc liga <PREFIXO>_CERT sozinho
 #   certificate_mtls       certificado A1 por TLS mútuo (Eproc, STJ); em Eproc também liga <PREFIXO>_CERT
