@@ -2,8 +2,9 @@ import base64
 import unittest
 from unittest.mock import Mock, patch
 
-from jurisync.connectors.eproc import client
+from jurisync.connectors.eproc import auth, client
 from jurisync.connectors.eproc.auth import portal_totp_account, session_from_cookies
+from jurisync.core.session_pool import LoginFailed
 
 
 def field(number, payload):
@@ -166,3 +167,60 @@ class FillFieldTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CaptchaRoundsTests(unittest.TestCase):
+    def test_a_captcha_that_never_clears_fails_after_the_last_round(self):
+        driver = Mock()
+        with (
+            patch.object(auth, "submit_captcha") as submit,
+            patch.object(auth, "wait_for_step", return_value="captcha") as wait,
+        ):
+            with self.assertRaises(LoginFailed) as raised:
+                auth.pass_captcha(driver, "captcha")
+        self.assertEqual(raised.exception.reason, "captcha")
+        self.assertEqual(submit.call_count, auth.MAX_CAPTCHA_ROUNDS)
+        self.assertEqual(wait.call_count, auth.MAX_CAPTCHA_ROUNDS)
+
+    def test_a_captcha_cleared_by_a_click_goes_on_to_the_next_step(self):
+        with (
+            patch.object(auth, "submit_captcha") as submit,
+            patch.object(auth, "wait_for_step", side_effect=["captcha", "otp"]),
+        ):
+            self.assertEqual(auth.pass_captcha(Mock(), "captcha"), "otp")
+        self.assertEqual(submit.call_count, 2)
+
+    def test_another_step_is_returned_untouched(self):
+        with patch.object(auth, "submit_captcha") as submit:
+            self.assertEqual(auth.pass_captcha(Mock(), "panel"), "panel")
+        submit.assert_not_called()
+
+    def test_login_stuck_on_the_captcha_fails_and_closes_the_browser(self):
+        driver = Mock()
+        with (
+            patch("seleniumbase.Driver", return_value=driver),
+            patch.object(auth, "_first_element", return_value=Mock()),
+            patch.object(auth, "_fill_field", return_value=Mock()),
+            patch.object(auth, "has", return_value=True),
+            patch.object(auth, "submit_captcha") as submit,
+            patch.object(auth, "wait_for_step", return_value="captcha"),
+            patch.object(auth.time, "sleep"),
+        ):
+            with self.assertRaises(LoginFailed) as raised:
+                auth.login("usuario", "senha", {"type": "totp"}, portal="jfsc")
+        self.assertEqual(raised.exception.reason, "captcha")
+        self.assertEqual(submit.call_count, auth.MAX_CAPTCHA_ROUNDS)
+        driver.quit.assert_called_once()
+
+    def test_otp_followed_by_a_captcha_that_never_clears_fails(self):
+        driver = Mock()
+        with (
+            patch.object(auth, "_fill_field", return_value=Mock()),
+            patch.object(auth, "has", return_value=True),
+            patch.object(auth, "submit_captcha") as submit,
+            patch.object(auth, "wait_for_step", return_value="captcha"),
+            patch.object(auth.time, "sleep"),
+        ):
+            with self.assertRaises(LoginFailed):
+                auth._submit_otp(driver, "123456")
+        self.assertEqual(submit.call_count, auth.MAX_CAPTCHA_ROUNDS)
