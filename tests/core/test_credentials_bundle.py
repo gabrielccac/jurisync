@@ -344,7 +344,7 @@ class ImportValidationTest(unittest.TestCase):
             encoding="utf-8",
         )
         with mock.patch.dict(os.environ, {"JURISYNC_CUSTOMERS_DIR": str(root)}):
-            self.assertEqual(setup.bundle_names("acme"), {"TJRS_1G_USERNAME", "ACME_ATTORNEY_CPF"})
+            self.assertEqual(setup.bundle_names("acme"), {"TJRS_1G_USERNAME", "TJRS_USERNAME", "ACME_ATTORNEY_CPF"})
             accepted = setup.accepted_values(env, "acme", lambda _m: None)
         self.assertEqual(set(accepted), {"TJRS_1G_USERNAME", "ACME_ATTORNEY_CPF"})
 

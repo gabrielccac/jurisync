@@ -78,7 +78,7 @@ def is_a3(setup):
 def a3_switch(config, values):
     """The variable that sends this portal to the A3 token in a local install, if any is on."""
     system = {"pje": "PJE_AUTH", "eproc": "EPROC_AUTH"}.get(config.system)
-    for name in (f"{config.env_prefix}_AUTH", system):
+    for name in (*(f"{prefix}_AUTH" for prefix in (config.env_prefix, *config.legacy_env_prefixes)), system):
         if name and values.get(name, "").strip().lower() == "a3":
             return name
     return None
