@@ -49,7 +49,6 @@ customers/
   victor/               DJEN → ADVBOX routing skill, TRF5 filing prep, TRF1 watcher
   elisandra/            DJEN → eproc intimações skill (TRF4 SC/RS, TJRS), task drafts for approval
   wesley/               PJe (TRF1, TRF3, TRF5) and Eproc (TRF4) access on the A1 certificate
-plugins/                Claude Code plugins per customer (skills + server registrations), with .claude-plugin/ marketplace
 cli/                    Diagnostics: juridiq_read, eproc_portal_smoke
 tests/                  Offline tests mirroring src/ and customers/
 docs/                   Architecture, publication workflow, connector references
@@ -91,17 +90,7 @@ uv tool install git+https://github.com/gabrielccac/jurisync
 This installs one command per server (`jurisync-pje`, `jurisync-advbox`, `jurisync-djen`, `jurisync-eproc`,
 `jurisync-juridiq`, `jurisync-filing`), `jurisync-http` and `jurisync-setup`.
 
-**Skill + MCPs as a Claude Code plugin.** After the `uv tool install` above, one command installs the customer's
-skills and registers its MCP servers, and `/plugin update` brings every later change:
-
-```text
-/plugin install victor --marketplace gabrielccac/jurisync
-```
-
-The plugin only carries the skills and the server registrations; the logins still come from the bundle below.
-Import it with `--register none` (or `desktop`) so the servers are not registered twice.
-
-**Customer skills from GitHub, without the plugin.** `jurisync-setup skills --customer <name>` clones the
+**Customer skills from GitHub.** `jurisync-setup skills --customer <name>` clones the
 repository into `~/jurisync-src` (or fast-forwards it) on the branch the package was installed from, links each
 `customers/<name>/skills/<skill>` into `~/.claude/skills` for Claude Code, and writes `<skill>.zip` to Downloads
 for upload in Cowork, only when the skill changed. Running it again is the update; it stops instead of overwriting

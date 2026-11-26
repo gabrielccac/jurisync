@@ -107,7 +107,7 @@ reiniciar o servidor.
 | Escritório passa a ser só local (A3) | `[hosted] mode = "local"` no `settings.toml` e repetir A2–A3 |
 
 Skills do escritório no Claude Code / Cowork apontando para o servidor:
-`uv run jurisync-hosted provision plugin plugins/<nome> --url https://<domínio> --out dist/<nome>-remote` (um servidor
+`uv run jurisync-hosted provision plugin <pasta-do-plugin> --url https://<domínio> --out dist/<nome>-remote` (um servidor
 `tribunais` e um por sistema de gestão que o plugin usa).
 
 ---

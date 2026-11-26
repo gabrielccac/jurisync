@@ -114,7 +114,7 @@ signed in once, set `JURISYNC_REQUIRE_TOKEN_RESOURCE=1` in `/etc/jurisync/jurisy
 Office plugins (skills) for Claude Code / Cowork pointing at the server:
 
 ```bash
-uv run jurisync-hosted provision plugin plugins/victor --url https://<host> --out dist/victor-remote
+uv run jurisync-hosted provision plugin <plugin-folder> --url https://<host> --out dist/<office>-remote
 ```
 
 The copy has one server `tribunais` (`/tribunais/mcp`) for the plugin's court systems and DJEN and one per management
