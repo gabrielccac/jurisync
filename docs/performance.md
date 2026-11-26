@@ -10,6 +10,26 @@ the counters (one bucket instead of `regions=true`), skipping inboxes counted em
 the Eproc pending queues kept 120 s per session, and the draft tools removed from the hosted server. Caches across
 sessions, sync and the HTTP API are in `service-layer-design.md` (later); order in `roadmap.md`.
 
+## Implemented: connector performance front F5 (2026-11-26)
+
+- **DJEN OAB variants in parallel:** the 7 suffixes are read 3 at a time. Live, one day and a made-up OAB:
+  **1.51 s → 0.59 s**. A failed variant no longer hides the others: the search marks it with `error` and the
+  result as incomplete; the poll refuses the window and keeps its state. The API answers with
+  `X-RateLimit-Limit: 20`, so the saved searches (up to 4 × 7 requests) can still meet a 429 on their own.
+- **Push walk continues:** rows read and the paginator's position are kept 5 minutes per session; `offset += limit`
+  and `processNumber` lookups continue instead of starting at page 1. KZ fake of 9 053 rows, `limit=500`: a full
+  walk asks **1 459 → 182** pages. `MAX_PUSH_PAGES` now caps each call, not the walk.
+- **PJe documents keep to 360 s:** each wait is cut to what is left of the call; no retry or new document with
+  less than 30 s left. Simulated silent portal, 5 documents: **540 s → 360 s**. Downloads stay sequential inside
+  the session lock: whether the REST download accepts parallel requests on one Seam session is unverified.
+- **PJe 1.x timeout** is a parameter of `jsf.get`/`jsf.post`, no longer a module global other offices read.
+- **ADVBOX OCR bounded:** at most `JURISYNC_OCR_MAX_PAGES` pages per PDF, `JURISYNC_OCR_SECONDS` per folder call,
+  offline models only, off with `JURISYNC_OCR=off`; skipped files keep their text layer and say why
+  (`ocrSkipped`).
+- **State files:** DJEN poll and publication pipeline state are locked between processes and age out (DJEN IDs
+  31 days before the window, completed publications after 90 days); the per-session process memo keeps at most
+  20 unexpired processes.
+
 ## Implemented: shared Eproc password login (2026-11-04)
 
 The login used to wait for each alternate field separately. On TRF6's legacy form, absent SSO selectors cost
