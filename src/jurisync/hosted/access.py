@@ -38,10 +38,6 @@ PORTAL_FIELDS = (
 )
 
 
-def pje_portals():
-    return [portals.pje(key) for key in portals.keys("pje")]
-
-
 def portal_names(config):
     """Every vault name that configures this portal, current and legacy prefixes."""
     return {

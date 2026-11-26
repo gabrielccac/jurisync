@@ -23,7 +23,6 @@ from jurisync.core.ciencia import NONE, report
 from jurisync.core.http import REDIRECTS
 from jurisync.core.session_pool import MissingLogin
 
-SESSION_EXPIRED_MARKERS = ("a sessao expirou", "a sessão expirou")
 # The page the portal serves for a dropped session says "A sessao expirou". Every logged-in TJAM page also carries
 # "Sua sessão expirou" inside a script (its timeout dialog), so only visible text counts and the phrase must start a word.
 SESSION_EXPIRED = re.compile(r"(?<![\w])a sess[aã]o expirou", re.I)
