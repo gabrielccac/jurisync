@@ -17,8 +17,8 @@ def jsf_data(html):
         if element.name == "input" and element.get("type") in {"checkbox", "radio"} and not element.has_attr("checked"):
             continue
         if element.name == "select":
-            selected = element.find("option", selected=True)
-            fields[name] = (selected or element.find("option")).get("value", "") if element.find("option") else ""
+            option = element.find("option", selected=True) or element.find("option")
+            fields[name] = option.get("value", "") if option else ""
         else:
             fields[name] = element.get("value", "")
     return (state.get("value") if state else None), fields
