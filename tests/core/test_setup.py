@@ -1,12 +1,12 @@
 import json
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from jurisync.install import setup
+from tests.portability import assert_mode
 
 URI = "otpauth://totp/Eproc:user?secret=JBSWY3DPEHPK3PXP&issuer=Eproc"
 
@@ -22,7 +22,7 @@ class EnvFileTest(unittest.TestCase):
                 path.read_text(encoding="utf-8").splitlines(),
                 ["# comment", "OTHER=1", "TJRS_1G_USERNAME=new", "TJRS_1G_PASSWORD=pw"],
             )
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            assert_mode(self, path, 0o600)
             self.assertEqual(setup.read_env(path)["OTHER"], "1")
 
 
@@ -155,7 +155,7 @@ class MainTest(unittest.TestCase):
             stored = setup.read_env(env_file)
             self.assertEqual(stored["TJRS_1G_USERNAME"], "login-user")
             self.assertEqual(stored["TJRS_1G_2FA_DATA"], URI)
-            self.assertEqual(stat.S_IMODE(env_file.stat().st_mode), 0o600)
+            assert_mode(self, env_file, 0o600)
 
 
 if __name__ == "__main__":

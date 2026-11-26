@@ -63,7 +63,7 @@ class AdvboxTest(unittest.TestCase):
             client_b, path_b = server.client.get(), session_file()
             require_writes()
         self.assertIsNot(client_a, client_b)
-        self.assertIn("tenants/office-a", str(path_a))
+        self.assertIn("tenants/office-a", Path(path_a).as_posix())
         self.assertIn("tenants/office-b", str(path_b))
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "true", "ADVBOX_PASSWORD": "server"}):
             with credentials.scope("office-c"), self.assertRaises(PermissionError):
@@ -85,7 +85,7 @@ class JuridiqTest(unittest.TestCase):
         with credentials.scope("office-a", {"JURIDIQ_EMAIL": "A@x.br", "JURIDIQ_PASSWORD": "p"}):
             settings = config()
         self.assertEqual((settings["email"], settings["password"]), ("a@x.br", "p"))
-        self.assertIn("tenants/office-a", str(settings["sessionFile"]))
+        self.assertIn("tenants/office-a", Path(settings["sessionFile"]).as_posix())
         with mock.patch.dict(os.environ, {"JURIDIQ_PASSWORD": "server"}), credentials.scope("office-b"):
             self.assertIsNone(config()["password"] or None)
 

@@ -13,6 +13,7 @@ from mcp.client.client import Client
 
 from jurisync.connectors.juridiq.api import JuridiqApi
 from jurisync.connectors.juridiq.server import create_server
+from tests.portability import assert_mode
 
 
 class Response:
@@ -79,7 +80,7 @@ class SessionTest(JuridiqTestCase):
         api.request("/publication?page=1&limit=10")
         self.assertEqual(fake.logins, 1)
         self.assertEqual(fake.requests[0]["auth"], fake.requests[1]["auth"])
-        self.assertEqual(oct(self.session_file.stat().st_mode & 0o777), "0o600")
+        assert_mode(self, self.session_file, 0o600)
         fake.statuses += [401, 200]
         self.assertEqual(api.request("/user/me").status_code, 200)
         self.assertEqual(fake.logins, 2)

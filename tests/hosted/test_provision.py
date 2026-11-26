@@ -2,7 +2,6 @@
 
 import json
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +15,7 @@ from jurisync.hosted import cli, provision
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key
+from tests.portability import NO_SYMLINKS, SYMLINKS, assert_mode
 
 from .test_hosted import make_p12_bytes
 from .test_office_endpoint import OfficeCase
@@ -174,7 +174,7 @@ class PlanTest(ProvisionCase):
         for value in VALUES:
             self.assertNotIn(value, text)
         for path in [self.out / provision.PLAN, self.passphrase, *self.out.glob("*.jurisync")]:
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path)
+            assert_mode(self, path, 0o600)
 
     def test_the_passphrase_file_travels_apart_from_the_bundles(self):
         with self.assertRaises(SystemExit):
@@ -277,7 +277,7 @@ class ApplyTest(ProvisionCase):
         email, tenant, password = passwords.read_text(encoding="utf-8").splitlines()[0].split("\t")
         self.assertEqual(store.authenticate(email, password), tenant)
         self.assertTrue(store.must_change(email))
-        self.assertEqual(stat.S_IMODE(passwords.stat().st_mode), 0o600)
+        assert_mode(self, passwords, 0o600)
         text = "\n".join(self.said)
         for value in [*VALUES, password]:
             self.assertNotIn(value, text)
@@ -545,6 +545,7 @@ class JuridiqWritesTest(unittest.TestCase):
 
 
 class RemotePluginTest(unittest.TestCase):
+    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
     def test_the_plugin_points_at_the_server_and_flags_local_only_skills(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

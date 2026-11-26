@@ -6,6 +6,7 @@ from unittest import mock
 
 from jurisync.connectors.advbox.documents import AdvboxDocuments
 from jurisync.core.documents_dir import resolve_saved_folder, save_folder_file
+from tests.portability import NO_SYMLINKS, SYMLINKS
 
 
 class FakeSession:
@@ -76,11 +77,16 @@ class SavedFolderTest(unittest.TestCase):
                 with self.subTest(name=name), self.assertRaises(ValueError):
                     save_folder_file("run", name, b"x")
             save_folder_file("run", "Procuração (1).pdf", b"x")
+            with self.assertRaises(FileNotFoundError):
+                resolve_saved_folder("missing")
+
+    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
+    def test_symlinks_are_not_followed_out_of_the_shared_folder(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"JURISYNC_DOCUMENTS_DIR": root}):
+            save_folder_file("run", "Procuração (1).pdf", b"x")
             (Path(root) / "link").symlink_to(Path(root) / "run")
             with self.assertRaises(FileNotFoundError):
                 resolve_saved_folder("link")
-            with self.assertRaises(FileNotFoundError):
-                resolve_saved_folder("missing")
             (Path(root) / "run" / "evil.pdf").symlink_to("/etc/passwd")
             self.assertEqual([p.name for p in resolve_saved_folder("run")[1]], ["Procuração (1).pdf"])
 

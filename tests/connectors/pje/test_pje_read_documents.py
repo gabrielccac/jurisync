@@ -11,6 +11,7 @@ from jurisync.connectors.pje import documents
 from jurisync.connectors.pje import process as client
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents_dir import resolve_saved_document, save_document
+from tests.portability import NO_SYMLINKS, SYMLINKS
 
 NUMBER = "0003597-10.2026.4.05.8303"
 URL = "https://pje1g.trf5.jus.br/pje/seam/resource/rest/pje-legacy/documento/download/TRF5/token/123/456"
@@ -122,6 +123,7 @@ class SavedDocumentsTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             resolve_saved_document("missing_1.pdf")
 
+    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
     def test_symlink_pointing_outside_is_refused(self):
         outside = Path(tempfile.mkdtemp()) / "secret.pdf"
         outside.write_bytes(b"secret")

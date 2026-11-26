@@ -24,6 +24,7 @@ from jurisync.workflows.filing.prepare import (
     upload_filename,
 )
 from jurisync.workflows.filing.profile import load_profile
+from tests.portability import assert_mode
 
 PROFILE = load_profile("victor")
 FACTS = {
@@ -264,7 +265,7 @@ class PayloadTest(unittest.TestCase):
                 documents["supporting"],
                 [{"path": str(supporting), "type": "Outros Documentos", "description": "supporting"}],
             )
-            self.assertEqual(oct(Path(result["payloadPath"]).stat().st_mode & 0o777), "0o600")
+            assert_mode(self, Path(result["payloadPath"]), 0o600)
             petition.write_bytes(b"%PDF-1.4\nchanged")
             with self.assertRaisesRegex(ValueError, "Document changed"):
                 finalize_review(report, FACTS, choice, profile=PROFILE)
@@ -365,7 +366,7 @@ class StalePayloadTest(RunFolder):
 
     def test_the_payload_is_written_whole_and_private(self):
         self.prepare()
-        self.assertEqual(oct(self.payload.stat().st_mode & 0o777), "0o600")
+        assert_mode(self, self.payload, 0o600)
         self.assertEqual(json.loads(self.payload.read_text(encoding="utf-8"))["authorCpf"], "12345678909")
         self.assertEqual(sorted(path.name for path in self.out.glob("*.json*")), ["payload.json", "review.json"])
 

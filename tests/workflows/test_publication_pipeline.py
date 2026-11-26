@@ -218,7 +218,7 @@ class PipelineTest(unittest.TestCase):
                 agent=Agent(sufficient(), route_with([])), profile=PROFILE, state_file="relative.json"
             )
         with self.assertRaisesRegex(ValueError, "agent.assess"):
-            run_publication_pipeline(agent=object(), profile=PROFILE, state_file="/tmp/state.json")
+            run_publication_pipeline(agent=object(), profile=PROFILE, state_file=Path.cwd() / "state.json")
 
 
 if __name__ == "__main__":

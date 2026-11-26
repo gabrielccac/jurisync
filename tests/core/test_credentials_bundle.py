@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import stat
 import tempfile
 import threading
 import unittest
@@ -12,6 +11,7 @@ from unittest import mock
 
 from jurisync.install import credentials_bundle as bundle
 from jurisync.install import setup
+from tests.portability import assert_mode
 
 ENV = {"TJRS_1G_USERNAME": "user-123", "TJRS_1G_PASSWORD": "s3cret-value", "TJRS_1G_2FA_DATA": "otpauth://x"}
 PASSPHRASE = "correct horse battery"
@@ -78,7 +78,7 @@ class ExportImportTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"JURISYNC_CUSTOMERS_DIR": str(root / "customers")}, clear=True):
                 code = setup.main(["export", "--customer", "demo", "--out", str(out)], say=messages.append)
             self.assertEqual(code, 0)
-            self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
+            assert_mode(self, out, 0o600)
             passphrase = next(m for m in messages if m.startswith("Senha do pacote")).rsplit(": ", 1)[1]
             self.assertNotIn("keep-out", out.read_text(encoding="utf-8"))
             target = root / "home" / ".env"
@@ -98,7 +98,7 @@ class ExportImportTest(unittest.TestCase):
                 )
             self.assertEqual(code, 0)
             self.assertEqual(setup.read_env(target), ENV)
-            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            assert_mode(self, target, 0o600)
             # a wrong passphrase fails cleanly and writes nothing new
             other = root / "other" / ".env"
             with (
@@ -208,7 +208,7 @@ class CertificateCustomerTest(unittest.TestCase):
             copy = Path(stored["PJE_A1_P12"])
             self.assertEqual(copy.read_bytes(), b"CERTIFICATE-BYTES")
             self.assertEqual(copy.parent, target.parent / "files")
-            self.assertEqual(stat.S_IMODE(copy.stat().st_mode), 0o600)
+            assert_mode(self, copy, 0o600)
             self.assertEqual(stored["PJE_TRF5_2FA_DATA"], URI)
             self.assertNotIn("PJE_TRF5_2FA_QR", stored)
             self.assertEqual(stored["ADVBOX_EMAIL"], "v@x")

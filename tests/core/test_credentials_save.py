@@ -1,11 +1,11 @@
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from jurisync.core import credentials
+from tests.portability import NO_SYMLINKS, SYMLINKS, assert_mode
 
 
 class SaveTest(unittest.TestCase):
@@ -31,7 +31,7 @@ class SaveTest(unittest.TestCase):
             + "f" * 32
             + "\nOTHER='x y'\nNEW_SETTING=\"with space\"\n",
         )
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        assert_mode(self, path, 0o600)
         self.assertEqual(sorted(item.name for item in self.folder.iterdir()), [".env"])
 
     def test_a_value_with_a_line_break_is_refused_and_the_file_is_untouched(self):
@@ -44,6 +44,7 @@ class SaveTest(unittest.TestCase):
             self.assertNotIn("ADVBOX_DEVICE_ID", os.environ)
         self.assertEqual(path.read_text(encoding="utf-8"), "ADVBOX_EMAIL=a@b.c\n")
 
+    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
     def test_the_file_is_written_through_a_new_temporary_file_never_a_fixed_name(self):
         path = self.folder / ".env"
         path.write_text("ADVBOX_EMAIL=a@b.c\n", encoding="utf-8")

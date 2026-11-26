@@ -7,6 +7,7 @@ from unittest import mock
 from jurisync.core import certificate, credentials, documents
 from jurisync.core.http import REDIRECTS, UnsafeUrlError, follow_redirects
 from jurisync.core.session_pool import SessionExpired, SessionPool
+from tests.portability import assert_mode
 
 
 class DocumentLimitsTest(unittest.TestCase):
@@ -64,7 +65,8 @@ class CertificateTest(unittest.TestCase):
             certificate.load_a1(None, "pin")
         with credentials.scope("office", {}, {}), self.assertRaisesRegex(RuntimeError, "not set for this account"):
             certificate.load_a1(None, "pin")
-        with tempfile.NamedTemporaryFile() as empty, self.assertRaises(ValueError):
+        with tempfile.NamedTemporaryFile(delete_on_close=False) as empty, self.assertRaises(ValueError):
+            empty.close()
             certificate.load_a1(empty.name, "pin")
 
     def test_pem_is_private_and_removed_after_the_block(self):
@@ -89,10 +91,10 @@ class CertificateTest(unittest.TestCase):
             .sign(key, hashes.SHA256())
         )
         with certificate.client_certificate(key, cert, []) as (cert_path, key_path):
-            self.assertEqual(oct(os.stat(key_path).st_mode & 0o777), "0o600")
+            assert_mode(self, key_path, 0o600)
             self.assertIn(b"BEGIN CERTIFICATE", Path(cert_path).read_bytes())
             folder = os.path.dirname(cert_path)
-            self.assertEqual(oct(os.stat(folder).st_mode & 0o777), "0o700")
+            assert_mode(self, folder, 0o700)
         self.assertFalse(os.path.exists(folder))
 
 
@@ -134,13 +136,14 @@ class PathsTest(unittest.TestCase):
 
         from jurisync import paths
 
-        with mock.patch.dict(os.environ, {}, clear=True):
+        home = {name: os.environ[name] for name in ("HOME", "USERPROFILE") if name in os.environ}
+        with mock.patch.dict(os.environ, home, clear=True):
             self.assertEqual(paths.user_cache("pje"), Path.home() / ".cache" / "jurisync" / "pje")
             self.assertEqual(paths.user_data("filings"), Path.home() / ".local/share/jurisync/filings")
-        with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": "/xdg", "PJE_SESSION_DIR": "/mine"}, clear=True):
+        with mock.patch.dict(os.environ, {**home, "XDG_CACHE_HOME": "/xdg", "PJE_SESSION_DIR": "/mine"}, clear=True):
             self.assertEqual(paths.user_cache("juridiq"), Path("/xdg/jurisync/juridiq"))
             self.assertEqual(paths.user_cache("pje", "PJE_SESSION_DIR"), Path("/mine"))
-        with mock.patch.dict(os.environ, {"JURISYNC_FILING_DIR": "  "}, clear=True):
+        with mock.patch.dict(os.environ, {**home, "JURISYNC_FILING_DIR": "  "}, clear=True):
             self.assertEqual(
                 paths.user_data("filings", "JURISYNC_FILING_DIR"), Path.home() / ".local/share/jurisync/filings"
             )

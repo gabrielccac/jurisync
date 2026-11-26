@@ -21,6 +21,7 @@ from jurisync.hosted import cli
 from jurisync.hosted.app import build_app
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key
+from tests.portability import assert_mode
 
 BASE = "https://mcp.test"
 
@@ -84,7 +85,7 @@ class VaultTest(unittest.TestCase):
         self.assertEqual(self.vault.get("office-a"), ({"PJE_A1_PIN": "segredo-123"}, {"PJE_A1_P12": b"\x00cert"}))
         raw = (Path(self.directory.name) / "office-a.vault").read_text(encoding="utf-8")
         self.assertNotIn("segredo-123", raw)
-        self.assertEqual(oct((Path(self.directory.name) / "office-a.vault").stat().st_mode & 0o777), "0o600")
+        assert_mode(self, Path(self.directory.name) / "office-a.vault", 0o600)
 
     def test_an_entry_does_not_open_under_another_tenant_or_key(self):
         self.vault.put("office-a", {"PJE_A1_PIN": "a"})

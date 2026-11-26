@@ -14,7 +14,7 @@ def files(tmp_path):
     (tmp_path / "acme" / "portals.toml").write_text(
         '[env]\nset = { ADVBOX_ALLOW_WRITES = "false" }\n', encoding="utf-8"
     )
-    keep = {name: os.environ[name] for name in ("PATH", "HOME") if name in os.environ}
+    keep = {name: os.environ[name] for name in ("PATH", "HOME", "USERPROFILE") if name in os.environ}
     with mock.patch.dict(os.environ, {**keep, "JURISYNC_CUSTOMERS_DIR": str(tmp_path)}, clear=True):
         yield tmp_path / "acme" / ".env", tmp_path / "shared.env"
 
