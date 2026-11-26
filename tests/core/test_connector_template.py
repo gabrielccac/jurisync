@@ -8,6 +8,7 @@ from unittest import mock
 from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync.core import mcp as core_mcp
+from jurisync.core.session_pool import LoginRejected, SessionExpired, SessionPool
 from templates.connector import client, server
 
 NAME = re.compile(r"^[a-z]+_(get|list|search|read|download|calculate|create|update|delete|upload|complete)_[a-z_]+$")
@@ -64,6 +65,32 @@ class TemplateTest(unittest.TestCase):
             call("exemplo_list_intimacoes")
         self.assertNotIn("https://", str(raised.exception))
         self.assertNotIn("abc", str(raised.exception))
+
+
+class LoginTest(unittest.TestCase):
+    def test_a_refused_login_is_a_rejection_not_an_expired_session(self):
+        with (
+            mock.patch.object(client.credentials, "env", return_value="fictitious"),
+            mock.patch.object(client.requests, "Session"),
+            mock.patch.object(client, "request", side_effect=SessionExpired("401")),
+            self.assertRaises(LoginRejected) as raised,
+        ):
+            client.login(client.PORTAL)
+        self.assertEqual(raised.exception.reason, "credentials_refused")
+
+    def test_a_refused_login_reaches_the_agent_with_its_reason(self):
+        refused = LoginRejected("the portal refused the user or the password", reason="credentials_refused")
+        pool = SessionPool(login=mock.Mock(side_effect=refused), refresh=client.refresh, close=lambda session: None)
+        with mock.patch.object(server, "sessions", pool), self.assertRaises(ToolError) as raised:
+            call("exemplo_list_intimacoes")
+        self.assertIn("[credentials_refused]", str(raised.exception))
+
+    def test_redirects_are_refused_not_followed(self):
+        http = mock.Mock()
+        http.request.return_value = mock.Mock(status_code=302)
+        with self.assertRaises(RuntimeError):
+            client.request(http, "GET", "/api/intimacoes")
+        self.assertFalse(http.request.call_args.kwargs["allow_redirects"])
 
 
 if __name__ == "__main__":

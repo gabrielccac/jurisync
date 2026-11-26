@@ -34,8 +34,10 @@ def configured():
 def request(session, method, path, *, token=None, **kwargs):
     url = require_url(BASE_URL + path, hosts=HOSTS)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    response = session.request(method, url, headers=headers, timeout=TIMEOUT, **kwargs)
+    response = session.request(method, url, headers=headers, timeout=TIMEOUT, allow_redirects=False, **kwargs)
     log_request(method, url, response.status_code)
+    if 300 <= response.status_code < 400:
+        raise RuntimeError(f"exemplo answered {response.status_code}: redirects are not followed")
     if response.status_code == 401:
         raise SessionExpired("exemplo session expired")
     response.raise_for_status()
@@ -47,9 +49,15 @@ def login(portal):
     if not configured():
         raise MissingLogin(f"set {USERNAME} and {PASSWORD}")
     http = requests.Session(impersonate="chrome")
-    payload = request(
-        http, "POST", "/api/login", json={"login": credentials.env(USERNAME), "senha": credentials.env(PASSWORD)}
-    )
+    try:
+        payload = request(
+            http, "POST", "/api/login", json={"login": credentials.env(USERNAME), "senha": credentials.env(PASSWORD)}
+        )
+    except SessionExpired:
+        payload = {}
+    except Exception:
+        http.close()
+        raise
     if not payload.get("token"):
         http.close()
         raise LoginRejected("the portal refused the user or the password", reason="credentials_refused")
