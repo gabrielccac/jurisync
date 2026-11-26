@@ -550,16 +550,19 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         if password != ask_secret("Repita a senha: "):
             raise SystemExit("As senhas não conferem")
         try:
-            open_store().add_user(args.email, args.tenant, password)
+            open_store().add_user(args.email, args.tenant, password, must_change=True)
         except ValueError as error:
             raise SystemExit(str(error)) from None
-        say(f"Usuário {args.email.strip().lower()} pode entrar em {args.tenant}.")
+        say(f"Usuário {args.email.strip().lower()} pode entrar em {args.tenant}; escolhe a própria senha no 1º login.")
     elif args.command == "user" and args.action == "password":
         password = ask_secret("Nova senha (mín. 12 caracteres): ")
         if password != ask_secret("Repita a senha: "):
             raise SystemExit("As senhas não conferem")
-        open_store().set_password(args.email, password)
-        say(f"Senha de {args.email.strip().lower()} trocada; sessões e tokens antigos foram encerrados.")
+        open_store().set_password(args.email, password, must_change=True)
+        say(
+            f"Senha de {args.email.strip().lower()} trocada; sessões e tokens antigos foram encerrados. "
+            "O usuário escolhe uma senha nova no próximo login."
+        )
     elif args.command == "user" and args.action == "list":
         for row in open_store().users(args.tenant):
             say(f"{row['email']}\t{row['tenant']}")

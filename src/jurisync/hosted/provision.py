@@ -406,7 +406,7 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace
             if email in existing:
                 continue
             password = secrets.token_urlsafe(15)
-            store.add_user(email, tenant, password)
+            store.add_user(email, tenant, password, must_change=True)
             store.log(tenant, "operador", "usuário criado", email)
             created_users.append(f"{email}\t{tenant}\t{password}")
             say(f"{tenant}: usuário {email} criado")

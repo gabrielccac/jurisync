@@ -30,7 +30,8 @@ create table if not exists users (
     email text primary key,
     tenant text not null references tenants(id) on delete cascade,
     password text not null,
-    created integer not null
+    created integer not null,
+    must_change integer not null default 0
 );
 create table if not exists clients (
     client_id text primary key,
@@ -100,6 +101,7 @@ create table if not exists tokens (
 # Tool calls and logins are kept this long, then dropped by ``purge``.
 CALLS_KEPT = 90 * 24 * 3600
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
+MIN_PASSWORD = 12
 
 
 def digest(secret):
@@ -148,6 +150,8 @@ class Store:
             ("tenants", "reason", "text not null default ''"),
             ("calls", "portal", "text not null default ''"),  # and before the monitoring API
             ("calls", "reason", "text not null default ''"),
+            # Every password stored before users could choose their own was set by the operator: due for a change.
+            ("users", "must_change", "integer not null default 1"),
         ):
             if column not in {row["name"] for row in self._db.execute(f"pragma table_info({table})")}:
                 self._db.execute(f"alter table {table} add column {column} {definition}")
@@ -214,21 +218,24 @@ class Store:
         self._run("delete from codes where tenant = ?", tenant)
         self._run("delete from tenants where id = ?", tenant)
 
-    def add_user(self, email, tenant, password):
+    def add_user(self, email, tenant, password, *, must_change=False):
+        """``must_change``: the operator chose the password, so the user picks a new one at the next sign-in."""
         office = self.tenant(tenant)
         if office is None:
             raise ValueError(f"Unknown tenant {tenant}")
         if office["mode"] == "local":
             raise ValueError(f"{tenant} uses its local install: it has no users on the server")
-        if len(password) < 12:
-            raise ValueError("Use a password of at least 12 characters")
+        if len(password) < MIN_PASSWORD:
+            raise ValueError(f"Use a password of at least {MIN_PASSWORD} characters")
         self._run(
-            "insert into users (email, tenant, password, created) values (?, ?, ?, ?) "
-            "on conflict(email) do update set tenant = excluded.tenant, password = excluded.password",
+            "insert into users (email, tenant, password, created, must_change) values (?, ?, ?, ?, ?) "
+            "on conflict(email) do update set tenant = excluded.tenant, password = excluded.password, "
+            "must_change = excluded.must_change",
             email.strip().lower(),
             tenant,
             hash_password(password),
             int(time.time()),
+            int(must_change),
         )
 
     def authenticate(self, email, password):
@@ -245,11 +252,21 @@ class Store:
             sql, args = sql + " where tenant = ?", (tenant,)
         return [dict(row) for row in self._run(sql + " order by email", *args)]
 
-    def set_password(self, email, password):
-        if len(password) < 12:
-            raise ValueError("Use a password of at least 12 characters")
+    def must_change(self, email):
+        """Whether the user still signs in with a password the operator set."""
+        rows = self._run("select must_change from users where email = ?", email.strip().lower())
+        return bool(rows and rows[0]["must_change"])
+
+    def set_password(self, email, password, *, must_change=False):
+        if len(password) < MIN_PASSWORD:
+            raise ValueError(f"Use a password of at least {MIN_PASSWORD} characters")
         email = email.strip().lower()
-        self._run("update users set password = ? where email = ?", hash_password(password), email)
+        self._run(
+            "update users set password = ?, must_change = ? where email = ?",
+            hash_password(password),
+            int(must_change),
+            email,
+        )
         self._run("delete from tokens where subject = ?", email)
 
     def remove_user(self, email):

@@ -593,6 +593,84 @@ class OldStoreMigrationTest(unittest.TestCase):
             store.remove_tenant("office-a")
             store.purge()
 
+    def test_users_stored_before_the_password_change_must_change_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "store.sqlite"
+            store = Store(path)
+            store.add_tenant("office-a", "A")
+            store._db.close()
+            old = sqlite3.connect(path)
+            old.execute("alter table users drop column must_change")
+            old.execute("insert into users values ('u@a.test', 'office-a', 'scrypt$00$00', 0)")
+            old.commit()
+            old.close()
+            store = Store(path)
+            self.assertTrue(store.must_change("u@a.test"))
+            store.add_user("new@a.test", "office-a", PASSWORD)
+            self.assertFalse(store.must_change("new@a.test"))
+            store._db.close()
+
+
+class PasswordChangeTest(SignInCase):
+    EMAIL = "user@office-a.test"
+    NEW = "outra-senha-bem-longa"
+
+    def start(self, client, **form):
+        client_id = self.register(client)
+        verifier, challenge = pkce()
+        request_id, _ = self.authorize(client, client_id, challenge)
+        data = {"request": request_id, "email": self.EMAIL, "password": PASSWORD, **form}
+        return client_id, verifier, request_id, client.post("/login", data=data, follow_redirects=False)
+
+    def change(self, client, request_id, password, confirm=None):
+        data = {"request": request_id, "email": self.EMAIL, "new_password": password, "confirm": confirm or password}
+        return client.post("/login", data=data, follow_redirects=False)
+
+    def test_an_operator_set_password_is_changed_before_the_code_is_issued(self):
+        self.store.set_password(self.EMAIL, PASSWORD, must_change=True)
+        client = TestClient(self.app, base_url=BASE)
+        client_id, verifier, request_id, response = self.start(client)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("definida pelo administrador", response.text)
+        self.assertNotIn("code=", response.headers.get("location", ""))
+        self.assertIn("não conferem", self.change(client, request_id, self.NEW, self.NEW + "x").text)
+        self.assertIn("pelo menos 12", self.change(client, request_id, "curta").text)
+        self.assertIn("diferente da atual", self.change(client, request_id, PASSWORD).text)
+        done = self.change(client, request_id, self.NEW)
+        self.assertEqual(done.status_code, 302, done.text)
+        code = parse_qs(urlsplit(done.headers["location"]).query)["code"][0]
+        self.assertEqual(self.exchange(client, client_id, code, verifier).status_code, 200)
+        self.assertFalse(self.store.must_change(self.EMAIL))
+        self.assertIsNone(self.store.authenticate(self.EMAIL, PASSWORD))
+        self.assertEqual(self.store.authenticate(self.EMAIL, self.NEW), "office-a")
+        self.assertEqual(self.store.history("office-a")[0]["action"], "senha trocada pelo usuário")
+
+    def test_any_user_may_choose_to_change_the_password(self):
+        client = TestClient(self.app, base_url=BASE)
+        _, _, request_id, response = self.start(client, change="1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Escolha a senha nova", response.text)
+        self.assertEqual(self.change(client, request_id, self.NEW).status_code, 302)
+        self.assertEqual(self.store.authenticate(self.EMAIL, self.NEW), "office-a")
+
+    def test_without_the_box_a_user_signs_in_directly(self):
+        client = TestClient(self.app, base_url=BASE)
+        self.assertEqual(self.start(client)[3].status_code, 302)
+
+    def test_the_new_password_step_needs_the_current_password_first(self):
+        client = TestClient(self.app, base_url=BASE)
+        request_id, _ = self.authorize(client, self.register(client), pkce()[1])
+        self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
+        self.assertEqual(self.store.authenticate(self.EMAIL, PASSWORD), "office-a")
+
+    def test_a_wrong_password_never_reaches_the_new_password_step(self):
+        self.store.set_password(self.EMAIL, PASSWORD, must_change=True)
+        client = TestClient(self.app, base_url=BASE)
+        request_id, _ = self.authorize(client, self.register(client), pkce()[1])
+        wrong = self.submit(client, request_id, password="senha-errada-longa")
+        self.assertIn("incorretos", wrong.text)
+        self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
