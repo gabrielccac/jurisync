@@ -22,6 +22,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from jurisync.paths import REPO_ROOT
+
 
 @dataclass(frozen=True)
 class Scope:
@@ -134,6 +136,25 @@ def read_file(name):
     return Path(path).expanduser().read_bytes()
 
 
+def customers_dir():
+    return Path(os.environ.get("JURISYNC_CUSTOMERS_DIR") or REPO_ROOT / "customers")
+
+
+def customer_name():
+    return env("JURISYNC_CUSTOMER").strip()
+
+
+def customer_dir(name):
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise ValueError(f"invalid customer name: {name!r}")
+    return customers_dir() / name
+
+
+def customer_env_path(name=None):
+    name = name or customer_name()
+    return customer_dir(name) / ".env" if name else None
+
+
 def save(name, value):
     """Store a new value of one credential and use it from now on in this process.
 
@@ -154,7 +175,6 @@ def save(name, value):
 
 
 def _loaded_env_file():
-    from jurisync.customers import customer_env_path
     from jurisync.paths import USER_ENV_FILE
 
     own = customer_env_path()

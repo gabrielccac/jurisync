@@ -67,7 +67,7 @@ class SaveTest(unittest.TestCase):
         shared.write_text("JURISYNC_X=1\n", encoding="utf-8")
         with (
             mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(shared), "JURISYNC_CUSTOMER": "victor"}),
-            mock.patch("jurisync.customers.customers_dir", return_value=self.folder),
+            mock.patch.object(credentials, "customers_dir", return_value=self.folder),
         ):
             credentials.save("ADVBOX_DEVICE_ID", "abc")
         self.assertEqual(own.read_text(encoding="utf-8"), "ADVBOX_EMAIL=a@b.c\nADVBOX_DEVICE_ID=abc\n")

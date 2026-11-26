@@ -7,6 +7,7 @@ from unittest import mock
 import pytest
 
 from jurisync import customers, portals
+from jurisync.core import credentials
 from jurisync.hosted import provision
 from jurisync.install import setup
 
@@ -44,7 +45,7 @@ def test_a_group_accepts_the_same_variable_under_every_prefix_of_the_portal():
 @pytest.fixture
 def root(tmp_path):
     (tmp_path / "acme").mkdir()
-    with mock.patch.object(customers, "customers_dir", return_value=tmp_path):
+    with mock.patch.object(credentials, "customers_dir", return_value=tmp_path):
         yield tmp_path
 
 
@@ -122,6 +123,6 @@ def test_the_env_example_lists_each_declared_variable_once(root):
 def test_the_generated_env_example_passes_the_check_of_every_customer(name, tmp_path):
     (tmp_path / name).mkdir()
     (tmp_path / name / "portals.toml").write_bytes((customers.customer_dir(name) / "portals.toml").read_bytes())
-    with mock.patch.object(customers, "customers_dir", return_value=tmp_path):
+    with mock.patch.object(credentials, "customers_dir", return_value=tmp_path):
         (tmp_path / name / ".env.example").write_text(customers.env_example(name), encoding="utf-8")
         assert [problem for problem in customers.validate(name) if ".env.example" in problem] == []

@@ -20,10 +20,10 @@ import functools
 import os
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
 
 from jurisync import portals
-from jurisync.core import credentials
+from jurisync.core.credentials import customer_dir, customer_env_path, customer_name, customers_dir
+from jurisync.paths import REPO_ROOT
 
 # Methods a customer may declare. Connectors decide how each one logs in.
 METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate_challenge", "browser_totp")
@@ -32,8 +32,6 @@ METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate
 CERTIFICATE_SYSTEMS = ("pje", "eproc")
 CERTIFICATE_METHODS = ("certificate_totp", "certificate_mtls")
 TRUE = ("1", "true", "yes", "on")
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -47,20 +45,6 @@ class PortalSetup:
         return tuple(
             group for group in self.secrets if not any(os.environ.get(name.strip()) for name in group.split("|"))
         )
-
-
-def customers_dir():
-    return Path(os.environ.get("JURISYNC_CUSTOMERS_DIR") or REPO_ROOT / "customers")
-
-
-def customer_name():
-    return credentials.env("JURISYNC_CUSTOMER").strip()
-
-
-def customer_dir(name):
-    if not name or "/" in name or "\\" in name or name.startswith("."):
-        raise ValueError(f"invalid customer name: {name!r}")
-    return customers_dir() / name
 
 
 def load_setup(name):
@@ -201,11 +185,6 @@ def hosted_mode(name):
     if mode not in HOSTED_MODES:
         raise ValueError(f"settings.toml [hosted] mode must be one of {', '.join(HOSTED_MODES)}")
     return mode, str(table.get("reason", "")).strip()
-
-
-def customer_env_path(name=None):
-    name = name or customer_name()
-    return customer_dir(name) / ".env" if name else None
 
 
 def load_env_file(path=None):
