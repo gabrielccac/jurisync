@@ -133,7 +133,7 @@ class AccessChecksTest(unittest.TestCase):
 
             path = session_file()
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("{}")
+            path.write_text("{}", encoding="utf-8")
             with mock.patch("jurisync.connectors.advbox.client.AdvboxClient") as client:
                 access.check("advbox")
             self.assertFalse(path.exists())  # the cached cookie cannot pass for a new password

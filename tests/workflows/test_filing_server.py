@@ -65,7 +65,7 @@ class FilingServerTests(unittest.TestCase):
             calls.append(
                 {"files": sorted(Path(f).name for f in files), "source": source, "jev": jev, "profile": profile.name}
             )
-            Path(out_dir, "review.json").write_text(json.dumps(REVIEW))
+            Path(out_dir, "review.json").write_text(json.dumps(REVIEW), encoding="utf-8")
             return {"ready": False}
 
         return mock.patch.object(filing, "prepare_folder", prepare)
@@ -115,7 +115,7 @@ class FilingServerTests(unittest.TestCase):
         text = json.dumps(view)
         for hidden in ("/secret", "sha256", "uploadSha256"):
             self.assertNotIn(hidden, text)
-        self.assertEqual(json.loads(self.run_dir.joinpath("facts.json").read_text()), {"a": 1})
+        self.assertEqual(json.loads(self.run_dir.joinpath("facts.json").read_text(encoding="utf-8")), {"a": 1})
 
     def test_a_source_folder_that_was_not_pulled_is_a_clear_error(self):
         calls = []
@@ -135,8 +135,8 @@ class FilingServerTests(unittest.TestCase):
 
     def test_a_run_with_a_draft_cannot_be_prepared_or_finalized_again(self):
         self.run_dir.mkdir()
-        self.run_dir.joinpath("checkpoint.json").write_text("{}")
-        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
+        self.run_dir.joinpath("checkpoint.json").write_text("{}", encoding="utf-8")
+        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW), encoding="utf-8")
         for name, arguments in (
             ("filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "docs1", "facts": {}}),
             ("filing_finalize", {"profile": "victor", "runId": "run1", "facts": {}}),
@@ -147,8 +147,8 @@ class FilingServerTests(unittest.TestCase):
 
     def test_finalize_rejects_overrides_for_unknown_files_and_masks_the_cpf(self):
         self.run_dir.mkdir()
-        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
-        self.run_dir.joinpath("facts.json").write_text("{}")
+        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW), encoding="utf-8")
+        self.run_dir.joinpath("facts.json").write_text("{}", encoding="utf-8")
         bad = call("filing_finalize", {"profile": "victor", "runId": "run1", "overrides": {"nope:9": {"role": "skip"}}})
         self.assertTrue(bad.is_error)
         self.assertIn("nope:9", bad.content[0].text)
@@ -162,7 +162,7 @@ class FilingServerTests(unittest.TestCase):
         }
 
         def finalize(review_path, facts, overrides=None, *, profile):
-            Path(review_path).with_name("payload.json").write_text(json.dumps(payload))
+            Path(review_path).with_name("payload.json").write_text(json.dumps(payload), encoding="utf-8")
             return {"ready": True}
 
         with mock.patch.object(filing, "finalize_review", finalize):
@@ -184,7 +184,7 @@ class FilingServerTests(unittest.TestCase):
 
     def test_prepare_that_ends_in_review_does_not_report_an_earlier_payload(self):
         self.run_dir.mkdir()
-        self.run_dir.joinpath("payload.json").write_text('{"stale": true}')
+        self.run_dir.joinpath("payload.json").write_text('{"stale": true}', encoding="utf-8")
         with self.fake_prepare([]):
             result = call(
                 "filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "docs1", "facts": {}}
@@ -195,16 +195,16 @@ class FilingServerTests(unittest.TestCase):
 
     def test_prepare_that_fails_leaves_no_payload(self):
         self.run_dir.mkdir()
-        self.run_dir.joinpath("payload.json").write_text('{"stale": true}')
+        self.run_dir.joinpath("payload.json").write_text('{"stale": true}', encoding="utf-8")
         result = call("filing_prepare", {"profile": "victor", "runId": "run1", "sourceFolder": "nope", "facts": {}})
         self.assertTrue(result.is_error)
         self.assertFalse(self.run_dir.joinpath("payload.json").exists())
 
     def test_finalize_that_raises_leaves_no_payload(self):
         self.run_dir.mkdir()
-        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
-        self.run_dir.joinpath("facts.json").write_text("{}")
-        self.run_dir.joinpath("payload.json").write_text('{"stale": true}')
+        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW), encoding="utf-8")
+        self.run_dir.joinpath("facts.json").write_text("{}", encoding="utf-8")
+        self.run_dir.joinpath("payload.json").write_text('{"stale": true}', encoding="utf-8")
 
         def finalize(review_path, facts, overrides=None, *, profile):
             raise ValueError("Expected one main petition, found 2")
@@ -218,8 +218,8 @@ class FilingServerTests(unittest.TestCase):
 
     def test_finalize_overrides_cannot_replace_a_documents_path(self):
         self.run_dir.mkdir()
-        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW))
-        self.run_dir.joinpath("facts.json").write_text("{}")
+        self.run_dir.joinpath("review.json").write_text(json.dumps(REVIEW), encoding="utf-8")
+        self.run_dir.joinpath("facts.json").write_text("{}", encoding="utf-8")
         calls = []
         with mock.patch.object(filing, "finalize_review", lambda *args, **kwargs: calls.append(args)):
             result = call(
@@ -251,8 +251,8 @@ class OfficeScopeTests(unittest.TestCase):
                 "defaults": {"attorney": {"cpfEnv": []}, "passive": {}},
                 "references": {"history": "notes.md"},
             }
-            folder.joinpath("filing-profile.json").write_text(json.dumps(profile))
-            folder.joinpath("notes.md").write_text(self.HISTORY)
+            folder.joinpath("filing-profile.json").write_text(json.dumps(profile), encoding="utf-8")
+            folder.joinpath("notes.md").write_text(self.HISTORY, encoding="utf-8")
         self.environment({"JURISYNC_PROFILES_DIR": tmp.name, "JURISYNC_FILING_DIR": tmp.name + "/runs"})
 
     def environment(self, values):

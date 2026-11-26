@@ -162,7 +162,7 @@ class PipelineTest(unittest.TestCase):
         )
         self.assertIn("Fonte: publicação pub-1", payload["description"])
         self.assertEqual(self.fake.read, [{"ids": ["pub-1"]}])
-        state = json.loads(self.state_file.read_text())
+        state = json.loads(self.state_file.read_text(encoding="utf-8"))
         self.assertEqual(state["publications"]["pub-1"]["status"], "completed")
 
     def test_validates_evidence_against_an_enriched_source(self):

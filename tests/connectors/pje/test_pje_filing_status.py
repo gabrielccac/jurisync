@@ -53,10 +53,12 @@ class StepStateTests(unittest.TestCase):
     def test_steps_left_running_by_a_dead_run_are_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "filing-steps.json")
-            path.write_text(json.dumps({"steps": [{"step": "x", "status": "running", "error": None}]}))
+            path.write_text(
+                json.dumps({"steps": [{"step": "x", "status": "running", "error": None}]}), encoding="utf-8"
+            )
             timeline = StepTimeline(path, Stub(), "fill")
             timeline.close_stale()
-            saved = json.loads(path.read_text())["steps"][0]
+            saved = json.loads(path.read_text(encoding="utf-8"))["steps"][0]
         self.assertEqual((saved["status"], saved["error"]), ("interrupted", "run ended without finishing"))
 
 
@@ -71,7 +73,7 @@ class FillStatusTests(unittest.TestCase):
     def test_a_finished_fill_records_complete_with_its_process_id(self):
         checkpoint, path, run = self.run_fill(Stub())
         run()
-        saved = json.loads(path.read_text())
+        saved = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual((saved["status"], saved["pid"], saved["error"]), ("complete", os.getpid(), None))
         self.assertEqual(saved["stage"], "parties_complete")
 
@@ -80,7 +82,7 @@ class FillStatusTests(unittest.TestCase):
             checkpoint, path, run = self.run_fill(Stub(outcome))
             with self.assertRaises(type(outcome)):
                 run()
-            saved = json.loads(path.read_text())
+            saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(saved["status"], status)
             self.assertIn(type(outcome).__name__, saved["error"])
 
@@ -93,15 +95,15 @@ class FillStatusTests(unittest.TestCase):
         stale = {"draftId": "1", "draftUrl": "u", "status": "running", "pid": dead_pid()}
         _, path, run = self.run_fill(Stub(), stale)
         run()
-        self.assertEqual(json.loads(path.read_text())["status"], "complete")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["status"], "complete")
 
 
 class RunStatusTests(unittest.TestCase):
     def write(self, tmp, checkpoint, steps=None):
         path = Path(tmp, "checkpoint.json")
-        path.write_text(json.dumps(checkpoint))
+        path.write_text(json.dumps(checkpoint), encoding="utf-8")
         if steps is not None:
-            Path(tmp, "filing-steps.json").write_text(json.dumps({"steps": steps}))
+            Path(tmp, "filing-steps.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
         return path
 
     def test_state_comes_from_the_run_record_and_process_liveness(self):
@@ -161,7 +163,7 @@ class BackgroundFillTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp, "run1")
             run_dir.mkdir()
-            run_dir.joinpath("payload.json").write_text(json.dumps(PAYLOAD))
+            run_dir.joinpath("payload.json").write_text(json.dumps(PAYLOAD), encoding="utf-8")
             env = {"JURISYNC_FILING_DIR": tmp, "PJE_ALLOW_DRAFT_WRITES": "true"}
             with (
                 mock.patch.dict(os.environ, env),
@@ -215,7 +217,7 @@ class BackgroundFillTests(unittest.TestCase):
                 mock.patch.object(server.filing, "validate_fill_payload"),
             ):
                 payload = Path(tmp) / "payload.json"
-                payload.write_text("{}")
+                payload.write_text("{}", encoding="utf-8")
                 paths.return_value = (payload, Path(tmp) / "checkpoint.json")
                 server._start_fill("run-ctx", "create-fill")
                 server.fill_jobs[("office-a", "run-ctx")].join(5)
@@ -259,7 +261,8 @@ class BackgroundFillTests(unittest.TestCase):
                         "status": "failed",
                         "error": "OSError: cannot read /home/office/docs/laudo.pdf from https://pje1g.trf5.jus.br/pje/x",
                     }
-                )
+                ),
+                encoding="utf-8",
             )
             error = run_status(checkpoint)["error"]
         self.assertIn("OSError: cannot read", error)
@@ -267,7 +270,7 @@ class BackgroundFillTests(unittest.TestCase):
         self.assertNotIn("https://", error)
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint = Path(tmp, "checkpoint.json")
-            checkpoint.write_text(json.dumps({"status": "complete"}))
+            checkpoint.write_text(json.dumps({"status": "complete"}), encoding="utf-8")
             self.assertIsNone(run_status(checkpoint)["error"])
 
     def test_only_the_act_reader_is_marked_as_not_read_only(self):

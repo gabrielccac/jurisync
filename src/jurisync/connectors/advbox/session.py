@@ -357,7 +357,7 @@ class AdvboxSession:
         path = session_file()
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, "w") as output:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
             output.write(json.dumps(cache, indent=2) + "\n")
 
     def _obtain(self, force_login=False):
@@ -365,7 +365,7 @@ class AdvboxSession:
             return
         if not force_login:
             try:
-                cache = json.loads(session_file().read_text())
+                cache = json.loads(session_file().read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 cache = None
             if cache and not is_expired_session(cache):

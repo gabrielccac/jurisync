@@ -11,7 +11,8 @@ def root(tmp_path, monkeypatch):
     acme = tmp_path / "acme"
     acme.mkdir()
     (acme / "portals.toml").write_text(
-        '[trf1-1g]\nmethod = "password_totp"\nsecrets = ["ACME_USER", "ACME_PASS", "ACME_2FA|ACME_2FA_QR"]\n'
+        '[trf1-1g]\nmethod = "password_totp"\nsecrets = ["ACME_USER", "ACME_PASS", "ACME_2FA|ACME_2FA_QR"]\n',
+        encoding="utf-8",
     )
     monkeypatch.setenv("JURISYNC_CUSTOMERS_DIR", str(tmp_path))
     monkeypatch.setenv("JURISYNC_CUSTOMER", "acme")
@@ -36,10 +37,11 @@ def test_alternative_group_is_satisfied_by_either(root, monkeypatch):
 def test_pinned_values_beat_the_shared_file_but_not_the_environment(root, monkeypatch, tmp_path):
     (root / "acme" / "portals.toml").write_text(
         '[trf1-1g]\nmethod = "certificate_totp"\nsecrets = ["ACME_USER"]\n'
-        '[env]\nset = { ACME_CERT = "true", ACME_KEEP = "pinned" }\n'
+        '[env]\nset = { ACME_CERT = "true", ACME_KEEP = "pinned" }\n',
+        encoding="utf-8",
     )
     shared = tmp_path / "shared.env"
-    shared.write_text("ACME_CERT=false\nACME_KEEP=shared\n")
+    shared.write_text("ACME_CERT=false\nACME_KEEP=shared\n", encoding="utf-8")
     monkeypatch.setenv("ACME_KEEP", "from-process")
     monkeypatch.delenv("ACME_CERT", raising=False)
     load_env_file(shared)
@@ -49,10 +51,10 @@ def test_pinned_values_beat_the_shared_file_but_not_the_environment(root, monkey
 
 
 def test_invalid_setup_fails_loudly(root):
-    (root / "acme" / "portals.toml").write_text('[trf9-1g]\nmethod = "password_totp"\n')
+    (root / "acme" / "portals.toml").write_text('[trf9-1g]\nmethod = "password_totp"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="portal must be one of"):
         customers.load_setup("acme")
-    (root / "acme" / "portals.toml").write_text('[trf1-1g]\nmethod = "magic"\n')
+    (root / "acme" / "portals.toml").write_text('[trf1-1g]\nmethod = "magic"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="method must be one of"):
         customers.load_setup("acme")
 
@@ -60,7 +62,8 @@ def test_invalid_setup_fails_loudly(root):
 def test_a_certificate_method_switches_the_portal_to_the_a1_login(root):
     (root / "acme" / "portals.toml").write_text(
         '[trf1-1g]\nmethod = "certificate_totp"\n[trf3-1g]\nmethod = "password_totp"\n[trf4-2g]\nmethod = "certificate_mtls"\n'
-        '[env]\nset = { ADVBOX_ALLOW_WRITES = "true" }\n'
+        '[env]\nset = { ADVBOX_ALLOW_WRITES = "true" }\n',
+        encoding="utf-8",
     )
     assert customers.fixed_variables("acme") == {
         "PJE_1G_CERT": "true",
@@ -71,12 +74,12 @@ def test_a_certificate_method_switches_the_portal_to_the_a1_login(root):
 
 def test_a_pinned_switch_that_contradicts_the_method_fails_loudly(root):
     (root / "acme" / "portals.toml").write_text(
-        '[trf1-1g]\nmethod = "password_totp"\n[env]\nset = { PJE_1G_CERT = "true" }\n'
+        '[trf1-1g]\nmethod = "password_totp"\n[env]\nset = { PJE_1G_CERT = "true" }\n', encoding="utf-8"
     )
     with pytest.raises(ValueError, match="PJE_1G_CERT"):
         customers.load_setup("acme")
     (root / "acme" / "portals.toml").write_text(
-        '[trf1-1g]\nmethod = "certificate_totp"\n[env]\nset = { PJE_1G_CERT = "false" }\n'
+        '[trf1-1g]\nmethod = "certificate_totp"\n[env]\nset = { PJE_1G_CERT = "false" }\n', encoding="utf-8"
     )
     with pytest.raises(ValueError, match="contradicts"):
         customers.load_setup("acme")
@@ -109,8 +112,8 @@ def test_victor_setup_is_valid(monkeypatch):
 
 
 def test_validate_reports_what_breaks_a_folder(root):
-    (root / "acme" / ".env.example").write_text("ACME_USER=\nACME_2FA_QR=\n")
-    (root / "acme" / "settings.toml").write_text('[hosted]\nmode = "cloud"\n')
+    (root / "acme" / ".env.example").write_text("ACME_USER=\nACME_2FA_QR=\n", encoding="utf-8")
+    (root / "acme" / "settings.toml").write_text('[hosted]\nmode = "cloud"\n', encoding="utf-8")
     problems = customers.validate("acme")
     assert "acme: .env.example lacks ACME_PASS" in problems
     assert not any("ACME_2FA" in problem for problem in problems)  # one name of an A|B group is enough
@@ -126,16 +129,16 @@ def test_check_customer_command(root):
     lines = []
     assert setup.main(["check-customer", "acme"], say=lines.append) == 0
     assert lines == ["Tudo certo."]
-    (root / "acme" / "portals.toml").write_text('[trf1-1g]\nmethod = "magic"\n')
+    (root / "acme" / "portals.toml").write_text('[trf1-1g]\nmethod = "magic"\n', encoding="utf-8")
     assert setup.main(["check-customer"], say=lines.append) == 1
     assert lines[-1] == "1 problema(s)."
 
 
 def test_ciencia_on_read_defaults_to_ask_and_follows_settings_toml(root):
     assert customers.ciencia_on_read() == "ask"
-    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "allow"\n')
+    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "allow"\n', encoding="utf-8")
     assert customers.ciencia_on_read() == "allow"
-    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "sometimes"\n')
+    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "sometimes"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="ciencia_on_read"):
         customers.ciencia_on_read()
 

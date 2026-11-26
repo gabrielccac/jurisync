@@ -72,7 +72,7 @@ class StepTimelineTest(unittest.TestCase):
             again = filing.StepTimeline(path, client, "fill")
             with again.step("pending"):
                 pass
-            saved = json.loads(path.read_text())["steps"]
+            saved = json.loads(path.read_text(encoding="utf-8"))["steps"]
         self.assertEqual([step["step"] for step in saved], ["author", "other participant", "subjects", "pending"])
         self.assertEqual(saved[1]["name"], "PARTY")
         self.assertEqual((saved[0]["status"], saved[0]["requests"]), ("ok", 3))

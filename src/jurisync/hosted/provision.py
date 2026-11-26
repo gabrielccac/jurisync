@@ -284,7 +284,9 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
     passphrase = rollout_passphrase(passphrase_file, create=True)
     previous = {}
     if (out / PLAN).is_file():
-        previous = {office["tenant"]: office for office in json.loads((out / PLAN).read_text())["offices"]}
+        previous = {
+            office["tenant"]: office for office in json.loads((out / PLAN).read_text(encoding="utf-8"))["offices"]
+        }
     offices = []
     for customer in only or all_customers():
         values = read_customer_env(customer)
@@ -507,7 +509,9 @@ def remote_plugin(source, url, out, *, say=print):
         )
         if found:
             local_only[Path(entry).name] = found
-    (out / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    (out / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     say(
         f"Plugin remoto em {out}: "
         + ", ".join(f"{name} -> {entry['url']}" for name, entry in manifest["mcpServers"].items())

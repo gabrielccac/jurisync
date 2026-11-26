@@ -250,14 +250,15 @@ class PayloadTest(unittest.TestCase):
                             },
                         ]
                     }
-                )
+                ),
+                encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "needs review"):
                 finalize_review(report, FACTS, profile=PROFILE)
             choice = {"file:0": {"role": "main", "type": "Petição inicial"}}
             result = finalize_review(report, FACTS, choice, profile=PROFILE)
             self.assertTrue(result["ready"])
-            documents = json.loads(Path(result["payloadPath"]).read_text())["documents"]
+            documents = json.loads(Path(result["payloadPath"]).read_text(encoding="utf-8"))["documents"]
             self.assertEqual(documents["main"]["path"], str(petition))
             self.assertEqual(
                 documents["supporting"],
@@ -290,7 +291,7 @@ class PrepareFolderTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as out:
             result = prepare_folder(files, FACTS, out, profile=PROFILE, source="docs", jev=False)
             self.assertEqual((result["fileCount"], result["source"]), (2, "docs"))
-            report = json.loads(Path(result["reviewPath"]).read_text())
+            report = json.loads(Path(result["reviewPath"]).read_text(encoding="utf-8"))
             self.assertEqual(report["source"], "docs")
             self.assertEqual(sorted(row["role"] for row in report["files"]), ["main", "supporting"])
             for row in report["files"]:
@@ -365,7 +366,7 @@ class StalePayloadTest(RunFolder):
     def test_the_payload_is_written_whole_and_private(self):
         self.prepare()
         self.assertEqual(oct(self.payload.stat().st_mode & 0o777), "0o600")
-        self.assertEqual(json.loads(self.payload.read_text())["authorCpf"], "12345678909")
+        self.assertEqual(json.loads(self.payload.read_text(encoding="utf-8"))["authorCpf"], "12345678909")
         self.assertEqual(sorted(path.name for path in self.out.glob("*.json*")), ["payload.json", "review.json"])
 
 
@@ -376,7 +377,7 @@ class OverrideTest(RunFolder):
 
     def test_an_override_changes_only_role_and_type(self):
         self.prepare()
-        report = json.loads((self.out / "review.json").read_text())
+        report = json.loads((self.out / "review.json").read_text(encoding="utf-8"))
         supporting = next(row for row in report["files"] if row["role"] == "supporting")
         other = self.source / "0-PA.pdf"
         for extra in ({"path": str(other)}, {"uploadSha256": "0" * 64}, {"parts": []}, {"name": "x.pdf"}):
@@ -388,11 +389,11 @@ class OverrideTest(RunFolder):
         with self.assertRaisesRegex(ValueError, "not in the review"):
             self.finalize({"nope:9": {"role": "skip"}})
         self.finalize({supporting["id"]: {"role": "supporting", "type": "Planilha"}})
-        documents = json.loads(self.payload.read_text())["documents"]
+        documents = json.loads(self.payload.read_text(encoding="utf-8"))["documents"]
         self.assertEqual(documents["supporting"][0]["type"], "Planilha")
         self.assertEqual(documents["supporting"][0]["path"], supporting["path"])
         self.finalize({supporting["id"]: {"role": "skip"}})
-        self.assertEqual(json.loads(self.payload.read_text())["documents"]["supporting"], [])
+        self.assertEqual(json.loads(self.payload.read_text(encoding="utf-8"))["documents"]["supporting"], [])
 
 
 class PetitionCrossCheckTest(RunFolder):

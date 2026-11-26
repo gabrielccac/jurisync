@@ -66,7 +66,7 @@ def token_lock():
     """One process at a time on the token (parallel MCP calls, other servers using the same A3)."""
     path = lock_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with open(path, "w") as handle:
+    with open(path, "w", encoding="utf-8") as handle:
         if fcntl is None:  # Windows: msvcrt locks a byte range and blocks while another process holds it.
             import msvcrt
 

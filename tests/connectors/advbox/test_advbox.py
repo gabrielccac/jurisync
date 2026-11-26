@@ -416,7 +416,7 @@ class DownloadTest(unittest.TestCase):
     def test_available_path_suffixes_without_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(available_path(directory, "x.pdf"), Path(directory) / "x.pdf")
-            (Path(directory) / "x.pdf").write_text("a")
+            (Path(directory) / "x.pdf").write_text("a", encoding="utf-8")
             self.assertEqual(available_path(directory, "x.pdf"), Path(directory) / "x-1.pdf")
             with self.assertRaises(ValueError):
                 available_path(directory, "../x.pdf")

@@ -82,16 +82,16 @@ class VaultTest(unittest.TestCase):
     def test_round_trip_and_no_plain_text_on_disk(self):
         self.vault.put("office-a", {"PJE_A1_PIN": "segredo-123"}, {"PJE_A1_P12": b"\x00cert"})
         self.assertEqual(self.vault.get("office-a"), ({"PJE_A1_PIN": "segredo-123"}, {"PJE_A1_P12": b"\x00cert"}))
-        raw = (Path(self.directory.name) / "office-a.vault").read_text()
+        raw = (Path(self.directory.name) / "office-a.vault").read_text(encoding="utf-8")
         self.assertNotIn("segredo-123", raw)
         self.assertEqual(oct((Path(self.directory.name) / "office-a.vault").stat().st_mode & 0o777), "0o600")
 
     def test_an_entry_does_not_open_under_another_tenant_or_key(self):
         self.vault.put("office-a", {"PJE_A1_PIN": "a"})
         path = Path(self.directory.name)
-        record = json.loads((path / "office-a.vault").read_text())
+        record = json.loads((path / "office-a.vault").read_text(encoding="utf-8"))
         record["tenant"] = "office-b"
-        (path / "office-b.vault").write_text(json.dumps(record))
+        (path / "office-b.vault").write_text(json.dumps(record), encoding="utf-8")
         with self.assertRaises(RuntimeError):
             self.vault.get("office-b")
         with self.assertRaises(RuntimeError):

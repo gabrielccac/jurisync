@@ -17,7 +17,7 @@ NUMBER = "0000001-00.2026.5.07.0001"
 
 
 def fixture(name):
-    return json.loads((FIXTURES / f"{name}.json").read_text())
+    return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def token():
@@ -505,7 +505,7 @@ def test_fixtures_carry_no_real_looking_cpf():
     import re
 
     for path in FIXTURES.glob("*.json"):
-        for cpf in re.findall(r"\d{3}\.\d{3}\.\d{3}-\d{2}", path.read_text()):
+        for cpf in re.findall(r"\d{3}\.\d{3}\.\d{3}-\d{2}", path.read_text(encoding="utf-8")):
             assert len(set(re.sub(r"\D", "", cpf))) == 1, f"{path.name} has a CPF that is not an obvious placeholder"
 
 

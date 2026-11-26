@@ -101,7 +101,8 @@ class SessionTest(JuridiqTestCase):
                     "baseUrl": "https://other.example.invalid",
                     "expiresAt": "2999-01-01T00:00:00.000Z",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         fake = FakeJuridiq()
         self.assertTrue(JuridiqApi(send=fake).token().startswith("offline."))
@@ -115,7 +116,8 @@ class SessionTest(JuridiqTestCase):
                     "baseUrl": "https://api.example.invalid",
                     "expiresAt": "2999-01-01T00:00:00.000Z",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         fake = FakeJuridiq()
         JuridiqApi(send=fake).request("/user/me")
@@ -325,7 +327,8 @@ class SessionReuseTest(JuridiqTestCase):
         with mock.patch("jurisync.connectors.juridiq.api.requests.Session") as session:
             session.return_value.request.return_value = Response({"data": []})
             self.session_file.write_text(
-                json.dumps({"token": "t", "baseUrl": "https://api.example.invalid", "expiresAt": None})
+                json.dumps({"token": "t", "baseUrl": "https://api.example.invalid", "expiresAt": None}),
+                encoding="utf-8",
             )
             api.request("/user/me")
             api.request("/user/me")

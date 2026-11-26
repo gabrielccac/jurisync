@@ -105,7 +105,9 @@ class PjeSessionCacheChecks(unittest.TestCase):
         ):
             path = session_cache.cache_path("trf1-1g")
             path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"portal": "trf1-1g", "identity": "another-account", "cookies": [{}]}))
+            path.write_text(
+                json.dumps({"portal": "trf1-1g", "identity": "another-account", "cookies": [{}]}), encoding="utf-8"
+            )
             with patch.object(requests.Session, "get") as network:
                 self.assertIsNone(session_cache.load_session("trf1-1g"))
                 network.assert_not_called()

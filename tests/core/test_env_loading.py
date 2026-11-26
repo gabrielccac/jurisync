@@ -11,7 +11,9 @@ from jurisync.core.mcp import is_machine_name, load_env_file, sanitize_diagnosti
 def files(tmp_path):
     """A customer ``acme`` with its own .env, a shared file, and an environment restored afterwards."""
     (tmp_path / "acme").mkdir()
-    (tmp_path / "acme" / "portals.toml").write_text('[env]\nset = { ADVBOX_ALLOW_WRITES = "false" }\n')
+    (tmp_path / "acme" / "portals.toml").write_text(
+        '[env]\nset = { ADVBOX_ALLOW_WRITES = "false" }\n', encoding="utf-8"
+    )
     keep = {name: os.environ[name] for name in ("PATH", "HOME") if name in os.environ}
     with mock.patch.dict(os.environ, {**keep, "JURISYNC_CUSTOMERS_DIR": str(tmp_path)}, clear=True):
         yield tmp_path / "acme" / ".env", tmp_path / "shared.env"
@@ -46,8 +48,8 @@ SHARED_WRITES = ("PJE_ALLOW_DRAFT_WRITES", "JURIDIQ_ALLOW_WRITES")
 
 def test_a_write_grant_in_the_shared_file_reaches_no_office(files):
     own, shared = files
-    own.write_text("PJE_1G_USERNAME=acme-user\n")
-    shared.write_text(SHARED)
+    own.write_text("PJE_1G_USERNAME=acme-user\n", encoding="utf-8")
+    shared.write_text(SHARED, encoding="utf-8")
     os.environ["JURISYNC_CUSTOMER"] = "acme"
     load_env_file(shared)
     for name in SHARED_WRITES:
@@ -56,8 +58,8 @@ def test_a_write_grant_in_the_shared_file_reaches_no_office(files):
 
 def test_an_office_grants_its_own_writes(files):
     own, shared = files
-    own.write_text("JURIDIQ_ALLOW_WRITES=true\n")
-    shared.write_text("PJE_ALLOW_DRAFT_WRITES=true\n")
+    own.write_text("JURIDIQ_ALLOW_WRITES=true\n", encoding="utf-8")
+    shared.write_text("PJE_ALLOW_DRAFT_WRITES=true\n", encoding="utf-8")
     os.environ["JURISYNC_CUSTOMER"] = "acme"
     load_env_file(shared)
     assert os.environ["JURIDIQ_ALLOW_WRITES"] == "true"
@@ -66,8 +68,8 @@ def test_an_office_grants_its_own_writes(files):
 
 def test_with_a_customer_the_shared_file_gives_machine_settings_only(files, caplog):
     own, shared = files
-    own.write_text("PJE_1G_USERNAME=acme-user\nJURISYNC_DOCUMENTS_DIR=/acme/documents\n")
-    shared.write_text(SHARED)
+    own.write_text("PJE_1G_USERNAME=acme-user\nJURISYNC_DOCUMENTS_DIR=/acme/documents\n", encoding="utf-8")
+    shared.write_text(SHARED, encoding="utf-8")
     os.environ["JURISYNC_CUSTOMER"] = "acme"
     before = set(os.environ)
     with caplog.at_level(logging.INFO, logger="jurisync.core.mcp"):
@@ -88,8 +90,8 @@ def test_with_a_customer_the_shared_file_gives_machine_settings_only(files, capl
 
 def test_the_environment_beats_both_files(files):
     own, shared = files
-    own.write_text("PJE_1G_USERNAME=acme-user\n")
-    shared.write_text("LIBREOFFICE_BIN=/machine/soffice\n")
+    own.write_text("PJE_1G_USERNAME=acme-user\n", encoding="utf-8")
+    shared.write_text("LIBREOFFICE_BIN=/machine/soffice\n", encoding="utf-8")
     os.environ.update(JURISYNC_CUSTOMER="acme", PJE_1G_USERNAME="from-process", LIBREOFFICE_BIN="from-process")
     load_env_file(shared)
     assert (os.environ["PJE_1G_USERNAME"], os.environ["LIBREOFFICE_BIN"]) == ("from-process", "from-process")
@@ -97,7 +99,7 @@ def test_the_environment_beats_both_files(files):
 
 def test_without_a_customer_the_whole_shared_file_loads(files):
     _, shared = files
-    shared.write_text(SHARED)
+    shared.write_text(SHARED, encoding="utf-8")
     load_env_file(shared)
     assert os.environ["PJE_1G_PASSWORD"] == "shared-password"
     assert os.environ["ADVBOX_ALLOW_WRITES"] == "true"
@@ -108,8 +110,8 @@ def test_without_a_customer_the_whole_shared_file_loads(files):
 
 def test_a_customer_named_by_the_shared_file_is_isolated_too(files):
     own, shared = files
-    own.write_text("PJE_1G_USERNAME=acme-user\n")
-    shared.write_text("JURISYNC_CUSTOMER=acme\n" + SHARED)
+    own.write_text("PJE_1G_USERNAME=acme-user\n", encoding="utf-8")
+    shared.write_text("JURISYNC_CUSTOMER=acme\n" + SHARED, encoding="utf-8")
     load_env_file(shared)
     assert os.environ["PJE_1G_USERNAME"] == "acme-user"
     assert "PJE_1G_PASSWORD" not in os.environ
@@ -121,7 +123,7 @@ def test_an_installed_office_reads_its_whole_user_file(files, named_by):
     # A plugin (JURISYNC_CUSTOMER in the server env) or a bundle (named in the file) keeps the office's own logins
     # in ~/.config/jurisync/.env and ships no customers/<name>/.env.
     _, shared = files
-    shared.write_text(("JURISYNC_CUSTOMER=acme\n" if named_by == "file" else "") + SHARED)
+    shared.write_text(("JURISYNC_CUSTOMER=acme\n" if named_by == "file" else "") + SHARED, encoding="utf-8")
     if named_by == "server":
         os.environ["JURISYNC_CUSTOMER"] = "acme"
     load_env_file(shared)

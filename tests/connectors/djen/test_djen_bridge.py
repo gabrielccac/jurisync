@@ -38,7 +38,7 @@ class BridgeTest(unittest.TestCase):
         ).decode()
         self.directory = tempfile.TemporaryDirectory()
         self.sa = os.path.join(self.directory.name, "sa.json")
-        with open(self.sa, "w") as handle:
+        with open(self.sa, "w", encoding="utf-8") as handle:
             json.dump(
                 {"client_email": "bridge@p.iam.gserviceaccount.com", "private_key": pem, "private_key_id": "k1"}, handle
             )
