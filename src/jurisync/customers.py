@@ -244,6 +244,28 @@ def validate(name):
     return problems
 
 
+def env_example(name):
+    """The customer's ``.env.example``, made from its portals.toml: one line per declared variable, the alternatives of
+    an ``A|B`` group and the optional ones commented out, each variable once. No values."""
+    data = tomllib.loads((customer_dir(name) / "portals.toml").read_text(encoding="utf-8"))
+    lines, seen = (
+        [f"# Gerado de portals.toml por: jurisync-setup env-example {name}. Copie para customers/{name}/.env."],
+        set(),
+    )
+    for key, entry in data.items():
+        lines.append(f"# {key}" + (f" ({entry['method']})" if "method" in entry else ""))
+        for group in entry.get("secrets", []):
+            first, *others = (variable.strip() for variable in group.split("|"))
+            lines += [
+                f"{first}=" if first not in seen else "",
+                *(f"# {other}=" for other in others if other not in seen),
+            ]
+            seen.update((first, *others))
+        lines += [f"# {variable}=" for variable in entry.get("optional", []) if variable not in seen]
+        seen.update(entry.get("optional", []))
+    return "\n".join(line for line in lines if line) + "\n"
+
+
 def check(name):
     """Report, per portal, the method and which secrets are still missing. Never prints values."""
     return {key: {"method": setup.method, "missing": list(setup.missing())} for key, setup in load_setup(name).items()}

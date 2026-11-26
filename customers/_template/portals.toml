@@ -15,7 +15,7 @@
 
 [trf1-1g]
 method = "password_totp"
-secrets = ["PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA|PJE_1G_2FA_QR"]
+secrets = ["TRF1_1G_USERNAME", "TRF1_1G_PASSWORD", "TRF1_1G_2FA_DATA|TRF1_1G_2FA_QR"]
 
 [trf4-2g]
 method = "certificate_totp"
