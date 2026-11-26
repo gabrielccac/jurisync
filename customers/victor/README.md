@@ -287,8 +287,8 @@ it still does not infer unreadable pages.
 
 `portals.toml` lists, per portal, the login method and the environment variables it
 needs (no values). The values go in the gitignored `customers/victor/.env`, copied from
-`.env.example`. Servers pick the customer with `JURISYNC_CUSTOMER=victor` (set in
-`.mcp.json`); the customer `.env` loads before the shared `.env`, and variables already
+`.env.example`. Servers pick the customer with `JURISYNC_CUSTOMER=victor` (in
+the root `.env` of the checkout, read by every server in `.mcp.json`); the customer `.env` loads before the shared `.env`, and variables already
 in the environment win. Check a setup without printing secrets:
 
 ```bash

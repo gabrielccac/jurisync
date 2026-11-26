@@ -18,6 +18,8 @@ __pycache__/
 *.bak.*
 .claude/worktrees/
 .claude/settings.local.json
+# Claude Code's server list for this checkout: copy .mcp.json.example and adjust locally
+.mcp.json
 
 # Certificates, keys, and authenticator QR codes
 *.p12

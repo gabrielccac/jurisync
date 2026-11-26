@@ -102,5 +102,5 @@ JPe use it.
    and, for logins, `core.session_pool`.
 2. Add it to `CONNECTORS` in `src/jurisync/registry.py` (serve, setup and the hosted server read it from there).
 3. Add offline tests under `tests/connectors/<name>/`.
-4. Add the server to `.mcp.json` and its variables to `.env.example`.
+4. Add the server to `.mcp.json.example` and its variables to `.env.example`.
 5. Validate the read tools live and read-only before enabling any write.

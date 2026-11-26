@@ -70,9 +70,15 @@ cp .env.example .env
 
 Fill in only the connectors you use; `.env.example` documents every variable.
 
-Claude Code picks up `.mcp.json` from the project root. Each server runs as
-`.venv/bin/python -m jurisync.connectors.<name>.server` and loads `.env` on
-startup. Restart Claude Code (or reload MCP servers) after changing `.env`.
+```bash
+cp .mcp.json.example .mcp.json
+```
+
+Claude Code picks up `.mcp.json` from the project root. The file is gitignored, so each machine keeps its own copy;
+the versioned `.mcp.json.example` runs every server as `uv run --project <checkout> python -m <module>`, which
+works on Windows, Linux and macOS, and loads `.env` on startup. To work as one office, add
+`JURISYNC_CUSTOMER=<name>` to `.env` (or to the environment): every server then reads `customers/<name>/.env` and
+`customers/<name>/portals.toml`. Restart Claude Code (or reload MCP servers) after changing `.env`.
 
 ## Installing on another machine (Claude and Codex)
 
