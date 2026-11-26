@@ -185,12 +185,12 @@ Add a customer by creating `customers/<name>/` with a README, its skills under
 ## Command line
 
 ```bash
-.venv/bin/python -m jurisync.connectors.pje.process --portal trf1-1g --process-number 1024853-70.2023.4.01.3400
+.venv/bin/python -m jurisync.connectors.pje.process --portal trf1-1g --process-number 1000001-00.2023.4.01.3400
 ```
 
 ```bash
 .venv/bin/python -m jurisync.connectors.eproc.client processes --portal trf6-1g
-.venv/bin/python -m jurisync.connectors.eproc.client process --portal trf4-1g-sc --process-number 5000436-79.2026.4.04.7220
+.venv/bin/python -m jurisync.connectors.eproc.client process --portal trf4-1g-sc --process-number 5000002-00.2026.4.04.7220
 ```
 
 ```bash

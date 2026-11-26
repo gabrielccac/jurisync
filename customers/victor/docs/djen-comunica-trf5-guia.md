@@ -44,13 +44,13 @@ curl 'https://comunicaapi.pje.jus.br/api/v1/comunicacao/{hash}/certidao' -H 'Acc
 ```
 
 Resultados obtidos:
-- `14663/PB + TRF5`, 01–29 set: **count 1438** (topo: `0003527-90.2026.4.05.8303`
-  38ª PE, `0004456-23.2026.4.05.8304` 20ª PE, `0004687-53.2026.4.05.8303` 18ª PE).
+- `14663/PB + TRF5`, 01–29 set: **count 1438** (topo: `0000112-00.2026.4.05.8303`
+  38ª PE, `0000113-00.2026.4.05.8304` 20ª PE, `0000114-00.2026.4.05.8303` 18ª PE).
 - `14663/PB + TRF5`, 29 ago–29 set: **count 1554**, sendo **1365 PE** (18ª: 607,
   38ª: 430, 8ª: 184, 20ª: 108).
 - `14663/PE`: **count 0** (UF errada — o número 14663 existe em várias seccionais;
   sem UF, `count 2119` misturando AL/PB/CE/etc).
-- `42543/PE` set: **count 99** (inclui atuação TRF3: `5051046-22.2026.4.03.6301`
+- `42543/PE` set: **count 99** (inclui atuação TRF3: `5000115-00.2026.4.03.6301`
   JEF Catanduva); variantes `42543-A/B/E/N/O/S`: **0**.
 
 ## 4. Regras da API (armadilhas confirmadas)
@@ -81,7 +81,7 @@ Texto suficiente para triar ~90% dos JEF-INSS sem abrir o PJe. PJe fica como
 fonte secundária quando o texto é genérico, há prazo fatal a calcular ou
 sigilo a conferir (via `link` + `numero_processo`).
 
-Exemplo real: `0003527-90.2026.4.05.8303`, 38ª PE, MARIA DE LOURDES DA SILVA
+Exemplo real: `0000112-00.2026.4.05.8303`, 38ª PE, MARIA DE LOURDES DA SILVA
 (polo A) x INSS — "intimadas para se manifestarem sobre o(s) laudo(s)
 pericial(is)" → workflow `12049 Z-ANALISE DE LAUDO` (ver skill
 `customers/victor/skills/victor-sop-intimacoes/` para cadeia POP completa e invariantes

@@ -9,31 +9,31 @@ Contadores = buckets 0 a 6 (ou 0 a 7) do painel, nesta ordem: Pendentes de ciên
 
 | Portal | Login | Contadores | Caixa | Processo | Documento | Observação |
 |---|---|---|---|---|---|---|
-| trf1-1g | ✅ | ✅ 18/3/0/14/5/1/7 | ✅ 18 linhas | ✅ 1008138-17.2018.4.01.3500 (Push 494) | ✅ Petição inicial (`extracted_unnumbered`), mais de 20.000 chars (truncado no textLimit=20000 desta execução) | 2 logins, os dois OK (o 2º porque o meu script lia mal o inventário) |
-| trf1-2g | ✅ | ✅ 5/3/0/1/1/1/0 | ✅ 5 linhas (3 pendentes de ciência), 3 caixas | ✅ 1012057-77.2019.4.01.9999 (Push 208) | ⚠️ Petição inicial = `short_html`, 93 bytes / 8 chars (só a capa HTML, a peça está nos anexos) | 2 logins (o 2º releu o mesmo doc) |
-| trf3-1g | ✅ | ✅ 13/5/0/6/4/2/5/0 | ✅ 13 linhas (5 pendentes), 9 caixas | ✅ 5006320-98.2025.4.03.6332 (Push 135) | ✅ Petição inicial, 13.875 chars | |
-| trf3-2g | ✅ | ✅ todos 0 | ✅ 0 linhas | ✅ 5028456-22.2024.4.03.6301 (Push 9) | ✅ Petição Inicial (ID de origem 332459850), 17.450 chars | |
-| trf5-1g | ✅ | ✅ 5/1/0/4/0/0/1 | ✅ 5 linhas, 5 caixas | ✅ 0002702-38.2024.4.05.8200 (Push 216) | ✅ Petição inicial, 29.257 chars | |
+| trf1-1g | ✅ | ✅ 18/3/0/14/5/1/7 | ✅ 18 linhas | ✅ 1000003-00.2018.4.01.3500 (Push 494) | ✅ Petição inicial (`extracted_unnumbered`), mais de 20.000 chars (truncado no textLimit=20000 desta execução) | 2 logins, os dois OK (o 2º porque o meu script lia mal o inventário) |
+| trf1-2g | ✅ | ✅ 5/3/0/1/1/1/0 | ✅ 5 linhas (3 pendentes de ciência), 3 caixas | ✅ 1000004-00.2019.4.01.9999 (Push 208) | ⚠️ Petição inicial = `short_html`, 93 bytes / 8 chars (só a capa HTML, a peça está nos anexos) | 2 logins (o 2º releu o mesmo doc) |
+| trf3-1g | ✅ | ✅ 13/5/0/6/4/2/5/0 | ✅ 13 linhas (5 pendentes), 9 caixas | ✅ 5000005-00.2025.4.03.6332 (Push 135) | ✅ Petição inicial, 13.875 chars | |
+| trf3-2g | ✅ | ✅ todos 0 | ✅ 0 linhas | ✅ 5000006-00.2024.4.03.6301 (Push 9) | ✅ Petição Inicial (ID de origem 332459850), 17.450 chars | |
+| trf5-1g | ✅ | ✅ 5/1/0/4/0/0/1 | ✅ 5 linhas, 5 caixas | ✅ 0000007-00.2024.4.05.8200 (Push 216) | ✅ Petição inicial, 29.257 chars | |
 | trf5-2g | ✅ | ✅ 1/0/0/0/0/1/0 | ✅ 1 linha | ✅ 0000136-76.2024.4.05.9830 (Push 4) | ✅ Petição inicial, 15.974 chars | |
-| tjba-1g | ✅ | ✅ 74/25/0/25/26/4/23/27 | ✅ 74 linhas (3 pendentes), 22 caixas | ✅ 8000094-23.2026.8.05.0020 (Push 377) | ✅ Petição Inicial, 35.860 chars | |
-| tjce-1g | ✅ | ✅ 6/0/0/4/3/2/5 | ✅ 6 linhas (2 pendentes), 3 caixas | ✅ 3004082-88.2025.8.06.0071 (Push 155) | ✅ Petição Inicial, 20.647 chars | |
-| tjce-2g | ✅ | ✅ 5/0/0/3/0/2/0 | ✅ 5 linhas | ✅ 3022521-69.2025.8.06.0000 (Push 3) | ⚠️ Petição Inicial = `short_html`, 38 chars. No 2º login: "Documento de Comprovação (…decisao)" em PDF, 2.458 chars ✅ | 2 logins |
-| tjdft-1g | ✅ | ✅ 6/2/0/3/2/1/2 | ✅ 6 linhas (2 pendentes), 4 caixas | ✅ 0705101-80.2020.8.07.0009 (Push 56) | ⚠️ Petição Inicial = `short_html`, 97 bytes / 26 chars (capa HTML) | 2 logins (o 2º releu o mesmo doc) |
-| tjes-1g | ✅ CAPTCHA do WAF resolvido nas 2 execuções (~18 s) | ✅ 9/5/0/4/0/0/1 | ✅ 9 linhas (5 pendentes), 5 caixas | ✅ 5007399-59.2025.8.08.0021 (Push 52) | ✅ Petição Inicial, PDF de 283.821 bytes, 28.432 chars | 1º login: 3 processos recusados com razão por ciência pendente (Intimação no Diário sem id de documento: 10885825, 15750761 e despacho 14517843). 2º login: o 4º processo foi lido |
-| tjes-2g | ✅ | ✅ 3/0/0/3/0/0/0 | ✅ 3 linhas | ✅ 5007399-59.2025.8.08.0021 (Push 4) | ✅ Petição Inicial (ID de origem 73533924), 28.432 chars | |
-| tjma-1g | ✅ | ✅ 9/0/0/3/0/4/4/0 | ✅ 9 linhas (2 pendentes), 5 caixas | ✅ 0800982-20.2024.8.10.0055 (Push 129) | ✅ Petição Inicial, 24.369 chars | |
-| tjmt-1g | ✅ | ✅ 14/1/2/11/6/0/7/13 | ✅ 14 linhas (1 pendente), 8 caixas | ✅ 1028320-73.2019.8.11.0041 (Push 91) | ⚠️ Petição Inicial (21282592) = `http_error`, 0 chars. No 2º login, 1007152-28.2025.8.11.0001: Certidão de trânsito em julgado (HTML), 556 chars ✅ | Ver bug 2 |
-| tjmt-2g (novo) | ✅ | ✅ 8/2/0/1/2/5/0/6 | ✅ 8 linhas (2 pendentes) | ✅ 1002023-93.2025.8.11.9005 e 1046353-30.2025.8.11.0000 (Push 31) | ❌ Petição Inicial `http_error` nos dois processos (335162368 e 337562382): HTTP 404, `text/html;charset=ISO-8859-1`, 0 bytes | Login, painel, caixa, Push e processo validados pela 1ª vez. Ver bug 2 |
-| tjpa-1g | ✅ | ✅ 56/9/8/24/2/15/12 | ✅ 56 linhas (4 pendentes), 18 caixas | ⚠️ 0803453-79.2026.8.14.0070 abre, mas a aba Expedientes volta `total 0, complete false` | ❌ `ciência not checked: the process' Expedientes list could not be read in full…`, igual em 3 processos | Push ❌ `Could not uniquely identify the PJe Push process grid`. Processos tirados da caixa. Ver bug 1 |
-| tjpb-1g | ✅ | ✅ 11/0/0/9/2/1/8 | ✅ 11 linhas, 6 caixas | ✅ 0800708-91.2024.8.15.0451 (Push 88) | ✅ Petição Inicial, 9.238 chars | |
-| tjpe-1g | ✅ | ✅ 31/0/0/27/11/4/11 | ✅ 31 linhas, 9 caixas | ✅ 0001110-44.2025.8.17.3450 (Push 208) | ✅ Petição Inicial (Outras), 30.251 chars | |
-| tjap-1g | ✅ | ✅ todos 0 | ✅ 0 linhas | ✅ 6001094-06.2026.8.03.0002 (Push 2) | ✅ Petição Inicial, 30.938 chars | |
-| tjrn-1g | ✅ | ✅ 21/7/0/13/5/1/26 | ✅ 21 linhas (7 pendentes), 8 caixas | ✅ 0819622-80.2025.8.20.5124 (Push 178), aberto pelo **Acervo** (a busca passa por `listView`, cai no reCAPTCHA e o conector percorre o painel: 25 POSTs, depois o detalhe) | ✅ Petição Inicial, 33.769 chars | ~24 s por chamada por causa do Acervo |
-| tjrn-2g | ✅ | ✅ 4/1/0/3/3/0/1 | ✅ 4 linhas (1 pendente) | ✅ 0828611-32.2025.8.20.5106 (Push 35) | ✅ Petição Inicial (ID de origem 171753524), 37.111 chars | |
-| tjro-1g | ✅ | ✅ 2/0/0/2/0/0/0 | ✅ 2 linhas, 2 caixas | ✅ 7040600-15.2024.8.22.0001 (Push 35) | ✅ PETIÇÃO INICIAL, 9.171 chars | |
-| tjro-2g | ✅ | ✅ todos 0 | ✅ 0 linhas | ✅ 7025532-88.2025.8.22.0001 (Push 11) | ✅ PETIÇÃO INICIAL (ID de origem 120512436), 29.251 chars | Na validação de 13/11 não havia processo para testar; agora testado |
-| tjpi-1g | ✅ | ✅ 1/0/0/1/1/0/4 | ✅ 1 linha | ✅ 0801515-70.2026.8.18.0027 (Push 126) | ✅ Petição Inicial, 37.436 chars | |
-| tjpi-2g | ✅ | ✅ 9/0/0/9/1/0/0 | ✅ 9 linhas | ✅ 0800467-38.2025.8.18.0051 (Push 34) | ✅ Petição Inicial (ID de origem 79621339), 20.595 chars | |
+| tjba-1g | ✅ | ✅ 74/25/0/25/26/4/23/27 | ✅ 74 linhas (3 pendentes), 22 caixas | ✅ 8000008-00.2026.8.05.0020 (Push 377) | ✅ Petição Inicial, 35.860 chars | |
+| tjce-1g | ✅ | ✅ 6/0/0/4/3/2/5 | ✅ 6 linhas (2 pendentes), 3 caixas | ✅ 3000009-00.2025.8.06.0071 (Push 155) | ✅ Petição Inicial, 20.647 chars | |
+| tjce-2g | ✅ | ✅ 5/0/0/3/0/2/0 | ✅ 5 linhas | ✅ 3000010-00.2025.8.06.0000 (Push 3) | ⚠️ Petição Inicial = `short_html`, 38 chars. No 2º login: "Documento de Comprovação (…decisao)" em PDF, 2.458 chars ✅ | 2 logins |
+| tjdft-1g | ✅ | ✅ 6/2/0/3/2/1/2 | ✅ 6 linhas (2 pendentes), 4 caixas | ✅ 0700011-00.2020.8.07.0009 (Push 56) | ⚠️ Petição Inicial = `short_html`, 97 bytes / 26 chars (capa HTML) | 2 logins (o 2º releu o mesmo doc) |
+| tjes-1g | ✅ CAPTCHA do WAF resolvido nas 2 execuções (~18 s) | ✅ 9/5/0/4/0/0/1 | ✅ 9 linhas (5 pendentes), 5 caixas | ✅ 5000012-00.2025.8.08.0021 (Push 52) | ✅ Petição Inicial, PDF de 283.821 bytes, 28.432 chars | 1º login: 3 processos recusados com razão por ciência pendente (Intimação no Diário sem id de documento: 10885825, 15750761 e despacho 14517843). 2º login: o 4º processo foi lido |
+| tjes-2g | ✅ | ✅ 3/0/0/3/0/0/0 | ✅ 3 linhas | ✅ 5000012-00.2025.8.08.0021 (Push 4) | ✅ Petição Inicial (ID de origem 73533924), 28.432 chars | |
+| tjma-1g | ✅ | ✅ 9/0/0/3/0/4/4/0 | ✅ 9 linhas (2 pendentes), 5 caixas | ✅ 0800013-00.2024.8.10.0055 (Push 129) | ✅ Petição Inicial, 24.369 chars | |
+| tjmt-1g | ✅ | ✅ 14/1/2/11/6/0/7/13 | ✅ 14 linhas (1 pendente), 8 caixas | ✅ 1000014-00.2019.8.11.0041 (Push 91) | ⚠️ Petição Inicial (21282592) = `http_error`, 0 chars. No 2º login, 1000015-00.2025.8.11.0001: Certidão de trânsito em julgado (HTML), 556 chars ✅ | Ver bug 2 |
+| tjmt-2g (novo) | ✅ | ✅ 8/2/0/1/2/5/0/6 | ✅ 8 linhas (2 pendentes) | ✅ 1000016-00.2025.8.11.9005 e 1000017-00.2025.8.11.0000 (Push 31) | ❌ Petição Inicial `http_error` nos dois processos (335162368 e 337562382): HTTP 404, `text/html;charset=ISO-8859-1`, 0 bytes | Login, painel, caixa, Push e processo validados pela 1ª vez. Ver bug 2 |
+| tjpa-1g | ✅ | ✅ 56/9/8/24/2/15/12 | ✅ 56 linhas (4 pendentes), 18 caixas | ⚠️ 0800018-00.2026.8.14.0070 abre, mas a aba Expedientes volta `total 0, complete false` | ❌ `ciência not checked: the process' Expedientes list could not be read in full…`, igual em 3 processos | Push ❌ `Could not uniquely identify the PJe Push process grid`. Processos tirados da caixa. Ver bug 1 |
+| tjpb-1g | ✅ | ✅ 11/0/0/9/2/1/8 | ✅ 11 linhas, 6 caixas | ✅ 0800019-00.2024.8.15.0451 (Push 88) | ✅ Petição Inicial, 9.238 chars | |
+| tjpe-1g | ✅ | ✅ 31/0/0/27/11/4/11 | ✅ 31 linhas, 9 caixas | ✅ 0000020-00.2025.8.17.3450 (Push 208) | ✅ Petição Inicial (Outras), 30.251 chars | |
+| tjap-1g | ✅ | ✅ todos 0 | ✅ 0 linhas | ✅ 6000021-00.2026.8.03.0002 (Push 2) | ✅ Petição Inicial, 30.938 chars | |
+| tjrn-1g | ✅ | ✅ 21/7/0/13/5/1/26 | ✅ 21 linhas (7 pendentes), 8 caixas | ✅ 0800022-00.2025.8.20.5124 (Push 178), aberto pelo **Acervo** (a busca passa por `listView`, cai no reCAPTCHA e o conector percorre o painel: 25 POSTs, depois o detalhe) | ✅ Petição Inicial, 33.769 chars | ~24 s por chamada por causa do Acervo |
+| tjrn-2g | ✅ | ✅ 4/1/0/3/3/0/1 | ✅ 4 linhas (1 pendente) | ✅ 0800023-00.2025.8.20.5106 (Push 35) | ✅ Petição Inicial (ID de origem 171753524), 37.111 chars | |
+| tjro-1g | ✅ | ✅ 2/0/0/2/0/0/0 | ✅ 2 linhas, 2 caixas | ✅ 7000024-00.2024.8.22.0001 (Push 35) | ✅ PETIÇÃO INICIAL, 9.171 chars | |
+| tjro-2g | ✅ | ✅ todos 0 | ✅ 0 linhas | ✅ 7000025-00.2025.8.22.0001 (Push 11) | ✅ PETIÇÃO INICIAL (ID de origem 120512436), 29.251 chars | Na validação de 13/11 não havia processo para testar; agora testado |
+| tjpi-1g | ✅ | ✅ 1/0/0/1/1/0/4 | ✅ 1 linha | ✅ 0800026-00.2026.8.18.0027 (Push 126) | ✅ Petição Inicial, 37.436 chars | |
+| tjpi-2g | ✅ | ✅ 9/0/0/9/1/0/0 | ✅ 9 linhas | ✅ 0800027-00.2025.8.18.0051 (Push 34) | ✅ Petição Inicial (ID de origem 79621339), 20.595 chars | |
 
 **Resumo:** 25/25 logins OK, todos na 1ª tentativa de cada execução (nenhum login falhou). Contadores e caixa ✅ nos 25 portais. Push ✅ em 24 (❌ no TJPA). Processo ✅ em 25, parcial no TJPA (sem expedientes). Leitura de documento ✅ em 21; ⚠️ em trf1-2g, tjdft-1g e tjmt-1g; ❌ em tjmt-2g (petição inicial) e tjpa-1g. Nenhuma ciência foi registrada.
 
@@ -65,30 +65,30 @@ Branch `main` (c63887e), sem alterar código, `.env`, `portals.toml` ou certific
 
 | Portal | Login | Filas/intimações | Lista de processos | Processo | Documento | Observação |
 |---|---|---|---|---|---|---|
-| trf2-1g-rj | ✅ 1 tentativa | ✅ pendentes 0, prazos abertos 3 | ✅ 21 | ✅ 5000602-66.2026.4.02.5119 (28 eventos, 23 docs) | ✅ Petição inicial, 8.896 caracteres | sem bloco ciência |
-| trf2-1g-es | ✅ 1 | ✅ pend. 1, abertos 0 | ✅ 7 | ✅ 5000692-37.2026.4.02.5002 (17 ev., 21 docs) | ✅ Petição inicial, 10.557 | |
+| trf2-1g-rj | ✅ 1 tentativa | ✅ pendentes 0, prazos abertos 3 | ✅ 21 | ✅ 5000028-00.2026.4.02.5119 (28 eventos, 23 docs) | ✅ Petição inicial, 8.896 caracteres | sem bloco ciência |
+| trf2-1g-es | ✅ 1 | ✅ pend. 1, abertos 0 | ✅ 7 | ✅ 5000029-00.2026.4.02.5002 (17 ev., 21 docs) | ✅ Petição inicial, 10.557 | |
 | trf2-2g | ✅ 1 | ✅ 0 / 0 | ✅ 0 ("Nenhum registro encontrado") | — | — | não há processo no 2G |
-| trf4-1g-rs | ✅ 1 | ✅ pend. 2, abertos 2 | ✅ 6 | ✅ 5014091-54.2026.4.04.7112 (9 ev., 18 docs) | ✅ Petição inicial, 43.462 | |
-| trf4-1g-sc | ✅ 1 | ✅ 0 / 6 | ✅ 13 | ✅ 5007263-25.2024.4.04.7205 (174 ev., 81 docs, 2 páginas) | ✅ Petição inicial, 28.075 | |
-| trf4-1g-pr | ✅ 1 | ✅ 0 / 5 | ✅ 15 | ✅ 5008575-51.2024.4.04.7006 (78 ev., 52 docs) | ✅ Petição inicial, 8.012 | |
-| trf4-2g | ✅ 1 | ✅ 0 / 0 | ✅ 6 | ✅ 5318421-56.2025.4.04.9666 (4 ev., 2 docs) | ✅ Petição inicial (segredo nível 1), 1.852 | |
-| tjsp-1g | ⚠️ com a configuração atual: ❌ `Eproc request failed: Set TJSP_1G_USERNAME and TJSP_1G_PASSWORD in .env` (2×, nada chegou ao portal). Com `TJSP_1G_CERT=true` e `TJSP_1G_USER_PROFILE=SP527617` só no ambiente do processo: ✅ 1 | ✅ pend. 28, abertos 89 | ✅ 50 | ✅ 4013685-84.2026.8.26.0037 (16 ev., 20 docs) | ✅ Petição inicial, 11.979 | falta config no `[env].set` |
-| tjsp-2g | ⚠️ igual ao 1G: `Set TJSP_2G_USERNAME and TJSP_2G_PASSWORD in .env`; com `TJSP_2G_CERT`/`USER_PROFILE=SP527617` no processo: ✅ 1 | ✅ 5 / 18 | ✅ 50 | ✅ 4000268-76.2025.8.26.0691 (24 ev., 4 docs) | ✅ Petição, 8.720 | idem |
-| tjsc-1g | ✅ 1 | ✅ 4 / 43 | ✅ 196 | ✅ 5014937-79.2025.8.24.0075 (77 ev., 38 docs) | ✅ Petição inicial, 35.802 | |
-| tjsc-2g | ✅ 1 | ✅ 2 / 18 | ✅ 52 | ✅ 5108713-33.2026.8.24.0000 (8 ev., 15 docs) | ✅ Petição inicial, 22.169 | |
+| trf4-1g-rs | ✅ 1 | ✅ pend. 2, abertos 2 | ✅ 6 | ✅ 5000030-00.2026.4.04.7112 (9 ev., 18 docs) | ✅ Petição inicial, 43.462 | |
+| trf4-1g-sc | ✅ 1 | ✅ 0 / 6 | ✅ 13 | ✅ 5000031-00.2024.4.04.7205 (174 ev., 81 docs, 2 páginas) | ✅ Petição inicial, 28.075 | |
+| trf4-1g-pr | ✅ 1 | ✅ 0 / 5 | ✅ 15 | ✅ 5000032-00.2024.4.04.7006 (78 ev., 52 docs) | ✅ Petição inicial, 8.012 | |
+| trf4-2g | ✅ 1 | ✅ 0 / 0 | ✅ 6 | ✅ 5300033-00.2025.4.04.9666 (4 ev., 2 docs) | ✅ Petição inicial (segredo nível 1), 1.852 | |
+| tjsp-1g | ⚠️ com a configuração atual: ❌ `Eproc request failed: Set TJSP_1G_USERNAME and TJSP_1G_PASSWORD in .env` (2×, nada chegou ao portal). Com `TJSP_1G_CERT=true` e `TJSP_1G_USER_PROFILE=SP527617` só no ambiente do processo: ✅ 1 | ✅ pend. 28, abertos 89 | ✅ 50 | ✅ 4000034-00.2026.8.26.0037 (16 ev., 20 docs) | ✅ Petição inicial, 11.979 | falta config no `[env].set` |
+| tjsp-2g | ⚠️ igual ao 1G: `Set TJSP_2G_USERNAME and TJSP_2G_PASSWORD in .env`; com `TJSP_2G_CERT`/`USER_PROFILE=SP527617` no processo: ✅ 1 | ✅ 5 / 18 | ✅ 50 | ✅ 4000035-00.2025.8.26.0691 (24 ev., 4 docs) | ✅ Petição, 8.720 | idem |
+| tjsc-1g | ✅ 1 | ✅ 4 / 43 | ✅ 196 | ✅ 5000036-00.2025.8.24.0075 (77 ev., 38 docs) | ✅ Petição inicial, 35.802 | |
+| tjsc-2g | ✅ 1 | ✅ 2 / 18 | ✅ 52 | ✅ 5100037-00.2026.8.24.0000 (8 ev., 15 docs) | ✅ Petição inicial, 22.169 | |
 | tjrj-eproc-1g | ❌ 1ª: `SSLError: curl: (35) Recv failure: Connection reset by peer`; 2ª: `Timeout: curl: (28) Operation timed out after 30000 milliseconds with 0 bytes received` | — | — | — | — | Falhou na 1ª requisição (rede/TLS). A1 e TOTP não chegaram a ser enviados. Às 15:5x, `curl` do shell recebeu 302 do host. Retestar |
-| tjrs-1g | ✅ 1 | ✅ 7 / 18 | ✅ 50 | ✅ 5004129-87.2026.8.21.0002 (22 ev., 22 docs) | ✅ Petição inicial, 35.422 | |
-| tjmg-1g | ✅ 1 | ✅ 12 / 59 | ✅ 50 | ✅ 1000002-27.2025.8.13.0005 (105 ev., 47 docs) | ✅ Emenda à inicial, 2.245 | |
-| tjpr-1g | ✅ 1 (A1, perfil GO022729) | ✅ 0 / 0 | ✅ 1 | ✅ 6000139-92.2026.8.16.0137 (42 ev., 21 docs) | ✅ Petição inicial, 20.909 | A1 validado de ponta a ponta |
+| tjrs-1g | ✅ 1 | ✅ 7 / 18 | ✅ 50 | ✅ 5000038-00.2026.8.21.0002 (22 ev., 22 docs) | ✅ Petição inicial, 35.422 | |
+| tjmg-1g | ✅ 1 | ✅ 12 / 59 | ✅ 50 | ✅ 1000039-00.2025.8.13.0005 (105 ev., 47 docs) | ✅ Emenda à inicial, 2.245 | |
+| tjpr-1g | ✅ 1 (A1, perfil GO022729) | ✅ 0 / 0 | ✅ 1 | ✅ 6000040-00.2026.8.16.0137 (42 ev., 21 docs) | ✅ Petição inicial, 20.909 | A1 validado de ponta a ponta |
 | tjpr-2g | ✅ 1 | ✅ 0 / 0 | ✅ 0 ("Nenhum registro") | — | — | |
-| tjac-1g | ✅ 1 | ✅ 0 / 4 | ✅ 34 | ✅ 5000191-24.2026.8.01.0008 (47 ev., 43 docs) | ✅ Petição inicial, 30.822 | |
-| tjac-2g | ✅ 2 execuções, 1 login cada | ✅ 0 / 0 | ✅ 10 | ✅ 5008950-32.2025.8.01.0001 (5 ev., 5 docs); 5008938-18.2025.8.01.0001 (4 ev., 1 doc) | ⚠️ 1ª: ❌ `UnexpectedToolError ... PydanticSerializationError: ... UnicodeEncodeError: 'utf-8' codec can't encode character '\ud83d' ... surrogates not allowed` (Petição, doc 821780512764725559220332452906); 2ª: ✅ Certidão (HTML), 959 | bug de serialização (ver abaixo) |
+| tjac-1g | ✅ 1 | ✅ 0 / 4 | ✅ 34 | ✅ 5000041-00.2026.8.01.0008 (47 ev., 43 docs) | ✅ Petição inicial, 30.822 | |
+| tjac-2g | ✅ 2 execuções, 1 login cada | ✅ 0 / 0 | ✅ 10 | ✅ 5000042-00.2025.8.01.0001 (5 ev., 5 docs); 5000043-00.2025.8.01.0001 (4 ev., 1 doc) | ⚠️ 1ª: ❌ `UnexpectedToolError ... PydanticSerializationError: ... UnicodeEncodeError: 'utf-8' codec can't encode character '\ud83d' ... surrogates not allowed` (Petição, doc 821780512764725559220332452906); 2ª: ✅ Certidão (HTML), 959 | bug de serialização (ver abaixo) |
 | tnu | ✅ 1 (primeira validação) | ✅ 0 / 0 | ✅ 0 ("Nenhum registro") | — | — | login A1 + TOTP OK; não há processo |
-| tjgo-1g (Projudi) | ✅ 2 execuções (a 1ª entrou, mas o harness quebrou: erro meu, `structuredContent`) | — (o conector não tem ferramenta de intimações) | — (o conector não tem ferramenta de lista) | ✅ 5649512-56.2022.8.09.0085 (169 movimentações, 91 arquivos); número tirado do DJEN (OAB GO 22729) | ✅ `inicialdivinocarvalhodearaujo.pdf.p7s` (21/10/2022), 22.464 caracteres | |
-| tjsp-esaj | ✅ 2 execuções, `usuarioLogado: true`, 24 OABs | ⚠️ intimações: ❌ `curl: (28) Operation timed out after 30001 ms` (2×); audiências 0; petições aguardando assinatura 4; concluídas 5; caixa postal 20 | — (sem ferramenta) | ✅ 10 processos lidos, mas sempre **5 movimentações**; ❌ `Unexpected process detail endpoint` em 1001092-05.2025.8.26.0233 | ❌ `flow_required: No authorized document viewer link in the account dashboard` (10 processos, de petições e da caixa postal) | |
-| tjms-esaj | ✅ 1 | ✅ intimações 15, audiências 3, petições 6 aguardando / 63 concluídas, caixa postal 20 | — | ✅ 0801509-98.2025.8.12.0016 (49 movimentações, 2 partes) | ✅ Emenda à inicial (doc 248037477), 80 KB, 2.206 caracteres | trava de intimação não disparou |
-| tjal-esaj | ✅ 2 execuções | ✅ intimações 15 (todas `ciencia=False`, por isso evitadas), audiências 1, petições 2 / 46, caixa postal 20 | — | ✅ 9 processos (17 a 51 movimentações); ❌ `Unexpected process detail endpoint` em 0700505-64.2026.8.02.0047 | ❌ `flow_required: No authorized document viewer link in the account dashboard` (9 processos de petições) | |
-| tjam-esaj | ✅ 1 (`sessionSource: sajcas`) | ✅ intimações 0, audiências 0, petições 0/0, caixa postal 1 | — | ✅ 0547731-07.2024.8.04.0001 (7 mov.) | ❌ `flow_required: No authorized document viewer link...` | não há processo no painel |
+| tjgo-1g (Projudi) | ✅ 2 execuções (a 1ª entrou, mas o harness quebrou: erro meu, `structuredContent`) | — (o conector não tem ferramenta de intimações) | — (o conector não tem ferramenta de lista) | ✅ 5600044-00.2022.8.09.0085 (169 movimentações, 91 arquivos); número tirado do DJEN (OAB GO 22729) | ✅ `inicialdivinocarvalhodearaujo.pdf.p7s` (21/10/2022), 22.464 caracteres | |
+| tjsp-esaj | ✅ 2 execuções, `usuarioLogado: true`, 24 OABs | ⚠️ intimações: ❌ `curl: (28) Operation timed out after 30001 ms` (2×); audiências 0; petições aguardando assinatura 4; concluídas 5; caixa postal 20 | — (sem ferramenta) | ✅ 10 processos lidos, mas sempre **5 movimentações**; ❌ `Unexpected process detail endpoint` em 1000045-00.2025.8.26.0233 | ❌ `flow_required: No authorized document viewer link in the account dashboard` (10 processos, de petições e da caixa postal) | |
+| tjms-esaj | ✅ 1 | ✅ intimações 15, audiências 3, petições 6 aguardando / 63 concluídas, caixa postal 20 | — | ✅ 0800046-00.2025.8.12.0016 (49 movimentações, 2 partes) | ✅ Emenda à inicial (doc 248037477), 80 KB, 2.206 caracteres | trava de intimação não disparou |
+| tjal-esaj | ✅ 2 execuções | ✅ intimações 15 (todas `ciencia=False`, por isso evitadas), audiências 1, petições 2 / 46, caixa postal 20 | — | ✅ 9 processos (17 a 51 movimentações); ❌ `Unexpected process detail endpoint` em 0700047-00.2026.8.02.0047 | ❌ `flow_required: No authorized document viewer link in the account dashboard` (9 processos de petições) | |
+| tjam-esaj | ✅ 1 (`sessionSource: sajcas`) | ✅ intimações 0, audiências 0, petições 0/0, caixa postal 1 | — | ✅ 0500048-00.2024.8.04.0001 (7 mov.) | ❌ `flow_required: No authorized document viewer link...` | não há processo no painel |
 | trf6-1g / trf6-2g | não tentado | — | — | — | — | Falta configuração: o `portals.toml` pede `browser_totp` com `TRF6_USERNAME`/`TRF6_PASSWORD`, que não existem. Em 13/11 a entrada foi só com o A1, por navegador + proxy local (mitmproxy), caminho que o conector não tem. `TRF6_2FA_QR` e `TRF6_OTP_PROFILE_MATCH` aparecem 2× no `customers/herica/.env` |
 | tjto-1g / tjto-2g | não tentado | — | — | — | — | DNS às 16:09: `mtls.tjto.jus.br` continua **NXDOMAIN** (getent rc=2; DoH Google e Cloudflare Status=3; SOA `ns.tjto.jus.br` serial 2026111710). `eproc1/2.tjto.jus.br` resolvem (177.0.107.47/48) |
 
@@ -101,7 +101,7 @@ Números: 19 eproc + 1 Projudi + 4 e-SAJ = 24 portais com login, e 23 entraram (
 3. **e-SAJ: documentos só abrem para processos que o painel do advogado resolve**. `esaj/base.py::dashboard_process` consulta `tarefas-adv/api/processos?numerosProcesso=` e recarrega as petições. No TJSP, no TJAL e no TJAM não resolveu nenhum dos 20 processos tentados, mesmo os das petições concluídas. No TJMS funcionou. Resultado: `esaj_list_documents`/`esaj_read_document` não funcionam no TJSP e no TJAL na prática.
 4. **e-SAJ TJSP: `tarefas-adv/api/intimacoes` excede o timeout de 30 s** (`core/http.TIMEOUT`) nas 2 sessões, e a fila de intimações do TJSP fica ilegível.
 5. **e-SAJ TJSP: `esaj_get_process` devolve sempre 5 movimentações** (10 processos). Parece que o parser lê só a lista recolhida das "últimas movimentações". No TJMS (49) e no TJAL (17 a 51) a lista veio completa.
-6. **e-SAJ `Unexpected process detail endpoint`** (TJSP 1001092-05.2025.8.26.0233, TJAL 0700505-64.2026.8.02.0047): a consulta redireciona para uma rota que `load_process` não aceita. Provavelmente é uma lista de processos/incidentes ou outra instância.
+6. **e-SAJ `Unexpected process detail endpoint`** (TJSP 1000045-00.2025.8.26.0233, TJAL 0700047-00.2026.8.02.0047): a consulta redireciona para uma rota que `load_process` não aceita. Provavelmente é uma lista de processos/incidentes ou outra instância.
 7. **Projudi: não há ferramenta de intimações nem de lista de processos.** É preciso saber o número antes (aqui saiu do DJEN). Também não há trava de ciência no Projudi.
 8. Observação: o eproc lê o documento antes de checar a ciência e só depois avisa (decisão de 09/11). Para validar isso com segurança, o harness teve de repetir antes a checagem `pending_notices`.
 

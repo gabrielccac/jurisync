@@ -3,7 +3,7 @@
 # Unified login (CPF + password) for all portals; TOTP from the two export QRs
 # (QR_Natalia_1de2.png = 10 profiles, QR_Natalia_2de2.png = Eproc/TJMG).
 # QR 1de2 profiles: PDPJ/PJE, Eproc/TRF6, GERID/INSS, Eproc/TJM, Eproc/TJRJ,
-# Projudi/Projudi, Eproc/TRF2, PDPJ/11840189606, Eproc/TJSP, Eproc/TJMS.
+# Projudi/Projudi, Eproc/TRF2, PDPJ/<CPF do titular>, Eproc/TJSP, Eproc/TJMS.
 # Every PJe portal uses OTP profile index 0 (PDPJ/PJE); the eproc username is the CPF with digits only.
 # Her list has 32 portals; the 7 at the end have no connector yet. Validation: VALIDACAO-2026-11-19.md.
 

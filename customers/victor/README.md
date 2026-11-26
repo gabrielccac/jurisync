@@ -176,14 +176,14 @@ every selection is the best choice for a new case:
 
 | Advbox `Ação` | PJe process | Saved subject codes |
 | --- | --- | --- |
-| BPC deficiente | `0005394-06.2026.4.05.8308`, `0009696-30.2025.4.05.8303`, `0004131-48.2026.4.05.8304` | `11946` in each |
-| Restabelecimento de incapacidade temporária | `0011038-42.2026.4.05.8303` | `6095`, `6101`, `6109`, `6178` |
-| Restabelecimento de incapacidade temporária | `0004131-36.2026.4.05.8308` | `6101`, `6109`, `6178` |
-| Pensão por morte rural | `0007999-71.2025.4.05.8303` | `6104` (general Pensão por Morte) |
-| Aposentadoria por idade rural | `0012409-41.2026.4.05.8303` | `6098` |
-| Incapacidade temporária urbana | `0006822-23.2026.4.05.8308` | `6095`, `6101`, `6109` |
-| Incapacidade temporária rural | `0001748-37.2025.4.05.8303` | `6095`, `6101`, `6109` |
-| Advbox lawsuit match remains provisional | `0003232-87.2025.4.05.8303` | `6095`, `6101`, `6109` |
+| BPC deficiente | `0000100-00.2026.4.05.8308`, `0000101-00.2025.4.05.8303`, `0000102-00.2026.4.05.8304` | `11946` in each |
+| Restabelecimento de incapacidade temporária | `0000103-00.2026.4.05.8303` | `6095`, `6101`, `6109`, `6178` |
+| Restabelecimento de incapacidade temporária | `0000104-00.2026.4.05.8308` | `6101`, `6109`, `6178` |
+| Pensão por morte rural | `0000105-00.2025.4.05.8303` | `6104` (general Pensão por Morte) |
+| Aposentadoria por idade rural | `0000106-00.2026.4.05.8303` | `6098` |
+| Incapacidade temporária urbana | `0000107-00.2026.4.05.8308` | `6095`, `6101`, `6109` |
+| Incapacidade temporária rural | `0000108-00.2025.4.05.8303` | `6095`, `6101`, `6109` |
+| Advbox lawsuit match remains provisional | `0000109-00.2025.4.05.8303` | `6095`, `6101`, `6109` |
 
 The two restabelecimento petitions explicitly request restoration and an
 alternative retirement if permanent incapacity is found. They use different
@@ -202,7 +202,7 @@ history consistently explains why `6109` was filed, or why two similar cases
 have different sets. That code needs an explicit reviewer decision.
 
 Another live comparison, Advbox task `279422924` / lawsuit `17519594`, is
-already filed in PJe as `0012250-98.2026.4.05.8303` with `6101` and `6109`.
+already filed in PJe as `0000110-00.2026.4.05.8303` with `6101` and `6109`.
 The Advbox action and triage note identify a rural temporary-incapacity claim.
 The petition's requests also seek auxílio-acidente if the injury only reduces
 working capacity and invalidity retirement if incapacity is permanent. Those
@@ -258,7 +258,7 @@ before selecting them automatically. The private read-only comparison is at
 
 The ten PJe process numbers saved in `docs/connectors/pje-trf5-filing.md` were
 searched in Advbox. Nine resolved to exact lawsuit records and customer folders.
-The tenth (`0003232-87.2025.4.05.8303`) was absent from Advbox lawsuit search,
+The tenth (`0000109-00.2025.4.05.8303`) was absent from Advbox lawsuit search,
 but the folder for customer `766433` contains that process-number PDF and the
 same initial document set, so it is a provisional match. The downloaded files
 and review reports are private under
@@ -266,16 +266,16 @@ and review reports are private under
 
 | PJe process | Advbox customer | What the comparison showed |
 | --- | ---: | --- |
-| `0005394-06.2026.4.05.8308` | `10472352` | Uses `00-PROTOCOLAR JUD`; typo `PETÇÃO` is now recognized. Visible PJe rows agree on routine evidence types. PA and medical PDF exceed the current 10 MB upload limit. The PJe first petition and decision are beyond the visible 16-row page. |
-| `0009696-30.2025.4.05.8303` | `7409301` | Folder has 14 files. The initial PJe submission is beyond the visible 16 of 32 rows, so its types cannot be checked from this capture. Two PDFs exceed 10 MB; medical text is unreadable. |
-| `0011038-42.2026.4.05.8303` | `514261` | Routine types match. The decision is a non-extension, so it stays in review; historically it was Documento Comprobatório. The medical PDF is unreadable. Quesitos is now routed to Outros Documentos per the current office rule, while this filing used Documento Comprobatório. |
-| `0004131-48.2026.4.05.8304` | `11623406` | Ten of 12 folder files match saved PJe types. An explicit denial now routes to Carta de Indeferimento though it was filed as Documento Comprobatório; the medical PDF is unreadable. |
-| `0004131-36.2026.4.05.8308` | `14705660` | Grant and routine types match. The cessation letter stays in review although historically filed as Carta de Indeferimento. The administrative process needs splitting into volumes; two identical cessation files appear in Advbox. |
-| `0007999-71.2025.4.05.8303` | `9739179` | The unlabelled `PENSÃO POR MORTE.docx` is proposed as the main petition but held for confirmation. Death/dependency evidence and representative ID now route as Documento Comprobatório, matching the filing. The oversized administrative process was historically filed as Documento Comprobatório. |
-| `0012409-41.2026.4.05.8303` | `18107570` | Routine types match. The captured decision text is insufficient for automatic classification, despite historical Carta de Indeferimento. Contract plus procuração is now Outros Documentos per office policy; this filing used Instrumento de Procuração. Both PDF and DOCX petition versions need selection. |
-| `0006822-23.2026.4.05.8308` | `9800697` | Routine types match. The explicit denial now routes to Carta de Indeferimento; the filing used Documento Comprobatório. The medical PDF is unreadable, and historic procuração used Instrumento de Procuração. |
-| `0001748-37.2025.4.05.8303` | `4020488` | Routine types match. The explicit denial now routes to Carta de Indeferimento rather than historical Documento Comprobatório. The medical bundle is unreadable; the administrative medical report stays in review because this filing used Documento Comprobatório despite Jev proposing Laudo Médico. |
-| `0003232-87.2025.4.05.8303` | `766433` (provisional) | The folder's initial files match PJe descriptions. Routine types match. The explicit denial now routes to Carta de Indeferimento rather than historical Documento Comprobatório; the medical PDF is unreadable. |
+| `0000100-00.2026.4.05.8308` | `10472352` | Uses `00-PROTOCOLAR JUD`; typo `PETÇÃO` is now recognized. Visible PJe rows agree on routine evidence types. PA and medical PDF exceed the current 10 MB upload limit. The PJe first petition and decision are beyond the visible 16-row page. |
+| `0000101-00.2025.4.05.8303` | `7409301` | Folder has 14 files. The initial PJe submission is beyond the visible 16 of 32 rows, so its types cannot be checked from this capture. Two PDFs exceed 10 MB; medical text is unreadable. |
+| `0000103-00.2026.4.05.8303` | `514261` | Routine types match. The decision is a non-extension, so it stays in review; historically it was Documento Comprobatório. The medical PDF is unreadable. Quesitos is now routed to Outros Documentos per the current office rule, while this filing used Documento Comprobatório. |
+| `0000102-00.2026.4.05.8304` | `11623406` | Ten of 12 folder files match saved PJe types. An explicit denial now routes to Carta de Indeferimento though it was filed as Documento Comprobatório; the medical PDF is unreadable. |
+| `0000104-00.2026.4.05.8308` | `14705660` | Grant and routine types match. The cessation letter stays in review although historically filed as Carta de Indeferimento. The administrative process needs splitting into volumes; two identical cessation files appear in Advbox. |
+| `0000105-00.2025.4.05.8303` | `9739179` | The unlabelled `PENSÃO POR MORTE.docx` is proposed as the main petition but held for confirmation. Death/dependency evidence and representative ID now route as Documento Comprobatório, matching the filing. The oversized administrative process was historically filed as Documento Comprobatório. |
+| `0000106-00.2026.4.05.8303` | `18107570` | Routine types match. The captured decision text is insufficient for automatic classification, despite historical Carta de Indeferimento. Contract plus procuração is now Outros Documentos per office policy; this filing used Instrumento de Procuração. Both PDF and DOCX petition versions need selection. |
+| `0000107-00.2026.4.05.8308` | `9800697` | Routine types match. The explicit denial now routes to Carta de Indeferimento; the filing used Documento Comprobatório. The medical PDF is unreadable, and historic procuração used Instrumento de Procuração. |
+| `0000108-00.2025.4.05.8303` | `4020488` | Routine types match. The explicit denial now routes to Carta de Indeferimento rather than historical Documento Comprobatório. The medical bundle is unreadable; the administrative medical report stays in review because this filing used Documento Comprobatório despite Jev proposing Laudo Médico. |
+| `0000109-00.2025.4.05.8303` | `766433` (provisional) | The folder's initial files match PJe descriptions. Routine types match. The explicit denial now routes to Carta de Indeferimento rather than historical Documento Comprobatório; the medical PDF is unreadable. |
 
 The comparison above records the original classification analysis. Under the
 current workflow, uncertain supporting files use flagged `Outros Documentos`.

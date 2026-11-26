@@ -22,7 +22,7 @@ Testes ao vivo somente de autenticação e leitura da página inicial, com as cr
 - Na 1ª tentativa de cada um, a senha foi aceita (o SSO chegou ao formulário de OTP), mas o OTP foi recusado: `OTP submission did not redirect; the code may be invalid or expired`. O relógio da máquina está sincronizado.
 - O `OTP_PROFILE_MATCH` configurado seleciona o perfil PDPJ cujo nome é o CPF (11 dígitos; é o 8º item da exportação). A exportação tem dois perfis PDPJ: o de nome "PJE" (índice 0) e esse do CPF.
 - Na 2ª tentativa, só em memória (`OTP_PROFILE_MATCH` vazio e `OTP_PROFILE_INDEX=0` na variável de ambiente do processo), o perfil "PDPJ/PJE" foi aceito nos três portais.
-- **Ação pendente (não gravei nada):** nas três chaves `PJE_1G`, `PJE_TRF3_1G` e `PJE_TRF3_2G`, trocar `*_OTP_PROFILE_MATCH` para escolher o perfil PDPJ "PJE" (por exemplo `*_OTP_PROFILE_INDEX=0` e `MATCH` vazio). O comentário do `portals.toml` sobre o perfil `11840189606` fica para outros tribunais.
+- **Ação pendente (não gravei nada):** nas três chaves `PJE_1G`, `PJE_TRF3_1G` e `PJE_TRF3_2G`, trocar `*_OTP_PROFILE_MATCH` para escolher o perfil PDPJ "PJE" (por exemplo `*_OTP_PROFILE_INDEX=0` e `MATCH` vazio). O comentário do `portals.toml` sobre o perfil `<CPF do titular>` fica para outros tribunais.
 - A tela de entrada é o "Quadro de avisos"; o texto "Processos" não apareceu nela, então a navegação interna não foi conferida.
 
 ## Eproc

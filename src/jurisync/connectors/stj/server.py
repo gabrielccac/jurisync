@@ -292,8 +292,8 @@ def create_server():
     server = MCPServer("stj", version="1.0.0")
     process_field = Field(
         min_length=1,
-        description="CNJ number with punctuation, STJ registration ('2026/0393422-3') or class and number "
-        "('AREsp 3415877').",
+        description="CNJ number with punctuation, STJ registration ('2026/0000001-0') or class and number "
+        "('AREsp 9000002').",
     )
     page_size_field = Field(ge=1, le=100, description="Rows per page.")
 

@@ -16,8 +16,8 @@ STATUS = {"active": "S", "closed": "N", "all": "T"}
 def classify(value):
     """``("cnj", digits)``, ``("registro", 12 digits)`` or ``("classe", (sigla, numero))`` for a process reference.
 
-    Accepts a CNJ number (masked or 20 digits), an STJ registration (``2026/0393422-3`` or 12 digits) or a class and
-    number (``AREsp 3415877``, ``REsp 1234567/SP``).
+    Accepts a CNJ number (masked or 20 digits), an STJ registration (``2026/0000001-0`` or 12 digits) or a class and
+    number (``AREsp 9000002``, ``REsp 1234567/SP``).
     """
     text = (value or "").strip()
     compact = re.sub(r"[\s.\-/]", "", text)
@@ -29,7 +29,7 @@ def classify(value):
     if match:
         return "classe", (match.group(1).replace(" ", ""), match.group(2))
     raise ValueError(
-        "process must be a CNJ number, an STJ registration (2026/0393422-3) or a class and number (AREsp 3415877)"
+        "process must be a CNJ number, an STJ registration (2026/0000001-0) or a class and number (AREsp 9000002)"
     )
 
 

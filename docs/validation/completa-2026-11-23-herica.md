@@ -16,7 +16,7 @@ Legenda: ✅ funcionou · ⚠️ funcionou com ressalva · ❌ falhou · — nã
    - O TJMT 2G, que veio logo depois, funcionou, mas com sessão salva (9 pedidos). Por isso ele não prova que o segredo TOTP está certo.
    - Pela mensagem não dá para separar duas causas: OTP realmente recusado, ou página final que o conector não reconhece como autenticada (o "otp_refused" sai de `RuntimeError`, sem olhar o que a página dizia). Para saber, é preciso uma tentativa assistida, fora desta rodada.
 2. **⚠️ e-SAJ TJAM, `esaj_list_documents` devolve 0 documentos sem erro.**
-   - O caso é 0547731-07.2024.8.04.0001, único processo da conta.
+   - O caso é 0500048-00.2024.8.04.0001, único processo da conta.
    - Em 17/11 o resultado era `flow_required`, e na causa-raiz de hoje `password_required` (o "Visualizar autos" só abre o pedido de senha).
    - Agora a chamada sai com `success` e `items=[]`, em 0,8 s.
    - Hipótese: o visualizador abriu (`var requestScope` presente) e nenhum nó tinha `cdDocumento` numérico. Assim, `parsers.viewer_documents` devolve uma lista vazia em vez de recusar. Para quem usa, parece "processo sem documentos".
@@ -52,31 +52,31 @@ Colunas: contadores (`pje_list_expediente_counters`), caixa (`pje_list_inbox`, m
 
 | Portal | Contadores | Caixa | Push | Processo | Documento | Ato | Observação |
 |---|---|---|---|---|---|---|---|
-| trf1-1g | ✅ 14/1/0/13/2/0/9 (2,3 s) | ✅ 14 linhas, 1 pendente, 11 caixas (7,4 s) | ✅ 494 (hasMore) | ✅ 1008138-17.2018.4.01.3500, 58 docs, 16 exp. completos (6,7 s) | ✅ Petição inicial `extracted_unnumbered` | ✅ 136607418 (Intimação PRU) | |
-| trf1-2g | ✅ 6/1/0/4/0/1/0 | ✅ 6 linhas, 4 caixas | ✅ 208 | ✅ 1012057-77.2019.4.01.9999, 25 docs, 7 exp. | ⚠️ Petição inicial `short_html`, 8 caracteres (capa HTML, como em 17/11) | ✅ 30773818 | |
-| trf3-1g | ✅ 12/1/0/9/0/2/3/0 | ✅ 12 linhas, 9 caixas | ✅ 137 | ✅ 5006320-98.2025.4.03.6332, 21 docs | ✅ Petição inicial `extracted` | ✅ 49039350 (Sentença) | |
-| trf3-2g | ✅ 1/0/0/1/0/0/0/0 | ✅ 1 linha | ✅ 9 (completo) | ✅ 5028456-22.2024.4.03.6301, 79 docs, 5 exp. | ✅ Petição Inicial (ID de origem) `extracted` | ✅ 13034381 (Acórdão) | |
-| trf5-1g | ✅ 4/1/0/3/2/0/0 | ✅ 4 linhas, 4 caixas | ✅ 217 | ✅ 0002702-38.2024.4.05.8200 (10,2 s) | ✅ Petição inicial `extracted` | ✅ 10413895 (Sentença) | |
+| trf1-1g | ✅ 14/1/0/13/2/0/9 (2,3 s) | ✅ 14 linhas, 1 pendente, 11 caixas (7,4 s) | ✅ 494 (hasMore) | ✅ 1000003-00.2018.4.01.3500, 58 docs, 16 exp. completos (6,7 s) | ✅ Petição inicial `extracted_unnumbered` | ✅ 136607418 (Intimação PRU) | |
+| trf1-2g | ✅ 6/1/0/4/0/1/0 | ✅ 6 linhas, 4 caixas | ✅ 208 | ✅ 1000004-00.2019.4.01.9999, 25 docs, 7 exp. | ⚠️ Petição inicial `short_html`, 8 caracteres (capa HTML, como em 17/11) | ✅ 30773818 | |
+| trf3-1g | ✅ 12/1/0/9/0/2/3/0 | ✅ 12 linhas, 9 caixas | ✅ 137 | ✅ 5000005-00.2025.4.03.6332, 21 docs | ✅ Petição inicial `extracted` | ✅ 49039350 (Sentença) | |
+| trf3-2g | ✅ 1/0/0/1/0/0/0/0 | ✅ 1 linha | ✅ 9 (completo) | ✅ 5000006-00.2024.4.03.6301, 79 docs, 5 exp. | ✅ Petição Inicial (ID de origem) `extracted` | ✅ 13034381 (Acórdão) | |
+| trf5-1g | ✅ 4/1/0/3/2/0/0 | ✅ 4 linhas, 4 caixas | ✅ 217 | ✅ 0000007-00.2024.4.05.8200 (10,2 s) | ✅ Petição inicial `extracted` | ✅ 10413895 (Sentença) | |
 | trf5-2g | ✅ 3/1/0/1/0/1/0 | ✅ 3 linhas, 1 pendente | ✅ 4 | ✅ 0000136-76.2024.4.05.9830, 14 exp. | ✅ Petição inicial `extracted` | ✅ 1044708 (Acórdão) | |
-| tjap-1g | ✅ todos 0 | ✅ 0 linhas | ✅ 2 | ✅ 6001094-06.2026.8.03.0002, 63 docs, 14 exp. (8 pendentes) | ✅ Petição Inicial `extracted` (fora dos pendentes) | ✅ 15860005 | |
-| tjba-1g | ✅ 67/21/1/20/30/4/15/16 | ✅ 67 linhas, 3 pendentes, 23 caixas (25,3 s) | ✅ 377 | ✅ 8000094-23.2026.8.05.0020 | ✅ Petição Inicial `extracted` | ✅ 69221700 | |
-| tjce-1g | ✅ 7/0/1/5/1/1/1 | ✅ 7 linhas, 5 caixas | ✅ 155 | ✅ 3004082-88.2025.8.06.0071, 63 docs | ✅ Petição Inicial `extracted` | ✅ 11520345 | |
-| tjce-2g | ✅ 5/0/0/3/0/2/0 | ✅ 5 linhas | ✅ 3 | ✅ 3022521-69.2025.8.06.0000 | ⚠️ Petição Inicial `short_html`, 38 caracteres (capa) | ✅ 2161854 | |
-| tjdft-1g | ✅ 5/1/0/3/1/1/1 | ✅ 5 linhas, 3 caixas | ✅ 56 | ✅ 0705101-80.2020.8.07.0009, 13 exp. | ⚠️ Petição Inicial `short_html`, 26 caracteres (capa) | ✅ 11323762 (Decisão) | |
-| tjes-1g | ✅ 6/3/0/3/0/0/5 (17,3 s; WAF) | ✅ 6 linhas, 3 pendentes, 5 caixas | ✅ 52 | ✅ 5000308-30.2025.8.08.0016, 7 exp. (1 pendente) | ✅ Petição Inicial `extracted` | ✅ 13955296 (Intimação - Diário) | |
-| tjes-2g | ✅ 3/0/0/3/0/0/0 | ✅ 3 linhas | ✅ 4 | ✅ 5012491-47.2026.8.08.0000 | ⚠️ Petição Inicial `short_html`, 1 caractere | ✅ 1398622 | outro processo, não o de 17/11 |
-| tjma-1g | ✅ 8/0/0/4/1/4/0/0 | ✅ 8 linhas, 4 caixas | ✅ 129 | ✅ 0800982-20.2024.8.10.0055, 16 exp. | ✅ Petição Inicial `extracted` | ✅ 33977717 | |
+| tjap-1g | ✅ todos 0 | ✅ 0 linhas | ✅ 2 | ✅ 6000021-00.2026.8.03.0002, 63 docs, 14 exp. (8 pendentes) | ✅ Petição Inicial `extracted` (fora dos pendentes) | ✅ 15860005 | |
+| tjba-1g | ✅ 67/21/1/20/30/4/15/16 | ✅ 67 linhas, 3 pendentes, 23 caixas (25,3 s) | ✅ 377 | ✅ 8000008-00.2026.8.05.0020 | ✅ Petição Inicial `extracted` | ✅ 69221700 | |
+| tjce-1g | ✅ 7/0/1/5/1/1/1 | ✅ 7 linhas, 5 caixas | ✅ 155 | ✅ 3000009-00.2025.8.06.0071, 63 docs | ✅ Petição Inicial `extracted` | ✅ 11520345 | |
+| tjce-2g | ✅ 5/0/0/3/0/2/0 | ✅ 5 linhas | ✅ 3 | ✅ 3000010-00.2025.8.06.0000 | ⚠️ Petição Inicial `short_html`, 38 caracteres (capa) | ✅ 2161854 | |
+| tjdft-1g | ✅ 5/1/0/3/1/1/1 | ✅ 5 linhas, 3 caixas | ✅ 56 | ✅ 0700011-00.2020.8.07.0009, 13 exp. | ⚠️ Petição Inicial `short_html`, 26 caracteres (capa) | ✅ 11323762 (Decisão) | |
+| tjes-1g | ✅ 6/3/0/3/0/0/5 (17,3 s; WAF) | ✅ 6 linhas, 3 pendentes, 5 caixas | ✅ 52 | ✅ 5000176-00.2025.8.08.0016, 7 exp. (1 pendente) | ✅ Petição Inicial `extracted` | ✅ 13955296 (Intimação - Diário) | |
+| tjes-2g | ✅ 3/0/0/3/0/0/0 | ✅ 3 linhas | ✅ 4 | ✅ 5000177-00.2026.8.08.0000 | ⚠️ Petição Inicial `short_html`, 1 caractere | ✅ 1398622 | outro processo, não o de 17/11 |
+| tjma-1g | ✅ 8/0/0/4/1/4/0/0 | ✅ 8 linhas, 4 caixas | ✅ 129 | ✅ 0800013-00.2024.8.10.0055, 16 exp. | ✅ Petição Inicial `extracted` | ✅ 33977717 | |
 | tjmt-1g | ❌ `[otp_refused]` (16,8 s, 18 pedidos) | — | — | — | — | — | ver regressão 1 |
-| tjmt-2g | ✅ 9/1/0/2/0/6/0/8 | ✅ 9 linhas, 1 pendente | ✅ 31 | ✅ 1002023-93.2025.8.11.9005, 16 exp. (5 pendentes) | ✅ Petição Inicial 335162368 `extracted` (era 404) | ✅ 56790076 (Acórdão) | |
-| tjpa-1g | ✅ 49/7/5/21/0/16/6 | ✅ 49 linhas, 2 pendentes, 18 caixas (13,9 s) | ✅ 276 (era ❌) | ✅ 0802092-18.2021.8.14.0065, 193 docs, 16 exp. completos | ✅ "Documento de Comprovação (04 INICIAL…)" `extracted` | ✅ 29213270 (Decisão) | bug 1 de 17/11 corrigido |
-| tjpb-1g | ✅ 10/0/0/9/3/0/4 | ✅ 10 linhas, 8 caixas | ✅ 88 | ✅ 0800708-91.2024.8.15.0451 | ✅ Petição Inicial `extracted` | ✅ 18317077 (Mandado) | |
-| tjpe-1g | ✅ 38/1/0/34/3/3/7 | ✅ 38 linhas, 9 caixas | ✅ 208 | ✅ 0001110-44.2025.8.17.3450 | ✅ Petição Inicial (Outras) `extracted` | ✅ 36225160 | |
-| tjpi-1g | ✅ 2/0/0/2/0/0/1 | ✅ 2 linhas | ✅ 126 | ✅ 0801515-70.2026.8.18.0027, 0 expedientes | ✅ Petição Inicial `extracted` | — processo sem expediente | |
-| tjpi-2g | ✅ 9/0/0/9/3/0/0 | ✅ 9 linhas | ✅ 34 | ✅ 0800467-38.2025.8.18.0051, 4 exp. (2 pendentes) | ✅ Petição Inicial (ID de origem) `extracted` | ✅ 4005432 | |
-| tjrn-1g | ✅ 28/5/0/21/1/2/13 | ✅ 28 linhas, 5 pendentes | ✅ 178 | ✅ 0819622-80.2025.8.20.5124 (22,4 s, 31 pedidos: rota do Acervo) | ✅ Petição Inicial `extracted` | ✅ 28328549 | |
-| tjrn-2g | ✅ 4/0/0/4/1/0/1 | ✅ 4 linhas | ✅ 35 | ✅ 0828611-32.2025.8.20.5106, 120 docs (13,8 s) | ✅ Petição Inicial (ID de origem) `extracted` | ✅ 4981176 | |
-| tjro-1g | ✅ 2/0/0/2/0/0/1 | ✅ 2 linhas | ✅ 35 | ✅ 7040600-15.2024.8.22.0001 | ✅ PETIÇÃO INICIAL `extracted` | ✅ 33396570 (Decisão) | |
-| tjro-2g | ✅ todos 0 | ✅ 0 linhas | ✅ 13 | ✅ 7025532-88.2025.8.22.0001 | ✅ PETIÇÃO INICIAL (ID de origem) `extracted` | ✅ 2741156 | |
+| tjmt-2g | ✅ 9/1/0/2/0/6/0/8 | ✅ 9 linhas, 1 pendente | ✅ 31 | ✅ 1000016-00.2025.8.11.9005, 16 exp. (5 pendentes) | ✅ Petição Inicial 335162368 `extracted` (era 404) | ✅ 56790076 (Acórdão) | |
+| tjpa-1g | ✅ 49/7/5/21/0/16/6 | ✅ 49 linhas, 2 pendentes, 18 caixas (13,9 s) | ✅ 276 (era ❌) | ✅ 0800178-00.2021.8.14.0065, 193 docs, 16 exp. completos | ✅ "Documento de Comprovação (04 INICIAL…)" `extracted` | ✅ 29213270 (Decisão) | bug 1 de 17/11 corrigido |
+| tjpb-1g | ✅ 10/0/0/9/3/0/4 | ✅ 10 linhas, 8 caixas | ✅ 88 | ✅ 0800019-00.2024.8.15.0451 | ✅ Petição Inicial `extracted` | ✅ 18317077 (Mandado) | |
+| tjpe-1g | ✅ 38/1/0/34/3/3/7 | ✅ 38 linhas, 9 caixas | ✅ 208 | ✅ 0000020-00.2025.8.17.3450 | ✅ Petição Inicial (Outras) `extracted` | ✅ 36225160 | |
+| tjpi-1g | ✅ 2/0/0/2/0/0/1 | ✅ 2 linhas | ✅ 126 | ✅ 0800026-00.2026.8.18.0027, 0 expedientes | ✅ Petição Inicial `extracted` | — processo sem expediente | |
+| tjpi-2g | ✅ 9/0/0/9/3/0/0 | ✅ 9 linhas | ✅ 34 | ✅ 0800027-00.2025.8.18.0051, 4 exp. (2 pendentes) | ✅ Petição Inicial (ID de origem) `extracted` | ✅ 4005432 | |
+| tjrn-1g | ✅ 28/5/0/21/1/2/13 | ✅ 28 linhas, 5 pendentes | ✅ 178 | ✅ 0800022-00.2025.8.20.5124 (22,4 s, 31 pedidos: rota do Acervo) | ✅ Petição Inicial `extracted` | ✅ 28328549 | |
+| tjrn-2g | ✅ 4/0/0/4/1/0/1 | ✅ 4 linhas | ✅ 35 | ✅ 0800023-00.2025.8.20.5106, 120 docs (13,8 s) | ✅ Petição Inicial (ID de origem) `extracted` | ✅ 4981176 | |
+| tjro-1g | ✅ 2/0/0/2/0/0/1 | ✅ 2 linhas | ✅ 35 | ✅ 7000024-00.2024.8.22.0001 | ✅ PETIÇÃO INICIAL `extracted` | ✅ 33396570 (Decisão) | |
+| tjro-2g | ✅ todos 0 | ✅ 0 linhas | ✅ 13 | ✅ 7000025-00.2025.8.22.0001 | ✅ PETIÇÃO INICIAL (ID de origem) `extracted` | ✅ 2741156 | |
 
 `short_html` = a "Petição inicial" do PJe é uma capa HTML curta, e a peça está nos anexos. É o mesmo comportamento de 17/11, não é erro de extração.
 
@@ -88,24 +88,24 @@ Colunas: contadores (`pje_list_expediente_counters`), caixa (`pje_list_inbox`, m
 
 | Portal | Filas (7) | Lista | Processo | Documento | Observação |
 |---|---|---|---|---|---|
-| trf2-1g-rj | ✅ (3/2/4/0) | ✅ 18 | ✅ 5000602-66.2026.4.02.5119, 28 ev., 23 docs | ✅ Petição inicial, 8.896 caracteres | |
-| trf2-1g-es | ✅ (0/1/2/0) | ✅ 7 | ✅ 5000692-37.2026.4.02.5002 | ✅ Petição inicial, 10.557 | |
+| trf2-1g-rj | ✅ (3/2/4/0) | ✅ 18 | ✅ 5000028-00.2026.4.02.5119, 28 ev., 23 docs | ✅ Petição inicial, 8.896 caracteres | |
+| trf2-1g-es | ✅ (0/1/2/0) | ✅ 7 | ✅ 5000029-00.2026.4.02.5002 | ✅ Petição inicial, 10.557 | |
 | trf2-2g | ✅ (todas 0) | ✅ 0 | — sem processo | — | igual a 17/11 |
-| trf4-1g-rs | ✅ (0/4/4/0) | ✅ 6 | ✅ 5000923-07.2026.4.04.7137 | ✅ Petição inicial, 38.464 | |
-| trf4-1g-sc | ✅ (0/5/5/0) | ✅ 13 | ✅ 5007263-25.2024.4.04.7205, 174 ev. | ✅ Petição inicial, 28.075 | |
-| trf4-1g-pr | ✅ (1/3/2/0) | ✅ 14 | ✅ 5008575-51.2024.4.04.7006 | ✅ Petição inicial, 8.012 | |
-| trf4-2g | ✅ (todas 0) | ✅ 6 | ✅ 5318421-56.2025.4.04.9666 | ✅ Petição inicial (segredo), 1.852 | |
-| tjsp-1g | ✅ (13/77/91/0) | ⚠️ 50, `complete=false` | ✅ 4003442-15.2025.8.26.0038, 59 ev., 51 docs | ✅ Petição inicial, 31.032 | login com a configuração do escritório (17/11: só com variáveis no processo). O 1º candidato (4003440-45) tinha evento "AGUARD. ABERTURA" e `ciencia=nenhuma`, e foi pulado pelo harness |
-| tjsp-2g | ✅ (1/23/21/13) | ⚠️ 50, `complete=false` | ✅ 4000268-76.2025.8.26.0691 | ✅ Petição, 8.720 | |
-| tjsc-1g | ✅ (5/41/31/0) | ✅ 196 | ✅ 5014937-79.2025.8.24.0075 | ✅ Petição inicial, 35.802 | |
-| tjsc-2g | ✅ (1/21/4/4) | ✅ 56 | ✅ 5001336-30.2026.8.24.0088 | ✅ Informação, 2.069 | |
-| tjrj-eproc-1g | ✅ (6/24/50/0) | ⚠️ 50, `complete=false` | ✅ 3023388-96.2025.8.19.0001 | ✅ Petição inicial, 6.804 (27,3 s) | 17/11: ❌ rede |
-| tjrs-1g | ✅ (6/26/21/0) | ⚠️ 50, `complete=false` | ✅ 5004129-87.2026.8.21.0002 | ✅ Petição inicial, 35.422 | |
-| tjmg-1g | ✅ (4/58/50/0) | ⚠️ 50, `complete=false` | ✅ 1000002-27.2025.8.13.0005, 106 ev. (13,7 s) | ✅ Emenda à inicial, 2.245 | |
-| tjpr-1g | ✅ (todas 0) | ✅ 1 | ✅ 6000139-92.2026.8.16.0137 | ✅ Petição inicial, 20.909 | A1 aceito de novo |
+| trf4-1g-rs | ✅ (0/4/4/0) | ✅ 6 | ✅ 5000179-00.2026.4.04.7137 | ✅ Petição inicial, 38.464 | |
+| trf4-1g-sc | ✅ (0/5/5/0) | ✅ 13 | ✅ 5000031-00.2024.4.04.7205, 174 ev. | ✅ Petição inicial, 28.075 | |
+| trf4-1g-pr | ✅ (1/3/2/0) | ✅ 14 | ✅ 5000032-00.2024.4.04.7006 | ✅ Petição inicial, 8.012 | |
+| trf4-2g | ✅ (todas 0) | ✅ 6 | ✅ 5300033-00.2025.4.04.9666 | ✅ Petição inicial (segredo), 1.852 | |
+| tjsp-1g | ✅ (13/77/91/0) | ⚠️ 50, `complete=false` | ✅ 4000180-00.2025.8.26.0038, 59 ev., 51 docs | ✅ Petição inicial, 31.032 | login com a configuração do escritório (17/11: só com variáveis no processo). O 1º candidato (4003440-45) tinha evento "AGUARD. ABERTURA" e `ciencia=nenhuma`, e foi pulado pelo harness |
+| tjsp-2g | ✅ (1/23/21/13) | ⚠️ 50, `complete=false` | ✅ 4000035-00.2025.8.26.0691 | ✅ Petição, 8.720 | |
+| tjsc-1g | ✅ (5/41/31/0) | ✅ 196 | ✅ 5000036-00.2025.8.24.0075 | ✅ Petição inicial, 35.802 | |
+| tjsc-2g | ✅ (1/21/4/4) | ✅ 56 | ✅ 5000181-00.2026.8.24.0088 | ✅ Informação, 2.069 | |
+| tjrj-eproc-1g | ✅ (6/24/50/0) | ⚠️ 50, `complete=false` | ✅ 3000182-00.2025.8.19.0001 | ✅ Petição inicial, 6.804 (27,3 s) | 17/11: ❌ rede |
+| tjrs-1g | ✅ (6/26/21/0) | ⚠️ 50, `complete=false` | ✅ 5000038-00.2026.8.21.0002 | ✅ Petição inicial, 35.422 | |
+| tjmg-1g | ✅ (4/58/50/0) | ⚠️ 50, `complete=false` | ✅ 1000039-00.2025.8.13.0005, 106 ev. (13,7 s) | ✅ Emenda à inicial, 2.245 | |
+| tjpr-1g | ✅ (todas 0) | ✅ 1 | ✅ 6000040-00.2026.8.16.0137 | ✅ Petição inicial, 20.909 | A1 aceito de novo |
 | tjpr-2g | ✅ (todas 0) | ✅ 0 | — sem processo | — | |
-| tjac-1g | ✅ (2/4/1/0) | ✅ 34 | ✅ 5000191-24.2026.8.01.0008 | ✅ Petição inicial, 30.822 | |
-| tjac-2g | ✅ (0/0/0/4) | ✅ 10 | ✅ 5008950-32.2025.8.01.0001 | ✅ Petição (o doc que quebrava em 17/11), 1.621 | bug de surrogate corrigido |
+| tjac-1g | ✅ (2/4/1/0) | ✅ 34 | ✅ 5000041-00.2026.8.01.0008 | ✅ Petição inicial, 30.822 | |
+| tjac-2g | ✅ (0/0/0/4) | ✅ 10 | ✅ 5000042-00.2025.8.01.0001 | ✅ Petição (o doc que quebrava em 17/11), 1.621 | bug de surrogate corrigido |
 | tnu | ✅ (todas 0) | ✅ 0 | — sem processo | — | |
 
 ⚠️ na lista: nos portais com mais de 50 processos, `eproc_list_processes` devolve os 50 primeiros com `complete=false`. Em 17/11 também vieram 50. É o limite declarado da ferramenta, não erro.
@@ -119,10 +119,10 @@ Colunas: sessão (`esaj_get_session`), mensagens (`esaj_list_messages`), intima�
 
 | Portal | Sessão | Mensagens | Intimações | Audiências | Petições | Processo | Lista docs | Leitura | Download |
 |---|---|---|---|---|---|---|---|---|---|
-| tjsp-esaj | ✅ 24 OABs (1,4 s) | ✅ 20 | ✅ 3, todas sem ciência (4,8 s; antes timeout) | ✅ 0 | ✅ 4 / 4 | ✅ 1000722-27.2026.8.26.0383, 4 mov. | ✅ 13 | ✅ Petição (Outras), 288 KB, 24.129 caracteres | ✅ 288 KB (apagado) |
-| tjms-esaj | ✅ 24 OABs | ✅ 20 | ✅ 20, todas sem ciência | ✅ 3 | ✅ 6 / 64 | ✅ 0800912-95.2026.8.12.0016, 26 mov. | ✅ 30 | ✅ Petição (Outras), 283 KB, 43.446 | ✅ 283 KB (apagado) |
-| tjal-esaj | ✅ 24 OABs | ✅ 20 | ✅ 15, todas sem ciência | ✅ 1 | ✅ 2 / 43 | ✅ 0719268-17.2025.8.02.0058, 51 mov. | ✅ 96 | ✅ Petição, 60 KB, 5.254 | ✅ 60 KB (apagado) |
-| tjam-esaj | ✅ `sajcas` (7 s) | ✅ 1 | ✅ 0 | ✅ 0 | ✅ 0 / 0 | ✅ 0547731-07.2024.8.04.0001, 7 mov. | ⚠️ 0 itens sem erro | — nada para ler | — | 
+| tjsp-esaj | ✅ 24 OABs (1,4 s) | ✅ 20 | ✅ 3, todas sem ciência (4,8 s; antes timeout) | ✅ 0 | ✅ 4 / 4 | ✅ 1000183-00.2026.8.26.0383, 4 mov. | ✅ 13 | ✅ Petição (Outras), 288 KB, 24.129 caracteres | ✅ 288 KB (apagado) |
+| tjms-esaj | ✅ 24 OABs | ✅ 20 | ✅ 20, todas sem ciência | ✅ 3 | ✅ 6 / 64 | ✅ 0800184-00.2026.8.12.0016, 26 mov. | ✅ 30 | ✅ Petição (Outras), 283 KB, 43.446 | ✅ 283 KB (apagado) |
+| tjal-esaj | ✅ 24 OABs | ✅ 20 | ✅ 15, todas sem ciência | ✅ 1 | ✅ 2 / 43 | ✅ 0700185-00.2025.8.02.0058, 51 mov. | ✅ 96 | ✅ Petição, 60 KB, 5.254 | ✅ 60 KB (apagado) |
+| tjam-esaj | ✅ `sajcas` (7 s) | ✅ 1 | ✅ 0 | ✅ 0 | ✅ 0 / 0 | ✅ 0500048-00.2024.8.04.0001, 7 mov. | ⚠️ 0 itens sem erro | — nada para ler | — | 
 
 TJAM: ver o item 2 das regressões.
 

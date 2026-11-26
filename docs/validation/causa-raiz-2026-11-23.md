@@ -10,7 +10,7 @@ Falhas vistas em `regressao-2026-11-23.md`, reproduzidas ao vivo (só leitura) e
 
 | Passo | Resultado |
 |---|---|
-| `BuscaProcesso` de 5847109-96.2026.8.09.0051 **antes** das listas | ✅ "Dados Processo" (processo em segredo de justiça, acessível à conta) |
+| `BuscaProcesso` de 5800134-00.2026.8.09.0051 **antes** das listas | ✅ "Dados Processo" (processo em segredo de justiça, acessível à conta) |
 | `projudi_list_intimations` + `projudi_list_processes` | ✅ Diário 81, completa; 12 categorias, completa. O processo está na categoria 83 "UPJ dos Juizados Especiais Cíveis" |
 | A mesma busca **depois** das listas (ativo e arquivado) | ❌ "Nenhum Processo foi localizado" |
 | Busca de outro processo tirado da própria lista (5185787-46) | ❌ "Nenhum Processo foi localizado" |
@@ -20,7 +20,7 @@ Falhas vistas em `regressao-2026-11-23.md`, reproduzidas ao vivo (só leitura) e
 
 **Correção** (`connectors/projudi/tjgo.py`): toda busca por número começa pelo "Limpar" do próprio formulário (`_clear_search`, `POST BuscaProcesso PaginaAtual=4`). É só navegação e custa um pedido a mais.
 
-**Confirmação ao vivo, na mesma sessão:** listas → `load_process` de 5847109-96.2026.8.09.0051 deu ✅ 24 movimentações e 30 arquivos, igual a 17/11. Listas de novo → 5185787-46.2026.8.09.0174 ✅ (89 mov., 50 arquivos), e pelo número curto também ✅.
+**Confirmação ao vivo, na mesma sessão:** listas → `load_process` de 5800134-00.2026.8.09.0051 deu ✅ 24 movimentações e 30 arquivos, igual a 17/11. Listas de novo → 5100135-00.2026.8.09.0174 ✅ (89 mov., 50 arquivos), e pelo número curto também ✅.
 
 ### Eproc TRF6 (fernanda · `trf6-1g`): "login page did not open in the browser"
 
@@ -47,7 +47,7 @@ Reprodução ao vivo, só leitura, com o A1 da herica: **1 login por portal** (t
 
 **Causa:** o painel só resolve os processos das listas de tarefas. O navegador abre a pasta por outro caminho, o botão "Visualizar autos" do `cpopg/show.do`: `a.linkPasta` → `GET /cpopg/abrirPastaDigital.do?processo.codigo=<código>`. A resposta é **texto puro com a URL** do visualizador (`/pastadigital/abrirPastaProcessoDigital.do?nuProcesso=…&cdProcesso=…&instanciaProcesso=pg&cdProcessoMaster=…&cdServico=190101&…&ticket=<uso único>`), que o script da página então abre. O conector não conhecia esse caminho.
 
-Caso particular, 1006316-80.2025.8.26.0278, "Em grau de recurso": o `show.do` do 1º grau não tem "Visualizar autos", só "Consultar em 2ª instância" (`/cpopg/abrirConsultaProcessoSG.do`). Esse link leva ao `/cposg/show.do`, cujo botão (`#pbVisualizarAutos`, `href="#"`) chama `GET /cposg/verificarAcessoPastaDigital.do?cdProcesso=<input oculto cdProcesso>`, conforme `acessoRecurso-2.10.2-0.js`. Pelo script, 200 é a URL do visualizador, 406 é o limite diário de pastas em processos não vinculados, e qualquer outra resposta é o diálogo de senha. Ao vivo, o 2º grau respondeu 403 com o diálogo de senha ("Se for advogado(a) nesse processo…", campo `senhaProcesso`), porque a conta não está vinculada ao recurso. Já o `abrirPastaDigital.do` do 1º grau, chamado com o código do processo, **serve** a pasta de 1º grau para a conta vinculada.
+Caso particular, 1000136-00.2025.8.26.0278, "Em grau de recurso": o `show.do` do 1º grau não tem "Visualizar autos", só "Consultar em 2ª instância" (`/cpopg/abrirConsultaProcessoSG.do`). Esse link leva ao `/cposg/show.do`, cujo botão (`#pbVisualizarAutos`, `href="#"`) chama `GET /cposg/verificarAcessoPastaDigital.do?cdProcesso=<input oculto cdProcesso>`, conforme `acessoRecurso-2.10.2-0.js`. Pelo script, 200 é a URL do visualizador, 406 é o limite diário de pastas em processos não vinculados, e qualquer outra resposta é o diálogo de senha. Ao vivo, o 2º grau respondeu 403 com o diálogo de senha ("Se for advogado(a) nesse processo…", campo `senhaProcesso`), porque a conta não está vinculada ao recurso. Já o `abrirPastaDigital.do` do 1º grau, chamado com o código do processo, **serve** a pasta de 1º grau para a conta vinculada.
 
 **Correção** (`esaj/base.py::detail_viewer`, `second_instance_records`; `parsers.records_link`, `second_instance_link`, `hidden_process_code`):
 - O painel continua sendo o primeiro caminho. Quando ele não traz `urlPasta`, o conector usa o "Visualizar autos" do `show.do`. A URL devolvida só é seguida se estiver no host do portal, no caminho `/pastadigital/abrirPastaProcessoDigital.do` e com o `nuProcesso` do próprio processo. O link de acessibilidade é ignorado.
@@ -57,11 +57,11 @@ Caso particular, 1006316-80.2025.8.26.0278, "Em grau de recurso": o `show.do` do
 
 **Confirmação ao vivo:**
 - TJSP: 15 dos 16 processos da caixa postal que davam `flow_required` passaram a listar de 27 a 102 documentos, todos `permission_check_required`. O 16º (o de grau de recurso) lista 56 documentos pela pasta de 1º grau.
-- `esaj_read_document` no TJSP: 0001082-60.2026.8.26.0356 deu PDF de 63 KB, `extracted`, 7.934 caracteres; 1006316-80.2025.8.26.0278 deu 263 KB, `extracted`, 34.119 caracteres.
-- TJAL: os 17 processos de petições e da caixa postal sem intimação pendente listaram de 15 a 96 documentos. Leitura de 0700043-25.2026.8.02.0042: 286 KB, `extracted`, 44.485 caracteres.
-- TJAM: o único processo da conta (0547731-07.2024.8.04.0001) dá `password_required`, porque o "Visualizar autos" só abre o pedido de senha (`#liberarAutoPorSenha`) e a conta não está vinculada. **Não tem remédio sem a senha do cartório.**
+- `esaj_read_document` no TJSP: 0000137-00.2026.8.26.0356 deu PDF de 63 KB, `extracted`, 7.934 caracteres; 1000136-00.2025.8.26.0278 deu 263 KB, `extracted`, 34.119 caracteres.
+- TJAL: os 17 processos de petições e da caixa postal sem intimação pendente listaram de 15 a 96 documentos. Leitura de 0700138-00.2026.8.02.0042: 286 KB, `extracted`, 44.485 caracteres.
+- TJAM: o único processo da conta (0500048-00.2024.8.04.0001) dá `password_required`, porque o "Visualizar autos" só abre o pedido de senha (`#liberarAutoPorSenha`) e a conta não está vinculada. **Não tem remédio sem a senha do cartório.**
 
-### 2. `Unexpected process detail endpoint` (TJSP 1001092-05.2025.8.26.0233, TJAL 0700505-64.2026.8.02.0047)
+### 2. `Unexpected process detail endpoint` (TJSP 1000045-00.2025.8.26.0233, TJAL 0700047-00.2026.8.02.0047)
 
 **Reprodução:** os dois processos hoje abrem pelo painel (`consultationSource: dashboard`), com 41 e 26 movimentações. A causa foi a já descrita no 0af7e25: o painel lista uma entrada por instância (`PG`/`SG`) sem ordem fixa, e o `urlCpo` de 2º grau (`/cposg/show.do`) caía no teste de rota. Esse commit escolhe a entrada `PG` e manda a entrada só-`SG` para a consulta de 1º grau. Confirmado ao vivo.
 
@@ -73,7 +73,7 @@ Caso particular, 1006316-80.2025.8.26.0278, "Em grau de recurso": o `show.do` do
 
 ### 4. `paged_movements` no TJSP
 
-**Confirmado ao vivo, sem mudança:** `carregarMovimentacoesAjax.do` paginado por cursor traz o histórico inteiro. Em 1006125-49.2025.8.26.0047 vieram 66 movimentações e em 1000713-48.2025.8.26.0691 vieram 81, `complete=True`, sem duplicatas, em ordem decrescente, terminando em "Distribuído Livremente (por Sorteio)". Os outros processos trouxeram de 4 a 81 movimentações. As "5 movimentações" de 17/11 eram anteriores ao 0af7e25.
+**Confirmado ao vivo, sem mudança:** `carregarMovimentacoesAjax.do` paginado por cursor traz o histórico inteiro. Em 1000139-00.2025.8.26.0047 vieram 66 movimentações e em 1000140-00.2025.8.26.0691 vieram 81, `complete=True`, sem duplicatas, em ordem decrescente, terminando em "Distribuído Livremente (por Sorteio)". Os outros processos trouxeram de 4 a 81 movimentações. As "5 movimentações" de 17/11 eram anteriores ao 0af7e25.
 
 **Testes:** `tests/connectors/esaj/test_esaj_panel.py` ganhou 18 casos: espera do painel para cada lista, retentativa e `rate_limited` no bloqueio de consultas, "Visualizar autos" com a URL devolvida checada (host, caminho e número), 2º grau / recurso ao 1º grau / `access_limit` / `password_required`, e o 403 lido só quando pedido.
 
@@ -83,7 +83,7 @@ Leituras ao vivo só de leitura, com a trava de ciência ligada (`pending_notice
 
 ### 1. TJBA 1G (juliana): download da petição 507664773 com `request failed: Timeout`
 
-**Medição (8020841-42.2025.8.05.0080):**
+**Medição (8000071-00.2025.8.05.0080):**
 
 | Pedido | Primeiro byte | Corpo | Tamanho |
 |---|---|---|---|
@@ -103,7 +103,7 @@ Leituras ao vivo só de leitura, com a trava de ciência ligada (`pending_notice
 ### 2. TJPA 1G (juliana): item 151361043 "sem local de download"
 
 - `pje_list_watched_processes` (código novo do Push): ✅ 6 linhas, `hasMore=false`, sem erro.
-- `search_process` de 0870742-49.2025.8.14.0301: `download_pattern_found=False`. Nenhum dos 29 itens do inventário tinha URL, então a falha era `NO_ROUTE`, não `NO_LINK`.
+- `search_process` de 0800069-00.2025.8.14.0301: `download_pattern_found=False`. Nenhum dos 29 itens do inventário tinha URL, então a falha era `NO_ROUTE`, não `NO_LINK`.
 
 **Estrutura capturada (sem dados pessoais):** o TJPA não tem `window.open('.../documento/download/...')` nem `var url = ... + idDocumento`. A rota aparece só no visualizador: `<iframe id="frameBinario" src="/pje/seam/resource/rest/pje-legacy/documento/download/<id>#toolbar=0" ...>`. O `DOWNLOAD_PATTERN` exigia `"` logo depois do id, e o `#toolbar=0` fazia a regra falhar.
 
@@ -128,7 +128,7 @@ Leituras ao vivo só de leitura, com a trava de ciência ligada (`pending_notice
 
 **Correção** (`pje/kz.py`): memória própria por sessão (número → id, registro, partes, timeline), por 180 s. Os expedientes são lidos de novo a cada chamada, para a trava de ciência. Uma leitura em que as partes falharam não é guardada.
 
-**Confirmação ao vivo** (fernanda · `trt1-1g`, 0101627-48.2026.5.01.0013): `get_process` 6 pedidos; `read_documents` da Petição Inicial **3 pedidos** (antes 7): token, expedientes, documento. ✅ `extracted`, 68.352 caracteres, ciência `nenhuma`.
+**Confirmação ao vivo** (fernanda · `trt1-1g`, 0100141-00.2026.5.01.0013): `get_process` 6 pedidos; `read_documents` da Petição Inicial **3 pedidos** (antes 7): token, expedientes, documento. ✅ `extracted`, 68.352 caracteres, ciência `nenhuma`.
 
 ### 5. eliane: "[login_missing] Set PJE_A1_PIN…" sem certificado nenhum
 
@@ -148,7 +148,7 @@ Leituras ao vivo só de leitura, com a trava de ciência ligada (`pending_notice
 - Novo extra opcional `pdf-ocr` (`pypdfium2==4.30.0`, `onnxruntime==1.30.0`), com `uv.lock` atualizado. Instalado no `.venv` do worktree.
 - Em `core/document_text.py`, o status fica `extracted_ocr` (ou `extracted_ocr_partial` quando o limite cortou páginas). Sem motor, continua `ocr_needed`.
 
-**Confirmação ao vivo** (natalia · `tjpa-1g`, 0802512-14.2023.8.14.0013, Documento de Comprovação 98734222, `ocr_needed` em 19/11): ✅ `extracted_ocr`, 716 caracteres, 16 s.
+**Confirmação ao vivo** (natalia · `tjpa-1g`, 0800079-00.2023.8.14.0013, Documento de Comprovação 98734222, `ocr_needed` em 19/11): ✅ `extracted_ocr`, 716 caracteres, 16 s.
 
 **Pendência fora do PJe:** em `connectors/eproc/documents.py:202-203` o `save` só grava `extracted` ou `ocr_needed`/`empty`. Um PDF lido por OCR (`extracted_ocr*`) deixaria de ser salvo. O arquivo é de outro agente e não foi mexido.
 
@@ -166,7 +166,7 @@ Base: `chore/hardening`. Um login por portal e conta, sem segunda tentativa. Nen
 
 **Correção:** a trava saiu. Com `scope=latest`, a `timeline` traz só a data mais recente e os documentos pedidos vêm do inventário inteiro. A descrição de `documentIds` diz isso.
 
-**Ao vivo** (denis · `tjsp-1g`, 4006734-80.2026.8.26.0229, 1 login): fila `pending` 0 (`complete=true`), processo com ciência `nenhuma`. Petição inicial (id de **30 dígitos**, evento fora da data mais recente) lida com `scope=latest`: ✅ `extracted`, 43.657 caracteres, ciência `nenhuma`, 4,5 s. Isso fecha também a pendência do denis (item 5).
+**Ao vivo** (denis · `tjsp-1g`, 4000142-00.2026.8.26.0229, 1 login): fila `pending` 0 (`complete=true`), processo com ciência `nenhuma`. Petição inicial (id de **30 dígitos**, evento fora da data mais recente) lida com `scope=latest`: ✅ `extracted`, 43.657 caracteres, ciência `nenhuma`, 4,5 s. Isso fecha também a pendência do denis (item 5).
 
 ### 2. Eproc: Relação de Processos parada em 50 (herica) e 500 (`tjsc-1g`)
 
@@ -180,7 +180,7 @@ Base: `chore/hardening`. Um login por portal e conta, sem segunda tentativa. Nen
 
 **Ao vivo** (herica · `tjmg-1g`, 1 login, `maxPages=20`): ✅ **381 de 381** processos, 8 páginas, 381 números distintos, `complete=true`, 36 s. Antes vinham 50 com `complete=false`.
 
-### 3. e-SAJ TJAM: `esaj_list_documents` "com sucesso e 0 itens" (herica · 0547731-07.2024.8.04.0001)
+### 3. e-SAJ TJAM: `esaj_list_documents` "com sucesso e 0 itens" (herica · 0500048-00.2024.8.04.0001)
 
 **Reprodução** (herica · `tjam-esaj`, 1 login): `base.list_documents` termina em `EsajBlocked("password_required")`. Caminho: painel por número sem entrada, consulta → `show.do` com o código, painel por código sem entrada, e o "Visualizar autos" é só `#liberarAutoPorSenha`. O conector já dava o estado certo. `viewer_documents` nem chegou a rodar.
 
@@ -209,7 +209,7 @@ Base: `chore/hardening`. Um login por portal e conta, sem segunda tentativa. Nen
 ### 5. Leituras pendentes
 
 - denis `tjsp-1g` (Eproc): ver o item 1. Id de 30 dígitos aceito. `validate_document_ids` só exige dígitos, e o campo MCP não limita o tamanho. O problema era o filtro do roteiro.
-- anaflavia `tjgo-1g` (Projudi, 5747771-52.2026.8.09.0051, 1 login): `projudi_get_process` trouxe 42 movimentações, 24 com arquivo, ids de **27 dígitos**. Escolhi um arquivo da movimentação mais antiga (anexo da inicial, nenhuma intimação/citação). `projudi_read_documents` passou pela trava de ciência: ✅ `extracted_ocr`, 1.826 caracteres, ciência `nenhuma`.
+- anaflavia `tjgo-1g` (Projudi, 5700143-00.2026.8.09.0051, 1 login): `projudi_get_process` trouxe 42 movimentações, 24 com arquivo, ids de **27 dígitos**. Escolhi um arquivo da movimentação mais antiga (anexo da inicial, nenhuma intimação/citação). `projudi_read_documents` passou pela trava de ciência: ✅ `extracted_ocr`, 1.826 caracteres, ciência `nenhuma`.
 
 ### Testes (rodada 2)
 
@@ -242,7 +242,7 @@ Ao vivo, só leitura: nenhum `acknowledgeCiencia`, nenhuma intimação pendente 
 
 **Correção** (`pje/documents.py`): quando um documento sai `short_html` e a sua entrada da timeline lista outros documentos, os anexos são lidos na mesma chamada, no máximo 3, em `anexos` (com `cover_note`). Os demais vão em `anexos_not_read` (id e título). Cada anexo passa pela mesma checagem de rota. A trava de ciência já cobre os anexos, porque a checagem considera os documentos da mesma entrada. Um anexo já pedido na chamada não é lido duas vezes. O `textLimit` vale também para os anexos.
 
-**Confirmação ao vivo (max · `tjba-2g` 8019223-67.2022.8.05.0080):** capa `short_html` (9 caracteres) + anexos: "Petição (Inicial)" PDF `extracted`, 5.748 caracteres; RG/comprovante `extracted_ocr` (584); procuração `extracted_ocr` (1.863). 9 anexos em `anexos_not_read`. Ciência `nenhuma`. 16,4 s.
+**Confirmação ao vivo (max · `tjba-2g` 8000144-00.2022.8.05.0080):** capa `short_html` (9 caracteres) + anexos: "Petição (Inicial)" PDF `extracted`, 5.748 caracteres; RG/comprovante `extracted_ocr` (584); procuração `extracted_ocr` (1.863). 9 anexos em `anexos_not_read`. Ciência `nenhuma`. 16,4 s.
 
 ### 3. `pje_get_process` fazia login antes de recusar o número
 
@@ -250,7 +250,7 @@ Ao vivo, só leitura: nenhum `acknowledgeCiencia`, nenhuma intimação pendente 
 
 **Correção:** `process.require_own_number` compara justiça e região, com a mensagem "J.TR is 8.13; nothing was sent to the portal". Ela é chamada **antes** da sessão em `pje_get_process`, `pje_read_documents` (junto com os ids), `pje_read_expediente_ato`, e no `processNumber` de `pje_list_inbox` e `pje_list_watched_processes`.
 
-**Confirmação ao vivo (natalia):** `trt5-1g` com 5004935-56.2020.8.13.0261 e `tjmg-pje-1g` com 0000216-14.2026.5.19.0060: recusados em 0,01 s, **0 requisições**.
+**Confirmação ao vivo (natalia):** `trt5-1g` com 5000082-00.2020.8.13.0261 e `tjmg-pje-1g` com 0000216-14.2026.5.19.0060: recusados em 0,01 s, **0 requisições**.
 
 ### 4. `trf5-legacy` (PJe 1.x): cerca de 50 s por chamada
 

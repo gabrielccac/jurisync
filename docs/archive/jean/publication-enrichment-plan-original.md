@@ -122,7 +122,7 @@ and compare complete text, other-party notifications, missing referenced text,
 ambiguity and contradictions. Then authorize a separate read-only live acceptance
 run with retained sessions. No new production automation is enabled by this patch.
 
-Local evidence check on the saved `1020340-18.2025.4.01.3100` capture: 20 date
+Local evidence check on the saved `1000130-00.2025.4.01.3100` capture: 20 date
 buckets, 39 movements, and three compound rows with 4/2/2 labels respectively.
 Of its 23 saved document responses, the conservative extractor returns 13 HTML
 texts, nine `pdf_extractor_unavailable` records and one `unrecognized_html`.

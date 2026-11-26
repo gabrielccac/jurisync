@@ -25,7 +25,7 @@ os dados do processo e os documentos. É somente leitura em relação ao STJ.
 | Tool | Endpoint(s) CPE | Observação |
 |---|---|---|
 | `stj_list_processes(status, page, page_size)` | `POST /api/advogados/processosFiltro` `{page, qtd, tramitando: S\|N\|T}` | Processos do advogado ("Meus processos"). O POST só filtra |
-| `stj_get_process(process, include_documents)` | `getNumeroRegistroByNumeroUnico` / `getNumeroRegistroBySiglaClasseNumero` → `/processo/{reg}`, `/partesadvogados`, `/faseprocessoext`, `/indiceprocesso` | Aceita CNJ, registro STJ (`2026/0393422-3`) ou classe e número (`AREsp 3415877`). Quando um CNJ tem vários registros, usa o mais recente e lista os outros em `relatedRecords`. Não devolve CPF/CNPJ das partes |
+| `stj_get_process(process, include_documents)` | `getNumeroRegistroByNumeroUnico` / `getNumeroRegistroBySiglaClasseNumero` → `/processo/{reg}`, `/partesadvogados`, `/faseprocessoext`, `/indiceprocesso` | Aceita CNJ, registro STJ (`2026/0000001-0`) ou classe e número (`AREsp 9000002`). Quando um CNJ tem vários registros, usa o mais recente e lista os outros em `relatedRecords`. Não devolve CPF/CNPJ das partes |
 | `stj_read_documents(process, document_ids)` | `/pecas/{reg}/getPecaAutorizacao?indLocal=P&seq={sequencialPeca}` → `/visualizador/externo/processos/{reg}/peca?autorizacao&token` | 1 a 5 ids, todos do índice recém-lido. A autorização da peça nunca sai do cliente. Devolve o texto via `core.document_text` |
 | `stj_download_document(process, document_id)` | idem | Salva o arquivo em `JURISYNC_DOCUMENTS_DIR` como `STJ_<registro>_<id>.pdf` |
 | `stj_list_publications(oab, page, page_size)` | `/api/advogados/minhasOABs/{cpf}` → `/api/advogados/{OAB}/publicacoes` | DJe próprio do STJ, que é legado (casos antigos) |
