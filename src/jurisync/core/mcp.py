@@ -6,6 +6,7 @@ import io
 import logging
 import os
 import re
+import secrets
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -234,15 +235,42 @@ def offer_portals(server, keys):
             tool.description, noted = with_portal_note(tool.description, keys), True
 
 
-def http_settings():
-    """Streamable HTTP for local test installs reached through a tunnel.
+LOOPBACK = ("127.0.0.1", "localhost", "[::1]")
+HTTP_SECRET_VAR = "JURISYNC_HTTP_SECRET"
 
-    The Host header of a tunnel is not loopback, so the SDK's DNS-rebinding check is off. There is no
-    authentication: bind to 127.0.0.1 (the default) and expose it only through a tunnel you control.
+
+def http_settings(public_host=None):
+    """Streamable HTTP for local installs: the SDK's DNS-rebinding check accepts only this machine's Host and Origin,
+    plus ``public_host`` (the tunnel's address) when one is given. A page in the browser that points its own domain at
+    127.0.0.1 is refused.
     """
     from mcp.server.transport_security import TransportSecuritySettings
 
-    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    hosts = [*LOOPBACK, *(f"{host}:*" for host in LOOPBACK)]
+    origins = [*(f"http://{host}" for host in LOOPBACK), *(f"http://{host}:*" for host in LOOPBACK)]
+    if public_host:
+        hosts += [public_host, f"{public_host}:*"]
+        origins.append(f"https://{public_host}")
+    return TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
+
+
+def http_prefix(host, public_host=None):
+    """The path every URL starts with: empty when only this machine reaches the server, otherwise a secret segment
+    (``JURISYNC_HTTP_SECRET`` for a URL that survives restarts, else a new one per start). Whoever lacks it gets 404:
+    the tunnel URL alone no longer calls the tools with this machine's credentials.
+    """
+    if not public_host and host in ("127.0.0.1", "localhost", "::1"):
+        return ""
+    secret = os.environ.get(HTTP_SECRET_VAR, "").strip()
+    if secret and not re.fullmatch(r"[A-Za-z0-9_-]{24,}", secret):
+        raise SystemExit(f"{HTTP_SECRET_VAR}: use 24 or more letters, digits, - or _")
+    return "/" + (secret or secrets.token_urlsafe(24))
+
+
+def http_urls(host, port, public_host, prefix, paths):
+    """Where to reach each path, printed at start: the secret is in them, so they go only to this terminal."""
+    base = f"https://{public_host}" if public_host else f"http://{host}:{port}"
+    return [f"{base}{prefix}{path}" for path in paths]
 
 
 def serve(server, on_exit=None, argv=None):
@@ -251,14 +279,24 @@ def serve(server, on_exit=None, argv=None):
     parser.add_argument("--http", action="store_true", help="serve streamable HTTP at /mcp instead of stdio")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--public-host", help="the tunnel's host name (e.g. abc.trycloudflare.com); adds a secret path")
     args = parser.parse_args(argv)
     if not args.http:
         return run_stdio(server, on_exit=on_exit)
     from jurisync.core.http import enable_request_logging
 
     enable_request_logging()
+    path = http_prefix(args.host, args.public_host) + "/mcp"
+    for url in http_urls(args.host, args.port, args.public_host, "", [path]):
+        print(f"MCP em {url}", file=sys.stderr)
     try:
-        server.run("streamable-http", host=args.host, port=args.port, transport_security=http_settings())
+        server.run(
+            "streamable-http",
+            host=args.host,
+            port=args.port,
+            transport_security=http_settings(args.public_host),
+            streamable_http_path=path,
+        )
     finally:
         if on_exit is not None:
             on_exit()

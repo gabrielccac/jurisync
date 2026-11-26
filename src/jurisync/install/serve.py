@@ -3,15 +3,19 @@
     jurisync-http                      # pje + advbox on 127.0.0.1:8000
     jurisync-http pje advbox djen --port 9000
 
-Each server answers at ``/<name>/mcp`` (for example ``http://127.0.0.1:8000/pje/mcp``). There is no
-authentication: this is for local test installs, reached through a tunnel you control.
+Each server answers at ``/<name>/mcp`` (for example ``http://127.0.0.1:8000/pje/mcp``), only to this machine. For
+ChatGPT, start the tunnel first and give its host: the server then also answers to that host, under a secret path
+printed at start (``JURISYNC_HTTP_SECRET`` keeps it across restarts), and to nothing else.
+
+    jurisync-http pje advbox --public-host abc.trycloudflare.com
 """
 
 import argparse
+import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from jurisync import registry
-from jurisync.core.mcp import http_settings, load_env_file
+from jurisync.core.mcp import http_prefix, http_settings, http_urls, load_env_file
 
 DEFAULT_SERVERS = ("pje", "advbox")
 
@@ -21,8 +25,8 @@ def load(name):
     return registry.get(name).load()
 
 
-def build_app(names, host="127.0.0.1"):
-    """One Starlette app with every named server mounted at ``/<name>``; returns ``(app, close callbacks)``."""
+def build_app(names, host="127.0.0.1", public_host=None, prefix=""):
+    """One Starlette app with every named server mounted at ``<prefix>/<name>``; returns ``(app, close callbacks)``."""
     from starlette.applications import Starlette
     from starlette.routing import Mount
 
@@ -30,7 +34,7 @@ def build_app(names, host="127.0.0.1"):
     for name in names:
         server, close = load(name)
         apps[name] = server.streamable_http_app(
-            streamable_http_path="/mcp", transport_security=http_settings(), host=host
+            streamable_http_path="/mcp", transport_security=http_settings(public_host), host=host
         )
         if close:
             closers.append(close)
@@ -43,7 +47,8 @@ def build_app(names, host="127.0.0.1"):
                 await stack.enter_async_context(sub.router.lifespan_context(sub))
             yield
 
-    return Starlette(routes=[Mount(f"/{name}", app=sub) for name, sub in apps.items()], lifespan=lifespan), closers
+    routes = [Mount(f"{prefix}/{name}", app=sub) for name, sub in apps.items()]
+    return Starlette(routes=routes, lifespan=lifespan), closers
 
 
 def main(argv=None):
@@ -51,6 +56,7 @@ def main(argv=None):
     parser.add_argument("servers", nargs="*", choices=list(registry.CONNECTORS), default=list(DEFAULT_SERVERS))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--public-host", help="the tunnel's host name (e.g. abc.trycloudflare.com); adds a secret path")
     args = parser.parse_args(argv)
     load_env_file()
     import uvicorn
@@ -58,7 +64,11 @@ def main(argv=None):
     from jurisync.core.http import enable_request_logging
 
     enable_request_logging()
-    app, closers = build_app(args.servers or list(DEFAULT_SERVERS), args.host)
+    names = args.servers or list(DEFAULT_SERVERS)
+    prefix = http_prefix(args.host, args.public_host)
+    app, closers = build_app(names, args.host, args.public_host, prefix)
+    for url in http_urls(args.host, args.port, args.public_host, prefix, [f"/{name}/mcp" for name in names]):
+        print(f"MCP em {url}", file=sys.stderr)
     try:
         uvicorn.run(app, host=args.host, port=args.port)
     finally:
