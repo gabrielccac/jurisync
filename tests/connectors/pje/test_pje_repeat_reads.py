@@ -122,7 +122,7 @@ def test_a_tool_logs_in_again_once_when_the_session_expired(monkeypatch):
         return {"success": True, "timeline": []}
 
     monkeypatch.setattr(server, "fetch_process", fetch)
-    assert server.get_process(NUMBER, "trf1-1g")["success"]
+    assert server.create_server()._tool_manager.get_tool("pje_get_process").fn(NUMBER, "trf1-1g")["success"]
     assert len(logins) == 2 and calls[0] is not calls[1]
 
 

@@ -11,12 +11,30 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import ToolAnnotations
 
-from jurisync.core.session_pool import REASONS
+from jurisync.core import calls, errors
 
+# Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
+# They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+# Reads the portal and saves a file in the shared folder (or a local run folder); nothing changes in the portal.
+SAVES_FILE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+# Opens what may register a pending ciência: the deadline starts and cannot be undone. Every portal, the same rule.
+MAY_GIVE_CIENCIA = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True
+)
+# Adds something (task, folder, draft, device); repeating adds again unless the tool dedupes (WRITE_IDEMPOTENT).
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
+WRITE_IDEMPOTENT = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True
+)
+# Changes or removes what exists; REPLACE sets a value, so repeating it changes nothing more.
+DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True)
+REPLACE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
+PRESETS = (READ_ONLY, SAVES_FILE, MAY_GIVE_CIENCIA, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, REPLACE)
 
 log = logging.getLogger(__name__)
 
@@ -180,27 +198,53 @@ def sanitize_result(value):
 
 
 def require_success(label, value):
-    """Turn a connector's success=False result into a sanitized tool error."""
+    """Turn a connector's success=False result into a sanitized tool error (code ``portal_error`` unless it names one)."""
     value = sanitize_result(value)
     if value.get("success") is False:
         reason = value.get("error") or "; ".join(value.get("diagnostics") or []) or "unknown"
-        raise ToolError(f"{label} request failed: {reason}")
+        code = value.get("errorCode") or errors.PortalError.code
+        problem = errors.Problem(code, reason, errors.PortalError.next_step, False, errors.AGENT)
+        raise ToolError(errors.render(label, problem, sanitize_diagnostics))
     return value
 
 
 @contextmanager
-def tool_errors(label, *anticipated):
-    """Report anticipated failures to the model as sanitized tool errors.
+def tool_errors(label):
+    """Report anticipated failures (``errors.describe``) to the model as sanitized tool errors in one format.
 
-    Anything else propagates and the SDK reports only a generic tool failure,
-    so unexpected exception text never reaches the caller. A failed login carries its reason code: ``[otp_refused]``.
+    Anything else propagates: the server answers with the generic ``[unexpected]`` error and the text stays in the log.
     """
     try:
         yield
-    except anticipated as error:
-        reason = getattr(error, "reason", None)
-        tag = f" [{reason}]" if reason in REASONS else ""
-        raise ToolError(f"{label} request failed{tag}: {sanitize_diagnostics(error) or 'unknown'}") from error
+    except ToolError:
+        raise
+    except Exception as error:
+        problem = errors.describe(error)
+        if problem is None:
+            raise
+        raise ToolError(errors.render(label, problem, sanitize_diagnostics)) from error
+
+
+def tool_error(label, error):
+    """The tool error for an anticipated failure detected outside ``tool_errors``: ``raise tool_error("PJe", InputError(...))``."""
+    return ToolError(errors.render(label, errors.describe(error) or errors.UNEXPECTED, sanitize_diagnostics))
+
+
+class JurisyncServer(MCPServer):
+    """The MCP server every connector builds in its ``create_server``: each call gets an id (the ``ref`` of its
+    errors), and a crash reaches the agent as the generic ``[unexpected]`` error with that ref, never its text."""
+
+    def __init__(self, name, **options):
+        options.setdefault("version", "1.0.0")
+        super().__init__(name, **options)
+
+    async def call_tool(self, name, arguments, context=None):
+        with calls.bound():
+            try:
+                return await super().call_tool(name, arguments, context)
+            except UnexpectedToolError as error:
+                log.error("tool %s failed unexpectedly (ref=%s)", name, calls.current(), exc_info=error.__cause__)
+                raise UnexpectedToolError(errors.render(name, errors.UNEXPECTED, sanitize_diagnostics)) from error
 
 
 # The ``portal`` field of every tool: the enum holds the keys, and one tool of the server lists them with their hosts.

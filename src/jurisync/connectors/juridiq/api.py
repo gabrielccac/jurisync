@@ -18,6 +18,7 @@ from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync.core import credentials
+from jurisync.core.errors import WritesDisabled
 from jurisync.paths import user_cache
 
 MAX_PAGINATION_PAGES = 10_000
@@ -279,9 +280,7 @@ class JuridiqApi:
         method = method.upper()
         read_query = method == "POST" and parts.path == "/generic-tables"
         if method not in ("GET", "HEAD") and not read_query and credentials.env("JURIDIQ_ALLOW_WRITES") != "true":
-            raise PermissionError(
-                "Juridiq writes are disabled. Set JURIDIQ_ALLOW_WRITES=true after confirming the operation."
-            )
+            raise WritesDisabled("Juridiq writes are disabled for this office.", setting="JURIDIQ_ALLOW_WRITES=true")
         token = self.token()
         for attempt in range(2):
             headers = {"accept": "application/json", "authorization": f"Bearer {token}"}

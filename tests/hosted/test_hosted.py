@@ -297,12 +297,19 @@ class RealServerTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "s.sqlite") as store:
             vault = Vault(Path(directory) / "v", load_key(generate_key()))
-            server, _ = load("pje")
-            build_app(BASE, store, vault, ["pje"])
-            build_app(BASE, store, vault, ["pje"])  # a second app in the same process must not fail
-            after = {tool.name for tool in server._tool_manager.list_tools()}
-            self.assertFalse({"pje_draft_write", "pje_draft_delete"} & after)
-            self.assertIn("pje_get_process", after)
+            built = []
+
+            def capture(name):
+                server, close = load(name)
+                built.append(server)
+                return server, close
+
+            build_app(BASE, store, vault, ["pje"], load=capture)
+            build_app(BASE, store, vault, ["pje"], load=capture)  # a second app in the same process must not fail
+            for server in built:
+                after = {tool.name for tool in server._tool_manager.list_tools()}
+                self.assertFalse({"pje_draft_write", "pje_draft_delete"} & after)
+                self.assertIn("pje_get_process", after)
 
 
 class ImportTest(unittest.TestCase):

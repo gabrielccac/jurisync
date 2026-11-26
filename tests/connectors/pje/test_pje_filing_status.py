@@ -173,7 +173,7 @@ class BackgroundFillTests(unittest.TestCase):
                 first = server._start_fill("run1", "create-fill")
                 started.wait(5)
                 again = server._start_fill("run1", "create-fill")
-                status = server.draft_status("run1")
+                status = server.create_server()._tool_manager.get_tool("pje_draft_status").fn("run1")
                 release.set()
                 server.fill_jobs[("", "run1")].join(5)
         self.assertEqual(first["state"], "started")
@@ -239,10 +239,10 @@ class BackgroundFillTests(unittest.TestCase):
             with mock.patch.object(server, "sessions", Pool()):
                 with credentials.scope("office-a", {}):
                     server._fill_job("same-run", "fill")
-                    failed = server.draft_status("same-run")
+                    failed = server.create_server()._tool_manager.get_tool("pje_draft_status").fn("same-run")
                 with credentials.scope("office-b", {}):
                     with self.assertRaisesRegex(Exception, "no checkpoint yet"):
-                        server.draft_status("same-run")
+                        server.create_server()._tool_manager.get_tool("pje_draft_status").fn("same-run")
         self.assertEqual(list(server.fill_errors), [("office-a", "same-run")])
         error = failed["result"]["error"]
         self.assertEqual(failed["result"]["state"], "failed")
@@ -278,7 +278,7 @@ class BackgroundFillTests(unittest.TestCase):
 
         from jurisync.connectors.pje import server
 
-        tools = {tool.name: tool.annotations for tool in asyncio.run(server.server.list_tools())}
+        tools = {tool.name: tool.annotations for tool in asyncio.run(server.create_server().list_tools())}
         ato = tools["pje_read_expediente_ato"]
         self.assertEqual(
             (ato.read_only_hint, ato.destructive_hint, ato.idempotent_hint, ato.open_world_hint),
@@ -299,7 +299,7 @@ class BackgroundFillTests(unittest.TestCase):
 
         from jurisync.connectors.pje import server
 
-        tools = {tool.name: tool for tool in asyncio.run(server.server.list_tools())}
+        tools = {tool.name: tool for tool in asyncio.run(server.create_server().list_tools())}
         properties = tools["pje_list_watched_processes"].input_schema["properties"]
         self.assertEqual((properties["limit"]["default"], properties["limit"]["maximum"]), (100, 500))
         self.assertEqual(properties["offset"]["default"], 0)

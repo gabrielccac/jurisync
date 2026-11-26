@@ -5,18 +5,11 @@ from datetime import date
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from curl_cffi.requests.exceptions import RequestException
-from mcp.server.mcpserver import MCPServer
-from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from jurisync.connectors.juridiq.api import JuridiqApi, JuridiqError
+from jurisync.connectors.juridiq.api import JuridiqApi
 from jurisync.core import credentials
-from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
-
-ADDITIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
-DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
-ERRORS = (JuridiqError, ValueError, PermissionError, OSError, RequestException)
+from jurisync.core.mcp import DESTRUCTIVE, READ_ONLY, WRITE, JurisyncServer, load_env_file, serve, tool_errors
 
 Text = Annotated[str, Field(min_length=1)]
 OneOrMany = Text | Annotated[list[Text], Field(min_length=1)]
@@ -291,10 +284,10 @@ def _payload(model):
 def create_server(allow_writes=None, api=None):
     allow_writes = credentials.env("JURIDIQ_ALLOW_WRITES") == "true" if allow_writes is None else allow_writes
     api = api or JuridiqApi()
-    server = MCPServer("juridiq", version="1.0.0")
+    server = JurisyncServer("juridiq")
 
     def call(handler):
-        with tool_errors("Juridiq", *ERRORS):
+        with tool_errors("Juridiq"):
             value = handler()
         # Lists and raw text are wrapped as the Node SDK did: structured content must be an object.
         return value if isinstance(value, dict) else {"result": value}
@@ -366,7 +359,7 @@ def create_server(allow_writes=None, api=None):
         "juridiq_create_lawsuit",
         "Create Juridiq lawsuit",
         "Create a lawsuit. Required: serviceStep, responsibleIds (UUIDs), persons (name, personOrigin Cliente|Requerida). If Juridiq doesn't confirm (timeout, connection error, 5xx) the lawsuit MAY have been created: check juridiq_find_lawsuit before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
-        ADDITIVE,
+        WRITE,
     )
     def create_lawsuit(payload: LawSuitCreate) -> dict[str, Any]:
         return call(lambda: api.create_lawsuit(_payload(payload)))
@@ -593,7 +586,7 @@ def create_server(allow_writes=None, api=None):
         "juridiq_create_task",
         "Create Juridiq task",
         "Create a task. Required: title, priority, columnId (UUID from juridiq_list_task_columns), initialDate. Use responsiblesId, not responsibleIds. Pass lawSuitId (juridiq_find_lawsuit) so the task shows in its process; else it is standalone. If Juridiq doesn't confirm (timeout, connection error, 5xx) the task MAY have been created: check juridiq_list_tasks before retrying. Needs JURIDIQ_ALLOW_WRITES=true.",
-        ADDITIVE,
+        WRITE,
     )
     def create_task(payload: TaskCreate) -> dict[str, Any]:
         return call(lambda: api.create_task(_payload(payload)))
@@ -632,7 +625,7 @@ def create_server(allow_writes=None, api=None):
         "juridiq_create_tag",
         "Create Juridiq tag",
         "Create a tag (etiqueta); modules sets where it shows. Needs JURIDIQ_ALLOW_WRITES=true.",
-        ADDITIVE,
+        WRITE,
     )
     def create_tag(payload: TagCreate) -> dict[str, Any]:
         return call(lambda: api.create_tag(_payload(payload)))
@@ -659,7 +652,7 @@ def create_server(allow_writes=None, api=None):
         "juridiq_create_task_template",
         "Create Juridiq task template",
         "Create a task template (modelo de tarefa). UUIDs: tags from juridiq_list_tags, responsiblesId from juridiq_list_users, columnId from juridiq_list_task_columns. Omitted: points 0, priority Baixa, daysForDue 1, daysForStart 0. Needs JURIDIQ_ALLOW_WRITES=true.",
-        ADDITIVE,
+        WRITE,
     )
     def create_task_template(payload: TaskTemplateCreate) -> dict[str, Any]:
         return call(lambda: api.create_task_template(_payload(payload)))
@@ -686,7 +679,7 @@ def create_server(allow_writes=None, api=None):
         "juridiq_create_event",
         "Create Juridiq event",
         "Create a calendar event. Needs JURIDIQ_ALLOW_WRITES=true.",
-        ADDITIVE,
+        WRITE,
     )
     def create_event(payload: EventCreate) -> dict[str, Any]:
         return call(lambda: api.create_event(_payload(payload)))

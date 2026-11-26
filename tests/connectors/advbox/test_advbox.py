@@ -53,7 +53,7 @@ class WriteGuardTest(unittest.TestCase):
         from jurisync.connectors.advbox import server
 
         async def call():
-            async with Client(server.server) as client:
+            async with Client(server.create_server()) as client:
                 return await client.call_tool("advbox_delete_task", {"postId": "1"})
 
         with (

@@ -38,7 +38,7 @@ REVIEW = {
 
 def call(name, arguments):
     async def run():
-        async with Client(filing.server) as client:
+        async with Client(filing.create_server()) as client:
             return await client.call_tool(name, arguments)
 
     return asyncio.run(run())
@@ -72,7 +72,7 @@ class FilingServerTests(unittest.TestCase):
 
     def test_tools_are_registered_and_only_prepare_and_finalize_write(self):
         async def listing():
-            async with Client(filing.server) as client:
+            async with Client(filing.create_server()) as client:
                 return {tool.name: tool.annotations.read_only_hint for tool in (await client.list_tools()).tools}
 
         self.assertEqual(

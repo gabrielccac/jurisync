@@ -354,7 +354,7 @@ class SelectedDocumentsChecks(unittest.TestCase):
 
         from jurisync.connectors.pje import server
 
-        tools = {tool.name: tool for tool in asyncio.run(server.server.list_tools())}
+        tools = {tool.name: tool for tool in asyncio.run(server.create_server().list_tools())}
         self.assertNotIn("documentIds", tools["pje_get_process"].input_schema["properties"])
         self.assertIn("documentIds", tools["pje_read_documents"].input_schema["properties"])
 

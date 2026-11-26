@@ -40,7 +40,7 @@ TIMELINE = [
 
 def call(name, arguments):
     async def run():
-        async with Client(server.server) as client:
+        async with Client(server.create_server()) as client:
             return await client.call_tool(name, arguments)
 
     result = asyncio.run(run())

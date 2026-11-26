@@ -6,11 +6,8 @@ later calls reuse the authenticated cookies and re-read the panel. A call the po
 logs in again once and is repeated.
 """
 
-import sys
 from typing import Annotated, Any, Literal
 
-from mcp.server.mcpserver import MCPServer
-from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from jurisync import customers, portals
@@ -28,8 +25,10 @@ from jurisync.connectors.eproc.client import (
 )
 from jurisync.core import certificate
 from jurisync.core.mcp import (
+    MAY_GIVE_CIENCIA,
     PORTAL_HELP,
     READ_ONLY,
+    JurisyncServer,
     load_env_file,
     offer_portals,
     require_success,
@@ -37,20 +36,6 @@ from jurisync.core.mcp import (
     tool_errors,
 )
 from jurisync.core.session_pool import SessionExpired, SessionPool
-
-ERRORS = (ValueError, RuntimeError, OSError, KeyError)
-# eproc_get_process can store a file in the shared folder and, by opening a document, register a ciência.
-READS_AND_SAVES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
-
-
-def anticipated_errors():
-    """ERRORS plus Selenium's WebDriverException (browser/network failures during login).
-
-    Selenium is imported only when a browser login runs, so the class is looked up instead of imported: while the
-    module is not loaded no such exception can have been raised.
-    """
-    selenium = sys.modules.get("selenium.common.exceptions")
-    return (*ERRORS, selenium.WebDriverException) if selenium else ERRORS
 
 
 def refresh_panel(portal, value):
@@ -91,10 +76,10 @@ def create_server(keys=None):
     keys = tuple(keys or portals.keys("eproc"))
     Portal = Annotated[Literal[keys], Field(description=PORTAL_HELP)]  # noqa: N806 - built from the configured portals
     Queue = Literal[tuple(QUEUE_KINDS)]  # noqa: N806 - a type built from the queue kinds
-    server = MCPServer("eproc", version="1.0.0")
+    server = JurisyncServer("eproc")
 
     def call(portal, read):
-        with tool_errors("Eproc", *anticipated_errors()):
+        with tool_errors("Eproc"):
             return require_success(
                 "Eproc",
                 sessions.run(
@@ -155,7 +140,7 @@ def create_server(keys=None):
             "tell the user ciencia.aviso and note it in the task. save=true stores each read document (HTML as PDF) "
             "in the shared documents folder."
         ),
-        annotations=READS_AND_SAVES,
+        annotations=MAY_GIVE_CIENCIA,
     )
     def eproc_get_process(
         portal: Portal,
