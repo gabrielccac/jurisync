@@ -23,6 +23,7 @@ from jurisync.connectors.projudi import base, legacy, tjam, tjba, tjgo, tjpr
 from jurisync.connectors.projudi.base import public_file
 from jurisync.core import ciencia
 from jurisync.core.documents import MAX_DOCUMENTS
+from jurisync.core.errors import NotSupported
 from jurisync.core.mcp import (
     PORTAL_HELP,
     READ_ONLY,
@@ -66,7 +67,7 @@ def adapter_for(portal):
     known = portals.PORTALS.get(portal)
     if known is not None and known.system == "projudi" and (known.flavor not in ADAPTERS or not known.wired):
         wired = ", ".join(portals.keys("projudi"))
-        raise NotImplementedError(
+        raise NotSupported(
             f"Projudi {known.tribunal} ({known.key}, generation {known.flavor or 'unknown'}) is not implemented yet; "
             f"wired: {wired}"
         )

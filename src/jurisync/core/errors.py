@@ -81,6 +81,13 @@ class PortalError(JurisyncError, RuntimeError):
     next_step = "não repita a mesma chamada; relate a mensagem ao usuário."
 
 
+class NotSupported(JurisyncError, NotImplementedError):
+    """A portal or operation the connector does not cover yet."""
+
+    code = "not_supported"
+    next_step = "não repita; este portal ou operação ainda não é atendido pelo conector. Avise o usuário."
+
+
 class PortalUnavailable(JurisyncError, RuntimeError):
     code = "portal_unavailable"
     retryable = True
