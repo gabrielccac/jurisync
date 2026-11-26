@@ -166,13 +166,13 @@ async def test_tools_and_registration():
         "esaj_read_document",
         "esaj_download_document",
     }
-    # The document tools may register a ciência once acknowledged, and the download writes a file; nothing is destructive.
+    # The document tools may register a ciência once acknowledged: destructive, as in every portal; nothing else is.
     opening = [t for t in tools if not t.annotations.read_only_hint]
     assert {t.name for t in opening} == {"esaj_list_documents", "esaj_read_document", "esaj_download_document"}
     for tool in opening:
         assert tool.input_schema["properties"]["acknowledgeCiencia"].get("default") is None
         assert "acknowledgeCiencia" not in tool.input_schema.get("required", [])
-    assert not any(t.annotations.destructive_hint for t in tools)
+    assert {t.name for t in tools if t.annotations.destructive_hint} == {t.name for t in opening}
     assert all(t.title for t in tools)
     assert not hasattr(base, "list_intimacoes")
     assert "esaj" in registry.CONNECTORS

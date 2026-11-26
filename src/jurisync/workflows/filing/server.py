@@ -11,12 +11,11 @@ import re
 from pathlib import Path
 from typing import Annotated, Any
 
-from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
 from jurisync.core.documents_dir import resolve_saved_folder
 from jurisync.core.errors import InputError
-from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, run_stdio, tool_error, tool_errors
+from jurisync.core.mcp import READ_ONLY, SAVES_FILE, JurisyncServer, load_env_file, run_stdio, tool_error, tool_errors
 from jurisync.core.runs import run_directory
 from jurisync.paths import REPO_ROOT
 from jurisync.workflows.filing.prepare import (
@@ -29,8 +28,6 @@ from jurisync.workflows.filing.prepare import (
 )
 from jurisync.workflows.filing.profile import load_profile, profile_names
 from jurisync.workflows.petitions.calc import digits
-
-LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
 
@@ -140,7 +137,7 @@ def create_server():
         name="filing_prepare",
         title="Prepare a filing from a folder of documents",
         description="Prepare the documents of a filing that were already pulled into a subfolder of the shared documents folder (sourceFolder). Pull them first with the office's own system tools, as its skill says (ADVBOX: advbox_save_folder). Converts Word files to PDF, split PDFs over 10 MB, classify every file and write the run's review. Facts may be partial: anything missing becomes a review item, and `candidates` lists the claim values and CPFs found in the petition. Returns each file's id, suggested PJe type and problems. Jev (document text sent to an outside classifier) is off unless useJev is true. Needs a new runId per filing; takes about 20 seconds.",
-        annotations=LOCAL_WRITE,
+        annotations=SAVES_FILE,
     )
     def prepare(
         profile: Annotated[ProfileName, Field(description="Profile name from filing_profiles, e.g. 'victor'.")],
@@ -196,7 +193,7 @@ def create_server():
         name="filing_finalize",
         title="Write the filing payload for a prepared run",
         description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition's text. `overrides` maps a file id from the review to {role, type} and nothing else (role is main, supporting or skip; {role: 'skip'} leaves a file out). Omit `facts` to reuse the facts given to prepare. A refusal removes any payload written earlier for this run. Returns a summary of what the draft will contain.",
-        annotations=LOCAL_WRITE,
+        annotations=SAVES_FILE,
     )
     def finalize(
         profile: Annotated[ProfileName, Field(description="Same profile used in filing_prepare.")],

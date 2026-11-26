@@ -496,7 +496,8 @@ class ServerTest(unittest.TestCase):
             with self.subTest(tool=tool.name):
                 # A download writes a file and, like a read, may register a ciência once acknowledged.
                 self.assertEqual(tool.annotations.read_only_hint, tool.name not in reads)
-                self.assertFalse(tool.annotations.destructive_hint)
+                # A ciência starts a deadline: destructive, the same rule in every portal.
+                self.assertEqual(tool.annotations.destructive_hint, tool.name in reads)
                 self.assertTrue(tool.title)
                 portal = tool.input_schema["properties"]["portal"]
                 self.assertEqual(portal.get("default"), "tjgo-1g")

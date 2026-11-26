@@ -12,7 +12,7 @@ from mcp.server.elicitation import AcceptedElicitation
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.shared.exceptions import MCPError
-from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel, Field
 
 from jurisync.connectors.advbox.client import AdvboxClient
@@ -28,13 +28,22 @@ from jurisync.connectors.advbox.session import (
 from jurisync.core import calls
 from jurisync.core.documents_dir import resolve_saved_document
 from jurisync.core.errors import InputError
-from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, serve, tool_error, tool_errors
+from jurisync.core.mcp import (
+    DESTRUCTIVE,
+    READ_ONLY,
+    REPLACE,
+    WRITE,
+    WRITE_IDEMPOTENT,
+    JurisyncServer,
+    load_env_file,
+    serve,
+    tool_error,
+    tool_errors,
+)
 from jurisync.core.tenant_local import TenantLocal
 from jurisync.registry import CONNECTORS
 
-WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
-DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
-LOCAL_WRITE = WRITE
+DESTRUCTIVE = DESTRUCTIVE
 
 Id = Annotated[str, Field(pattern=r"^\d+$")]
 Page = Annotated[int, Field(ge=1)]
@@ -254,9 +263,7 @@ def create_server():
         name="advbox_verify_device",
         title="Verify ADVBOX device",
         description="When a call says ADVBOX sent a device code, ask the user and pass it (3 attempts). newDevice=true only if a call says the account has no verified device, or the user says the stored one stopped working, and the user agrees to receive a code; then pass it. Changes the account's trusted devices; no write grant needed.",
-        annotations=ToolAnnotations(
-            readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
-        ),
+        annotations=WRITE,
     )
     async def verify_device(
         code: Annotated[
@@ -529,7 +536,7 @@ def create_server():
         name="advbox_download_file",
         title="Download ADVBOX file",
         description="Save a file (url) or folder zip (zipUrl) from advbox_list_files as a new local file (never overwrites); PDFs return text.",
-        annotations=LOCAL_WRITE,
+        annotations=WRITE,
     )
     def download_file(
         url: Annotated[
@@ -556,7 +563,7 @@ def create_server():
         name="advbox_download_folder",
         title="Download and parse ADVBOX folder",
         description="Download and parse up to maxFiles of a customer folder and subfolders: PDF text per file, totals, truncation flag.",
-        annotations=LOCAL_WRITE,
+        annotations=WRITE,
     )
     def download_folder(
         customerId: Id,
@@ -577,7 +584,7 @@ def create_server():
         name="advbox_save_folder",
         title="Save an ADVBOX folder into the shared documents folder",
         description="Copy a customer folder (with subfolders), unparsed, into a shared-documents subfolder (e.g. for filing_prepare). Never overwrites (repeated names get a suffix); refused names are adjusted and reported with renamedFrom.",
-        annotations=LOCAL_WRITE,
+        annotations=WRITE,
     )
     def save_folder(
         customerId: Id,
@@ -597,7 +604,7 @@ def create_server():
         name="advbox_create_folder",
         title="Create ADVBOX customer folder",
         description="Create a flat (one level) folder in a customer's files. Idempotent: an existing same-name folder is returned with existing=true. If creation is unconfirmed the error says it MAY exist. Needs ADVBOX_ALLOW_WRITES.",
-        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+        annotations=WRITE_IDEMPOTENT,
     )
     def create_folder(
         customerId: Id,
@@ -854,7 +861,7 @@ def create_server():
         name="advbox_update_lawsuit_stage",
         title="Change ADVBOX lawsuit stage",
         description="Move a lawsuit to another stage (Fase; ids from advbox_task_filters stages) and sub-stage (Etapa); nothing else changes. Unknown ids are refused before sending. Returns previous and new stage: call with previous to undo. Confirmed by re-reading the lawsuit, otherwise fails saying NOT confirmed. dryRun also returns the stage's subStageOptions. Needs ADVBOX_ALLOW_WRITES.",
-        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True),
+        annotations=REPLACE,
     )
     def update_lawsuit_stage(
         lawsuitId: Id,
