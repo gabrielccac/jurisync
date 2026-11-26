@@ -32,7 +32,6 @@ from jurisync.core.mcp import (
     DESTRUCTIVE,
     READ_ONLY,
     REPLACE,
-    SAVES_FILE,
     WRITE,
     WRITE_IDEMPOTENT,
     JurisyncServer,
@@ -537,7 +536,7 @@ def create_server():
         name="advbox_download_file",
         title="Download ADVBOX file",
         description="Save a file (url) or folder zip (zipUrl) from advbox_list_files as a new local file (never overwrites); PDFs return text.",
-        annotations=SAVES_FILE,
+        annotations=WRITE,
     )
     def download_file(
         url: Annotated[
@@ -564,7 +563,7 @@ def create_server():
         name="advbox_download_folder",
         title="Download and parse ADVBOX folder",
         description="Download and parse up to maxFiles of a customer folder and subfolders: PDF text per file, totals, truncation flag.",
-        annotations=SAVES_FILE,
+        annotations=WRITE,
     )
     def download_folder(
         customerId: Id,
@@ -585,7 +584,7 @@ def create_server():
         name="advbox_save_folder",
         title="Save an ADVBOX folder into the shared documents folder",
         description="Copy a customer folder (with subfolders), unparsed, into a shared-documents subfolder (e.g. for filing_prepare). Never overwrites (repeated names get a suffix); refused names are adjusted and reported with renamedFrom.",
-        annotations=SAVES_FILE,
+        annotations=WRITE,
     )
     def save_folder(
         customerId: Id,
