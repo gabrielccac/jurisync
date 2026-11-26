@@ -128,8 +128,7 @@ class StoreConcurrencyTest(unittest.TestCase):
     def test_a_second_process_reads_while_one_writes(self):
         import sqlite3
 
-        with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory) / "store.sqlite")
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "store.sqlite") as store:
             self.assertEqual(store._run("pragma journal_mode")[0][0], "wal")
             self.assertEqual(store._run("pragma busy_timeout")[0][0], 5000)
             store._run("begin immediate")
@@ -171,6 +170,7 @@ class HostedAppTest(unittest.TestCase):
             self.app, _ = build_app(BASE, self.store, self.vault, ["fake"], load=lambda name: (fake, None))
 
     def tearDown(self):
+        self.store.close()
         self.directory.cleanup()
 
     def sign_in(self, client, email, password="senha-bem-longa"):
@@ -294,8 +294,7 @@ class RealServerTest(unittest.TestCase):
     def test_the_pje_server_mounts_without_its_write_tools(self):
         from jurisync.install.serve import load
 
-        with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory) / "s.sqlite")
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "s.sqlite") as store:
             vault = Vault(Path(directory) / "v", load_key(generate_key()))
             server, _ = load("pje")
             build_app(BASE, store, vault, ["pje"])
@@ -416,8 +415,7 @@ class CertificateLoginTest(unittest.TestCase):
 
 class OpenTenantTest(unittest.TestCase):
     def test_open_mode_serves_one_tenant_without_a_token(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory) / "s.sqlite")
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "s.sqlite") as store:
             vault = Vault(Path(directory) / "v", load_key(generate_key()))
             store.add_tenant("office-a", "A", connectors=["fake"])
             vault.put("office-a", {"PJE_A1_PIN": "pin-a"})

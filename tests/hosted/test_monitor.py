@@ -164,14 +164,13 @@ class StoreTest(unittest.TestCase):
             )
             old.commit()
             old.close()
-            store = Store(path)
-            store.log_call("a", "u", "pje", "t", "LoginRejected", 7, "trf1-1g", "otp_refused")
-            new, before = store.calls("a")
+            with Store(path) as store:
+                store.log_call("a", "u", "pje", "t", "LoginRejected", 7, "trf1-1g", "otp_refused")
+                new, before = store.calls("a")
             self.assertEqual((new["portal"], new["reason"], before["portal"]), ("trf1-1g", "otp_refused", ""))
 
     def test_logins_are_purged_and_removed_with_the_office(self):
-        with tempfile.TemporaryDirectory() as root:
-            store = Store(Path(root) / "store.sqlite")
+        with tempfile.TemporaryDirectory() as root, Store(Path(root) / "store.sqlite") as store:
             store.add_tenant("office-a", "A")
             store.log_login("office-a", "trf1-1g", "", 900)
             store.log_login("office-a", "trf1-1g", "captcha", 900)

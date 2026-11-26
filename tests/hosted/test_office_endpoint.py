@@ -56,6 +56,7 @@ class OfficeCase(SignInCase):
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, connectors in (("office-a", ["alpha"]), ("office-b", ["alpha", "beta"])):
             self.store.add_tenant(tenant, tenant, connectors=connectors)
@@ -171,6 +172,7 @@ class PortalChoicesTest(OfficeCase):
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, logins in (("office-a", "tjam-1g"), ("office-b", "tjgo-1g,tjam-1g,stj")):
             self.store.add_tenant(tenant, tenant, connectors=["projudi", "stj"])
@@ -360,9 +362,9 @@ class CallsCommandTest(unittest.TestCase):
             said = []
             with mock.patch.dict(os.environ, env):
                 cli.main(["tenant", "add", "office-a", "--name", "A"], say=said.append)
-                store = cli.open_store()
-                store.log_call("office-a", "u@a.test", "pje", "pje_get_process", "", 812)
-                store.log_call("office-a", "u@a.test", "pje", "pje_list_inbox", "LoginRejected", 40)
+                with cli.open_store() as store:
+                    store.log_call("office-a", "u@a.test", "pje", "pje_get_process", "", 812)
+                    store.log_call("office-a", "u@a.test", "pje", "pje_list_inbox", "LoginRejected", 40)
                 said.clear()
                 cli.main(["calls", "office-a", "--limit", "1"], say=said.append)
         self.assertEqual(len(said), 1)

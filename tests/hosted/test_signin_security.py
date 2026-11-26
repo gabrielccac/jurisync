@@ -56,6 +56,7 @@ class SignInCase(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, connector in (("office-a", "fake"), ("office-b", "other")):
             self.store.add_tenant(tenant, tenant, connectors=[connector])
@@ -583,15 +584,15 @@ class OldStoreMigrationTest(unittest.TestCase):
             old.execute("create table web_sessions (digest text primary key, email text, tenant text)")
             old.commit()
             old.close()
-            store = Store(path)
-            tables = {row["name"] for row in store._run("select name from sqlite_master where type = 'table'")}
-            self.assertNotIn("web_sessions", tables)
-            store.add_tenant("office-a", "A")
-            store.add_user("u@a.test", "office-a", PASSWORD)
-            store.set_password("u@a.test", PASSWORD + "2")
-            store.remove_user("u@a.test")
-            store.remove_tenant("office-a")
-            store.purge()
+            with Store(path) as store:
+                tables = {row["name"] for row in store._run("select name from sqlite_master where type = 'table'")}
+                self.assertNotIn("web_sessions", tables)
+                store.add_tenant("office-a", "A")
+                store.add_user("u@a.test", "office-a", PASSWORD)
+                store.set_password("u@a.test", PASSWORD + "2")
+                store.remove_user("u@a.test")
+                store.remove_tenant("office-a")
+                store.purge()
 
     def test_users_stored_before_the_password_change_must_change_it(self):
         with tempfile.TemporaryDirectory() as directory:

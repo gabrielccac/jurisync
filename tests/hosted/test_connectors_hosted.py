@@ -184,6 +184,7 @@ class ServerGuardsTest(unittest.TestCase):
         self.vault = Vault(Path(self.directory.name) / "v", load_key(generate_key()))
 
     def tearDown(self):
+        self.store.close()
         self.directory.cleanup()
 
     def test_only_tenant_aware_connectors_mount(self):
@@ -294,11 +295,8 @@ class CredentialSaverTest(unittest.TestCase):
         from jurisync.hosted.store import Store
         from jurisync.hosted.vault import Vault
 
-        with tempfile.TemporaryDirectory() as directory:
-            store, vault = (
-                Store(Path(directory) / "store.sqlite"),
-                Vault(Path(directory) / "vault", secrets.token_bytes(32)),
-            )
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "store.sqlite") as store:
+            vault = Vault(Path(directory) / "vault", secrets.token_bytes(32))
             vault.put("office-a", {"ADVBOX_DEVICE_ID": "old", "ADVBOX_EMAIL": "a@x.br"}, {"cert.pfx": b"x"})
             vault.put("office-b", {"ADVBOX_DEVICE_ID": "other"})
             gate = TenantGate(None, connectors=None, store=store, vault=vault, resource="https://mcp.test")
@@ -315,11 +313,8 @@ class CredentialSaverTest(unittest.TestCase):
         import threading
         import time
 
-        with tempfile.TemporaryDirectory() as directory:
-            store, vault = (
-                Store(Path(directory) / "store.sqlite"),
-                Vault(Path(directory) / "vault", secrets.token_bytes(32)),
-            )
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "store.sqlite") as store:
+            vault = Vault(Path(directory) / "vault", secrets.token_bytes(32))
             vault.put("office-a", {"ADVBOX_EMAIL": "a@x.br"})
             read = vault.get
 

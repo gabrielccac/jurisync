@@ -158,6 +158,16 @@ class Store:
         self._lock = threading.Lock()
         self.path.chmod(0o600)
 
+    def close(self):
+        with self._lock:
+            self._db.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
     def _run(self, sql, *args):
         with self._lock:
             return self._db.execute(sql, args).fetchall()

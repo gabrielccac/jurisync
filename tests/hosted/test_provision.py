@@ -210,6 +210,7 @@ class LocalOfficeTest(ProvisionCase):
         environment = {**ProvisionCase.server(self), "JURISYNC_CUSTOMERS_DIR": str(self.ours)}
         with mock.patch.dict(os.environ, environment):
             store, vault = cli.open_store(), cli.open_vault()
+            self.addCleanup(store.close)
             # delta was hosted before the switch: connectors, vault and a user.
             store.add_tenant("delta", "Delta", customer="delta", connectors=["pje", "djen"])
             store.add_user("antiga@delta.test", "delta", PASSWORD)
@@ -249,7 +250,9 @@ class ApplyTest(ProvisionCase):
         (self.out / provision.PLAN).write_text(json.dumps(plan), encoding="utf-8")
         with mock.patch.dict(os.environ, self.server()):
             provision.apply(self.out, self.passphrase, say=self.said.append)
-            return cli.open_store(), cli.open_vault()
+            store = cli.open_store()
+            self.addCleanup(store.close)
+            return store, cli.open_vault()
 
     def test_the_server_gets_tenants_vault_profiles_and_users(self):
         self.export()
@@ -329,6 +332,7 @@ class ApplyTest(ProvisionCase):
     def test_an_import_keeps_the_renewed_device_id(self):
         with mock.patch.dict(os.environ, self.server()):
             store, vault = cli.open_store(), cli.open_vault()
+            self.addCleanup(store.close)
             store.add_tenant("alfa", "Alfa", customer="", connectors=["advbox"])
             vault.put("alfa", {"ADVBOX_DEVICE_ID": "renewed-device"})
             office = store.tenant("alfa")
@@ -404,6 +408,7 @@ class WriteGrantTest(OfficeCase):
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, grant in (("office-a", ""), ("office-b", "true")):
             self.store.add_tenant(tenant, tenant, connectors=["advbox"])
@@ -474,6 +479,7 @@ class JuridiqGrantTest(OfficeCase):
             return mock.Mock(status_code=200, text=json.dumps(payload), json=lambda: payload)
 
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, grant in (("office-a", ""), ("office-b", "true")):
             self.store.add_tenant(tenant, tenant, connectors=["juridiq"])
