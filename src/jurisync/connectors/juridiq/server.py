@@ -449,24 +449,24 @@ def create_server(allow_writes=None, api=None):
         page: Annotated[int, Field(ge=1)] = 1,
         limit: Annotated[int, Field(ge=1, le=200)] = 50,
     ) -> dict[str, Any]:
-        filters = dict(
-            responsible=responsible,
-            responsiblesMetrics=responsiblesMetrics,
-            personId=personId,
-            lawSuitId=lawSuitId,
-            dateType=dateType,
-            start=start,
-            end=end,
-            statusFilter=statusFilter,
-            fullQuery=fullQuery,
-            includeFutureCount=includeFutureCount,
-            tag=tag,
-            itemType=itemType,
-            taskPriority=taskPriority,
-            taskTag=taskTag,
-            orderBy=orderBy,
-            orderByField=orderByField,
-        )
+        filters = {
+            "responsible": responsible,
+            "responsiblesMetrics": responsiblesMetrics,
+            "personId": personId,
+            "lawSuitId": lawSuitId,
+            "dateType": dateType,
+            "start": start,
+            "end": end,
+            "statusFilter": statusFilter,
+            "fullQuery": fullQuery,
+            "includeFutureCount": includeFutureCount,
+            "tag": tag,
+            "itemType": itemType,
+            "taskPriority": taskPriority,
+            "taskTag": taskTag,
+            "orderBy": orderBy,
+            "orderByField": orderByField,
+        }
         return call(lambda: api.events(page=page, limit=limit, **filters))
 
     @read(

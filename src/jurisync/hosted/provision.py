@@ -147,7 +147,7 @@ def plan_office(customer, values, *, name=None, ready=None):
         # The office keeps its own install: no portal, credential, connector or user on the server.
         reason = reason or "instalação local"
         plan = OfficePlan(tenant=customer, name=name or customer.title(), customer=customer, mode=mode, reason=reason)
-        plan.skipped = {key: reason for key in setups}
+        plan.skipped = dict.fromkeys(setups, reason)
         return plan
     # The profile's pinned values ([env].set, e.g. TJSP_1G_CERT=true) count as set, as they do on every call.
     values = {**values, **customers.fixed_variables(customer)}
@@ -316,7 +316,7 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
             content_values,
             passphrase,
             customer=customer,
-            files={name: raw for name, raw in content_files.items()},
+            files=dict(content_files),
             file_vars={name: name for name in content_files},
             checks=plan.checks,
             servers=plan.connectors,

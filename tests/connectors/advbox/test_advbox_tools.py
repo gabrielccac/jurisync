@@ -151,7 +151,7 @@ class CreateTaskToolTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    ARGS = dict(lawsuitId="1", tasksId="2", guests=[216759], date="2026-10-09")
+    ARGS = {"lawsuitId": "1", "tasksId": "2", "guests": [216759], "date": "2026-10-09"}
 
     def test_saved_files_are_read_by_name_with_their_type(self):
         save_document("a_1.pdf", b"%PDF-1.7 body")

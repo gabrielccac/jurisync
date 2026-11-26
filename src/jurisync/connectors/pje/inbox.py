@@ -236,7 +236,7 @@ def tree_state(html, bucket):
     prefix = f"formAbaExpediente:listaAgrSitExp:{bucket}:"
     for field in BeautifulSoup(html, "html.parser").find_all("input", attrs={"name": True}):
         name = field["name"]
-        if name.startswith(prefix) and (name.endswith("NodeExpanded") or name.endswith(":input")):
+        if name.startswith(prefix) and name.endswith(("NodeExpanded", ":input")):
             state[name] = field.get("value", "")
     return state
 

@@ -74,7 +74,7 @@ target-version = "py312"
 extend-exclude = ["data", "conversions", "downloaded_files"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "G", "ISC", "LOG", "PIE", "T10"]
 # Style preferences, not defects: explicit try/except-pass, nested `with`, if/else over ternaries.
 ignore = ["E501", "SIM105", "SIM108", "SIM117"]
 

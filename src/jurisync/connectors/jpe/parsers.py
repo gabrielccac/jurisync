@@ -285,7 +285,7 @@ def _own_rows(table):
 
 
 def _cells(row):
-    return [cell for cell in row.find_all(["td", "th"], recursive=False)]
+    return list(row.find_all(["td", "th"], recursive=False))
 
 
 def _headers(table):
