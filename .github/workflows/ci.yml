@@ -17,6 +17,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run pyright
       - run: uv run pytest
       # Informational: a new advisory must not break unrelated pushes. ecdsa (via tlslite-ng) has no fix upstream.
       - name: pip-audit
@@ -24,3 +25,13 @@ jobs:
         run: |
           uv export --locked --format requirements-txt --no-hashes --all-extras --all-groups --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --ignore-vuln PYSEC-2026-1325
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest
