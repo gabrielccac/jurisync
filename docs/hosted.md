@@ -80,7 +80,12 @@ stay for older setups.
   another login.
 - Every login, including the operator's `portal check`, goes through the session pool: at most
   `JURISYNC_MAX_LOGINS` at once, and credentials a portal rejected are not sent again for the cool-down
-  (`JURISYNC_LOGIN_COOLDOWN_SECONDS`, 15 min) unless the access is changed.
+  (`JURISYNC_LOGIN_COOLDOWN_SECONDS`, 15 min) unless the access is changed. A call waits at most
+  `JURISYNC_LOGIN_WAIT_SECONDS` (5 min) for a login slot and `JURISYNC_SESSION_WAIT_SECONDS` (10 min) for the office's
+  previous call on the same portal, then fails with "try again in a few minutes" instead of hanging; an Eproc login
+  whose CAPTCHA page does not clear after 3 clicks fails with `[captcha]` and closes its Chrome.
+- The event loop serves every office, so the store (SQLite), the vault (read, decrypt, hash) and the profile's portal
+  list are read in worker threads: a busy SQLite file or a large vault slows one request, not all of them.
 - Each call's scope carries a signature (SHA-256) of the office's credentials as the server reads them. A pooled
   login, an ADVBOX client, a Juridiq token and a cool-down are kept with the signature they were made under: when the
   operator changes the vault from another process (`secrets import-bundle`, `certificate remove`, `portal remove`,
