@@ -3,6 +3,9 @@
 Guia único de convenções para quem escreve conector, workflow ou código do core. Cada regra aqui tem uma checagem
 automática (lint ou teste) sempre que possível; a coluna "como é checado" diz qual. O molde executável de conector está
 em [`templates/connector/`](../templates/connector/README.md) e passa pelos mesmos testes que os conectores reais.
+As seções 4 a 7 entram em vigor por partes: os helpers do core e os testes-guarda que as aplicam (presets de
+annotations, modelo de erro, formato de resposta, logs estruturados) chegam nos próximos passos da F4, e cada um
+atualiza a tabela da seção 9.
 
 ## 1. Idioma
 
