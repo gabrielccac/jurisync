@@ -269,10 +269,11 @@ class ApplyTest(ProvisionCase):
         self.assertEqual(set(gama), {"PJE_1G_USERNAME", "PJE_1G_PASSWORD", "PJE_1G_2FA_DATA"})
         self.assertTrue((self.root / "server" / "customers" / "beta" / "portals.toml").is_file())
         self.assertEqual(store.authenticate("advogada@alfa.test", "wrong-password-x"), None)
-        passwords = Path(self.server()["JURISYNC_HOSTED_DIR"]) / "new-user-passwords.txt"
-        self.assertEqual(stat.S_IMODE(passwords.stat().st_mode), 0o600)
+        [passwords] = Path(self.server()["JURISYNC_HOSTED_DIR"]).glob("new-user-passwords-*.txt")
         email, tenant, password = passwords.read_text().splitlines()[0].split("\t")
         self.assertEqual(store.authenticate(email, password), tenant)
+        self.assertTrue(store.must_change(email))
+        self.assertEqual(stat.S_IMODE(passwords.stat().st_mode), 0o600)
         text = "\n".join(self.said)
         for value in [*VALUES, password]:
             self.assertNotIn(value, text)
@@ -281,9 +282,17 @@ class ApplyTest(ProvisionCase):
         self.export()
         self.apply()
         store, _ = self.apply()
-        passwords = Path(self.server()["JURISYNC_HOSTED_DIR"]) / "new-user-passwords.txt"
+        [passwords] = Path(self.server()["JURISYNC_HOSTED_DIR"]).glob("new-user-passwords-*.txt")
         self.assertEqual(len(passwords.read_text().splitlines()), 3)
         self.assertEqual(len(store.users()), 3)
+
+    def test_apply_never_appends_to_an_existing_password_file(self):
+        self.export()
+        existing = self.root / "passwords.txt"
+        existing.write_text("old\n")
+        with mock.patch.dict(os.environ, self.server()), self.assertRaises(SystemExit):
+            provision.apply(self.out, self.passphrase, user_passwords=existing, say=self.said.append)
+        self.assertEqual(existing.read_text(), "old\n")
 
     def test_apply_again_replaces_the_vault_and_keeps_what_the_server_renewed(self):
         self.export()

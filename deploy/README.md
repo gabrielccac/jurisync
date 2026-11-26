@@ -86,8 +86,8 @@ ssh <vps> 'sudo shred -u /var/lib/jurisync/rollout.passphrase'
 
 `apply` creates or updates each tenant (connectors from the plan), installs its profile, stores the bundle in the
 vault without logging in, and creates the users with random passwords written to
-`/var/lib/jurisync/hosted/new-user-passwords.txt` (0600; hand each one over through another channel, then delete the
-file). Then, one office at a time, the first real login of each portal, from the VPS:
+a new `/var/lib/jurisync/hosted/new-user-passwords-<date>-<id>.txt` per run (0600; hand each one over through another
+channel, then delete the file; each user replaces that password at the first sign-in). Then, one office at a time, the first real login of each portal, from the VPS:
 
 ```bash
 sudo /opt/jurisync/app/deploy/check-office.sh victor     # one login per portal, 30 s apart, stops at the first failure
