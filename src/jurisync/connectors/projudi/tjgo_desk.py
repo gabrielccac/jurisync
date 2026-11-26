@@ -39,6 +39,8 @@ CNJ_NUMBER = re.compile(r"\b(\d{7})-(\d{2})\.\d{4}\.\d\.\d{2}\.\d{4}\b")
 MOVEMENT_DATE = re.compile(r"^(.*?)\s*\((\d{2}/\d{2}/\d{4}[^)]*)\)\s*$")
 DATE = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b")
 PROCESS_ID = re.compile(r"submete\('(\d{1,40})'\)")
+# The Diário row's own link to its process, the one a lawyer not linked to the process still opens it by.
+DIARIO_PROCESS_LINK = re.compile(r"^BuscaProcesso\?Id_Processo=(\d{1,40})$")
 NUMBER_CELL = re.compile(r"\d{1,7}[.-]\d{1,2}(?:\.\d{4}\.\d\.\d{2}\.\d{4})?")
 QUANTITY = re.compile(r"Quantidade:\s*(\d+)")
 TOTAL = re.compile(r"Total de:\s*(\d+)")
@@ -101,6 +103,7 @@ def _dje_items(fieldset, now):
         if not clean(cells[0]).isdigit() or key is None:
             raise ProjudiParseError("Projudi Diário intimation row has no pendência id or process number")
         movement, moved_at = _movement(clean(cells[2]))
+        link = cells[1].find("a", href=DIARIO_PROCESS_LINK)
         published = clean(cells[3])
         publication = parse_date(published)
         items.append(
@@ -113,6 +116,7 @@ def _dje_items(fieldset, now):
                 "deadline": clean(cells[4]),
                 "awaitingPublication": publication is None or publication > now,
                 "_key": key,
+                "_id": DIARIO_PROCESS_LINK.match(link["href"]).group(1) if link else None,
             }
         )
     footer = QUANTITY.search(clean(fieldset.find("tfoot") or ""))

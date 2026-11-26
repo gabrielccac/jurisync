@@ -113,7 +113,7 @@ def _notifications(portal, read, process_number=None):
 @server.tool(
     name="pje_get_process",
     title="Get PJe process context",
-    description="Read a PJe process: metadata, parties, timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. The timeline is movements, not confirmed publications. Read-only.",
+    description="Read a PJe process: metadata, parties, timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. The timeline is movements, not confirmed publications. Read-only.",
     annotations=READ_ONLY,
 )
 def get_process(

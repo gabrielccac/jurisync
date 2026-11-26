@@ -319,6 +319,14 @@ class TjgoAdapter(base.Adapter):
             rows = [row for group in self._own_processes(session, portal)[0] for row in group["processes"]]
             html = self._open_listed(session, portal, process_number, rows) or html
         if not parsers.is_process_page(html):
+            # A process the lawyer is intimated in without being linked to it (26/11/2026: an Ato Ordinatório in the
+            # Diário; the search and the own lists did not have it) opens through its Diário row's link.
+            try:
+                rows = self._home(session, portal)["dje"]["items"]
+            except base.ProjudiParseError:
+                rows = []
+            html = self._open_listed(session, portal, process_number, rows) or html
+        if not parsers.is_process_page(html):
             raise ValueError("Process not found or not accessible to this account")
         process = parsers.parse_process(html)
         if SHORT_NUMBER.fullmatch(process_number):
@@ -334,7 +342,11 @@ class TjgoAdapter(base.Adapter):
         """The page of the one listed row with the same sequence and check digits (a short number can match several
         processes, one per year or court: several stop the read), opened by the row's own link; ``None`` if none."""
         key = tjgo_desk.process_key(process_number)
-        matching = {row.get("_id") or row["number"]: row for row in rows if tjgo_desk.process_key(row["number"]) == key}
+        matching = {
+            row.get("_id") or listed: row
+            for row in rows
+            if tjgo_desk.process_key(listed := row.get("number") or row["process"]) == key
+        }
         if len(matching) > 1:
             raise ValueError(
                 f"The short number {process_number} matches {len(matching)} processes; pass the full CNJ number"

@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import acervo, jsf, kz
+from jurisync.connectors.pje import acervo, jsf, kz, pericias
 from jurisync.connectors.pje.expedientes import ato_ciencia, ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
@@ -340,6 +340,16 @@ def _read_detail(
     if expedientes is not None and not expedientes_complete:
         diagnostics.append({"code": "expedientes_incomplete", "message": "the Expedientes tab was not read in full"})
     _remember(session, canonical_number, lookup, page)
+    pericia_items = None
+    if not ato_expediente and pericias.has_tab(page["html"]):
+        try:
+            pericia_items, pericias_complete = pericias.fetch_pericias(session, page["html"], detail_url)
+            if not pericias_complete:
+                diagnostics.append({"code": "pericias_incomplete", "message": "the Perícia tab was not read in full"})
+        except SessionExpired:
+            raise
+        except RuntimeError as error:
+            diagnostics.append({"code": "pericias_unavailable", "message": str(error)[:200]})
     ato = ciencia = None
     if ato_expediente:
         item = None
@@ -377,6 +387,7 @@ def _read_detail(
         "latest_update": timeline[0] if timeline else None,
         "expedientes": expedientes,
         "expedientes_complete": expedientes_complete,
+        "pericias": pericia_items,
         "ato": ato,
         **({"ciencia": ciencia} if ciencia is not None else {}),
         "diagnostics": diagnostics,

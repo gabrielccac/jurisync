@@ -9,7 +9,7 @@ from mcp.client.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, parsers, server, tjgo
+from jurisync.connectors.projudi import base, parsers, server, tjgo, tjgo_desk
 from jurisync.core.documents import MAX_DOCUMENT_BYTES
 from jurisync.core.http import UnsafeUrlError
 from jurisync.core.session_pool import LoginRejected, SessionExpired, SessionPool
@@ -313,7 +313,9 @@ class TjgoAdapterTest(unittest.TestCase):
         session.request.return_value = self._search_page(NOT_LOCATED_HTML)
         with self.assertRaisesRegex(ValueError, "not found"):
             tjgo.TjgoAdapter().open_process(session, "tjgo-1g", NUMBER)
-        self.assertEqual(session.request.call_count, 4)
+        # Two searches (each after clearing the form), then the home page's Diário rows.
+        self.assertEqual(session.request.call_count, 5)
+        self.assertTrue(session.request.call_args.args[1].endswith(tjgo_desk.HOME))
 
     def test_archived_search_still_checks_the_opened_number(self):
         session = mock.Mock()

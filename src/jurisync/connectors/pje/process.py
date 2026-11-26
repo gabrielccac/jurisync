@@ -148,6 +148,7 @@ def fetch_process(
             "timeline": selected,
             "documentInventory": inventory,
             "expedientes": _expedientes(result.get("expedientes"), complete=_expedientes_complete(result)),
+            **({"pericias": result["pericias"]} if result.get("pericias") is not None else {}),
             "ato": result.get("ato"),
             **({"ciencia": result.get("ciencia") or ciencia_report(ciencia.NONE)} if ato_expediente else {}),
             "pagination": pagination,

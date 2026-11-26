@@ -455,6 +455,27 @@ class TjgoGuardTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not found"):
             self.adapter.open_process(Session(lists={"1": listed, "72": listed}), "tjgo-1g", "0000009-99")
 
+    def test_a_process_only_in_the_diario_opens_through_its_row_link(self):
+        from tests.connectors.projudi.test_projudi import NOT_LOCATED_HTML, PROCESS_HTML
+
+        class Session(DeskSession):
+            def request(self, method, url, **kwargs):
+                path = url.split("projudi.tjgo.jus.br/", 1)[1]
+                if method == "POST":
+                    self.paths.append("POST " + path)
+                    return page(NOT_LOCATED_HTML)
+                if path.startswith("BuscaProcesso?Id_Processo="):
+                    self.paths.append(path)
+                    return page(PROCESS_HTML)
+                return super().request(method, url, **kwargs)
+
+        lists = {"1": process_list(["0000004-56"]), "72": process_list(["0000007-89"])}
+        for number in (NUMBER, "0000001-23"):
+            session = Session(lists=lists)
+            self.assertEqual(self.adapter.open_process(session, "tjgo-1g", number)["number"], NUMBER)
+            self.assertEqual(session.paths[-1], "BuscaProcesso?Id_Processo=999700000001")
+        self.assertNotIn("_id", json.dumps(self.adapter.list_intimations(DeskSession(), "tjgo-1g")))
+
     def test_short_number_opens_the_process_with_the_same_pair(self):
         self.assertEqual(self.adapter.normalize_number("4.56", "tjgo-1g"), "0000004-56")
         self.assertEqual(self.adapter.normalize_number(NUMBER, "tjgo-1g"), NUMBER)
