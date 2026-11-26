@@ -3,34 +3,34 @@
 
 This is intentionally a one-shot/loop poller: it does not send messages or
 write the sheet. It returns changed movements for a later notification step.
+
+The login is Victor's (``JURISYNC_CUSTOMER=victor`` by default): the method his portals.toml declares for
+``trf1-1g``, through the PJe connector's session pool, as every PJe tool logs in.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import time
 from datetime import UTC, datetime
 from html import unescape
 from pathlib import Path
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests
 
 from jurisync import portals
-from jurisync.connectors.pje.auth.sso import login_session
 from jurisync.connectors.pje.parsers import jsf_data, parse_process_number
-from jurisync.connectors.pje.process import credentials
 from jurisync.connectors.pje.search import discover_controls, post_ajax, search_process
+from jurisync.connectors.pje.server import sessions
+from jurisync.core.mcp import load_env_file
+from jurisync.paths import STATE_DIR
 
 PORTAL = portals.pje("trf1-1g")
-APP_HOST_1G = PORTAL.host
-APP_URL = PORTAL.login_url
 SEARCH_URL = PORTAL.search_url
-BASE_URL = f"https://{APP_HOST_1G}"
-HEALTH_URL = f"{PORTAL.base_url}QuadroAviso/listViewQuadroAvisoMensagem.seam"
-DEFAULT_SHEET = Path("data/watched_processes_1g.json")
-DEFAULT_STATE = Path("data/pje1g_watch_state.json")
-DEFAULT_SESSION = Path("data/pje1g_watch_session.json")
+BASE_URL = f"https://{PORTAL.host}"
+DEFAULT_SHEET = STATE_DIR / "data" / "watched_processes_1g.json"
+DEFAULT_STATE = STATE_DIR / "data" / "pje1g_watch_state.json"
 
 
 def now_utc():
@@ -60,52 +60,6 @@ def save_json(path, value):
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
-
-
-def save_session(session, path):
-    cookies = []
-    for cookie in session.cookies.jar:
-        cookies.append(
-            {
-                "name": cookie.name,
-                "value": cookie.value,
-                "domain": cookie.domain,
-                "path": cookie.path,
-            }
-        )
-    save_json(path, {"saved_at": now_utc(), "cookies": cookies})
-
-
-def load_session(path):
-    data = load_json(path, {})
-    session = requests.Session()
-    for cookie in data.get("cookies", []):
-        session.cookies.set(
-            cookie["name"],
-            cookie["value"],
-            domain=cookie.get("domain") or None,
-            path=cookie.get("path") or "/",
-        )
-    return session if data.get("cookies") else None
-
-
-def authenticated(session):
-    response = session.get(HEALTH_URL, allow_redirects=False, impersonate="chrome", timeout=30)
-    location = response.headers.get("Location", "")
-    return response.status_code == 200 and APP_HOST_1G in response.url and "/pje/login.seam" not in location
-
-
-def ensure_session(session_path):
-    session = load_session(session_path)
-    if session is not None:
-        try:
-            if authenticated(session):
-                return session, "reused"
-        except Exception:
-            pass
-    session, _ = login_session(*credentials("trf1-1g"), APP_URL, APP_HOST_1G)
-    save_session(session, session_path)
-    return session, "new_login"
 
 
 def quick_check(session, process_number):
@@ -199,12 +153,11 @@ def poll_once(args):
     rows = load_rows(args.sheet_json)
     state = load_json(args.state_file, {"processes": {}})
     processes = list(rows)[: args.limit] if args.limit else list(rows)
-    session, session_mode = ensure_session(args.session_file)
     changes, errors, baselined = [], [], []
 
     for number in processes:
         try:
-            check = quick_check(session, number)
+            check = sessions.run(PORTAL.key, lambda session, number=number: quick_check(session, number))
             if not check.get("success"):
                 errors.append({"numero_processo": number, "error": check.get("error", "not found")})
                 continue
@@ -226,7 +179,9 @@ def poll_once(args):
                 previous["checked_at"] = now_utc()
                 continue
 
-            detail = search_process(session, number, portal="trf1-1g")
+            detail = sessions.run(
+                PORTAL.key, lambda session, number=number: search_process(session, number, portal=PORTAL.key)
+            )
             timeline = detail.get("timeline", [])
             movements = flatten_movements(timeline)
             old_keys = set(previous.get("movement_keys", []))
@@ -252,11 +207,9 @@ def poll_once(args):
             errors.append({"numero_processo": number, "error": str(error)})
 
     save_json(args.state_file, state)
-    save_session(session, args.session_file)
     return {
         "success": not errors,
         "checked_at": now_utc(),
-        "session": session_mode,
         "processes_checked": len(processes),
         "baselined": len(baselined),
         "changed": len(changes),
@@ -269,10 +222,11 @@ def main():
     parser = argparse.ArgumentParser(description="Poll controlled 1G PJe processes")
     parser.add_argument("--sheet-json", default=str(DEFAULT_SHEET))
     parser.add_argument("--state-file", default=str(DEFAULT_STATE))
-    parser.add_argument("--session-file", default=str(DEFAULT_SESSION))
     parser.add_argument("--limit", type=int, default=0, help="Only check the first N rows while testing")
     parser.add_argument("--interval", type=int, default=0, help="Repeat every N seconds; 0 means one run")
     args = parser.parse_args()
+    os.environ.setdefault("JURISYNC_CUSTOMER", "victor")
+    load_env_file()
     if not Path(args.sheet_json).exists():
         raise SystemExit(f"Sheet JSON not found: {args.sheet_json}")
     while True:
