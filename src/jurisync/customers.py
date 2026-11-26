@@ -16,6 +16,7 @@ before the shared one, and variables already in the environment always win.
 """
 
 import argparse
+import functools
 import os
 import tomllib
 from dataclasses import dataclass
@@ -114,6 +115,26 @@ def profile_portals(keys):
         return tuple(keys)
     declared = load_setup(name)
     return tuple(key for key in keys if key in declared)
+
+
+def declared_method(portal):
+    """The login method the current customer's ``portals.toml`` declares for ``portal`` (a ``Portal``); ``None`` when
+    there is no customer, no profile, or no entry for it. A declared method decides the login; connectors fall back to
+    the registry's ``Portal.auth`` only without one."""
+    name = customer_name()
+    if not name:
+        return None
+    path = customer_dir(name) / "portals.toml"
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return _declared_methods(name, str(path), stat.st_mtime_ns, stat.st_size).get(portal.id)
+
+
+@functools.lru_cache(maxsize=32)
+def _declared_methods(name, path, mtime, size):
+    return {portals.get(key).id: setup.method for key, setup in load_setup(name).items()}
 
 
 def extra_variables(name):

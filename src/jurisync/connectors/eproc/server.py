@@ -19,13 +19,14 @@ from jurisync.connectors.eproc.client import (
     MAX_REPORT_PAGES,
     QUEUE_KINDS,
     _response_error,
+    auth_method,
     authenticate,
     fetch_process,
     list_notices,
     list_processes,
     request,
-    uses_a3,
 )
+from jurisync.core import certificate
 from jurisync.core.mcp import (
     PORTAL_HELP,
     READ_ONLY,
@@ -67,10 +68,14 @@ def configured_portals():
     """Eproc portals whose login is set in the current credentials; ``()`` when none is."""
 
     def ready(config):
-        password = config.env("USERNAME") and config.env("PASSWORD")
-        return (config.env("2FA_DATA") or config.env("2FA_QR")) and (
-            password or config.uses_certificate() or uses_a3(config.key)
-        )
+        method = auth_method(config.key)
+        if method == "a3_totp":
+            login = True
+        elif method.startswith("certificate"):
+            login = certificate.is_configured()
+        else:
+            login = config.env("USERNAME") and config.env("PASSWORD")
+        return (config.env("2FA_DATA") or config.env("2FA_QR")) and login
 
     return customers.profile_portals(key for key in portals.keys("eproc") if ready(portals.eproc(key)))
 
