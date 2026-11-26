@@ -37,7 +37,7 @@ class SkillsError(ValueError):
 def installed_source():
     """Repository and branch recorded when the package was installed from git (PEP 610), else the defaults."""
     try:
-        direct = json.loads(metadata.distribution("jurisync").read_text("direct_url.json", encoding="utf-8") or "{}")
+        direct = json.loads(metadata.distribution("jurisync").read_text("direct_url.json") or "{}")
     except (metadata.PackageNotFoundError, json.JSONDecodeError):
         direct = {}
     vcs = direct.get("vcs_info") or {}
