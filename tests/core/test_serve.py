@@ -74,8 +74,16 @@ class HttpAccessTest(unittest.TestCase):
             self.assertEqual(self.post(client, f"{prefix}/a/mcp", "abc.trycloudflare.com").status_code, 200)
             self.assertEqual(self.post(client, f"{prefix}/a/mcp", "other.trycloudflare.com").status_code, 421)
 
-    def test_a_non_loopback_bind_also_needs_the_secret(self):
+    def test_a_lan_bind_answers_to_its_own_address_under_the_secret_path(self):
+        app, prefix = self.app(host="192.168.1.10")
+        self.assertNotEqual(prefix, "")
         self.assertNotEqual(core_mcp.http_prefix("0.0.0.0"), "")
+        with TestClient(app) as client:
+            self.assertEqual(self.post(client, "/a/mcp", "192.168.1.10:8000").status_code, 404)
+            self.assertEqual(self.post(client, f"{prefix}/a/mcp", "192.168.1.10:8000").status_code, 200)
+            self.assertEqual(self.post(client, f"{prefix}/a/mcp", "rebind.evil.test").status_code, 421)
+        self.assertIn("[fd00::1]:*", core_mcp.http_settings("fd00::1").allowed_hosts)
+        self.assertEqual(core_mcp.http_settings("0.0.0.0").allowed_hosts, core_mcp.http_settings().allowed_hosts)
 
     def test_the_secret_comes_from_the_environment_when_valid(self):
         with mock.patch.dict(os.environ, {core_mcp.HTTP_SECRET_VAR: "a-B_c" * 6}):

@@ -239,15 +239,18 @@ LOOPBACK = ("127.0.0.1", "localhost", "[::1]")
 HTTP_SECRET_VAR = "JURISYNC_HTTP_SECRET"
 
 
-def http_settings(public_host=None):
+def http_settings(host="127.0.0.1", public_host=None):
     """Streamable HTTP for local installs: the SDK's DNS-rebinding check accepts only this machine's Host and Origin,
-    plus ``public_host`` (the tunnel's address) when one is given. A page in the browser that points its own domain at
-    127.0.0.1 is refused.
+    the address bound with ``--host`` (a LAN address; not 0.0.0.0 or ::, which name no host), and ``public_host`` (the
+    tunnel's address) when one is given. A page in the browser that points its own domain at 127.0.0.1 is refused.
     """
     from mcp.server.transport_security import TransportSecuritySettings
 
-    hosts = [*LOOPBACK, *(f"{host}:*" for host in LOOPBACK)]
-    origins = [*(f"http://{host}" for host in LOOPBACK), *(f"http://{host}:*" for host in LOOPBACK)]
+    names = list(LOOPBACK)
+    if host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::", ""):
+        names.append(f"[{host}]" if ":" in host else host)
+    hosts = [*names, *(f"{name}:*" for name in names)]
+    origins = [*(f"http://{name}" for name in names), *(f"http://{name}:*" for name in names)]
     if public_host:
         hosts += [public_host, f"{public_host}:*"]
         origins.append(f"https://{public_host}")
@@ -294,7 +297,7 @@ def serve(server, on_exit=None, argv=None):
             "streamable-http",
             host=args.host,
             port=args.port,
-            transport_security=http_settings(args.public_host),
+            transport_security=http_settings(args.host, args.public_host),
             streamable_http_path=path,
         )
     finally:

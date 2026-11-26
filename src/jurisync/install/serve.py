@@ -34,7 +34,7 @@ def build_app(names, host="127.0.0.1", public_host=None, prefix=""):
     for name in names:
         server, close = load(name)
         apps[name] = server.streamable_http_app(
-            streamable_http_path="/mcp", transport_security=http_settings(public_host), host=host
+            streamable_http_path="/mcp", transport_security=http_settings(host, public_host), host=host
         )
         if close:
             closers.append(close)
