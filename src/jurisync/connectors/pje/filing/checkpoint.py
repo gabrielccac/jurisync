@@ -7,6 +7,10 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+ERROR_ACCESS_DENIED = 5
+STILL_ACTIVE = 259
+
 
 def fingerprint(value):
     """Stable digest of the payload slice a phase worked from; a changed slice means the phase must run again."""
@@ -48,8 +52,25 @@ def phase_fingerprints(payload):
 
 def pid_alive(pid):
     try:
-        os.kill(int(pid), 0)
-    except (ProcessLookupError, ValueError, TypeError):
+        pid = int(pid)
+    except (ValueError, TypeError):
+        return False
+    if os.name == "nt":
+        # os.kill on Windows terminates the process whatever the signal: ask the kernel whether it is still running.
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        try:
+            code = ctypes.c_ulong()
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return False
     except PermissionError:
         return True
