@@ -1,7 +1,10 @@
 """PDF text and metadata via pdf-inspector, plus safe local download paths."""
 
 import os
+import time
 from pathlib import Path
+
+from jurisync.core import ocr as ocr_settings
 
 
 def attachment_mime_type(content, filename):
@@ -42,15 +45,39 @@ def _limit(max_text_chars):
     return max_text_chars if isinstance(max_text_chars, int) and max_text_chars > 0 else 500_000
 
 
-def extract_pdf_with_ocr(content, *, max_text_chars=500_000, mode="auto"):
+class OcrSkipped(Exception):
+    """OCR was not run on this PDF; the message says why, and the caller reads its text layer instead."""
+
+
+def ocr_max_pages():
+    return ocr_settings._setting("JURISYNC_OCR_MAX_PAGES", ocr_settings.MAX_PAGES)
+
+
+def ocr_deadline(clock=time.monotonic):
+    """When a call that OCRs several files stops starting new OCR (``JURISYNC_OCR_SECONDS``, default 90 s)."""
+    return clock() + ocr_settings._setting("JURISYNC_OCR_SECONDS", ocr_settings.SECONDS)
+
+
+def extract_pdf_with_ocr(content, *, max_text_chars=500_000, mode="auto", deadline=None, clock=time.monotonic):
+    """pdf-inspector's selective OCR, bounded as ``core.ocr``: never on a PDF of more than ``ocr_max_pages()`` pages,
+    never once ``deadline`` passed, never with OCR off (``JURISYNC_OCR=off``), and never downloading a model.
+
+    Raises ``OcrSkipped`` when a limit applies. The fast detection runs first: its page count decides, and its
+    ``pdfType`` (which the OCR result lacks) is the one reported.
+    """
     import pdf_inspector
 
     limit = _limit(max_text_chars)
-    result = pdf_inspector.process_pdf_with_ocr_bytes(content, mode=mode)
-    try:
-        pdf_type = _pdf_type(pdf_inspector.detect_pdf_bytes(content).pdf_type)
-    except Exception:
-        pdf_type = None
+    if not ocr_settings.enabled():
+        raise OcrSkipped("OCR is off on this server (JURISYNC_OCR)")
+    if deadline is not None and clock() > deadline:
+        raise OcrSkipped("this call's OCR time was spent on earlier files")
+    detected = pdf_inspector.detect_pdf_bytes(content)
+    if detected.page_count > ocr_max_pages():
+        raise OcrSkipped(f"{detected.page_count} pages; OCR reads PDFs of at most {ocr_max_pages()} pages")
+    ocr_settings._locate_runtime()
+    result = pdf_inspector.process_pdf_with_ocr_bytes(content, mode=mode, offline=True)
+    pdf_type = _pdf_type(detected.pdf_type)
     markdown = result.markdown or ""
     return {
         "markdown": markdown[:limit],
@@ -85,16 +112,24 @@ def extract_pdf_metadata(content, max_text_chars=500_000):
     }
 
 
-def analyze_document(content, filename, *, max_text_chars=500_000, ocr=False):
+def analyze_document(content, filename, *, max_text_chars=500_000, ocr=False, ocr_deadline=None):
+    """MIME type, and for a PDF its text and metadata; with ``ocr`` its scanned pages are read by OCR within the
+    limits of ``extract_pdf_with_ocr`` (``ocrSkipped`` says which one applied)."""
     mime_type = attachment_mime_type(content, filename)
     if mime_type != "application/pdf":
         return {"mimeType": mime_type}
+    skipped = {}
     if ocr:
         try:
-            return {"mimeType": mime_type, **extract_pdf_with_ocr(content, max_text_chars=max_text_chars)}
+            return {
+                "mimeType": mime_type,
+                **extract_pdf_with_ocr(content, max_text_chars=max_text_chars, deadline=ocr_deadline),
+            }
+        except OcrSkipped as reason:
+            skipped = {"ocrSkipped": str(reason)}
         except Exception:
-            pass  # OCR runtime (PDFium/ONNX) unavailable; fall back to native extraction.
+            pass  # OCR runtime (PDFium/ONNX) or a model unavailable; fall back to native extraction.
     try:
-        return {"mimeType": mime_type, **extract_pdf_metadata(content, max_text_chars)}
+        return {"mimeType": mime_type, **extract_pdf_metadata(content, max_text_chars), **skipped}
     except Exception as error:
         return {"mimeType": mime_type, "pdfExtractionError": str(error)}
