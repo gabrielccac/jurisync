@@ -8,7 +8,6 @@ logs in again once and is repeated.
 
 from typing import Annotated, Any, Literal
 
-from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from jurisync import customers, portals
@@ -26,6 +25,7 @@ from jurisync.connectors.eproc.client import (
 )
 from jurisync.core import certificate
 from jurisync.core.mcp import (
+    MAY_GIVE_CIENCIA,
     PORTAL_HELP,
     READ_ONLY,
     JurisyncServer,
@@ -36,9 +36,6 @@ from jurisync.core.mcp import (
     tool_errors,
 )
 from jurisync.core.session_pool import SessionExpired, SessionPool
-
-# eproc_get_process can store a file in the shared folder and, by opening a document, register a ciência.
-READS_AND_SAVES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 
 
 def refresh_panel(portal, value):
@@ -143,7 +140,7 @@ def create_server(keys=None):
             "tell the user ciencia.aviso and note it in the task. save=true stores each read document (HTML as PDF) "
             "in the shared documents folder."
         ),
-        annotations=READS_AND_SAVES,
+        annotations=MAY_GIVE_CIENCIA,
     )
     def eproc_get_process(
         portal: Portal,

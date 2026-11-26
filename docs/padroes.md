@@ -66,10 +66,22 @@ depende de decisão do Gabriel. Skills e plugins são atualizados no mesmo PR da
 
 ## 4. Annotations MCP
 
-Toda tool usa um preset de `jurisync.core.mcp`, nunca um `ToolAnnotations` próprio, e tem `title`. A regra da
-ciência é uma só em todos os portais: qualquer leitura que **possa** registrar ciência (abre documento ou ato de uma
-intimação pendente, mesmo que só com `acknowledgeCiencia=true`) não é `readOnlyHint`. Annotations são dicas para o
-cliente; as travas reais (concessão de escrita por escritório, `acknowledgeCiencia`) ficam no servidor.
+Toda tool usa um preset de `jurisync.core.mcp`, nunca um `ToolAnnotations` próprio, e tem `title`:
+
+| Preset | Quando | readOnly / destructive / idempotent |
+|---|---|---|
+| `READ_ONLY` | só lê, não abre nada que dê ciência | sim / não / sim |
+| `SAVES_FILE` | lê e salva arquivo na pasta compartilhada ou numa pasta local de execução | não / não / sim |
+| `MAY_GIVE_CIENCIA` | abre ato ou documento que pode registrar ciência (com `acknowledgeCiencia` ou não) | não / sim / não |
+| `WRITE` | acrescenta algo no sistema (tarefa, rascunho, dispositivo) | não / não / não |
+| `WRITE_IDEMPOTENT` | acrescenta, mas repetir devolve o que já existe (pasta com o mesmo nome) | não / não / sim |
+| `DESTRUCTIVE` | altera ou apaga o que existe | não / sim / não |
+| `REPLACE` | troca um valor; repetir não muda mais nada (fase do processo) | não / sim / sim |
+
+A regra da ciência é uma só em todos os portais: qualquer tool que **possa** registrar ciência usa
+`MAY_GIVE_CIENCIA` (dar ciência inicia prazo e não se desfaz), mesmo que só abra o documento com
+`acknowledgeCiencia=true`. Annotations são dicas para o cliente; as travas reais (concessão de escrita por escritório,
+`acknowledgeCiencia`) ficam no servidor.
 
 ## 5. Erros
 
@@ -145,4 +157,5 @@ Passos para um conector novo:
 | Logging com `%`-args, sem `print` de depuração | regras `G`, `LOG`, `T10` do ruff |
 | Comprehensions e literais simples | regras `C4`, `PIE`, `ISC` do ruff |
 | Molde de conector válido | `tests/core/test_connector_template.py` |
+| Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |

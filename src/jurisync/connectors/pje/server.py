@@ -9,7 +9,6 @@ import json
 import threading
 from typing import Annotated, Any, Literal
 
-from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 
 from jurisync import customers, portals
@@ -29,8 +28,11 @@ from jurisync.core import certificate, ciencia, credentials
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.errors import InputError, NotFound, WritesDisabled
 from jurisync.core.mcp import (
+    DESTRUCTIVE,
+    MAY_GIVE_CIENCIA,
     PORTAL_HELP,
     READ_ONLY,
+    WRITE,
     JurisyncServer,
     load_env_file,
     offer_portals,
@@ -231,7 +233,7 @@ def create_server():
         + ciencia.AUTHORIZATION
         + ". When the expedientes could not be read in full the read is refused with nothing opened (error starts 'ciência not checked'): retry later, or acknowledgeCiencia=true under the same authorization. settings.toml [pje] ciencia_on_read = 'allow' reads them by default. The ciencia block: estado 'nenhuma' (nothing pending read), 'dada' (a pending communication was read: its ciência may be registered and deadline started; see intimacoes) or 'desconhecida' (read with acknowledgeCiencia, expedientes unchecked), with an aviso: unless 'nenhuma', tell the user and note it in the task.",
         # With acknowledgeCiencia a read may register the ciência and start a deadline, and save=true writes a file.
-        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
+        annotations=MAY_GIVE_CIENCIA,
     )
     def read_documents_tool(
         processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
@@ -284,7 +286,7 @@ def create_server():
         + ciencia.AUTHORIZATION
         + ". settings.toml [pje] ciencia_on_read = 'allow' opens them by default. The ciencia block: estado 'nenhuma' (already registered, or nothing opened), 'dada' (a pending one opened now: its ciência may be registered and deadline started) or 'pendente' (pending, not opened), with intimacoes and an aviso: unless 'nenhuma', tell the user and note it in the task.",
         # Opening a pending act registers the ciência and starts a deadline: not a read-only, repeatable call.
-        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
+        annotations=MAY_GIVE_CIENCIA,
     )
     def read_expediente_ato_tool(
         processNumber: Annotated[str, Field(min_length=1, description="CNJ process number with punctuation.")],
@@ -504,9 +506,7 @@ def create_server():
         name="pje_draft_write",
         title="Create or fill TRF5 PJe draft",
         description="Create or fill a TRF5 1G draft from the reviewed payload.json of a named filing run; it stays in Não Protocolados and is never protocolled. Requires PJE_ALLOW_DRAFT_WRITES=true. create-fill, fill and resume run in the background and return at once: follow them with pje_draft_status. After a failed or interrupted run use resume: it continues the same draft and uploads only the documents PJe still lacks (never create-fill again). Single stages run within the call and can time out on a slow portal, so prefer resume.",
-        annotations=ToolAnnotations(
-            readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
-        ),
+        annotations=WRITE,
     )
     def draft_write(runId: RunId, stage: DraftWriteStage) -> dict[str, Any]:
         if stage in BACKGROUND_STAGES:
@@ -517,7 +517,7 @@ def create_server():
         name="pje_draft_delete",
         title="Delete a TRF5 PJe draft",
         description="Delete one draft from Não Protocolados by its draft number. The row must show the author's name, otherwise nothing is deleted. Uses the portal's own Remover action and confirms the draft is gone from a fresh search. Irreversible. Requires PJE_ALLOW_DRAFT_WRITES=true.",
-        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True),
+        annotations=DESTRUCTIVE,
     )
     def draft_delete(
         draftId: Annotated[str, StringConstraints(pattern=r"^\d{1,12}$")],

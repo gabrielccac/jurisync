@@ -17,7 +17,20 @@ from mcp.types import ToolAnnotations
 
 from jurisync.core import calls, errors
 
+# Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
+# They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+# Reads the portal and saves a file in the shared folder (or a local run folder); nothing changes in the portal.
+SAVES_FILE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+# Opens what may register a pending ciência: the deadline starts and cannot be undone. Every portal, the same rule.
+MAY_GIVE_CIENCIA = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+# Adds something (task, folder, draft, device); repeating adds again unless the tool dedupes (WRITE_IDEMPOTENT).
+WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+WRITE_IDEMPOTENT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+# Changes or removes what exists; REPLACE sets a value, so repeating it changes nothing more.
+DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+REPLACE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+PRESETS = (READ_ONLY, SAVES_FILE, MAY_GIVE_CIENCIA, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, REPLACE)
 
 log = logging.getLogger(__name__)
 
