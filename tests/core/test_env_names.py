@@ -8,6 +8,7 @@ import pytest
 
 from jurisync import customers, portals
 from jurisync.hosted import provision
+from jurisync.install import setup
 
 
 def test_every_prefix_is_the_key_in_upper_case_or_a_listed_exception():
@@ -63,6 +64,23 @@ def test_a_pinned_older_switch_that_contradicts_the_method_fails_loudly(root):
     )
     with pytest.raises(ValueError, match="PJE_1G_CERT"):
         customers.load_setup("acme")
+
+
+def test_a_shared_older_pin_shadowed_by_the_portals_own_does_not_count(root):
+    (root / "acme" / "portals.toml").write_text(
+        '[trf5-1g]\nmethod = "password_totp"\n[trf5-2g]\nmethod = "certificate_totp"\n'
+        '[env]\nset = { PJE_TRF5_1G_CERT = "false", PJE_TRF5_CERT = "true" }\n',
+        encoding="utf-8",
+    )
+    assert set(customers.load_setup("acme")) == {"trf5-1g", "trf5-2g"}
+
+
+def test_a_shared_export_accepts_the_current_name_of_an_older_declaration(root):
+    (root / "acme" / "portals.toml").write_text(
+        '[trf1-1g]\nmethod = "password_totp"\nsecrets = ["PJE_1G_USERNAME"]\n', encoding="utf-8"
+    )
+    names, _ = setup.declared_names("acme")
+    assert {"PJE_1G_USERNAME", "TRF1_1G_USERNAME"} <= set(names)
 
 
 def test_the_a3_switch_is_found_under_an_older_prefix():

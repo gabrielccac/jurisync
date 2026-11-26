@@ -473,7 +473,7 @@ def declared_names(customer, keys=None):
         if key == customers.RESERVED_TABLE or (keys is not None and key not in keys):
             continue
         for group in entry.get("secrets", []):
-            names += [name.strip() for name in group.split("|")]
+            names += portals.get(key).variable_names(group).split("|")
     required, extra_optional = customers.extra_variables(customer)
     names += required
     optional += extra_optional

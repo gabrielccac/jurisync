@@ -86,11 +86,13 @@ def load_setup(name):
     switches = certificate_switches(setups)
     for key in setups:
         variable = portals.get(key).env_name("CERT")
-        for pin in portals.get(key).variable_names(variable).split("|") if variable in switches else ():
-            if pin in pinned and (str(pinned[pin]).strip().lower() in TRUE) != switches[variable]:
-                raise ValueError(
-                    f"{name}: [env].set {pin} = {pinned[pin]!r} contradicts the method declared for its portal"
-                )
+        # Only the pin the portal reads first counts: a shared older one (PJE_TRF5_CERT) it shadows has no effect here.
+        names = portals.get(key).variable_names(variable).split("|") if variable in switches else []
+        pin = next((name for name in names if name in pinned), None)
+        if pin and (str(pinned[pin]).strip().lower() in TRUE) != switches[variable]:
+            raise ValueError(
+                f"{name}: [env].set {pin} = {pinned[pin]!r} contradicts the method declared for its portal"
+            )
     return setups
 
 
