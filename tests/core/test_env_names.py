@@ -75,6 +75,15 @@ def test_a_shared_older_pin_shadowed_by_the_portals_own_does_not_count(root):
     assert set(customers.load_setup("acme")) == {"trf5-1g", "trf5-2g"}
 
 
+def test_a_blank_current_pin_does_not_hide_a_contradictory_older_one(root):
+    (root / "acme" / "portals.toml").write_text(
+        '[trf1-1g]\nmethod = "password_totp"\n[env]\nset = { TRF1_1G_CERT = "", PJE_1G_CERT = "true" }\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="PJE_1G_CERT"):
+        customers.load_setup("acme")
+
+
 def test_a_shared_export_accepts_the_current_name_of_an_older_declaration(root):
     (root / "acme" / "portals.toml").write_text(
         '[trf1-1g]\nmethod = "password_totp"\nsecrets = ["PJE_1G_USERNAME"]\n', encoding="utf-8"
