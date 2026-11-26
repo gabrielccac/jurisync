@@ -69,7 +69,7 @@ class Pending:
     params: AuthorizationParams
     expires: float
     browser: str  # the cookie value only the browser that opened /authorize holds
-    user: tuple | None = None  # (e-mail, tenant) once the password matched and a new password is due
+    user: tuple | None = None  # (e-mail, tenant, stored hash) once the password matched and a new one is due
 
 
 def login_cookie(request_id):
@@ -151,11 +151,11 @@ class Provider:
             return None
         return entry
 
-    def verified(self, request_id, email, tenant):
-        """The password matched and a new one is due: the request waits for it, bound to that user."""
+    def verified(self, request_id, email, tenant, current):
+        """The password matched and a new one is due: the request waits for it, bound to that user and password."""
         entry = self._pending.get(request_id)
         if entry is not None:
-            self._pending[request_id] = replace(entry, user=(email, tenant))
+            self._pending[request_id] = replace(entry, user=(email, tenant, current))
 
     def complete(self, request_id, email, tenant):
         """Issue the authorization code for a signed-in user and return where to send the browser.
@@ -445,7 +445,7 @@ def login_routes(provider, throttle, address_throttle):
         """Second step: the user whose password matched sets a new one, then the code is issued."""
         if entry.user is None:
             return EXPIRED
-        email, tenant = entry.user
+        email, tenant, current = entry.user
         password = str(form.get("new_password", ""))
         if password != str(form.get("confirm", "")):
             return change_page(request_id, email, "As duas senhas não conferem.")
@@ -456,8 +456,11 @@ def login_routes(provider, throttle, address_throttle):
             return change_page(request_id, email, "Servidor ocupado. Tente de novo em instantes.", 503)
         if same[0] is not None:
             return change_page(request_id, email, "Escolha uma senha diferente da atual.")
-        if await checked(provider.store.set_password, email, password) is None:
+        changed = await checked(provider.store.change_password, email, tenant, current, password)
+        if changed is None:
             return change_page(request_id, email, "Servidor ocupado. Tente de novo em instantes.", 503)
+        if not changed[0]:
+            return EXPIRED  # reset, moved or removed since the sign-in: that sign-in no longer counts
         provider.store.log(tenant, email, "senha trocada pelo usuário")
         return finish(request_id, email, tenant)
 
@@ -484,17 +487,17 @@ def login_routes(provider, throttle, address_throttle):
         if throttle.blocked(email) or address_throttle.blocked(address):
             return page(request_id, entry, "Muitas tentativas. Aguarde 15 minutos e tente de novo.", 429)
         # scrypt takes a while by design: off the event loop, so tool calls keep flowing meanwhile.
-        found = await checked(provider.store.authenticate, email, str(form.get("password", "")))
+        found = await checked(provider.store.credential, email, str(form.get("password", "")))
         if found is None:
             return page(request_id, entry, "Servidor ocupado. Tente de novo em instantes.", 503)
-        tenant = found[0]
+        tenant, current = found[0] or (None, None)
         if tenant is None:
             throttle.fail(email)
             address_throttle.fail(address)
             return page(request_id, entry, "E-mail ou senha incorretos.")
         throttle.clear(email)
         if form.get("change") or provider.store.must_change(email):
-            provider.verified(request_id, email, tenant)
+            provider.verified(request_id, email, tenant, current)
             return change_page(request_id, email)
         return finish(request_id, email, tenant)
 

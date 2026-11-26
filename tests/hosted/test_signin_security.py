@@ -297,17 +297,17 @@ class AvailabilityTest(SignInCase):
     def test_the_password_check_runs_off_the_event_loop(self):
         seen = []
 
-        def authenticate(email, password):
+        def credential(email, password):
             try:
                 asyncio.get_running_loop()
                 seen.append("loop")
             except RuntimeError:
                 seen.append("thread")
-            return "office-a"
+            return "office-a", "hash"
 
         client = TestClient(self.app, base_url=BASE)
         request_id, _ = self.authorize(client, self.register(client), pkce()[1])
-        with mock.patch.object(self.store, "authenticate", authenticate):
+        with mock.patch.object(self.store, "credential", credential):
             self.assertEqual(self.submit(client, request_id).status_code, 302)
         self.assertEqual(seen, ["thread"])
 
@@ -662,6 +662,19 @@ class PasswordChangeTest(SignInCase):
         request_id, _ = self.authorize(client, self.register(client), pkce()[1])
         self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
         self.assertEqual(self.store.authenticate(self.EMAIL, PASSWORD), "office-a")
+
+    def test_a_reset_or_removal_after_the_sign_in_voids_the_pending_change(self):
+        for revoke in (
+            lambda: self.store.set_password(self.EMAIL, "senha-do-operador-nova", must_change=True),
+            lambda: self.store.remove_user(self.EMAIL),
+        ):
+            self.store.add_user(self.EMAIL, "office-a", PASSWORD, must_change=True)
+            client = TestClient(self.app, base_url=BASE)
+            _, _, request_id, response = self.start(client)
+            self.assertEqual(response.status_code, 200)
+            revoke()
+            self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
+            self.assertIsNone(self.store.authenticate(self.EMAIL, self.NEW))
 
     def test_a_wrong_password_never_reaches_the_new_password_step(self):
         self.store.set_password(self.EMAIL, PASSWORD, must_change=True)

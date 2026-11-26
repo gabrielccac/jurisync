@@ -238,13 +238,19 @@ class Store:
             int(must_change),
         )
 
-    def authenticate(self, email, password):
-        """The user's tenant id when the password matches, else None."""
+    def credential(self, email, password):
+        """``(tenant id, stored hash)`` when the password matches, else None. The hash names this exact password: a
+        reset, a new tenant or a removal since then makes ``change_password`` with it refuse."""
         rows = self._run("select tenant, password from users where email = ?", email.strip().lower())
         if not rows:
             check_password(password, hash_password("timing-equalizer"))
             return None
-        return rows[0]["tenant"] if check_password(password, rows[0]["password"]) else None
+        return (rows[0]["tenant"], rows[0]["password"]) if check_password(password, rows[0]["password"]) else None
+
+    def authenticate(self, email, password):
+        """The user's tenant id when the password matches, else None."""
+        found = self.credential(email, password)
+        return found[0] if found else None
 
     def users(self, tenant=None):
         sql, args = "select email, tenant, created from users", ()
@@ -268,6 +274,21 @@ class Store:
             email,
         )
         self._run("delete from tokens where subject = ?", email)
+
+    def change_password(self, email, tenant, current, password):
+        """The user's own change: only while the user still belongs to ``tenant`` with the stored hash ``current``
+        (the one checked at sign-in). Ends the user's tokens. False when that sign-in is no longer valid."""
+        if len(password) < MIN_PASSWORD:
+            raise ValueError(f"Use a password of at least {MIN_PASSWORD} characters")
+        email, hashed = email.strip().lower(), hash_password(password)
+        with self._lock:
+            changed = self._db.execute(
+                "update users set password = ?, must_change = 0 where email = ? and tenant = ? and password = ?",
+                (hashed, email, tenant, current),
+            ).rowcount
+        if changed:
+            self._run("delete from tokens where subject = ?", email)
+        return bool(changed)
 
     def remove_user(self, email):
         email = email.strip().lower()
