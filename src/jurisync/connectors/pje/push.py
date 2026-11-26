@@ -44,10 +44,10 @@ SCROLLER = re.compile(r"Richfaces\.Datascroller\(\s*'([^']+)'")
 # Pages of the registry read per call at most (RichFaces pages hold 10 to 20 rows; the tool returns up to 500).
 MAX_PUSH_PAGES = 50
 # A walk through the registry (offset += limit, or one processNumber after another) read it again from page 1 on
-# every call. The rows read and where the paging stopped are kept this long per session, and the next call
-# continues from there.
+# every call. The rows read and where the paging stopped are kept per session, and the next call continues from
+# there, for this long after the walk's first page was read (reusing it never extends it).
 WALK_SECONDS = 300
-_walks = weakref.WeakKeyDictionary()  # session -> {portal: (time, walk)}
+_walks = weakref.WeakKeyDictionary()  # session -> {portal: walk}
 _walks_guard = threading.Lock()
 
 
@@ -347,8 +347,8 @@ def _enough(result, needed):
 
 def _recall(session, portal):
     with _walks_guard:
-        moment, walk = _walks.get(session, {}).get(portal, (0, None))
-    return walk if time.monotonic() - moment <= WALK_SECONDS else None
+        walk = _walks.get(session, {}).get(portal)
+    return walk if walk is not None and time.monotonic() - walk["since"] <= WALK_SECONDS else None
 
 
 def _remember(session, portal, walk):
@@ -357,7 +357,7 @@ def _remember(session, portal, walk):
             if walk is None:
                 _walks.get(session, {}).pop(portal, None)
             else:
-                _walks.setdefault(session, {})[portal] = (time.monotonic(), walk)
+                _walks.setdefault(session, {})[portal] = walk
     except TypeError:
         pass  # a session that cannot be weakly referenced is not remembered
 
@@ -406,7 +406,7 @@ def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_numb
             except RuntimeError:
                 walk = None
         if walk is None:
-            walk = _first_page(session, name, config)
+            walk = {**_first_page(session, name, config), "since": time.monotonic()}
             _continue(session, name, config, walk, needed)
         return copy.deepcopy(_window(walk["result"], limit, offset, process_number))
     except BaseException:

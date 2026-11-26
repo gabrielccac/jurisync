@@ -331,6 +331,18 @@ class PushRegistryPages(unittest.TestCase):
             push.read_push("tjmg-pje-1g", session=session, limit=20, offset=20)
         self.assertEqual((session.get.call_count, session.post.call_count), (3, 3))
 
+    def test_reusing_the_rows_never_extends_their_lifetime(self):
+        session = Mock()
+        session.get.return_value = _response(_scroller_page(self._numbers(1, 20), 1, 1))
+        clock = [1000.0]
+        with patch.object(push.time, "monotonic", lambda: clock[0]):
+            push.read_push("tjmg-pje-1g", session=session, limit=20)
+            for _ in range(3):
+                clock[0] += push.WALK_SECONDS / 2
+                push.read_push("tjmg-pje-1g", session=session, limit=20)
+        # Read at 1000, reused at 1150 and 1300, read again at 1450 and reused at 1600 (as a fresh snapshot).
+        self.assertEqual(session.get.call_count, 2)
+
     def test_a_failed_read_forgets_the_walk(self):
         pages = [_scroller_page(self._numbers(1 + 20 * n, 20), n + 1, 3) for n in range(3)]
         session = Mock()
