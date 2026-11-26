@@ -59,11 +59,21 @@ def require_own_number(portal, process_number):
 
 
 def login_portal(portal):
-    """Authenticate with the method assigned to this portal."""
-    config = portals.pje(portal)
+    """The saved session of this portal, else a new login with its method (saved for the next process)."""
     cached = load_session(portal)
     if cached is not None:
         return cached, None
+    session, response = authenticate(portal)
+    try:
+        save_session(portal, session)
+    except OSError:
+        pass  # Authentication remains usable if the private cache is unavailable.
+    return session, response
+
+
+def authenticate(portal):
+    """A new login with the method assigned to this portal, ignoring and not touching the saved session."""
+    config = portals.pje(portal)
     method = auth_method(portal)
     if method == "a3_totp":
         from jurisync.connectors.pje.auth.certificate import a3_cert_login
@@ -75,10 +85,6 @@ def login_portal(portal):
         session, response = cert_login(portal), None
     else:
         session, response = login_session(*credentials(portal), config.login_url, config.host, portal=portal)
-    try:
-        save_session(portal, session)
-    except OSError:
-        pass  # Authentication remains usable if the private cache is unavailable.
     return session, response
 
 

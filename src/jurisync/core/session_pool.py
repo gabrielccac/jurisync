@@ -313,6 +313,16 @@ class SessionPool:
         """Prove the current credentials with a fresh login under the pool's rules; nothing is kept."""
         self._close(self.fresh_login(portal))
 
+    def verify(self, portal, login=None):
+        """A fresh login under the pool's rules, then the pool's own liveness check on it; nothing is kept. Raises
+        ``LoginFailed`` when the login went through but the portal does not treat the session as logged in."""
+        value = self.fresh_login(portal, login)
+        try:
+            if self._refresh(portal, value) is None:
+                raise LoginFailed(f"{portal}: the login finished but the portal does not show a logged-in session")
+        finally:
+            self._close(value)
+
     @contextmanager
     def session(self, portal):
         key = (credentials.tenant(), portal)
