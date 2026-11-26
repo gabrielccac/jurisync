@@ -12,13 +12,16 @@ Each receives keyword arguments and returns plain dicts.
 
 import json
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from jurisync.connectors.juridiq.api import JuridiqApi, payload_data
+from jurisync.core.file_lock import locked
 
 ASSESSMENT_STATUSES = ("sufficient", "no_action", "needs_context", "review")
 READ_BATCH = 50
+# A publication completed and marked read is no longer listed as unread; its record is kept this long, then dropped.
+RETAIN_DAYS = 90
 
 
 class PipelineError(ValueError):
@@ -287,10 +290,28 @@ class _State:
     def publications(self):
         return self.data["publications"]
 
+    def prune(self, now=None):
+        """Drop the publications completed and marked read more than ``RETAIN_DAYS`` ago."""
+        cutoff = ((now or datetime.now(UTC)) - timedelta(days=RETAIN_DAYS)).isoformat(timespec="milliseconds")
+        cutoff = cutoff.replace("+00:00", "Z")
+        self.data["publications"] = {
+            key: value
+            for key, value in self.publications.items()
+            if not (
+                isinstance(value, dict)
+                and value.get("status") == "completed"
+                and value.get("markedRead") is True
+                and str(value.get("updatedAt") or "") < cutoff
+            )
+        }
+
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_name(f"{self.path.name}.tmp-{os.getpid()}")
-        temporary.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(self.data, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
         temporary.replace(self.path)
 
 
@@ -549,6 +570,14 @@ class PublicationPipeline:
             self.state.save()
 
     def run(self):
+        """One pass over the unread publications. A second run on the same state file while one is going fails
+        at once (``LockBusy``): both would act on the same publications and the last to save would win."""
+        with locked(self.state.path):
+            self.state = _State(self.state.path)
+            self.state.prune()
+            return self._run()
+
+    def _run(self):
         publications = [normalize_publication(item) for item in self.api.all_unread_publications(maxResults=self.limit)]
         result = {"fetched": len(publications), "skipped": 0, **self.result}
         self.result = result

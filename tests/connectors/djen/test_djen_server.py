@@ -9,7 +9,7 @@ from mcp.client.stdio import StdioServerParameters
 from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync.connectors.djen import server as djen_server
-from jurisync.connectors.djen.client import DjenError
+from jurisync.connectors.djen.client import OAB_VARIANTS, DjenError
 from jurisync.core import credentials
 
 RAW_ITEM = {
@@ -234,7 +234,7 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
                 },
             )
         sent = [call.args[0]["numeroOab"] for call in search.call_args_list]
-        self.assertEqual(sent[:7], ["14663", "14663-A", "14663-B", "14663-E", "14663-N", "14663-O", "14663-S"])
+        self.assertEqual(sorted(sent[:7]), ["14663", "14663-A", "14663-B", "14663-E", "14663-N", "14663-O", "14663-S"])
         self.assertEqual(sent[7:], ["14663"])
         content = result.structured_content
         self.assertEqual([item["id"] for item in content["items"]], [1, 2])
@@ -354,7 +354,8 @@ class DjenServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(text["complete"])
         self.assertEqual(text["checagem"]["status"], "parcial")
         self.assertIn("quebra=ERRO", text["texto"])
-        every = {"42543": DjenError("fora do ar"), "VICTOR HUGO": DjenError("fora do ar")}
+        # A search fails as a whole only when every OAB variant failed; one variant alone leaves a partial result.
+        every = {f"42543{suffix}": DjenError("fora do ar") for suffix in OAB_VARIANTS} | {"VICTOR HUGO": DjenError("x")}
         with self.assertRaises(ToolError):
             self.saved(searches, every)
 

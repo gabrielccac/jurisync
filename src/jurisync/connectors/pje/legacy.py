@@ -79,7 +79,9 @@ def parse_grid(html):
 
 
 def _panel(session, config):
-    response = jsf.get(session, config.url(PANEL_PATH), label=f"{config.key} panel", referer=config.base_url)
+    response = jsf.get(
+        session, config.url(PANEL_PATH), label=f"{config.key} panel", referer=config.base_url, timeout=LEGACY_TIMEOUT
+    )
     return config.url(PANEL_PATH), response_html(response)
 
 
@@ -91,7 +93,7 @@ def _post(session, url, html, form_id, extra, label):
     except RuntimeError:
         pass
     fields.update(extra)
-    return response_html(jsf.post(session, url, fields, label=label))
+    return response_html(jsf.post(session, url, fields, label=label, timeout=LEGACY_TIMEOUT))
 
 
 def _tab_html(session, url, html, tab, label):
@@ -106,39 +108,34 @@ def _walk_panel(session, portal):
     buckets, with the tab's page (``html``) on which the bucket's toggle can be opened. Indices follow the walk.
     """
     config = portals.pje(portal)
-    previous = jsf.TIMEOUT
-    jsf.TIMEOUT = LEGACY_TIMEOUT
-    try:
-        url, html = _panel(session, config)
-        index = 0
+    url, html = _panel(session, config)
+    index = 0
 
-        def bucket(group, label, count, **where):
-            nonlocal index
-            index += 1
-            return {"index": str(index - 1), "label": f"{group} / {label}", "count": count, "url": url, **where}
+    def bucket(group, label, count, **where):
+        nonlocal index
+        index += 1
+        return {"index": str(index - 1), "label": f"{group} / {label}", "count": count, "url": url, **where}
 
+    counts = parse_found_counts(html)
+    yield bucket(ACERVO, "Pendentes de Manifestação", counts[0] if counts else 0, kind="acervo"), html
+    general = _soup(html).find("td", id="idCaixa_lbl")
+    if general is not None and general.find_parent("form") is not None:
+        html = _post(
+            session,
+            url,
+            html,
+            general.find_parent("form").get("id"),
+            {"idCaixa_server_submit": "idCaixa_server_submit"},
+            f"{config.key} Acervo Geral",
+        )
         counts = parse_found_counts(html)
-        yield bucket(ACERVO, "Pendentes de Manifestação", counts[0] if counts else 0, kind="acervo"), html
-        general = _soup(html).find("td", id="idCaixa_lbl")
-        if general is not None and general.find_parent("form") is not None:
-            html = _post(
-                session,
-                url,
-                html,
-                general.find_parent("form").get("id"),
-                {"idCaixa_server_submit": "idCaixa_server_submit"},
-                f"{config.key} Acervo Geral",
-            )
-            counts = parse_found_counts(html)
-            yield bucket(ACERVO, "Acervo Geral", counts[0] if counts else 0, kind="acervo"), html
-        for tab in parse_tabs(html):
-            if tab[0] == "tabProcAdvPainelPeticaoInicial":
-                continue
-            html = _tab_html(session, url, html, tab, f"{config.key} {tab[1]}")
-            for toggle, label, count in parse_buckets(html):
-                yield bucket(tab[1], label, count, kind="intimacoes", tab=tab[0], form=tab[2], toggle=toggle), html
-    finally:
-        jsf.TIMEOUT = previous
+        yield bucket(ACERVO, "Acervo Geral", counts[0] if counts else 0, kind="acervo"), html
+    for tab in parse_tabs(html):
+        if tab[0] == "tabProcAdvPainelPeticaoInicial":
+            continue
+        html = _tab_html(session, url, html, tab, f"{config.key} {tab[1]}")
+        for toggle, label, count in parse_buckets(html):
+            yield bucket(tab[1], label, count, kind="intimacoes", tab=tab[0], form=tab[2], toggle=toggle), html
 
 
 def read_panel(session, portal):
@@ -207,21 +204,16 @@ def read_inbox(session, portal, *, bucket=None, filters=None):
         raise ValueError(
             f"Listing the rows of {chosen['label']!r} is not supported on the PJe 1.x panel yet; its counter works"
         )
-    previous = jsf.TIMEOUT
-    jsf.TIMEOUT = LEGACY_TIMEOUT
-    try:
-        # The walk left the session on this bucket's tab: its toggle opens from that page, as a click does.
-        toggle = chosen["toggle"]
-        html = _post(
-            session,
-            chosen["url"],
-            html,
-            chosen["form"],
-            {"AJAXREQUEST": "_viewRoot", toggle: toggle, "ajaxSingle": toggle},
-            f"{config.key} {chosen['label']}",
-        )
-    finally:
-        jsf.TIMEOUT = previous
+    # The walk left the session on this bucket's tab: its toggle opens from that page, as a click does.
+    toggle = chosen["toggle"]
+    html = _post(
+        session,
+        chosen["url"],
+        html,
+        chosen["form"],
+        {"AJAXREQUEST": "_viewRoot", toggle: toggle, "ajaxSingle": toggle},
+        f"{config.key} {chosen['label']}",
+    )
     grid = parse_grid(html)
     pending = chosen["label"].endswith("/ Pendentes")
     rows = [{**row, "pending": pending} for row in grid["rows"]]
@@ -278,25 +270,22 @@ def search_parameters(html):
 def find_process(session, process_number, *, portal):
     """Search a process number in the consultarProcessoForm: its id, access key (ca), search summary and referer."""
     config = portals.pje(portal)
-    previous = jsf.TIMEOUT
-    jsf.TIMEOUT = LEGACY_TIMEOUT
-    try:
-        response = jsf.get(session, config.search_url, label=f"{config.key} search page", referer=config.base_url)
-        html = response_html(response)
-        result = _post(
-            session,
-            config.search_url,
-            html,
-            SEARCH_FORM,
-            {
-                "AJAXREQUEST": "_viewRoot",
-                **search_parameters(html),
-                f"{SEARCH_FORM}:numeroProcessoDecoration:numeroProcesso": process_number,
-            },
-            f"{config.key} search",
-        )
-    finally:
-        jsf.TIMEOUT = previous
+    response = jsf.get(
+        session, config.search_url, label=f"{config.key} search page", referer=config.base_url, timeout=LEGACY_TIMEOUT
+    )
+    html = response_html(response)
+    result = _post(
+        session,
+        config.search_url,
+        html,
+        SEARCH_FORM,
+        {
+            "AJAXREQUEST": "_viewRoot",
+            **search_parameters(html),
+            f"{SEARCH_FORM}:numeroProcessoDecoration:numeroProcesso": process_number,
+        },
+        f"{config.key} search",
+    )
     found = [row for row in parse_search_rows(result) if row["processNumber"] == process_number]
     summary = {"table_found": "consultaProcessoList" in result, "count": parse_grid(result)["total"]}
     if not found:

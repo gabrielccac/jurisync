@@ -145,7 +145,7 @@ def _recall(session, number):
 def _remember(session, number, lookup, page):
     try:
         with _memo_guard:
-            _memo.setdefault(session, {})[number] = (time.monotonic(), lookup, copy.deepcopy(page))
+            kz.memo_store(_memo.setdefault(session, {}), number, (time.monotonic(), lookup, copy.deepcopy(page)))
     except TypeError:
         pass  # a session that cannot be weakly referenced is not remembered
 

@@ -173,19 +173,19 @@ def check_page(response, expected_url, label, *, require_state=False):
     return response
 
 
-def get(session, url, *, label, referer=None):
+def get(session, url, *, label, referer=None, timeout=TIMEOUT):
     response = session.get(
         url,
         headers={"Referer": referer} if referer else {},
         impersonate=IMPERSONATE,
         allow_redirects=False,
-        timeout=TIMEOUT,
+        timeout=timeout,
     )
     log_request("GET", url, response.status_code)
     return check_page(response, url, label)
 
 
-def post(session, url, data, *, label, require_state=False):
+def post(session, url, data, *, label, require_state=False, timeout=TIMEOUT):
     """Form POST back to the same page, as the browser's A4J submit does."""
     response = session.post(
         url,
@@ -193,7 +193,7 @@ def post(session, url, data, *, label, require_state=False):
         headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Referer": url},
         impersonate=IMPERSONATE,
         allow_redirects=False,
-        timeout=TIMEOUT,
+        timeout=timeout,
     )
     log_request("POST", url, response.status_code)
     return check_page(response, url, label, require_state=require_state)

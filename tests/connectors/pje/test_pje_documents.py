@@ -209,6 +209,49 @@ class SelectedDocumentsChecks(unittest.TestCase):
         self.assertEqual((late["extractionStatus"], late["failure"]), ("not_attempted", documents.OUT_OF_TIME))
         self.assertEqual(session.get.call_count, 1)
 
+    def test_a_silent_portal_keeps_the_call_within_its_budget(self):
+        """Every request gets nothing: the old reads waited 2 x 135 s per document and ran to 540 s."""
+        from curl_cffi.requests.exceptions import Timeout
+
+        data = process()
+        listed = data["timeline"][0]["movements"][0]["documents"]
+        listed += [{"id": str(n), "title": "Anexo", "download_url": URL[:-3] + str(n)} for n in range(457, 461)]
+        clock = [0.0]
+
+        def silent(url, **kwargs):
+            connect, wait = kwargs["timeout"]
+            clock[0] += connect + wait
+            raise Timeout("https://secret")
+
+        session = Mock()
+        session.get.side_effect = silent
+        with patch.object(documents.time, "monotonic", lambda: clock[0]):
+            items = documents.read_selected_documents(data, ["456", "457", "458", "459", "460"], session=session)
+        self.assertLessEqual(clock[0], documents.CALL_SECONDS)
+        waits = [call.kwargs["timeout"][1] for call in session.get.call_args_list]
+        self.assertEqual(waits, [documents.FIRST_BYTE_SECONDS] * 2 + [documents.CALL_SECONDS - 270 - 15])
+        self.assertIn("nothing for 135 s, twice", items[0]["failure"])
+        self.assertIn("nothing for 90 s;", items[1]["failure"])
+        self.assertEqual([item["extractionStatus"] for item in items[2:]], ["not_attempted"] * 3)
+
+    def test_a_body_is_cut_where_the_call_budget_ends(self):
+        clock = [documents.CALL_SECONDS - 40.0]
+
+        def chunks():
+            yield b"%PDF-"
+            clock[0] += 50
+            yield b"rest"
+
+        reply = response()
+        reply.iter_content.return_value = chunks()
+        session = Mock()
+        session.get.return_value = reply
+        start = [0.0]
+        with patch.object(documents.time, "monotonic", lambda: start.pop() if start else clock[0]):
+            item = documents.read_selected_documents(process(), ["456"], session=session)[0]
+        self.assertEqual(session.get.call_args.kwargs["timeout"], (documents.CONNECT_SECONDS, 25))
+        self.assertIn(f"before the call's {documents.CALL_SECONDS} s ran out", item["failure"])
+
     def test_a_document_without_a_download_link_is_reported_not_fetched(self):
         data = process()
         data["timeline"][0]["movements"][0]["documents"][0]["download_url"] = None

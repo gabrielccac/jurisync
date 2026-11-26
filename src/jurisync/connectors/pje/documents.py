@@ -35,7 +35,8 @@ def read_selected_documents(process, document_ids, *, session, save=False):
     With ``save`` the original bytes are written to the shared documents folder and reported as ``savedAs``.
     A PDF can take minutes before its first byte (TJBA prepares it first, then keeps it ready), so each request
     waits ``FIRST_BYTE_SECONDS``, one that got nothing is made once more, and the body must arrive within
-    ``DOCUMENT_SECONDS``; once the call has spent ``CALL_SECONDS`` the remaining documents are not requested.
+    ``DOCUMENT_SECONDS``. The call as a whole keeps to ``CALL_SECONDS``: each wait is cut to what is left of it, a
+    request is not repeated, nor a document started, with less than ``MIN_REQUEST_SECONDS`` left.
     """
     portal = process.get("portal")
     try:
@@ -197,20 +198,23 @@ def _read_one(session, config, process, document, url, viewer, number, save, cal
         failure = NO_ROUTE if process.get("download_pattern_found") is False else NO_LINK
         item.update(extractionStatus="no_download_location", failure=failure)
         return item
-    if time.monotonic() > call_deadline:
+    now = time.monotonic()
+    if call_deadline - now < MIN_REQUEST_SECONDS:
         item.update(extractionStatus="not_attempted", failure=OUT_OF_TIME)
         return item
     response = None
     step = "request"
-    deadline = time.monotonic() + DOCUMENT_SECONDS
+    body_seconds = min(DOCUMENT_SECONDS, call_deadline - now)
+    deadline = now + body_seconds
+    waits = []  # seconds each request waited for the portal
     try:
-        response = _download_patiently(session, config, url)
+        response = _download_patiently(session, config, url, call_deadline, now, waits)
         action = document.get("viewer_action")
         # TJMT serves a document only once the process page shows it in its viewer, as a click does.
         if response.status_code != 200 and action and _show_in_viewer(session, config, viewer, action):
             response.close()
             response = None
-            response = _download(session, config, url)
+            response = _download(session, config, url, _first_byte_wait(call_deadline, time.monotonic()), waits)
         item.update(status=response.status_code, content_type=response.headers.get("Content-Type", ""))
         if response.status_code != 200:
             # The first-instance copy of a second-instance document is not served here: read the visible one.
@@ -225,7 +229,11 @@ def _read_one(session, config, process, document, url, viewer, number, save, cal
                     item["extractionStatus"] = "too_large"
                     break
                 if time.monotonic() > deadline:
-                    item.update(failure=f"body failed: not received within {DOCUMENT_SECONDS} s")
+                    item.update(
+                        failure=f"body failed: not received within {DOCUMENT_SECONDS} s"
+                        if body_seconds == DOCUMENT_SECONDS
+                        else f"body failed: not received before the call's {CALL_SECONDS} s ran out; read it again alone"
+                    )
                     break
                 content.extend(chunk)
             else:
@@ -244,12 +252,12 @@ def _read_one(session, config, process, document, url, viewer, number, save, cal
     except (RequestException, OSError) as error:
         # Exception messages can include session-bearing request URLs: only the step and the error's class.
         failure = f"{step} failed: {type(error).__name__}"
-        if isinstance(error, Timeout):
+        if isinstance(error, Timeout) and waits:
             failure += (
-                f" (the portal sent nothing for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s, twice; it may still be "
+                f" (the portal sent nothing for {waits[-1]} s{', twice' if len(waits) > 1 else ''}; it may still be "
                 "preparing the document: read it again in a few minutes)"
                 if step == "request"
-                else f" (the portal stopped sending for {CONNECT_SECONDS + FIRST_BYTE_SECONDS} s)"
+                else f" (the portal stopped sending for {waits[-1]} s)"
             )
         item.update(extractionStatus="request_failed", text="", failure=failure)
     finally:
@@ -271,6 +279,8 @@ CONNECT_SECONDS = 15
 FIRST_BYTE_SECONDS = 120
 DOCUMENT_SECONDS = 300
 CALL_SECONDS = 360
+# Below this, what is left of the call is too short for a request: the portal rarely answers within it.
+MIN_REQUEST_SECONDS = 30
 OUT_OF_TIME = f"not requested: the earlier documents of this call used its {CALL_SECONDS} s; read this one again alone"
 NO_LINK = "the process page gives no download link for this document"
 NO_ROUTE = "the process page gives no download link for any document (its download route was not found)"
@@ -293,15 +303,25 @@ def _http_failure(response, config):
     return f"HTTP {status}: redirected to {where}"
 
 
-def _download_patiently(session, config, url):
-    """``_download``, once more when the portal sent nothing in time (it may have finished preparing it since)."""
+def _download_patiently(session, config, url, call_deadline, now, waits):
+    """``_download``, once more when the portal sent nothing in time (it may have finished preparing it since) and
+    the call still has ``MIN_REQUEST_SECONDS`` left."""
     try:
-        return _download(session, config, url)
+        return _download(session, config, url, _first_byte_wait(call_deadline, now), waits)
     except Timeout:
-        return _download(session, config, url)
+        now = time.monotonic()
+        if call_deadline - now < MIN_REQUEST_SECONDS:
+            raise
+        return _download(session, config, url, _first_byte_wait(call_deadline, now), waits)
 
 
-def _download(session, config, url):
+def _first_byte_wait(call_deadline, now):
+    """``FIRST_BYTE_SECONDS``, or less when the call has less left after connecting."""
+    return max(1, min(FIRST_BYTE_SECONDS, int(call_deadline - now) - CONNECT_SECONDS))
+
+
+def _download(session, config, url, wait, waits):
+    waits.append(CONNECT_SECONDS + wait)
     return session.get(
         url,
         headers={
@@ -311,7 +331,7 @@ def _download(session, config, url):
         impersonate=IMPERSONATE,
         allow_redirects=False,
         # Streamed: curl gives up when under 1 byte/s arrives for connect + wait seconds (headers included).
-        timeout=(CONNECT_SECONDS, FIRST_BYTE_SECONDS),
+        timeout=(CONNECT_SECONDS, wait),
         stream=True,
     )
 

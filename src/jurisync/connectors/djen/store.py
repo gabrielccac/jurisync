@@ -4,8 +4,12 @@ import json
 import os
 import re
 import tempfile
+from datetime import date, timedelta
 
 DEFAULT_BASE_DIR = os.path.join("data", "djen")
+# A communication made available this many days before a poll's window starts is no longer remembered: the window
+# never starts earlier than the last poll's end, so the API cannot list it again.
+RETAIN_DAYS = 31
 
 
 def state_path(base_dir, numero_oab, uf_oab, sigla_tribunal=None):
@@ -24,6 +28,7 @@ def load_state(path):
     data.setdefault("ids_vistos", [])
     data.setdefault("ids_cancelados", [])
     data.setdefault("count_total", 0)
+    data.setdefault("vistos_em", {})
     return data
 
 
@@ -33,7 +38,7 @@ def save_state(path, state):
     fd, tmp = tempfile.mkstemp(prefix=".djen-", dir=directory)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(state, fh, ensure_ascii=False, indent=2)
+            json.dump(state, fh, ensure_ascii=False, separators=(",", ":"))
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
@@ -64,18 +69,38 @@ def filter_new(items, state):
     return novos, dups
 
 
-def mark_seen(state, items):
+def mark_seen(state, items, today=None):
+    """Remember ``items`` by ID, with the date each was made available (else ``today``) for ``prune``."""
     seen = set(map(str, state.get("ids_vistos", [])))
     cancelled = set(map(str, state.get("ids_cancelados", [])))
+    dated = state.setdefault("vistos_em", {})
+    today = today or date.today().isoformat()
     for item in items:
         key = item.get("id") or item.get("comunicacao_id")
         if key is None:
             raise ValueError("comunicação DJEN sem ID")
         seen.add(str(key))
+        dated[str(key)] = str(item.get("data_disponibilizacao") or today)[:10]
         if item.get("data_cancelamento") or item.get("ativo") is False:
             cancelled.add(str(key))
+    for key in seen - dated.keys():  # remembered before dates were kept: from now on they age like the rest
+        dated[key] = today
     state["ids_vistos"] = sorted(seen)
     state["ids_cancelados"] = sorted(cancelled)
+    state["count_total"] = len(state["ids_vistos"])
+    return state
+
+
+def prune(state, window_start):
+    """Forget the IDs made available more than ``RETAIN_DAYS`` before ``window_start`` (YYYY-MM-DD)."""
+    cutoff = (date.fromisoformat(window_start) - timedelta(days=RETAIN_DAYS)).isoformat()
+    dated = state.get("vistos_em", {})
+    old = {key for key, day in dated.items() if day < cutoff}
+    if not old:
+        return state
+    state["vistos_em"] = {key: day for key, day in dated.items() if key not in old}
+    state["ids_vistos"] = [key for key in map(str, state.get("ids_vistos", [])) if key not in old]
+    state["ids_cancelados"] = [key for key in map(str, state.get("ids_cancelados", [])) if key not in old]
     state["count_total"] = len(state["ids_vistos"])
     return state
 

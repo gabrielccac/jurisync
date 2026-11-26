@@ -146,17 +146,23 @@ PUSH_PAGE_SIZE = 50
 MAX_PUSH_PAGES = 100
 
 
-def read_push(session, portal, *, needed=None):
+def read_push(session, portal, *, needed=None, start=None):
     """The processes registered in PJe Push ("Minhas assinaturas"), from ``/push`` with ``PROCESSOS_CADASTRADOS``.
 
     The legacy ``Push/listView.seam`` page of these portals is an empty shell of the old JSF app; the Angular
     "Push" route reads this endpoint. The "related" processes tab (``PROCESSOS_RELACIONADOS``) is not registrations
     and is not returned. ``needed`` stops the paging once that many rows are read (the caller wants one window of
-    the list); ``results_count`` is still the total the portal reports.
+    the list); ``results_count`` is still the total the portal reports. ``start`` is an earlier result of this
+    function: its rows are kept and the paging continues after its last page. At most ``MAX_PUSH_PAGES`` pages are
+    read per call.
     """
     api = Api(session, portal)
     items, total, pages, page = [], 0, 1, 1
-    while page <= min(pages, MAX_PUSH_PAGES) and (needed is None or len(items) < needed):
+    if start:
+        items, total = list(start["items"]), start["results_count"]
+        pages, page = start["total_pages"] or 0, (start["current_page"] or 0) + 1
+    first = page
+    while page <= pages and page - first < MAX_PUSH_PAGES and (needed is None or len(items) < needed):
         data = api.json(
             "/push",
             {
@@ -610,6 +616,21 @@ _memo = weakref.WeakKeyDictionary()  # session -> {process number: (time, proces
 _memo_guard = threading.Lock()
 
 
+MEMO_PROCESSES = 20  # per session: a batch walking hundreds of processes keeps only the last ones
+
+
+def memo_store(entries, number, entry):
+    """Put ``entry`` (whose first item is its time) in one session's process memo (here and in ``search``),
+    dropping the expired entries and, past ``MEMO_PROCESSES``, the oldest."""
+    now = entry[0]
+    for key in [key for key, value in entries.items() if now - value[0] > MEMO_SECONDS]:
+        del entries[key]
+    entries.pop(number, None)
+    entries[number] = entry
+    while len(entries) > MEMO_PROCESSES:
+        del entries[next(iter(entries))]
+
+
 def _recall(session, number):
     with _memo_guard:
         entry = _memo.get(session, {}).get(number)
@@ -621,10 +642,10 @@ def _recall(session, number):
 def _remember(session, number, process_id, process, parties, raw):
     try:
         with _memo_guard:
-            _memo.setdefault(session, {})[number] = (
-                time.monotonic(),
-                process_id,
-                *copy.deepcopy((process, parties, raw)),
+            memo_store(
+                _memo.setdefault(session, {}),
+                number,
+                (time.monotonic(), process_id, *copy.deepcopy((process, parties, raw))),
             )
     except TypeError:
         pass  # a session that cannot be weakly referenced is not remembered

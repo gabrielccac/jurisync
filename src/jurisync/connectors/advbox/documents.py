@@ -12,7 +12,7 @@ from jurisync.connectors.advbox.parsers import BASE_URL, parse_file_tree, parse_
 from jurisync.connectors.advbox.session import SessionExpiredError, require_writes
 from jurisync.core import credentials
 from jurisync.core.documents_dir import FOLDER_FILE_PATTERN, save_folder_file
-from jurisync.core.pdf import analyze_document, available_path
+from jurisync.core.pdf import analyze_document, available_path, ocr_deadline
 from jurisync.paths import STATE_DIR
 
 MAX_FOLDERS = 100
@@ -437,13 +437,14 @@ class AdvboxDocuments:
 
         def download(session):
             files = []
+            deadline = ocr_deadline()
 
             def parse(name, _file_name, content):
                 files.append(
                     {
                         "name": name,
                         "bytes": len(content),
-                        **analyze_document(content, name, max_text_chars=max_chars, ocr=ocr),
+                        **analyze_document(content, name, max_text_chars=max_chars, ocr=ocr, ocr_deadline=deadline),
                     }
                 )
 

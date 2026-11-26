@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from jurisync.connectors.pje import inbox, legacy, process, push, search
+from jurisync.connectors.pje import inbox, jsf, legacy, process, push, search
 
 FIXTURES = Path(__file__).parent / "fixtures" / "trf5_legacy"
 BASE = "https://pje.trf5.jus.br/pje/"
@@ -50,6 +50,34 @@ def panel_session():
         ],
         {legacy.PANEL_PATH: page("painel_acervo.html")},
     )
+
+
+class TimedSession(FakeSession):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.timeouts = []
+
+    def get(self, url, **kwargs):
+        self.timeouts.append(kwargs["timeout"])
+        return super().get(url, **kwargs)
+
+    def post(self, url, data="", **kwargs):
+        self.timeouts.append(kwargs["timeout"])
+        return super().post(url, data, **kwargs)
+
+
+class Pje1xTimeout(unittest.TestCase):
+    def test_the_legacy_timeout_reaches_only_legacy_requests(self):
+        """It used to be set on the shared jsf.TIMEOUT, which every office's requests read while a walk was paused."""
+        legacy_session = TimedSession(panel_session().post_pages, panel_session().get_pages)
+        walk = legacy._walk_panel(legacy_session, "trf5-legacy")
+        next(walk)
+        other = TimedSession([], {legacy.PANEL_PATH: page("painel_acervo.html")})
+        jsf.get(other, BASE + legacy.PANEL_PATH, label="other office")
+        list(walk)
+        self.assertEqual(other.timeouts, [jsf.TIMEOUT])
+        self.assertEqual(set(legacy_session.timeouts), {legacy.LEGACY_TIMEOUT})
+        self.assertGreater(len(legacy_session.timeouts), 1)
 
 
 class Pje1xPanel(unittest.TestCase):

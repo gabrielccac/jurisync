@@ -4,23 +4,30 @@ from datetime import date, timedelta
 
 from jurisync.connectors.djen.client import _check_window, fetch_all_variants
 from jurisync.connectors.djen.normalize import normalize_item
-from jurisync.connectors.djen.store import filter_new, load_state, mark_seen, save_state, state_path, stats
+from jurisync.connectors.djen.store import filter_new, load_state, mark_seen, prune, save_state, state_path, stats
+from jurisync.core.file_lock import locked
+
+# A poll of the same OAB already running (the routine and a manual run) is waited for this long.
+LOCK_WAIT_SECONDS = 300
 
 
 def poll_window(
     numero_oab, uf_oab, tribunal=None, inicio=None, fim=None, state_dir=None, itens_por_pagina=50, today=None
 ):
     path = state_path(state_dir, numero_oab, uf_oab, tribunal)
-    state = load_state(path)
-    end = fim or (today or date.today()).isoformat()
-    start = inicio or state["ultima_data"] or (date.fromisoformat(end) - timedelta(days=29)).isoformat()
-    _check_window(start, end)
-    fetched = fetch_all_variants(numero_oab, uf_oab, start, end, tribunal, itens_por_pagina)
-    items = [normalize_item(item) for item in fetched["items"]]
-    new, duplicates = filter_new(items, state)
-    mark_seen(state, new)
-    state["ultima_data"] = max(state["ultima_data"] or end, end)
-    save_state(path, state)
+    # Read, fetch and write under one lock: two polls of this OAB at once would each drop the other's IDs.
+    with locked(path, wait=LOCK_WAIT_SECONDS):
+        state = load_state(path)
+        end = fim or (today or date.today()).isoformat()
+        start = inicio or state["ultima_data"] or (date.fromisoformat(end) - timedelta(days=29)).isoformat()
+        _check_window(start, end)
+        fetched = fetch_all_variants(numero_oab, uf_oab, start, end, tribunal, itens_por_pagina)
+        items = [normalize_item(item) for item in fetched["items"]]
+        new, duplicates = filter_new(items, state)
+        mark_seen(state, new, today=end)
+        prune(state, start)
+        state["ultima_data"] = max(state["ultima_data"] or end, end)
+        save_state(path, state)
     return {
         "inicio": start,
         "fim": end,
