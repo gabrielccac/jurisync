@@ -3,7 +3,7 @@ import os
 import pytest
 
 from jurisync import customers
-from jurisync.core.mcp import load_env_file
+from jurisync.customers import load_env_file
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-from jurisync.core.mcp import load_env_file
+from jurisync.customers import load_env_file
 from jurisync.paths import REPO_ROOT
 from jurisync.workflows.filing.prepare import main
 

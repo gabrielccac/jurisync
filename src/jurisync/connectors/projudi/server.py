@@ -28,7 +28,6 @@ from jurisync.core.mcp import (
     PORTAL_HELP,
     READ_ONLY,
     JurisyncServer,
-    load_env_file,
     offer_portals,
     sanitize_diagnostics,
     serve,
@@ -36,6 +35,7 @@ from jurisync.core.mcp import (
 )
 from jurisync.core.responses import fitted
 from jurisync.core.session_pool import SessionPool
+from jurisync.customers import load_env_file
 
 DEFAULT_PORTAL = "tjgo-1g"
 ADAPTERS = {adapter.flavor: adapter for adapter in (tjgo.ADAPTER, tjam.ADAPTER, tjba.ADAPTER, tjpr.ADAPTER)}

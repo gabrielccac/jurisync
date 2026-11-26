@@ -15,7 +15,8 @@ import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from jurisync import registry
-from jurisync.core.mcp import http_prefix, http_settings, http_urls, load_env_file
+from jurisync.core.mcp import http_prefix, http_settings, http_urls
+from jurisync.customers import load_env_file
 
 DEFAULT_SERVERS = ("pje", "advbox")
 

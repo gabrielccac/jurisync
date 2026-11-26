@@ -23,7 +23,7 @@ from jurisync import portals
 from jurisync.connectors.pje.parsers import jsf_data, parse_process_number
 from jurisync.connectors.pje.search import discover_controls, post_ajax, search_process
 from jurisync.connectors.pje.server import sessions
-from jurisync.core.mcp import load_env_file
+from jurisync.customers import load_env_file
 from jurisync.paths import STATE_DIR
 
 PORTAL = portals.pje("trf1-1g")

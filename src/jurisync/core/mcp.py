@@ -70,38 +70,7 @@ def is_machine_name(name):
     return name not in NEVER_SHARED and any(fnmatch.fnmatchcase(name, pattern) for pattern in MACHINE_PATTERNS)
 
 
-def load_env_file(path=None):
-    """Load KEY=VALUE lines like `node --env-file`: existing variables win.
-
-    The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json); without it the
-    user's ``~/.config/jurisync/.env`` is used when it exists. When JURISYNC_CUSTOMER names a customer, its
-    gitignored ``customers/<name>/.env`` is loaded first, so a customer's values
-    take precedence over the shared file. The values its portals.toml ``[env].set`` pins (e.g. ``TRF1_1G_CERT=true``)
-    come next, so a checkout behaves like an installed bundle, which writes them into the customer's file.
-    With a customer selected the shared file then provides machine settings only (``MACHINE_PATTERNS``); without
-    one it is the single account's file and loads whole.
-    """
-    from jurisync.customers import customer_env_path, customer_name, fixed_variables
-    from jurisync.paths import USER_ENV_FILE
-
-    shared = path or os.environ.get("JURISYNC_ENV_FILE") or (USER_ENV_FILE if USER_ENV_FILE.exists() else None)
-    if shared and not customer_name():
-        # A client that registers the server without JURISYNC_CUSTOMER (Claude Desktop) can name it in the shared file.
-        _load_lines(shared, only={"JURISYNC_CUSTOMER"})
-    customer = customer_name()
-    own = customer_env_path()
-    if own:
-        _load_lines(own)
-    if customer:
-        for key, value in fixed_variables(customer).items():
-            os.environ.setdefault(key, value)
-    if shared:
-        # Only a checkout that keeps the office's own customers/<name>/.env treats the shared file as other offices'
-        # secrets. An installed office (plugin or bundle) has no such file: its ~/.config/jurisync/.env is its own.
-        _load_lines(shared, machine_only=bool(own and own.exists()))
-
-
-def _load_lines(path, only=None, machine_only=False):
+def load_env_lines(path, only=None, machine_only=False):
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:

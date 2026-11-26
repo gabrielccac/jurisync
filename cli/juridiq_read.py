@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from jurisync.connectors.juridiq.api import JuridiqApi, JuridiqError
-from jurisync.core.mcp import load_env_file
+from jurisync.customers import load_env_file
 
 
 def main():

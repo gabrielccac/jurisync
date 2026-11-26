@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 from jurisync.connectors.mindchat.api import Client, MindchatError
-from jurisync.core.mcp import load_env_file
 from jurisync.core.transcription import transcribe_bytes
+from jurisync.customers import load_env_file
 
 TEXT = {"conversation", "extendedtextmessage", "text"}
 MEDIA = {"imagemessage": "imagem", "documentmessage": "documento", "audiomessage": "audio", "videomessage": "video"}

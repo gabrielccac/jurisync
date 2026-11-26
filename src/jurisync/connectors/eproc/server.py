@@ -29,13 +29,13 @@ from jurisync.core.mcp import (
     PORTAL_HELP,
     READ_ONLY,
     JurisyncServer,
-    load_env_file,
     offer_portals,
     require_success,
     serve,
     tool_errors,
 )
 from jurisync.core.session_pool import SessionExpired, SessionPool
+from jurisync.customers import load_env_file
 
 
 def refresh_panel(portal, value):

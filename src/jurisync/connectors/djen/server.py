@@ -18,7 +18,8 @@ from jurisync.connectors.djen.documents import resolve_portal
 from jurisync.connectors.djen.normalize import compact_item, normalize_item
 from jurisync.core import credentials
 from jurisync.core.document_text import extract_document_text
-from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, sanitize_diagnostics, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, JurisyncServer, sanitize_diagnostics, serve, tool_errors
+from jurisync.customers import load_env_file
 
 REQUEST_ERRORS = (DjenError, ValueError, urllib.error.URLError, TimeoutError)
 

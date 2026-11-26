@@ -28,7 +28,7 @@ the same servers:
 
 `core.mcp.run_stdio` keeps connector progress output off the protocol stream:
 stdout is unbuffered and the SDK diverts it to stderr while serving.
-`core.mcp.load_env_file` reads `JURISYNC_ENV_FILE` (the project `.env`) without
+`customers.load_env_file` reads `JURISYNC_ENV_FILE` (the project `.env`) without
 overriding variables already set.
 
 Tool errors follow one rule. Anticipated failures (bad input, portal or login

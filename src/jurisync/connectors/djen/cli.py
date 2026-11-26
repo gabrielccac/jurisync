@@ -258,7 +258,7 @@ def cmd_buscar(a):
 
 def cmd_salvas(a):
     from jurisync.connectors.djen.server import saved_searches  # loads the MCP stack only for this command
-    from jurisync.core.mcp import load_env_file
+    from jurisync.customers import load_env_file
 
     load_env_file()
     if a.dia:

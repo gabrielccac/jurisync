@@ -34,7 +34,6 @@ from jurisync.core.mcp import (
     READ_ONLY,
     WRITE,
     JurisyncServer,
-    load_env_file,
     offer_portals,
     require_success,
     sanitize_diagnostics,
@@ -45,7 +44,7 @@ from jurisync.core.mcp import (
 from jurisync.core.responses import TEXT_BUDGET, fit_texts
 from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
-from jurisync.customers import ciencia_on_read
+from jurisync.customers import ciencia_on_read, load_env_file
 
 Portal = Annotated[Literal[portals.keys("pje")], Field(description=PORTAL_HELP)]
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
