@@ -545,6 +545,20 @@ class ServerTest(unittest.TestCase):
         vistas = [r for r in self.session.http.sent if r[1].endswith("vistasEmAberto")][0]
         self.assertEqual(vistas[2], {"values": "22,33"})  # only the parties of BA000002
 
+    def test_counters_count_an_oab_listed_under_two_paddings_once(self):
+        # Allan, 26/11/2026: minhasOABs lists DF062376 and DF0062376, each with the same 19 processes
+        self.vista_routes([VISTA])
+        self.session.http.routes[("GET", "/api/advogados/minhasOABs/00000000001")] = FakeResponse(
+            payload=[{"codigoOAB": "BA000002", "oabPrincipal": "S"}, {"codigoOAB": "BA0000002", "oabPrincipal": "N"}]
+        )
+        data, error = self.call("stj_get_counters", {})
+        self.assertFalse(error)
+        self.assertEqual([item["oab"] for item in data["oabs"]], ["BA000002"])
+        self.assertEqual(data["total"], 7)
+        data, error = self.call("stj_list_publications", {"oab": "BA0000002"})
+        self.assertFalse(error)
+        self.assertEqual(data["oab"], "BA000002")
+
     def test_inbox_lists_vistas_and_djen_notices(self):
         self.vista_routes([VISTA])
         with mock.patch.object(server.djen, "fetch_page", return_value={"count": 1, "items": [DJEN_ITEM]}) as fetch:

@@ -337,7 +337,8 @@ def _require_permission(session, config, push, push_url):
     ):
         raise RuntimeError(
             f"{config.key}: the portal does not let this account open the Push page (Sem permissão para acessar a "
-            "página); pje_list_processes lists the account's processes"
+            "página; the court leaves Push out of the lawyer's menu). pje_list_processes lists the account's "
+            "processes and the DJEN carries its intimations"
         )
 
 

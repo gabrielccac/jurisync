@@ -271,8 +271,18 @@ def oabs(session):
     if not session.oabs:
         rows = get_json(session, f"/api/advogados/minhasOABs/{session.cpf}", empty=[]) or []
         rows = sorted(rows, key=lambda row: row.get("oabPrincipal") != "S")
-        session.oabs = tuple(row["codigoOAB"] for row in rows if row.get("codigoOAB"))
+        codes = {}
+        for row in rows:
+            if row.get("codigoOAB"):
+                codes.setdefault(oab_key(row["codigoOAB"]), row["codigoOAB"])
+        session.oabs = tuple(codes.values())
     return session.oabs
+
+
+def oab_key(code):
+    """``("DF", 62376)`` for ``DF062376`` and ``DF0062376``: the CPE lists one OAB under both paddings."""
+    match = re.fullmatch(r"([A-Z]{2})0*(\d+)([A-Z]?)", re.sub(r"\W", "", code).upper())
+    return (match[1], int(match[2]), match[3]) if match else code
 
 
 def tramitacao_counts(session, oab):

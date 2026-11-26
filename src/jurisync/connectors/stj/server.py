@@ -7,7 +7,6 @@ its expiry, or one the CPE refuses, triggers one new login.
 """
 
 import hashlib
-import re
 from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
@@ -179,7 +178,7 @@ def download_document(session, reference, document_id):
 def list_publications(session, oab, page, page_size):
     codes = client.oabs(session)
     if oab:
-        oab = re.sub(r"\W", "", oab).upper()
+        oab = next((code for code in codes if client.oab_key(code) == client.oab_key(oab)), None) or oab
         if oab not in codes:
             raise ValueError(f"OAB must be one of the logged-in lawyer's: {', '.join(codes) or 'none registered'}")
     elif not codes:

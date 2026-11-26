@@ -123,6 +123,7 @@ class PjeNotificationChecks(unittest.TestCase):
 
     def test_a_portal_that_refuses_the_push_page_says_so(self):
         # TRF6 PJe, 25/11/2026: Push/listView.seam answers 302 to error.seam, "Sem permissão para acessar a página."
+        # On 26/11 the lawyer's menu had no Push entry at all.
         refused = "<html><div>Sem permissão para acessar a página.</div></html>"
         for location, html, message in (
             ("/pje/error.seam?cid=1", refused, "does not let this account open the Push page"),
