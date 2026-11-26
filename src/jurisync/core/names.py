@@ -38,6 +38,6 @@ ALIASES = {
 }
 
 
-def canonical(name):
+def canonical(name: str) -> str:
     """The current name of a tool called by an old one; any other name unchanged."""
     return ALIASES.get(name, name)
