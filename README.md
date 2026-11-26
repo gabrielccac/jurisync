@@ -52,7 +52,6 @@ customers/
 cli/                    Diagnostics: juridiq_read, eproc_portal_smoke
 tests/                  Offline tests mirroring src/ and customers/
 docs/                   Architecture, publication workflow, connector references
-.claude/skills/         Links to each customer's skills for Claude Code
 ```
 
 ## Setup
@@ -182,7 +181,7 @@ Add a customer by copying `customers/_template/` to `customers/<name>/` and foll
 (login method and variable names per portal; the declared `method` is the login the connectors use, whatever else the
 `.env` holds), `settings.toml`, `.env.example` and a README. `jurisync-setup
 check-customer <name>` checks the folder without reading secrets, and the test suite runs the same check on every
-folder. Skills go under `skills/`, with a symlink in `.claude/skills/` for each one.
+folder. Skills go under `skills/`; `jurisync-setup skills --customer <name>` installs them for Claude Code.
 
 ## Command line
 
