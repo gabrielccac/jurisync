@@ -27,7 +27,7 @@ from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
-from jurisync.connectors.pje.auth.sso import alert_text
+from jurisync.core.keycloak import alert_text
 
 OWN_LOGIN_ACTION = "j_security_check"
 RESULTS = re.compile(r"(\d+)\s*resultado\(s\)", re.I)

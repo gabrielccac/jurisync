@@ -22,6 +22,7 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import is_panel, panel_link, portal_totp_account, session_from_cookies
+from jurisync.core import keycloak
 from jurisync.core.certificate import client_certificate, load_configured
 from jurisync.core.http import IMPERSONATE, TIMEOUT, UnsafeUrlError, follow_redirects, require_url
 from jurisync.core.redaction import url_shape
@@ -29,7 +30,7 @@ from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code, totp
 
 CERT_HOST = re.compile(r"document\.location\.host\s*=\s*['\"]([a-z0-9.-]+)['\"]", re.I)
-BROKER_HOST = "sso.cloud.pje.jus.br"
+BROKER_HOST = keycloak.PDPJ_SSO_HOST
 CLASSIC_CERT_FIELD = "destino_v2_cert"
 CLASSIC_CODE_FIELD = "txtAcessoCodigo"
 PROFILE_FORM = "frmEscolherUsuario"
@@ -402,7 +403,7 @@ def _choose_profile(session, config, response):
 
 def _otp_step(session, config, response, account):
     def action(page):
-        return _form(page.text, page.url, config, "kc-otp-login-form")[0]
+        return _form(page.text, page.url, config, keycloak.OTP_FORM)[0]
 
     def submit(page, url, code):
         data = {"otp": code, "login": "Sign In"}
@@ -507,14 +508,14 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
                 cert=pem,
             )
     if not _classic_certificate_url(page, config):
-        action, fields = _form(response.text, response.url, config, "kc-x509-login-info")
+        action, fields = _form(response.text, response.url, config, keycloak.X509_FORM)
         if action is not None:
             response = _follow(
                 session,
                 config,
                 session.post(action, data=fields, impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT),
             )
-        elif _form(response.text, response.url, config, "kc-otp-login-form")[0] is None:
+        elif _form(response.text, response.url, config, keycloak.OTP_FORM)[0] is None:
             # TJPR skips the "Continue" form and asks the code at once; anything else is a refusal.
             raise LoginRejected("eproc did not accept the A1 certificate", reason="certificate_refused")
         response = _otp_step(session, config, response, account)

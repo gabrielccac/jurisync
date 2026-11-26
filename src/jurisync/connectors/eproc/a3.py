@@ -18,7 +18,7 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER, portal_totp_account
-from jurisync.core import a3, mtls
+from jurisync.core import a3, keycloak, mtls
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code
 
@@ -81,12 +81,12 @@ def _keycloak_x509(session, page, mtls_host, signer):
     if not response.certificate_sent:
         raise RuntimeError(f"{mtls_host} did not ask for the certificate")
     _store_cookies(session, response, auth.hostname)
-    form = _form(response.text, "kc-x509-login-info")
+    form = _form(response.text, keycloak.X509_FORM)
     if response.status in {301, 302, 303} and response.location:
         return session.get(response.location, impersonate="chrome", timeout=60)
     if form is None or not form.get("action"):
         reason = eproc_message(response.url, response.text)
-        if not reason and _form(response.text, "kc-form-login") is not None:
+        if not reason and _form(response.text, keycloak.LOGIN_FORM) is not None:
             reason = "the certificate was read, but no user of this portal is linked to it (register the CPF first)"
             raise LoginRejected(f"Keycloak did not accept the certificate: {reason}", reason="not_registered")
         raise RuntimeError("Keycloak did not accept the certificate" + (f": {reason}" if reason else ""))
@@ -106,7 +106,7 @@ def _submit_otp(session, response, portal):
     return answer_code(
         response,
         lambda: portal_totp_account(portal),
-        lambda page: _form(page.text, "kc-otp-login-form"),
+        lambda page: _form(page.text, keycloak.OTP_FORM),
         submit,
         label="eproc",
     )

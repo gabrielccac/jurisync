@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from jurisync.connectors.pje.auth import sso
-from jurisync.core import totp
+from jurisync.core import keycloak, totp
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 
 
@@ -93,24 +93,24 @@ PDPJ_ERROR_PAGE = (
 
 def test_a_password_refusal_quotes_the_sso_alert():
     for html in (PJE_V2_REFUSAL, PDPJ_FIELD_ERROR):
-        kind, reason = sso.credential_failure(html)
+        kind, reason = keycloak.credential_failure(html)
         assert kind == "credentials"
         assert 'SSO message: "Usuário ou senha inválidos."' in reason
         assert "123" not in reason
 
 
 def test_a_keycloak_flow_error_is_not_a_password_refusal():
-    kind, reason = sso.credential_failure(PDPJ_ERROR_PAGE)
+    kind, reason = keycloak.credential_failure(PDPJ_ERROR_PAGE)
     assert kind == "flow"
     assert "Cookie não encontrado" in reason and "Voltar" not in reason
 
 
 def test_a_bare_invalid_elsewhere_on_the_page_is_not_a_password_refusal():
     html = '<form id="kc-form-login"></form><div class="alert alert-error"><span class="kc-feedback-text">Sessão inválida</span></div>'
-    assert sso.credential_failure(html)[0] == "flow"
-    assert sso.credential_failure("<p>invalid request id</p>")[0] == "unknown"
+    assert keycloak.credential_failure(html)[0] == "flow"
+    assert keycloak.credential_failure("<p>invalid request id</p>")[0] == "unknown"
     other = '<div id="kc-error-message"><p>Parâmetro inválido: redirect_uri</p></div>'
-    assert sso.credential_failure(other)[0] == "unknown"
+    assert keycloak.credential_failure(other)[0] == "unknown"
 
 
 def alert(message, theme="pje-v2"):
@@ -147,7 +147,7 @@ FLOW = (
 @pytest.mark.parametrize("message", REFUSALS)
 @pytest.mark.parametrize("theme", ["pje-v2", "pdpj"])
 def test_each_keycloak_refusal_is_credentials_refused_with_its_text(message, theme):
-    error = sso.credential_refusal(alert(message, theme))
+    error = keycloak.credential_refusal(alert(message, theme))
     assert type(error) is LoginRejected and error.reason == "credentials_refused"
     assert f'SSO message: "{message}"' in str(error)
 
@@ -155,31 +155,31 @@ def test_each_keycloak_refusal_is_credentials_refused_with_its_text(message, the
 @pytest.mark.parametrize("message", FLOW)
 @pytest.mark.parametrize("theme", ["pje-v2", "pdpj"])
 def test_each_keycloak_flow_error_is_a_retryable_login_failure_with_its_text(message, theme):
-    error = sso.credential_refusal(alert(message, theme))
+    error = keycloak.credential_refusal(alert(message, theme))
     assert type(error) is LoginFailed and error.reason == "unexpected" and error.flow_error
     assert f'SSO message: "{message}"' in str(error)
 
 
 def test_expired_password_and_blocked_account_keep_their_reasons():
-    assert sso.credential_refusal(alert("Senha expirada.")).reason == "password_expired"
-    assert sso.credential_refusal(alert("Conta desativada.")).reason == "blocked"
-    assert not getattr(sso.credential_refusal(alert("Parâmetro inválido: client_id")), "flow_error", True)
+    assert keycloak.credential_refusal(alert("Senha expirada.")).reason == "password_expired"
+    assert keycloak.credential_refusal(alert("Conta desativada.")).reason == "blocked"
+    assert not getattr(keycloak.credential_refusal(alert("Parâmetro inválido: client_id")), "flow_error", True)
 
 
 def test_a_disabled_account_is_told_apart_and_identifiers_are_masked():
     html = (
         '<div class="alert-error"><span class="kc-feedback-text">Conta desativada 123.456.789-09 a@b.com</span></div>'
     )
-    kind, reason = sso.credential_failure(html)
+    kind, reason = keycloak.credential_failure(html)
     assert kind == "blocked"
     assert "123.456" not in reason and "a@b.com" not in reason
 
 
 def test_the_pdpj_theme_gets_the_cpf_as_digits_and_the_trf_theme_as_configured():
-    assert sso.sso_username("123.456.789-09", "kc-form-login") == "12345678909"
-    assert sso.sso_username("12.345.678/0001-95", "kc-form-login") == "12345678000195"
-    assert sso.sso_username("123.456.789-09", "loginForm") == "123.456.789-09"
-    assert sso.sso_username("someone@example.com", "kc-form-login") == "someone@example.com"
+    assert keycloak.sso_username("123.456.789-09", "kc-form-login") == "12345678909"
+    assert keycloak.sso_username("12.345.678/0001-95", "kc-form-login") == "12345678000195"
+    assert keycloak.sso_username("123.456.789-09", "loginForm") == "123.456.789-09"
+    assert keycloak.sso_username("someone@example.com", "kc-form-login") == "someone@example.com"
 
 
 def test_only_a_refusal_raises_login_rejected(monkeypatch):
