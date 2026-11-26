@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, serve, tool_errors
+from jurisync.core.responses import listing
 from jurisync.core.session_pool import SessionPool
 
 from . import client, parsers
@@ -44,8 +45,7 @@ def create_server():
             return {
                 "success": True,
                 "portal": client.PORTAL,
-                "count": len(items),
-                "intimacoes": items,
+                **listing(items, key="intimacoes"),
                 "notice": UNTRUSTED,
             }
 

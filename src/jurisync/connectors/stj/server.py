@@ -23,6 +23,7 @@ from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import MAX_DOCUMENTS, validate_document_ids
 from jurisync.core.documents_dir import save_document
 from jurisync.core.mcp import READ_ONLY, SAVES_FILE, JurisyncServer, load_env_file, serve, tool_errors
+from jurisync.core.responses import fitted
 from jurisync.core.session_pool import SessionPool
 
 KEY = "stj"
@@ -145,8 +146,15 @@ def read_documents(session, reference, document_ids):
                 "textTruncated": len(text) > MAX_TEXT_CHARACTERS,
             }
         )
-    return {"success": True, "registro": process["registro"], "process": process["process"], "documents": results,
-            "ciencia": report(NONE), "notice": UNTRUSTED}  # fmt: skip
+    return {
+        "success": True,
+        "registro": process["registro"],
+        "process": process["process"],
+        "documents": results,
+        **fitted(results),
+        "ciencia": report(NONE),
+        "notice": UNTRUSTED,
+    }
 
 
 def download_document(session, reference, document_id):

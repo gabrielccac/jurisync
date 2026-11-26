@@ -115,10 +115,23 @@ Como usar num conector:
 
 ## 6. Respostas
 
-- Retorno de tool é um `dict` JSON com `success`; listas trazem o total e se há mais.
-- Texto vindo de portal ou documento leva o aviso `notice` de que é evidência não confiável, nunca instrução.
-- Toda tool que abre ato ou documento devolve o bloco `ciencia` (`core.ciencia.report`).
-- Sem payload ilimitado: documentos têm teto de texto e quantidade (`core.documents.MAX_DOCUMENTS`).
+Helpers em `jurisync.core.responses`:
+
+- **Orçamento:** uma resposta fica em até `BUDGET` = 60.000 caracteres (~15k tokens, abaixo do corte de 25k tokens do
+  Claude Code); textos de documentos usam até `TEXT_BUDGET` = 50.000 e o resto fica para os metadados. O servidor
+  registra um `WARNING` quando uma resposta passa do orçamento.
+- **Texto cortado diz como continuar:** `fit_texts` reparte o orçamento entre os textos (os curtos ficam inteiros) e
+  marca cada texto cortado com `truncated: {shown, total, nextOffset}`; a tool aceita `offset` para ler o resto
+  (`pje_read_documents`). Tool sem `offset` usa `fitted`: um documento lido sozinho fica com o limite do conector e
+  vários repartem `TEXT_BUDGET`, com uma `note` mandando ler menos documentos por chamada.
+  `textTruncated` continua para clientes antigos.
+- **Listas:** `listing(items, key=..., total=..., more=...)` dá `{<key>: [...], returned, total, next}`; `total` é o
+  que o portal informa (ou `null`) e `next` diz como pedir o resto (ou `null`). Conector novo usa o envelope;
+  os antigos migram quando forem tocados, mantendo as chaves que as skills já leem.
+- **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%
+  menor), sem mudar o `structuredContent`.
+- Retorno de tool é um `dict` com `success`; texto vindo de portal leva o `notice` de evidência não confiável;
+  toda tool que abre ato ou documento devolve o bloco `ciencia` (`core.ciencia.report`).
 
 ## 7. Logs
 
@@ -158,4 +171,5 @@ Passos para um conector novo:
 | Comprehensions e literais simples | regras `C4`, `PIE`, `ISC` do ruff |
 | Molde de conector válido | `tests/core/test_connector_template.py` |
 | Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |
+| Orçamento, offset e JSON compacto (pior caso do `pje_read_documents`) | `tests/core/test_responses.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |

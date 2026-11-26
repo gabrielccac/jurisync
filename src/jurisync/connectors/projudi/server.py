@@ -34,6 +34,7 @@ from jurisync.core.mcp import (
     serve,
     tool_errors,
 )
+from jurisync.core.responses import fitted
 from jurisync.core.session_pool import SessionPool
 
 DEFAULT_PORTAL = "tjgo-1g"
@@ -242,7 +243,14 @@ def create_server(keys=None):
             number, documents, ciencia = base.read_documents(
                 adapter, session, portal, process_number, document_ids, ciencia=checked[0]
             )
-            return {"success": True, "number": number, "documents": documents, "ciencia": ciencia, "notice": UNTRUSTED}
+            return {
+                "success": True,
+                "number": number,
+                "documents": documents,
+                **fitted(documents),
+                "ciencia": ciencia,
+                "notice": UNTRUSTED,
+            }
 
         return open_documents(portal, read)
 

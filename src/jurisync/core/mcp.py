@@ -3,6 +3,7 @@
 import argparse
 import fnmatch
 import io
+import json
 import logging
 import os
 import re
@@ -13,9 +14,9 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import ToolAnnotations
+from mcp.types import TextContent, ToolAnnotations
 
-from jurisync.core import calls, errors
+from jurisync.core import calls, errors, responses
 
 # Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
 # They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
@@ -241,10 +242,31 @@ class JurisyncServer(MCPServer):
     async def call_tool(self, name, arguments, context=None):
         with calls.bound():
             try:
-                return await super().call_tool(name, arguments, context)
+                result = await super().call_tool(name, arguments, context)
             except UnexpectedToolError as error:
                 log.error("tool %s failed unexpectedly (ref=%s)", name, calls.current(), exc_info=error.__cause__)
                 raise UnexpectedToolError(errors.render(name, errors.UNEXPECTED, sanitize_diagnostics)) from error
+            return compact_text(name, result)
+
+
+def compact_text(name, result):
+    """Replace the SDK's indented text copy of a structured answer with compact JSON, keeping any other block (the
+    ADVBOX downloads add extracted Markdown); log an answer over the budget."""
+    structured = getattr(result, "structured_content", None)
+    content = list(getattr(result, "content", None) or [])
+    if structured is None or not content or not isinstance(content[0], TextContent):
+        return result
+    try:
+        copy = json.loads(content[0].text)
+    except ValueError:
+        return result
+    if copy != structured:
+        return result
+    content[0] = TextContent(type="text", text=responses.compact(structured))
+    size = sum(len(block.text) for block in content if isinstance(block, TextContent))
+    if size > responses.BUDGET:
+        log.warning("tool %s answered %d characters, over the %d budget", name, size, responses.BUDGET)
+    return result.model_copy(update={"content": content})
 
 
 # The ``portal`` field of every tool: the enum holds the keys, and one tool of the server lists them with their hosts.
