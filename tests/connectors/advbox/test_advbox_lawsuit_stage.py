@@ -14,8 +14,8 @@ from unittest import mock
 from curl_cffi.requests.exceptions import Timeout
 from mcp.server.mcpserver.exceptions import ToolError
 
-from jurisync.connectors.advbox import client as client_module
 from jurisync.connectors.advbox import parsers, server
+from jurisync.connectors.advbox import stages as stages_module
 from jurisync.connectors.advbox.client import AdvboxClient, UnconfirmedWriteError
 from jurisync.connectors.advbox.session import AdvboxSession
 
@@ -245,10 +245,10 @@ class UpdateLawsuitStageTest(StageCase):
 
     def test_a_burst_limit_413_is_waited_out(self):
         self.pages = [RuntimeError("ADVBOX GET /lawsuits/555/edit failed (413)"), lawsuit_page("1", "7090")]
-        with mock.patch.object(client_module.time, "sleep") as sleep:
+        with mock.patch.object(stages_module.time, "sleep") as sleep:
             form = self.client.lawsuit_form("555")
         self.assertEqual(form["stageId"], "1")
-        sleep.assert_called_once_with(client_module.LAWSUIT_READ_WAIT)
+        sleep.assert_called_once_with(stages_module.LAWSUIT_READ_WAIT)
 
 
 class CreateTaskWithStageTest(StageCase):
