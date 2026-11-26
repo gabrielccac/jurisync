@@ -43,7 +43,9 @@ stay for older setups.
 ## Request flow
 
 1. The client calls `/tribunais/mcp` (or another endpoint) without a token, gets `401` with the protected resource metadata URL, discovers the
-   authorization server, registers itself and sends the user to `/authorize`.
+   authorization server, registers itself and sends the user to `/authorize`. Registration accepts redirect URIs only
+   on Claude's and ChatGPT's hosts (https), on localhost, or on an https host listed in `JURISYNC_OAUTH_REDIRECT_HOSTS`
+   (comma separated; the sign-in page still warns about those). Any other client is refused, also one registered before.
 2. `/authorize` parks the request and redirects to `/login`. The user signs in with an office e-mail and password; the
    code records the user's tenant.
 3. `/token` exchanges the code (PKCE checked by the SDK) for a one-hour access token and a 30-day refresh token.

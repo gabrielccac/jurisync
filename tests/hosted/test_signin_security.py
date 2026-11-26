@@ -18,7 +18,7 @@ from starlette.testclient import TestClient
 
 from jurisync.core import credentials
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
-from jurisync.hosted.oauth import login_cookie, redirect_target
+from jurisync.hosted.oauth import REDIRECT_HOSTS_VAR, login_cookie, redirect_hosts, redirect_target
 from jurisync.hosted.store import Store
 from jurisync.hosted.throttle import Throttle, client_address
 from jurisync.hosted.vault import Vault, generate_key, load_key
@@ -152,8 +152,7 @@ class BrowserBindingTest(SignInCase):
 
     def test_a_forwarded_login_link_is_dead_in_another_browser(self):
         attacker, victim = TestClient(self.app, base_url=BASE), TestClient(self.app, base_url=BASE)
-        request_id, _ = self.authorize(attacker, self.register(attacker, "https://evil.test/cb"), pkce()[1],
-                                       redirect_uri="https://evil.test/cb")  # fmt: skip
+        request_id, _ = self.authorize(attacker, self.register(attacker), pkce()[1])
         shown = victim.get(f"/login?request={request_id}")
         self.assertEqual(shown.status_code, 400)
         self.assertNotIn("<form", shown.text)
@@ -213,11 +212,39 @@ class SignInPageTest(SignInCase):
         self.assertIn("<strong>claude.ai</strong>", text)
         self.assertNotIn("Atenção", text)
 
-    def test_other_hosts_get_a_warning_but_are_not_blocked(self):
-        text = self.page("https://claude.ai.evil.test/cb", "Claude")
-        self.assertIn("<strong>claude.ai.evil.test</strong>", text)
-        self.assertIn("Atenção", text)
-        self.assertIn("<form", text)
+    def test_other_hosts_are_refused_at_registration(self):
+        client = TestClient(self.app, base_url=BASE)
+        for uri in ("https://claude.ai.evil.test/cb", "http://claude.ai/cb", "cursor://anysphere/cb"):
+            body = {"redirect_uris": [uri], "token_endpoint_auth_method": "none", "client_name": "Claude"}
+            response = client.post("/register", json=body)
+            self.assertEqual(response.status_code, 400, uri)
+            self.assertEqual(response.json()["error"], "invalid_redirect_uri")
+        mixed = {"redirect_uris": [CALLBACK, "https://evil.test/cb"], "token_endpoint_auth_method": "none"}
+        self.assertEqual(client.post("/register", json=mixed).status_code, 400)
+        self.assertEqual(self.store._run("select count(*) as total from clients")[0]["total"], 0)
+
+    def test_a_client_stored_before_the_rule_is_unknown(self):
+        client = TestClient(self.app, base_url=BASE)
+        client_id = self.register(client)
+        info = self.store.client(client_id).replace("claude.ai", "evil.test")
+        self.store.save_client(client_id, info)
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "code_challenge": pkce()[1],
+            "code_challenge_method": "S256",
+            "redirect_uri": "https://evil.test/api/mcp/auth_callback",
+            "state": "s1",
+        }
+        response = client.get("/authorize", params=params, follow_redirects=False)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("evil.test", response.headers.get("location", ""))
+
+    def test_redirect_hosts_parse_the_operator_list(self):
+        self.assertEqual(
+            redirect_hosts(" App.Example.com, other.test  third.test,"), {"app.example.com", "other.test", "third.test"}
+        )
+        self.assertEqual(redirect_hosts(None), frozenset())
 
     def test_the_client_name_is_escaped_and_may_be_missing(self):
         text = self.page(CALLBACK, '<script>alert(1)</script>"><b>')
@@ -238,6 +265,30 @@ class SignInPageTest(SignInCase):
         ):
             self.assertFalse(redirect_target(uri)[1], uri)
         self.assertEqual(redirect_target("cursor://anysphere/cb")[0], "cursor://anysphere")
+
+
+class AllowedRedirectHostTest(SignInCase):
+    environment = {REDIRECT_HOSTS_VAR: "app.example.test"}
+
+    def test_an_allowed_host_signs_in_with_the_warning(self):
+        callback = "https://app.example.test/cb"
+        client = TestClient(self.app, base_url=BASE)
+        client_id = self.register(client, callback, "App")
+        verifier, challenge = pkce()
+        request_id, _ = self.authorize(client, client_id, challenge, redirect_uri=callback)
+        text = client.get(f"/login?request={request_id}").text
+        self.assertIn("<strong>app.example.test</strong>", text)
+        self.assertIn("Atenção", text)
+        login = self.submit(client, request_id)
+        self.assertTrue(login.headers["location"].startswith(callback))
+        code = parse_qs(urlsplit(login.headers["location"]).query)["code"][0]
+        self.assertEqual(self.exchange(client, client_id, code, verifier, callback).status_code, 200)
+
+    def test_only_https_and_only_the_named_host(self):
+        client = TestClient(self.app, base_url=BASE)
+        for uri in ("http://app.example.test/cb", "https://other.example.test/cb"):
+            body = {"redirect_uris": [uri], "token_endpoint_auth_method": "none"}
+            self.assertEqual(client.post("/register", json=body).status_code, 400, uri)
 
 
 class AvailabilityTest(SignInCase):

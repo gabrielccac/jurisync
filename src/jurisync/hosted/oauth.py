@@ -4,10 +4,13 @@ Built on the SDK's ``OAuthAuthorizationServerProvider``; the SDK serves the OAut
 URIs and client authentication. This module decides who the user is (e-mail + password of a tenant user) and records
 which tenant every code and token acts for. Access tokens last one hour; refresh tokens 30 days and rotate on use.
 
-Anyone may register a client, so the sign-in is tied to the browser that opened ``/authorize``: that response sets a
-per-request cookie and ``/login`` answers only to the browser holding it. A ``/login`` link passed to someone else is
-dead. A whole ``/authorize`` link passed to someone else still works, which is why the page names the client and the
-host that receives the access.
+Anyone may register a client, but only with redirect URIs on Claude's or ChatGPT's hosts, on this machine, or on a
+host the operator allows in ``JURISYNC_OAUTH_REDIRECT_HOSTS``: a link that sends the code anywhere else is refused at
+registration, and a client stored before the rule (or after the operator dropped its host) is treated as unknown.
+
+The sign-in is tied to the browser that opened ``/authorize``: that response sets a per-request cookie and ``/login``
+answers only to the browser holding it. A ``/login`` link passed to someone else is dead. A whole ``/authorize`` link
+passed to someone else still works, which is why the page names the client and the host that receives the access.
 """
 
 import hashlib
@@ -49,9 +52,11 @@ LOGIN_PATH = "/login"
 LOGIN_COOKIE = "jurisync_login_"
 MAX_LOGIN_BODY = 64 * 1024
 MAX_PASSWORD_CHECKS = 4
-# Where Claude and ChatGPT receive the authorization code; any other redirect host gets a warning on the sign-in page.
+# Where Claude and ChatGPT receive the authorization code. Registration accepts redirects only to these, to this machine
+# and to the hosts in REDIRECT_HOSTS_VAR; an operator-allowed host still gets a warning on the sign-in page.
 KNOWN_HOSTS = {"claude.ai", "claude.com", "chatgpt.com", "chat.openai.com"}
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+REDIRECT_HOSTS_VAR = "JURISYNC_OAUTH_REDIRECT_HOSTS"
 
 
 @dataclass(frozen=True)
@@ -67,12 +72,18 @@ def login_cookie(request_id):
     return LOGIN_COOKIE + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:16]
 
 
+def redirect_hosts(value):
+    """The extra redirect hosts an operator allows, from ``REDIRECT_HOSTS_VAR`` (comma or space separated)."""
+    return frozenset(host.strip().lower() for host in (value or "").replace(",", " ").split())
+
+
 class Provider:
-    def __init__(self, store, base_url, issuer=None):
+    def __init__(self, store, base_url, issuer=None, allowed_hosts=()):
         self.store = store
         self.base_url = base_url.rstrip("/")
         # RFC 9207: must be the exact string the metadata document gives as ``issuer``.
         self.issuer = issuer or self.base_url
+        self.allowed_hosts = frozenset(allowed_hosts)
         self._pending = {}
         self._purged = time.monotonic()
         self.store.purge()
@@ -86,14 +97,24 @@ class Provider:
 
     # Clients
 
+    def refused_redirects(self, client):
+        return [str(uri) for uri in client.redirect_uris or () if not redirect_allowed(uri, self.allowed_hosts)]
+
     async def get_client(self, client_id):
         info = await anyio.to_thread.run_sync(self.store.client, client_id)
-        return OAuthClientInformationFull.model_validate_json(info) if info else None
+        client = OAuthClientInformationFull.model_validate_json(info) if info else None
+        return None if client is None or self.refused_redirects(client) else client
 
     async def register_client(self, client_info):
         info = client_info.model_dump_json()
         if len(info) > MAX_CLIENT_INFO:
             raise RegistrationError("invalid_client_metadata", "client metadata is too large")
+        refused = self.refused_redirects(client_info)
+        if refused or not client_info.redirect_uris:
+            raise RegistrationError(
+                "invalid_redirect_uri",
+                f"redirect URI not allowed on this server: {', '.join(refused) or 'none given'}",
+            )
         self.store.save_client(client_info.client_id, info)
         self.store.prune_clients(MAX_CLIENTS)
 
@@ -273,14 +294,21 @@ class BrowserBinding:
         )
 
 
-def redirect_target(redirect_uri):
-    """``(what to show, known)`` for the address that receives the authorization code."""
+def redirect_allowed(redirect_uri, allowed_hosts=frozenset()):
+    """Whether the code may go there: https on Claude's, ChatGPT's or an operator-allowed host, or this machine."""
     parts = urlsplit(str(redirect_uri))
-    host = parts.hostname or ""
-    known = (parts.scheme == "https" and host in KNOWN_HOSTS) or (
+    host = (parts.hostname or "").lower()
+    return (parts.scheme == "https" and (host in KNOWN_HOSTS or host in allowed_hosts)) or (
         parts.scheme in ("http", "https") and host in LOCAL_HOSTS
     )
-    return (host if host and parts.scheme in ("http", "https") else f"{parts.scheme}://{host}"), known
+
+
+def redirect_target(redirect_uri):
+    """``(what to show, known)``: known for Claude, ChatGPT and this machine; any other host gets the warning."""
+    parts = urlsplit(str(redirect_uri))
+    host = parts.hostname or ""
+    shown = host if host and parts.scheme in ("http", "https") else f"{parts.scheme}://{host}"
+    return shown, redirect_allowed(redirect_uri)
 
 
 def client_label(client):
