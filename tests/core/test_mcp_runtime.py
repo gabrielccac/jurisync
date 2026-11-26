@@ -89,7 +89,7 @@ class SessionPoolTest(unittest.TestCase):
         pool = self.make_pool(valid=False, revalidate_after=0)
         with pool.session("jfsc"):
             pass
-        time.sleep(0.01)
+        time.sleep(max(0.01, 2 * time.get_clock_info("monotonic").resolution))
         with pool.session("jfsc") as session:
             self.assertEqual(session, "jfsc-session-2")
 

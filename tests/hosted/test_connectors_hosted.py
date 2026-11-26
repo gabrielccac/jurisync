@@ -64,7 +64,7 @@ class AdvboxTest(unittest.TestCase):
             require_writes()
         self.assertIsNot(client_a, client_b)
         self.assertIn("tenants/office-a", Path(path_a).as_posix())
-        self.assertIn("tenants/office-b", str(path_b))
+        self.assertIn("tenants/office-b", Path(path_b).as_posix())
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "true", "ADVBOX_PASSWORD": "server"}):
             with credentials.scope("office-c"), self.assertRaises(PermissionError):
                 require_writes()
