@@ -192,7 +192,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_tjpa_rows_without_priority_take_the_act_document_from_the_row_links():
-    html = (FIXTURES / "expedientes_tjpa.html").read_text()
+    html = (FIXTURES / "expedientes_tjpa.html").read_text(encoding="utf-8")
     items = expedientes.parse_expedientes(html)
     assert expedientes.tab_complete(html, items)
     assert [(i["expedienteId"], i["tipo"], i["documentId"]) for i in items] == [
@@ -217,7 +217,7 @@ def test_tjpa_rows_without_priority_take_the_act_document_from_the_row_links():
 
 
 def test_a_row_without_header_still_counts_for_the_ciencia_check():
-    html = (FIXTURES / "expedientes_tjpb_sem_id.html").read_text()
+    html = (FIXTURES / "expedientes_tjpb_sem_id.html").read_text(encoding="utf-8")
     items = expedientes.parse_expedientes(html)
     assert expedientes.tab_complete(html, items)
     regular, headless = items
@@ -232,7 +232,7 @@ def test_a_row_without_header_still_counts_for_the_ciencia_check():
 
 
 def test_a_row_with_neither_expediente_nor_document_id_keeps_the_tab_incomplete():
-    html = (FIXTURES / "expedientes_tjpb_sem_id.html").read_text()
+    html = (FIXTURES / "expedientes_tjpb_sem_id.html").read_text(encoding="utf-8")
     html = html.replace("validaDocumento.seam?idProcessoDocumento=150000001&amp;cid=9", "x")
     items = expedientes.parse_expedientes(html)
     assert [i["expedienteId"] for i in items] == ["20000002"]

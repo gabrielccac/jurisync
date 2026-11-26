@@ -1,35 +1,32 @@
 """An exclusive lock between processes on a state file, for read-modify-write cycles (polls, pipelines)."""
 
 import os
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-
-try:
-    import fcntl
-except ImportError:  # Windows
-    fcntl = None
 
 
 class LockBusy(TimeoutError):
     """Another process kept the lock for longer than the caller waits."""
 
 
-def _try_lock(handle):
-    if fcntl is None:
-        import msvcrt
+if sys.platform == "win32":
+    import msvcrt
 
+    def _try_lock(handle):
         msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-    else:
+
+    def _unlock(handle):
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _try_lock(handle):
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
-
-def _unlock(handle):
-    if fcntl is None:
-        import msvcrt
-
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-    else:
+    def _unlock(handle):
         fcntl.flock(handle, fcntl.LOCK_UN)
 
 

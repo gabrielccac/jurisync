@@ -87,7 +87,7 @@ class Vault:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=self.root)
         try:
-            with os.fdopen(fd, "w") as output:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
                 json.dump(record, output)
             os.chmod(temporary, 0o600)
             os.replace(temporary, path)

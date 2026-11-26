@@ -4,6 +4,7 @@ from pathlib import Path
 
 from jurisync.connectors.pje.filing import DraftClient, StepTimeline
 from jurisync.connectors.pje.filing.checkpoint import documents_fingerprint, fingerprint, write_checkpoint
+from tests.portability import assert_mode
 
 PAYLOAD = {
     "subject": {"search": "s", "code": "1", "name": "S"},
@@ -147,7 +148,7 @@ class PhaseTests(unittest.TestCase):
             path = Path(tmp, "checkpoint.json")
             write_checkpoint(path, {"draftId": "1"})
             write_checkpoint(path, {"draftId": "2"})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            assert_mode(self, path, 0o600)
             self.assertEqual(list(Path(tmp).iterdir()), [path])
 
 

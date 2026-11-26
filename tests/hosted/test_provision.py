@@ -2,7 +2,6 @@
 
 import json
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +15,7 @@ from jurisync.hosted import cli, provision
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key
+from tests.portability import NO_SYMLINKS, SYMLINKS, assert_mode
 
 from .test_hosted import make_p12_bytes
 from .test_office_endpoint import OfficeCase
@@ -170,11 +170,11 @@ class PlanTest(ProvisionCase):
 
     def test_output_and_plan_never_carry_a_value(self):
         self.export()
-        text = "\n".join(self.said) + (self.out / provision.PLAN).read_text()
+        text = "\n".join(self.said) + (self.out / provision.PLAN).read_text(encoding="utf-8")
         for value in VALUES:
             self.assertNotIn(value, text)
         for path in [self.out / provision.PLAN, self.passphrase, *self.out.glob("*.jurisync")]:
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path)
+            assert_mode(self, path, 0o600)
 
     def test_the_passphrase_file_travels_apart_from_the_bundles(self):
         with self.assertRaises(SystemExit):
@@ -182,12 +182,13 @@ class PlanTest(ProvisionCase):
 
     def test_users_written_in_the_plan_survive_a_new_export(self):
         self.export()
-        plan = json.loads((self.out / provision.PLAN).read_text())
+        plan = json.loads((self.out / provision.PLAN).read_text(encoding="utf-8"))
         plan["offices"][0]["users"] = ["pessoa@alfa.test"]
-        (self.out / provision.PLAN).write_text(json.dumps(plan))
+        (self.out / provision.PLAN).write_text(json.dumps(plan), encoding="utf-8")
         self.export("alfa")
         offices = {
-            office["tenant"]: office for office in json.loads((self.out / provision.PLAN).read_text())["offices"]
+            office["tenant"]: office
+            for office in json.loads((self.out / provision.PLAN).read_text(encoding="utf-8"))["offices"]
         }
         self.assertEqual(offices["alfa"]["users"], ["pessoa@alfa.test"])
         self.assertEqual(set(offices), {"alfa", "beta", "gama", "delta"})
@@ -209,15 +210,16 @@ class LocalOfficeTest(ProvisionCase):
         environment = {**ProvisionCase.server(self), "JURISYNC_CUSTOMERS_DIR": str(self.ours)}
         with mock.patch.dict(os.environ, environment):
             store, vault = cli.open_store(), cli.open_vault()
+            self.addCleanup(store.close)
             # delta was hosted before the switch: connectors, vault and a user.
             store.add_tenant("delta", "Delta", customer="delta", connectors=["pje", "djen"])
             store.add_user("antiga@delta.test", "delta", PASSWORD)
             vault.put("delta", {"PJE_1G_PASSWORD": "senha-delta"})
             store.save_check("delta", "trf1-1g", True, "login OK")
-            plan = json.loads((self.out / provision.PLAN).read_text())
+            plan = json.loads((self.out / provision.PLAN).read_text(encoding="utf-8"))
             for office in plan["offices"]:
                 office["users"] = [f"advogada@{office['tenant']}.test"]
-            (self.out / provision.PLAN).write_text(json.dumps(plan))
+            (self.out / provision.PLAN).write_text(json.dumps(plan), encoding="utf-8")
             provision.apply(self.out, self.passphrase, say=self.said.append)
             office = store.tenant("delta")
             self.assertEqual((office["mode"], office["connectors"]), ("local", []))
@@ -242,13 +244,15 @@ class LocalOfficeTest(ProvisionCase):
 
 class ApplyTest(ProvisionCase):
     def apply(self):
-        plan = json.loads((self.out / provision.PLAN).read_text())
+        plan = json.loads((self.out / provision.PLAN).read_text(encoding="utf-8"))
         for office in plan["offices"]:
             office["users"] = [f"advogada@{office['tenant']}.test"]
-        (self.out / provision.PLAN).write_text(json.dumps(plan))
+        (self.out / provision.PLAN).write_text(json.dumps(plan), encoding="utf-8")
         with mock.patch.dict(os.environ, self.server()):
             provision.apply(self.out, self.passphrase, say=self.said.append)
-            return cli.open_store(), cli.open_vault()
+            store = cli.open_store()
+            self.addCleanup(store.close)
+            return store, cli.open_vault()
 
     def test_the_server_gets_tenants_vault_profiles_and_users(self):
         self.export()
@@ -270,10 +274,10 @@ class ApplyTest(ProvisionCase):
         self.assertTrue((self.root / "server" / "customers" / "beta" / "portals.toml").is_file())
         self.assertEqual(store.authenticate("advogada@alfa.test", "wrong-password-x"), None)
         [passwords] = Path(self.server()["JURISYNC_HOSTED_DIR"]).glob("new-user-passwords-*.txt")
-        email, tenant, password = passwords.read_text().splitlines()[0].split("\t")
+        email, tenant, password = passwords.read_text(encoding="utf-8").splitlines()[0].split("\t")
         self.assertEqual(store.authenticate(email, password), tenant)
         self.assertTrue(store.must_change(email))
-        self.assertEqual(stat.S_IMODE(passwords.stat().st_mode), 0o600)
+        assert_mode(self, passwords, 0o600)
         text = "\n".join(self.said)
         for value in [*VALUES, password]:
             self.assertNotIn(value, text)
@@ -283,16 +287,16 @@ class ApplyTest(ProvisionCase):
         self.apply()
         store, _ = self.apply()
         [passwords] = Path(self.server()["JURISYNC_HOSTED_DIR"]).glob("new-user-passwords-*.txt")
-        self.assertEqual(len(passwords.read_text().splitlines()), 3)
+        self.assertEqual(len(passwords.read_text(encoding="utf-8").splitlines()), 3)
         self.assertEqual(len(store.users()), 3)
 
     def test_apply_never_appends_to_an_existing_password_file(self):
         self.export()
         existing = self.root / "passwords.txt"
-        existing.write_text("old\n")
+        existing.write_text("old\n", encoding="utf-8")
         with mock.patch.dict(os.environ, self.server()), self.assertRaises(SystemExit):
             provision.apply(self.out, self.passphrase, user_passwords=existing, say=self.said.append)
-        self.assertEqual(existing.read_text(), "old\n")
+        self.assertEqual(existing.read_text(encoding="utf-8"), "old\n")
 
     def test_apply_again_replaces_the_vault_and_keeps_what_the_server_renewed(self):
         self.export()
@@ -314,7 +318,7 @@ class ApplyTest(ProvisionCase):
 
     def test_the_device_id_the_server_renewed_beats_the_bundle_unless_replaced(self):
         env = self.ours / "alfa" / ".env"
-        env.write_text(env.read_text() + "ADVBOX_DEVICE_ID=office-machine-device\n")
+        env.write_text(env.read_text(encoding="utf-8") + "ADVBOX_DEVICE_ID=office-machine-device\n", encoding="utf-8")
         self.export("alfa")
         _, vault = self.apply()
         self.assertEqual(vault.get("alfa")[0]["ADVBOX_DEVICE_ID"], "office-machine-device")
@@ -328,6 +332,7 @@ class ApplyTest(ProvisionCase):
     def test_an_import_keeps_the_renewed_device_id(self):
         with mock.patch.dict(os.environ, self.server()):
             store, vault = cli.open_store(), cli.open_vault()
+            self.addCleanup(store.close)
             store.add_tenant("alfa", "Alfa", customer="", connectors=["advbox"])
             vault.put("alfa", {"ADVBOX_DEVICE_ID": "renewed-device"})
             office = store.tenant("alfa")
@@ -346,7 +351,7 @@ class ApplyTest(ProvisionCase):
 
     def test_a_wrong_passphrase_stores_nothing(self):
         self.export()
-        self.passphrase.write_text("outra-senha-qualquer")
+        self.passphrase.write_text("outra-senha-qualquer", encoding="utf-8")
         with self.assertRaises(ValueError):
             self.apply()
 
@@ -364,8 +369,8 @@ class MachineSettingTest(unittest.TestCase):
     def test_systemd_credentials_serve_the_vault_key_and_machine_keys(self):
         key = generate_key()
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / "JURISYNC_VAULT_KEY").write_text(key + "\n")
-            (Path(directory) / "JURISYNC_CAPTCHA_API_KEY").write_text("pago-pelo-servidor\n")
+            (Path(directory) / "JURISYNC_VAULT_KEY").write_text(key + "\n", encoding="utf-8")
+            (Path(directory) / "JURISYNC_CAPTCHA_API_KEY").write_text("pago-pelo-servidor\n", encoding="utf-8")
             environment = {"CREDENTIALS_DIRECTORY": directory, "JURISYNC_VAULT_KEY": "", "JURISYNC_CAPTCHA_API_KEY": ""}
             with mock.patch.dict(os.environ, environment), credentials.scope("office-a"):
                 self.assertEqual(load_key(), load_key(key))
@@ -403,6 +408,7 @@ class WriteGrantTest(OfficeCase):
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, grant in (("office-a", ""), ("office-b", "true")):
             self.store.add_tenant(tenant, tenant, connectors=["advbox"])
@@ -473,6 +479,7 @@ class JuridiqGrantTest(OfficeCase):
             return mock.Mock(status_code=200, text=json.dumps(payload), json=lambda: payload)
 
         self.store = Store(root / "store.sqlite")
+        self.addCleanup(self.store.close)
         self.vault = Vault(root / "vault", load_key(generate_key()))
         for tenant, grant in (("office-a", ""), ("office-b", "true")):
             self.store.add_tenant(tenant, tenant, connectors=["juridiq"])
@@ -538,6 +545,7 @@ class JuridiqWritesTest(unittest.TestCase):
 
 
 class RemotePluginTest(unittest.TestCase):
+    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
     def test_the_plugin_points_at_the_server_and_flags_local_only_skills(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -547,7 +555,7 @@ class RemotePluginTest(unittest.TestCase):
                 ("protocolo", "Use filing_prepare e pje_draft_write."),
             ):
                 (skills / name).mkdir(parents=True)
-                (skills / name / "SKILL.md").write_text(text)
+                (skills / name / "SKILL.md").write_text(text, encoding="utf-8")
             plugin = root / "plugins" / "x"
             (plugin / ".claude-plugin").mkdir(parents=True)
             (plugin / "skills").mkdir()
@@ -555,10 +563,10 @@ class RemotePluginTest(unittest.TestCase):
                 (plugin / "skills" / name).symlink_to(skills / name)
             local = {name: {"command": f"jurisync-{name}"} for name in ("pje", "djen", "advbox", "filing")}
             manifest = {"name": "x", "skills": ["./skills/triagem", "./skills/protocolo"], "mcpServers": local}
-            (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+            (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
             out = root / "remote"
             local_only = provision.remote_plugin(plugin, "https://mcp.exemplo.com.br/mcp", out, say=lambda _: None)
-            written = json.loads((out / ".claude-plugin" / "plugin.json").read_text())
+            written = json.loads((out / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 written["mcpServers"],
                 {
@@ -568,7 +576,8 @@ class RemotePluginTest(unittest.TestCase):
             )
             provision.remote_plugin(plugin, "https://mcp.exemplo.com.br", out, say=lambda _: None)  # base address
             self.assertEqual(
-                json.loads((out / ".claude-plugin" / "plugin.json").read_text())["mcpServers"], written["mcpServers"]
+                json.loads((out / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["mcpServers"],
+                written["mcpServers"],
             )
             self.assertFalse((out / "skills" / "triagem").is_symlink())
             self.assertEqual(local_only, {"protocolo": ["filing_prepare", "pje_draft_write"]})

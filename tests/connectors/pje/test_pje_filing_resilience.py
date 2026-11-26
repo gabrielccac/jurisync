@@ -475,8 +475,8 @@ class ServerResumeTests(unittest.TestCase):
         self.addCleanup(server.fill_errors.clear)
         run = Path(self.tmp.name, "run1")
         run.mkdir()
-        (run / "payload.json").write_text(json.dumps({"portal": "trf5-1g"}))
-        (run / "checkpoint.json").write_text(json.dumps({"draftId": "1", "draftUrl": "u"}))
+        (run / "payload.json").write_text(json.dumps({"portal": "trf5-1g"}), encoding="utf-8")
+        (run / "checkpoint.json").write_text(json.dumps({"draftId": "1", "draftUrl": "u"}), encoding="utf-8")
 
     def test_resume_continues_the_same_draft_in_the_background_as_a_fill(self):
         threads = []

@@ -14,6 +14,7 @@ import hashlib
 import re
 import time
 from pathlib import Path
+from typing import cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pyotp
@@ -76,7 +77,7 @@ def migration_accounts(encoded):
             elif nested_wire == 2 and nested_field in (2, 3):
                 account["name" if nested_field == 2 else "issuer"] = value.decode("utf-8", errors="replace")
             elif nested_wire == 0 and nested_field == 4:
-                account["algorithm"] = {2: "sha256", 3: "sha512"}.get(value, "sha1")
+                account["algorithm"] = {2: "sha256", 3: "sha512"}.get(int(value), "sha1")
             elif nested_wire == 0 and nested_field == 5:
                 account["digits"] = 8 if value == 2 else 6
             elif nested_wire == 0 and nested_field == 6:
@@ -95,7 +96,7 @@ def parse_accounts(value):
     if not value.startswith(("otpauth://", "otpauth-migration://")) and "data=" not in value:
         value = unquote(value)
     if value.startswith("otpauth://totp/"):
-        otp = pyotp.parse_uri(value)
+        otp = cast(pyotp.TOTP, pyotp.parse_uri(value))
         return [
             {
                 "secret": otp.secret,
@@ -130,7 +131,7 @@ def accounts_from_image(path):
     from PIL import Image
 
     with Image.open(path) as image:
-        barcodes = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode)
+        barcodes = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormats(zxingcpp.BarcodeFormat.QRCode))
     if len(barcodes) != 1:
         raise ValueError(f"Expected one QR code, found {len(barcodes)}")
     value = barcodes[0].text

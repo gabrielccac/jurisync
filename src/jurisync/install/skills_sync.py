@@ -109,7 +109,7 @@ def skill_digest(skill):
 
 def points_to(link, target):
     try:
-        return link.resolve() == target.resolve() and link.resolve() != link.absolute()
+        return (link.is_symlink() or link.is_junction()) and link.resolve() == target.resolve()
     except OSError:
         return False
 
@@ -128,7 +128,7 @@ def link_skill(skill, skills_dir, say):
     link = skills_dir / skill.name
     if points_to(link, skill):
         return "ok"
-    if link.is_symlink() or (link.exists() and link.resolve() != link.absolute()):
+    if link.is_symlink() or link.is_junction():
         link.unlink() if link.is_symlink() else os.rmdir(link)  # a junction is removed like an empty folder
     elif link.exists():
         backup = link.with_name(f"{link.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")

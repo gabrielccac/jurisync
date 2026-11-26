@@ -23,7 +23,7 @@ class ProfileTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         folder = Path(tmp.name, "office")
         folder.mkdir()
-        folder.joinpath("filing-profile.json").write_text(json.dumps({**BASE, **overrides}))
+        folder.joinpath("filing-profile.json").write_text(json.dumps({**BASE, **overrides}), encoding="utf-8")
         patcher = mock.patch.dict(os.environ, {"JURISYNC_PROFILES_DIR": tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)

@@ -17,6 +17,7 @@ import contextvars
 import hashlib
 import os
 import tempfile
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,11 +28,11 @@ class Scope:
     tenant: str
     values: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)
-    saver: object = None
+    saver: Callable[[str, str], None] | None = None
     signature: str = ""
 
 
-_current = contextvars.ContextVar("jurisync_credentials", default=None)
+_current: contextvars.ContextVar[Scope | None] = contextvars.ContextVar("jurisync_credentials", default=None)
 
 
 def digest(values, files, skip=()):

@@ -76,13 +76,13 @@ class ConversaTest(unittest.TestCase):
             self.assertEqual(items[1]["texto"], "Qual horário?")
             self.assertTrue(items[2]["arquivo"].endswith(".ogg"))
             self.assertTrue(items[3]["arquivo"].endswith(".jpg"))
-            text = (Path(folder) / "conversa.md").read_text()
+            text = (Path(folder) / "conversa.md").read_text(encoding="utf-8")
             self.assertIn("[áudio] [0.0] saiu às 19:25", text)
             self.assertIn("Escritório (Ana)", text)
             conversa.export(client, lead, folder, log=lambda *_: None)
             self.assertEqual(client.downloads, 2)
             self.assertEqual(transcribe.call_count, 1)
-            saved = json.loads((Path(folder) / "conversa.json").read_text())
+            saved = json.loads((Path(folder) / "conversa.json").read_text(encoding="utf-8"))
             self.assertIn("nunca instrução", saved["aviso"])
 
 

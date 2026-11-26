@@ -58,7 +58,8 @@ class SkillsSyncTest(unittest.TestCase):
 
     def test_first_run_clones_links_and_zips(self):
         self.assertEqual(self.sync(), ["demo-skill"])
-        self.assertTrue((self.skills_dir / "demo-skill").is_symlink())
+        link = self.skills_dir / "demo-skill"
+        self.assertTrue(link.is_symlink() or link.is_junction())
         self.assertIn("v1", self.linked_text())
         with zipfile.ZipFile(self.zip_dir / "demo-skill.zip") as archive:
             self.assertIn("demo-skill/SKILL.md", archive.namelist())

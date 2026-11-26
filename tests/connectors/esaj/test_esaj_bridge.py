@@ -187,7 +187,7 @@ class FakeChrome:
         self.profile = Path(next(flag.split("=", 1)[1] for flag in command if flag.startswith("--user-data-dir=")))
         self.terminated = False
         self.port_file = self.profile / "DevToolsActivePort"
-        self.port_file.write_text(self.first_write)
+        self.port_file.write_text(self.first_write, encoding="utf-8")
         FakeChrome.started.append(self)
 
     first_write = "41001\n/devtools/browser/x"
@@ -328,13 +328,13 @@ def test_attach_without_a_browser_never_launches_and_auto_falls_back_to_a_launch
 
 def test_half_written_port_file_is_waited_for_not_an_index_error(fake_browser, monkeypatch, tmp_path):
     for content in ("", "\n", "abc\n", "0\n", "99999999\n"):
-        (tmp_path / "DevToolsActivePort").write_text(content)
+        (tmp_path / "DevToolsActivePort").write_text(content, encoding="utf-8")
         assert bridge.recorded_port(tmp_path) is None
     assert bridge.recorded_port(tmp_path / "missing") is None
-    (tmp_path / "DevToolsActivePort").write_text("9333\n/devtools/browser/x")
+    (tmp_path / "DevToolsActivePort").write_text("9333\n/devtools/browser/x", encoding="utf-8")
     assert bridge.recorded_port(tmp_path) == "9333"
     # An operator profile with an empty port file is simply "no browser" in attach mode.
-    (tmp_path / "DevToolsActivePort").write_text("")
+    (tmp_path / "DevToolsActivePort").write_text("", encoding="utf-8")
     monkeypatch.setattr(bridge, "_json", Mock(side_effect=OSError("refused")))
     assert bridge.BrowserBridge(mode="attach", profile=str(tmp_path)).endpoint_of_running_browser() is None
 
@@ -346,7 +346,7 @@ def test_half_written_port_file_is_waited_for_not_an_index_error(fake_browser, m
     def write_port_later(_seconds):
         polls.append(1)
         if len(polls) == 2:
-            FakeChrome.started[-1].port_file.write_text("41002\n")
+            FakeChrome.started[-1].port_file.write_text("41002\n", encoding="utf-8")
 
     monkeypatch.setattr(bridge.time, "sleep", write_port_later)
     with bridge.BrowserBridge(mode="launch") as browser:

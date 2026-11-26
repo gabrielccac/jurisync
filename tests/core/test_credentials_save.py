@@ -1,11 +1,11 @@
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from jurisync.core import credentials
+from tests.portability import NO_SYMLINKS, SYMLINKS, assert_mode
 
 
 class SaveTest(unittest.TestCase):
@@ -16,58 +16,62 @@ class SaveTest(unittest.TestCase):
 
     def test_locally_only_that_line_of_the_loaded_file_changes_and_it_stays_private(self):
         path = self.folder / ".env"
-        path.write_text("# ADVBOX_DEVICE_ID=commented\nADVBOX_EMAIL=a@b.c\nexport ADVBOX_DEVICE_ID=old\nOTHER='x y'\n")
+        path.write_text(
+            "# ADVBOX_DEVICE_ID=commented\nADVBOX_EMAIL=a@b.c\nexport ADVBOX_DEVICE_ID=old\nOTHER='x y'\n",
+            encoding="utf-8",
+        )
         path.chmod(0o644)
         with mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(path), "JURISYNC_CUSTOMER": ""}):
             credentials.save("ADVBOX_DEVICE_ID", "f" * 32)
             self.assertEqual(os.environ["ADVBOX_DEVICE_ID"], "f" * 32)
             credentials.save("NEW_SETTING", "with space")
         self.assertEqual(
-            path.read_text(),
+            path.read_text(encoding="utf-8"),
             "# ADVBOX_DEVICE_ID=commented\nADVBOX_EMAIL=a@b.c\nexport ADVBOX_DEVICE_ID="
             + "f" * 32
             + "\nOTHER='x y'\nNEW_SETTING=\"with space\"\n",
         )
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        assert_mode(self, path, 0o600)
         self.assertEqual(sorted(item.name for item in self.folder.iterdir()), [".env"])
 
     def test_a_value_with_a_line_break_is_refused_and_the_file_is_untouched(self):
         path = self.folder / ".env"
-        path.write_text("ADVBOX_EMAIL=a@b.c\n")
+        path.write_text("ADVBOX_EMAIL=a@b.c\n", encoding="utf-8")
         with mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(path), "JURISYNC_CUSTOMER": ""}):
             for value in ("abc\nJURISYNC_X=1", "abc\rJURISYNC_X=1"):
                 with self.subTest(value=value), self.assertRaisesRegex(ValueError, "ADVBOX_DEVICE_ID must be a single"):
                     credentials.save("ADVBOX_DEVICE_ID", value)
             self.assertNotIn("ADVBOX_DEVICE_ID", os.environ)
-        self.assertEqual(path.read_text(), "ADVBOX_EMAIL=a@b.c\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), "ADVBOX_EMAIL=a@b.c\n")
 
+    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
     def test_the_file_is_written_through_a_new_temporary_file_never_a_fixed_name(self):
         path = self.folder / ".env"
-        path.write_text("ADVBOX_EMAIL=a@b.c\n")
+        path.write_text("ADVBOX_EMAIL=a@b.c\n", encoding="utf-8")
         elsewhere = self.folder / "elsewhere"
-        elsewhere.write_text("keep\n")
+        elsewhere.write_text("keep\n", encoding="utf-8")
         (self.folder / ".env.tmp").symlink_to(elsewhere)  # a leftover (or planted) file at the old fixed name
         with mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(path), "JURISYNC_CUSTOMER": ""}):
             credentials.save("ADVBOX_DEVICE_ID", "abc")
             with mock.patch("os.replace", side_effect=OSError), self.assertRaises(OSError):
                 credentials.save("ADVBOX_DEVICE_ID", "def")
-        self.assertEqual(path.read_text(), "ADVBOX_EMAIL=a@b.c\nADVBOX_DEVICE_ID=abc\n")
-        self.assertEqual(elsewhere.read_text(), "keep\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), "ADVBOX_EMAIL=a@b.c\nADVBOX_DEVICE_ID=abc\n")
+        self.assertEqual(elsewhere.read_text(encoding="utf-8"), "keep\n")
         self.assertEqual(sorted(item.name for item in self.folder.iterdir()), [".env", ".env.tmp", "elsewhere"])
 
     def test_a_customer_checkout_writes_its_own_file(self):
         own = self.folder / "victor" / ".env"
         own.parent.mkdir()
-        own.write_text("ADVBOX_EMAIL=a@b.c\n")
+        own.write_text("ADVBOX_EMAIL=a@b.c\n", encoding="utf-8")
         shared = self.folder / "shared.env"
-        shared.write_text("JURISYNC_X=1\n")
+        shared.write_text("JURISYNC_X=1\n", encoding="utf-8")
         with (
             mock.patch.dict(os.environ, {"JURISYNC_ENV_FILE": str(shared), "JURISYNC_CUSTOMER": "victor"}),
             mock.patch("jurisync.customers.customers_dir", return_value=self.folder),
         ):
             credentials.save("ADVBOX_DEVICE_ID", "abc")
-        self.assertEqual(own.read_text(), "ADVBOX_EMAIL=a@b.c\nADVBOX_DEVICE_ID=abc\n")
-        self.assertEqual(shared.read_text(), "JURISYNC_X=1\n")
+        self.assertEqual(own.read_text(encoding="utf-8"), "ADVBOX_EMAIL=a@b.c\nADVBOX_DEVICE_ID=abc\n")
+        self.assertEqual(shared.read_text(encoding="utf-8"), "JURISYNC_X=1\n")
 
     def test_hosted_it_goes_to_the_saver_and_the_rest_of_the_request_sees_it(self):
         saved = []

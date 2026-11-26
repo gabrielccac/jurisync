@@ -174,7 +174,7 @@ class PjeNotificationChecks(unittest.TestCase):
     def test_tjrj_grid_with_the_paginator_nested_inside_is_read(self):
         from pathlib import Path
 
-        html = (Path(__file__).parent / "fixtures" / "push_tjrj.html").read_text()
+        html = (Path(__file__).parent / "fixtures" / "push_tjrj.html").read_text(encoding="utf-8")
         items = push.parse_push_items(html)
         self.assertEqual(
             [(i["process_number"], i["process_id"], i["registered_at"]) for i in items],

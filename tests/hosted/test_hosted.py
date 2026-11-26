@@ -21,6 +21,7 @@ from jurisync.hosted import cli
 from jurisync.hosted.app import build_app
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key
+from tests.portability import assert_mode
 
 BASE = "https://mcp.test"
 
@@ -82,16 +83,16 @@ class VaultTest(unittest.TestCase):
     def test_round_trip_and_no_plain_text_on_disk(self):
         self.vault.put("office-a", {"PJE_A1_PIN": "segredo-123"}, {"PJE_A1_P12": b"\x00cert"})
         self.assertEqual(self.vault.get("office-a"), ({"PJE_A1_PIN": "segredo-123"}, {"PJE_A1_P12": b"\x00cert"}))
-        raw = (Path(self.directory.name) / "office-a.vault").read_text()
+        raw = (Path(self.directory.name) / "office-a.vault").read_text(encoding="utf-8")
         self.assertNotIn("segredo-123", raw)
-        self.assertEqual(oct((Path(self.directory.name) / "office-a.vault").stat().st_mode & 0o777), "0o600")
+        assert_mode(self, Path(self.directory.name) / "office-a.vault", 0o600)
 
     def test_an_entry_does_not_open_under_another_tenant_or_key(self):
         self.vault.put("office-a", {"PJE_A1_PIN": "a"})
         path = Path(self.directory.name)
-        record = json.loads((path / "office-a.vault").read_text())
+        record = json.loads((path / "office-a.vault").read_text(encoding="utf-8"))
         record["tenant"] = "office-b"
-        (path / "office-b.vault").write_text(json.dumps(record))
+        (path / "office-b.vault").write_text(json.dumps(record), encoding="utf-8")
         with self.assertRaises(RuntimeError):
             self.vault.get("office-b")
         with self.assertRaises(RuntimeError):
@@ -128,8 +129,7 @@ class StoreConcurrencyTest(unittest.TestCase):
     def test_a_second_process_reads_while_one_writes(self):
         import sqlite3
 
-        with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory) / "store.sqlite")
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "store.sqlite") as store:
             self.assertEqual(store._run("pragma journal_mode")[0][0], "wal")
             self.assertEqual(store._run("pragma busy_timeout")[0][0], 5000)
             store._run("begin immediate")
@@ -171,6 +171,7 @@ class HostedAppTest(unittest.TestCase):
             self.app, _ = build_app(BASE, self.store, self.vault, ["fake"], load=lambda name: (fake, None))
 
     def tearDown(self):
+        self.store.close()
         self.directory.cleanup()
 
     def sign_in(self, client, email, password="senha-bem-longa"):
@@ -294,8 +295,7 @@ class RealServerTest(unittest.TestCase):
     def test_the_pje_server_mounts_without_its_write_tools(self):
         from jurisync.install.serve import load
 
-        with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory) / "s.sqlite")
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "s.sqlite") as store:
             vault = Vault(Path(directory) / "v", load_key(generate_key()))
             built = []
 
@@ -423,8 +423,7 @@ class CertificateLoginTest(unittest.TestCase):
 
 class OpenTenantTest(unittest.TestCase):
     def test_open_mode_serves_one_tenant_without_a_token(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory) / "s.sqlite")
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "s.sqlite") as store:
             vault = Vault(Path(directory) / "v", load_key(generate_key()))
             store.add_tenant("office-a", "A", connectors=["fake"])
             vault.put("office-a", {"PJE_A1_PIN": "pin-a"})

@@ -11,6 +11,7 @@ from curl_cffi import requests
 
 from jurisync.connectors.pje import process as client
 from jurisync.connectors.pje.auth import sessions as session_cache
+from tests.portability import assert_mode
 
 
 class PjeSessionCacheChecks(unittest.TestCase):
@@ -32,8 +33,8 @@ class PjeSessionCacheChecks(unittest.TestCase):
                 session.cookies.set("test-cookie", portal, domain=host, secure=True)
                 session_cache.save_session(portal, session)
                 path = session_cache.cache_path(portal)
-                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+                assert_mode(self, path, 0o600)
+                assert_mode(self, path.parent, 0o700)
                 session.close()
 
             def valid_page(_session, url, **_kwargs):
@@ -105,7 +106,9 @@ class PjeSessionCacheChecks(unittest.TestCase):
         ):
             path = session_cache.cache_path("trf1-1g")
             path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"portal": "trf1-1g", "identity": "another-account", "cookies": [{}]}))
+            path.write_text(
+                json.dumps({"portal": "trf1-1g", "identity": "another-account", "cookies": [{}]}), encoding="utf-8"
+            )
             with patch.object(requests.Session, "get") as network:
                 self.assertIsNone(session_cache.load_session("trf1-1g"))
                 network.assert_not_called()

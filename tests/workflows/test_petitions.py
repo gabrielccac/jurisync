@@ -493,11 +493,13 @@ class CommandLineTest(unittest.TestCase):
     def test_calculate_audit_and_write(self):
         with tempfile.TemporaryDirectory() as folder:
             dossier = Path(folder) / "dossie.json"
-            dossier.write_text(json.dumps({**complete_dossier(), "seguir_com_pendencias": "Colaboradora"}))
+            dossier.write_text(
+                json.dumps({**complete_dossier(), "seguir_com_pendencias": "Colaboradora"}), encoding="utf-8"
+            )
             draft = Path(folder) / "minuta.md"
-            draft.write_text(DRAFT)
+            draft.write_text(DRAFT, encoding="utf-8")
             references = Path(folder) / "refs.txt"
-            references.write_text(REFERENCES)
+            references.write_text(REFERENCES, encoding="utf-8")
             code, output = self.run_cli("calcular", "--dossie", str(dossier))
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(output)["valor_causa"], "20.100,50")

@@ -19,17 +19,21 @@ from jurisync.core import calls, errors
 
 # Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
 # They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 # Reads the portal and saves a file in the shared folder (or a local run folder); nothing changes in the portal.
-SAVES_FILE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+SAVES_FILE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 # Opens what may register a pending ciência: the deadline starts and cannot be undone. Every portal, the same rule.
-MAY_GIVE_CIENCIA = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+MAY_GIVE_CIENCIA = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True
+)
 # Adds something (task, folder, draft, device); repeating adds again unless the tool dedupes (WRITE_IDEMPOTENT).
-WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
-WRITE_IDEMPOTENT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
+WRITE_IDEMPOTENT = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True
+)
 # Changes or removes what exists; REPLACE sets a value, so repeating it changes nothing more.
-DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
-REPLACE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True)
+REPLACE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
 PRESETS = (READ_ONLY, SAVES_FILE, MAY_GIVE_CIENCIA, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, REPLACE)
 
 log = logging.getLogger(__name__)
@@ -286,7 +290,7 @@ def http_settings(host="127.0.0.1", public_host=None):
     """
     from mcp.server.transport_security import TransportSecuritySettings
 
-    names = list(LOOPBACK)
+    names: list[str] = list(LOOPBACK)
     if host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::", ""):
         names.append(f"[{host}]" if ":" in host else host)
     hosts = [*names, *(f"{name}:*" for name in names)]

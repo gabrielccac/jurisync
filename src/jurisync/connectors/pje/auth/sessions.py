@@ -102,7 +102,7 @@ def load_session(portal):
         return None
     session = requests.Session()
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         if data["portal"] != portal or data.get("identity") != cache_identity(portal) or not data["cookies"]:
             raise ValueError("Wrong or empty PJe session cache")
         for cookie in data["cookies"]:
@@ -139,7 +139,7 @@ def save_session(portal, session):
     ]
     fd, temporary = tempfile.mkstemp(dir=path.parent)
     try:
-        with os.fdopen(fd, "w") as output:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
             json.dump({"portal": portal, "identity": cache_identity(portal), "cookies": cookies}, output)
         os.replace(temporary, path)
     finally:

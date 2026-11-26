@@ -154,7 +154,7 @@ class PendingVerificationTest(DeviceCase):
         with mock.patch.object(credentials, "save") as save:
             self.assertEqual(self.session.verify_device(" 123 456 "), {"verified": True, "deviceSaved": False})
         save.assert_not_called()
-        self.assertIn("advbox_session", self.cache.read_text())
+        self.assertIn("advbox_session", self.cache.read_text(encoding="utf-8"))
         self.assertIsNone(advbox_session.pending_verification())
         self.assertEqual(self.session.using(lambda s: "ok"), "ok")
         self.assertEqual(self.advbox.logins, 1)
@@ -283,7 +283,7 @@ class ElicitationTest(DeviceCase):
         self.assertTrue(result.structured_content["authenticated"])
         self.assertEqual(len(self.prompts), 1)
         self.assertIn("enviou um código para j***@dominio.com", self.prompts[0])
-        self.assertIn("advbox_session", self.cache.read_text())
+        self.assertIn("advbox_session", self.cache.read_text(encoding="utf-8"))
 
     def test_a_wrong_code_is_asked_again(self):
         result = self.call("advbox_ensure_session", answers=["999999", CODE])

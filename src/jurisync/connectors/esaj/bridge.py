@@ -53,7 +53,7 @@ def _env(name, default=""):
 def recorded_port(profile):
     """The debugging port Chrome wrote in its profile, or None while the file is missing, empty or half-written."""
     try:
-        lines = (Path(profile) / "DevToolsActivePort").read_text().splitlines()
+        lines = (Path(profile) / "DevToolsActivePort").read_text(encoding="utf-8").splitlines()
     except (OSError, ValueError):
         return None
     port = lines[0].strip() if lines else ""

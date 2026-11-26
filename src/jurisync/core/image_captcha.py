@@ -22,6 +22,7 @@ import base64
 import io
 import logging
 import re
+from typing import Any
 
 from jurisync.core import credentials
 from jurisync.core.awswaf import API, DEFAULT_MODEL, captcha_api_key
@@ -37,7 +38,7 @@ PROMPT = (
 # The text is one dark color; the noise lines and backgrounds are lighter or saturated.
 DARK, GRAY = 150, 130
 
-_local_reader = None
+_local_reader: Any = None
 
 
 class UnreadableCaptcha(LoginFailed):
@@ -64,13 +65,12 @@ def dark_text(image_bytes, scale=2):
     from PIL import Image
 
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    mask = Image.new("L", image.size, 255)
-    pixels, marks = image.load(), mask.load()
-    for y in range(image.height):
-        for x in range(image.width):
-            if max(pixels[x, y]) < DARK and max(pixels[x, y]) - min(pixels[x, y]) < GRAY:
-                marks[x, y] = 0
-    mask = mask.resize((image.width * scale, image.height * scale))
+    rgb = image.tobytes()
+    marks = bytes(
+        0 if max(pixel) < DARK and max(pixel) - min(pixel) < GRAY else 255
+        for pixel in zip(rgb[0::3], rgb[1::3], rgb[2::3], strict=True)
+    )
+    mask = Image.frombytes("L", image.size, marks).resize((image.width * scale, image.height * scale))
     buffer = io.BytesIO()
     mask.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -81,7 +81,7 @@ def read_locally(image_bytes, length=4):
     global _local_reader
     if _local_reader is None:
         try:
-            import ddddocr
+            import ddddocr  # pyright: ignore[reportMissingImports]
         except ImportError:
             _local_reader = False
         else:
@@ -96,7 +96,7 @@ def _png64(image_bytes, scale=3):
     from PIL import Image
 
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = image.resize((image.width * scale, image.height * scale), Image.LANCZOS)
+    image = image.resize((image.width * scale, image.height * scale), Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode()

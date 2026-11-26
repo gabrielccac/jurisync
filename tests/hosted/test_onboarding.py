@@ -173,7 +173,7 @@ class OperatorCommandsTest(unittest.TestCase):
 
         bundle = Path(self.directory.name) / "office.jurisync"
         env = {"PJE_1G_USERNAME": "1", "PJE_1G_PASSWORD": "2", "PJE_1G_2FA_DATA": SECRET, "ADVBOX_PASSWORD": "x"}
-        bundle.write_text(credentials_bundle.seal(env, "senha-do-pacote-123"))
+        bundle.write_text(credentials_bundle.seal(env, "senha-do-pacote-123"), encoding="utf-8")
         argv = ["secrets", "import-bundle", "office-a", str(bundle), "--portal", "trf1-1g", "--check"]
         with mock.patch("getpass.getpass", return_value="senha-do-pacote-123"):
             with (

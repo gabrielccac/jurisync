@@ -139,31 +139,32 @@ def missing_groups(portal_keys, customer, values, files):
 
 
 def import_bundle(args, say):
-    store, vault = open_store(), open_vault()
-    tenant = require_existing(store, args.tenant)
-    if tenant["mode"] == "local":
-        raise SystemExit(f"{tenant['id']} usa a instalação local ({tenant['reason']}): nada vai para o cofre")
-    if args.passphrase_file:
-        passphrase = Path(args.passphrase_file).expanduser().read_text(encoding="utf-8").strip()
-    else:
-        passphrase = getpass.getpass("Senha do pacote: ")
-    opened = credentials_bundle.unseal(Path(args.bundle).read_text(encoding="utf-8"), passphrase)
-    values = dict(opened["env"])
-    files = {}
-    for variable, name in opened["file_vars"].items():
-        values[variable] = name
-        files[variable] = opened["files"][name]
-    wanted = wanted_names(args.portal, tenant["customer"]) if args.portal else None
-    merge(
-        vault,
-        tenant,
-        *normalize(values, files, wanted),
-        say,
-        portal_keys=args.portal,
-        check=args.check,
-        store=store,
-        replace_renewed=args.replace_renewed,
-    )
+    with open_store() as store:
+        vault = open_vault()
+        tenant = require_existing(store, args.tenant)
+        if tenant["mode"] == "local":
+            raise SystemExit(f"{tenant['id']} usa a instalação local ({tenant['reason']}): nada vai para o cofre")
+        if args.passphrase_file:
+            passphrase = Path(args.passphrase_file).expanduser().read_text(encoding="utf-8").strip()
+        else:
+            passphrase = getpass.getpass("Senha do pacote: ")
+        opened = credentials_bundle.unseal(Path(args.bundle).read_text(encoding="utf-8"), passphrase)
+        values = dict(opened["env"])
+        files = {}
+        for variable, name in opened["file_vars"].items():
+            values[variable] = name
+            files[variable] = opened["files"][name]
+        wanted = wanted_names(args.portal, tenant["customer"]) if args.portal else None
+        merge(
+            vault,
+            tenant,
+            *normalize(values, files, wanted),
+            say,
+            portal_keys=args.portal,
+            check=args.check,
+            store=store,
+            replace_renewed=args.replace_renewed,
+        )
 
 
 def keep_renewed(current, values, replace=False):
@@ -241,59 +242,64 @@ def forget(office, values, files, portal_keys):
 def certificate_remove(args, say):
     from jurisync.hosted import access
 
-    store, vault = open_store(), open_vault()
-    office = require_existing(store, args.tenant)
-    tenant = office["id"]
-    values, files = vault.get(tenant)
-    # The A1 also logs in to Eproc, e-SAJ, Projudi, STJ: every portal's login and cookie cache goes.
-    forget(office, values, files, access.served_portals())
-    values.pop(access.A1_PIN, None)
-    files.pop(access.A1_FILE, None)
-    vault.put(tenant, values, files)
-    store.log(tenant, "operador", "certificado A1 removido")
-    say(f"Certificado removido do cofre de {tenant}.")
+    with open_store() as store:
+        vault = open_vault()
+        office = require_existing(store, args.tenant)
+        tenant = office["id"]
+        values, files = vault.get(tenant)
+        # The A1 also logs in to Eproc, e-SAJ, Projudi, STJ: every portal's login and cookie cache goes.
+        forget(office, values, files, access.served_portals())
+        values.pop(access.A1_PIN, None)
+        files.pop(access.A1_FILE, None)
+        vault.put(tenant, values, files)
+        store.log(tenant, "operador", "certificado A1 removido")
+        say(f"Certificado removido do cofre de {tenant}.")
 
 
 def portal_list(args, say):
     from jurisync.hosted import access
     from jurisync.hosted.provision import NO_DEVICE
 
-    store, vault = open_store(), open_vault()
-    office = require_existing(store, args.tenant)
-    tenant = office["id"]
-    if office["mode"] == "local":
-        say(f"{tenant}: só local ({office['reason'] or 'instalação local'}); nenhum portal no servidor")
-        return
-    stored, files = vault.get(tenant)
-    values = access.tenant_values(office, stored)  # the state the server logs in with
-    info = access.certificate_info(values, files)
-    say(f"Certificado A1: {f'{info.holder}, válido até {info.expires}' if info else 'não cadastrado'}")
-    checks = store.checks(tenant)
-    methods = {access.PASSWORD: "login com senha", access.CERTIFICATE: "certificado A1", None: "-"}
+    with open_store() as store:
+        vault = open_vault()
+        office = require_existing(store, args.tenant)
+        tenant = office["id"]
+        if office["mode"] == "local":
+            say(f"{tenant}: só local ({office['reason'] or 'instalação local'}); nenhum portal no servidor")
+            return
+        stored, files = vault.get(tenant)
+        values = access.tenant_values(office, stored)  # the state the server logs in with
+        info = access.certificate_info(values, files)
+        say(f"Certificado A1: {f'{info.holder}, válido até {info.expires}' if info else 'não cadastrado'}")
+        checks = store.checks(tenant)
+        methods = {access.PASSWORD: "login com senha", access.CERTIFICATE: "certificado A1", None: "-"}
 
-    def result(key):
-        check = checks.get(key)
-        return "não testado" if check is None else ("OK" if check["ok"] else f"falhou: {check['message']}")
+        def result(key):
+            check = checks.get(key)
+            return "não testado" if check is None else ("OK" if check["ok"] else f"falhou: {check['message']}")
 
-    listed = office_portals(office, values, checks)
-    offered = served_now(office, stored, files, listed)
-    for key in listed:
-        config = portals.get(key)
-        state = access.portal_state(config, values, files)
-        authenticator = "sim" if state.has_authenticator else "não"
-        status = result(key)
-        if key not in offered:
-            status = "não oferecido: falta login no cofre" + ("" if key not in checks else f" (último teste: {status})")
-        say(
-            f"{key:<16} {registry.label(config.system):<9} {methods[state.method]:<16} 2FA={authenticator:<4} " + status
-        )
-    for service in registry.SERVICES:
-        if all(values.get(name) for name in registry.get(service).login):
-            device = registry.get(service).device
-            status = result(service)
-            if device and not values.get(device):
-                status = NO_DEVICE + ("" if service not in checks else f" (último teste: {status})")
-            say(f"{service:<16} {registry.label(service):<9} {methods[access.PASSWORD]:<16} {'':<9}{status}")
+        listed = office_portals(office, values, checks)
+        offered = served_now(office, stored, files, listed)
+        for key in listed:
+            config = portals.get(key)
+            state = access.portal_state(config, values, files)
+            authenticator = "sim" if state.has_authenticator else "não"
+            status = result(key)
+            if key not in offered:
+                status = "não oferecido: falta login no cofre" + (
+                    "" if key not in checks else f" (último teste: {status})"
+                )
+            say(
+                f"{key:<16} {registry.label(config.system):<9} {methods[state.method]:<16} 2FA={authenticator:<4} "
+                + status
+            )
+        for service in registry.SERVICES:
+            if all(values.get(name) for name in registry.get(service).login):
+                device = registry.get(service).device
+                status = result(service)
+                if device and not values.get(device):
+                    status = NO_DEVICE + ("" if service not in checks else f" (último teste: {status})")
+                say(f"{service:<16} {registry.label(service):<9} {methods[access.PASSWORD]:<16} {'':<9}{status}")
 
 
 def served_now(office, values, files, keys):
@@ -318,47 +324,49 @@ def office_portals(office, values, checks=()):
 
 
 def portal_check(args, say):
-    store, vault = open_store(), open_vault()
-    office = require_existing(store, args.tenant)
-    values, files = vault.get(office["id"])
-    if not run_check(store, office, args.portal, values, files, say):
-        raise SystemExit(1)
+    with open_store() as store:
+        vault = open_vault()
+        office = require_existing(store, args.tenant)
+        values, files = vault.get(office["id"])
+        if not run_check(store, office, args.portal, values, files, say):
+            raise SystemExit(1)
 
 
 def portal_remove(args, say):
     from jurisync.hosted import access
 
-    store, vault = open_store(), open_vault()
-    office = require_existing(store, args.tenant)
-    tenant = office["id"]
-    config = portals.get(args.portal)
-    values, files = vault.get(tenant)
-    forget(office, values, files, [config.key])
-    vault.put(tenant, access.without_portal(values, config), files)
-    store.forget_check(tenant, config.key)
-    store.log(tenant, "operador", "acesso ao portal removido", config.key)
-    say(f"{config.key}: acesso removido do cofre de {tenant}.")
+    with open_store() as store:
+        vault = open_vault()
+        office = require_existing(store, args.tenant)
+        tenant = office["id"]
+        config = portals.get(args.portal)
+        values, files = vault.get(tenant)
+        forget(office, values, files, [config.key])
+        vault.put(tenant, access.without_portal(values, config), files)
+        store.forget_check(tenant, config.key)
+        store.log(tenant, "operador", "acesso ao portal removido", config.key)
+        say(f"{config.key}: acesso removido do cofre de {tenant}.")
 
 
 def history(args, say):
-    store = open_store()
-    tenant = require_existing(store, args.tenant)["id"]
-    import datetime
+    with open_store() as store:
+        tenant = require_existing(store, args.tenant)["id"]
+        import datetime
 
-    for row in store.history(tenant, args.limit):
-        moment = datetime.datetime.fromtimestamp(row["at"]).strftime("%d/%m/%Y %H:%M")
-        say(f"{moment}  {row['actor']:<10} {row['action']}" + (f": {row['detail']}" if row["detail"] else ""))
+        for row in store.history(tenant, args.limit):
+            moment = datetime.datetime.fromtimestamp(row["at"]).strftime("%d/%m/%Y %H:%M")
+            say(f"{moment}  {row['actor']:<10} {row['action']}" + (f": {row['detail']}" if row["detail"] else ""))
 
 
 def calls(args, say):
-    store = open_store()
-    tenant = require_existing(store, args.tenant)["id"]
-    import datetime
+    with open_store() as store:
+        tenant = require_existing(store, args.tenant)["id"]
+        import datetime
 
-    for row in store.calls(tenant, args.limit):
-        moment = datetime.datetime.fromtimestamp(row["at"]).strftime("%d/%m/%Y %H:%M:%S")
-        result = "ok" if row["ok"] else f"erro {row['error']}"
-        say(f"{moment}  {row['user'] or '-'}  {row['tool']}  {result}  {row['duration_ms']} ms")
+        for row in store.calls(tenant, args.limit):
+            moment = datetime.datetime.fromtimestamp(row["at"]).strftime("%d/%m/%Y %H:%M:%S")
+            result = "ok" if row["ok"] else f"erro {row['error']}"
+            say(f"{moment}  {row['user'] or '-'}  {row['tool']}  {result}  {row['duration_ms']} ms")
 
 
 def require_existing(store, tenant_id):
@@ -385,24 +393,27 @@ def serve(args):
     from jurisync.core.http import enable_request_logging
     from jurisync.hosted.app import TENANT_READY, build_app
 
-    store, vault = open_store(), open_vault()
-    enable_request_logging()
-    lacking = missing_profiles(store)
-    if lacking:
-        # The profile pins per-portal methods (A1 on a password portal) and the office's settings: without it the
-        # server would try another login. Install it (provision apply, JURISYNC_CUSTOMERS_DIR) before serving.
-        raise SystemExit(f"Perfil customers/<nome>/portals.toml ausente para: {', '.join(lacking)}")
-    if args.open_tenant:
-        print(
-            f"ATENÇÃO: modo de teste sem login. Quem tiver o endereço usa as credenciais de {args.open_tenant}.",
-            file=sys.stderr,
+    with open_store() as store:
+        vault = open_vault()
+        enable_request_logging()
+        lacking = missing_profiles(store)
+        if lacking:
+            # The profile pins per-portal methods (A1 on a password portal) and the office's settings: without it the
+            # server would try another login. Install it (provision apply, JURISYNC_CUSTOMERS_DIR) before serving.
+            raise SystemExit(f"Perfil customers/<nome>/portals.toml ausente para: {', '.join(lacking)}")
+        if args.open_tenant:
+            print(
+                f"ATENÇÃO: modo de teste sem login. Quem tiver o endereço usa as credenciais de {args.open_tenant}.",
+                file=sys.stderr,
+            )
+        app, closers = build_app(
+            args.base_url, store, vault, args.connectors or TENANT_READY, open_tenant=args.open_tenant
         )
-    app, closers = build_app(args.base_url, store, vault, args.connectors or TENANT_READY, open_tenant=args.open_tenant)
-    try:
-        uvicorn.run(app, host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="127.0.0.1")
-    finally:
-        for close in closers:
-            close()
+        try:
+            uvicorn.run(app, host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="127.0.0.1")
+        finally:
+            for close in closers:
+                close()
 
 
 REPLACE_RENEWED_HELP = "grava o ADVBOX_DEVICE_ID do pacote mesmo quando o servidor já renovou o seu"
@@ -508,35 +519,39 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     args = parser.parse_args(argv)
     if args.command == "init":
         data_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
-        open_store()
+        open_store().close()
         say(f"Pasta de dados: {data_dir()}")
         say("Guarde esta chave fora do servidor e exporte-a como JURISYNC_VAULT_KEY antes de usar o cofre:")
         say(generate_key())
     elif args.command == "tenant" and args.action == "add":
         if args.customer and not customers.customer_dir(args.customer).is_dir():
             raise SystemExit(f"Perfil customers/{args.customer} não existe")
-        open_store().add_tenant(
-            require_tenant_id(args.tenant),
-            args.name,
-            customer=args.customer,
-            connectors=args.connectors,
-            mode="local" if args.local else "hosted",
-            reason=args.local or "",
-        )
+        with open_store() as store:
+            store.add_tenant(
+                require_tenant_id(args.tenant),
+                args.name,
+                customer=args.customer,
+                connectors=args.connectors,
+                mode="local" if args.local else "hosted",
+                reason=args.local or "",
+            )
         served = f"só local: {args.local}" if args.local else ", ".join(args.connectors)
         say(f"Escritório {args.tenant} criado ({served}).")
     elif args.command == "tenant" and args.action == "connectors":
-        store = open_store()
-        if require_existing(store, args.tenant)["mode"] == "local":
-            raise SystemExit(f"{args.tenant} usa a instalação local: não recebe conectores")
-        store.update_tenant(args.tenant, connectors=args.connectors)
+        with open_store() as store:
+            if require_existing(store, args.tenant)["mode"] == "local":
+                raise SystemExit(f"{args.tenant} usa a instalação local: não recebe conectores")
+            store.update_tenant(args.tenant, connectors=args.connectors)
         say(f"Escritório {args.tenant}: {', '.join(args.connectors)}.")
     elif args.command == "tenant" and args.action == "list":
-        for row in open_store().tenants():
+        with open_store() as store:
+            rows = store.tenants()
+        for row in rows:
             served = ",".join(row["connectors"]) if row["mode"] == "hosted" else f"só local: {row['reason'] or '-'}"
             say(f"{row['id']}\t{row['name']}\tperfil={row['customer'] or '-'}\t{served}")
     elif args.command == "tenant" and args.action == "remove":
-        open_store().remove_tenant(args.tenant)
+        with open_store() as store:
+            store.remove_tenant(args.tenant)
         open_vault().delete(args.tenant)
         say(f"Escritório {args.tenant}, usuários, tokens e cofre removidos.")
     elif args.command == "secrets" and args.action == "import-bundle":
@@ -550,7 +565,8 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         if password != ask_secret("Repita a senha: "):
             raise SystemExit("As senhas não conferem")
         try:
-            open_store().add_user(args.email, args.tenant, password, must_change=True)
+            with open_store() as store:
+                store.add_user(args.email, args.tenant, password, must_change=True)
         except ValueError as error:
             raise SystemExit(str(error)) from None
         say(f"Usuário {args.email.strip().lower()} pode entrar em {args.tenant}; escolhe a própria senha no 1º login.")
@@ -558,16 +574,20 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
         password = ask_secret("Nova senha (mín. 12 caracteres): ")
         if password != ask_secret("Repita a senha: "):
             raise SystemExit("As senhas não conferem")
-        open_store().set_password(args.email, password, must_change=True)
+        with open_store() as store:
+            store.set_password(args.email, password, must_change=True)
         say(
             f"Senha de {args.email.strip().lower()} trocada; sessões e tokens antigos foram encerrados. "
             "O usuário escolhe uma senha nova no próximo login."
         )
     elif args.command == "user" and args.action == "list":
-        for row in open_store().users(args.tenant):
+        with open_store() as store:
+            rows = store.users(args.tenant)
+        for row in rows:
             say(f"{row['email']}\t{row['tenant']}")
     elif args.command == "user" and args.action == "remove":
-        open_store().remove_user(args.email)
+        with open_store() as store:
+            store.remove_user(args.email)
         say(f"Usuário {args.email} removido e tokens revogados.")
     elif args.command == "certificate" and args.action == "remove":
         certificate_remove(args, say)

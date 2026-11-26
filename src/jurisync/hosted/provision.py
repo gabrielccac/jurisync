@@ -284,7 +284,9 @@ def export(out, passphrase_file, *, only=None, names=None, say=print):
     passphrase = rollout_passphrase(passphrase_file, create=True)
     previous = {}
     if (out / PLAN).is_file():
-        previous = {office["tenant"]: office for office in json.loads((out / PLAN).read_text())["offices"]}
+        previous = {
+            office["tenant"]: office for office in json.loads((out / PLAN).read_text(encoding="utf-8"))["offices"]
+        }
     offices = []
     for customer in only or all_customers():
         values = read_customer_env(customer)
@@ -375,52 +377,63 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace
     directory = Path(directory).expanduser()
     plan = json.loads((directory / PLAN).read_text(encoding="utf-8"))
     passphrase = rollout_passphrase(passphrase_file, create=False)
-    store, vault = cli.open_store(), cli.open_vault()
-    stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
-    user_passwords = Path(user_passwords or cli.data_dir() / f"new-user-passwords-{stamp}.txt").expanduser()
-    if user_passwords.exists():
-        raise SystemExit(f"{user_passwords} já existe: entregue e apague as senhas anteriores ou escolha outro arquivo")
-    created_users = []
-    for office in plan["offices"]:
-        if only and office["tenant"] not in only:
-            continue
-        tenant, customer = office["tenant"], office["customer"]
-        if install_profile(directory / "profiles" / customer, customer):
-            say(f"{tenant}: perfil instalado em {customers.customer_dir(customer)}")
-        if office.get("mode", "hosted") == "local":
-            apply_local(store, vault, office, say)
-            continue
-        if store.tenant(tenant) is None:
-            store.add_tenant(tenant, office["name"], customer=customer, connectors=office["connectors"])
-            say(f"{tenant}: escritório criado ({', '.join(office['connectors'])})")
-        else:
-            store.update_tenant(tenant, name=office["name"], connectors=office["connectors"], mode="hosted", reason="")
-            say(f"{tenant}: conectores atualizados ({', '.join(office['connectors'])})")
-        opened = credentials_bundle.unseal((directory / f"{tenant}.jurisync").read_text(encoding="utf-8"), passphrase)
-        if opened["customer"] != customer:
-            raise SystemExit(f"{tenant}.jurisync é de {opened['customer']}, não de {customer}")
-        values, files = dict(opened["env"]), {}
-        for variable, name in opened["file_vars"].items():
-            values.pop(variable, None)
-            files[variable] = opened["files"][name]
-        replace_vault(store, vault, tenant, values, files, office["portals"], customer, say, replace_renewed)
-        existing = {row["email"] for row in store.users()}
-        for email in office.get("users", []):
-            email = email.strip().lower()
-            if email in existing:
+    with cli.open_store() as store:
+        vault = cli.open_vault()
+        stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+        user_passwords = Path(user_passwords or cli.data_dir() / f"new-user-passwords-{stamp}.txt").expanduser()
+        if user_passwords.exists():
+            raise SystemExit(
+                f"{user_passwords} já existe: entregue e apague as senhas anteriores ou escolha outro arquivo"
+            )
+        created_users = []
+        for office in plan["offices"]:
+            if only and office["tenant"] not in only:
                 continue
-            password = secrets.token_urlsafe(15)
-            store.add_user(email, tenant, password, must_change=True)
-            store.log(tenant, "operador", "usuário criado", email)
-            created_users.append(f"{email}\t{tenant}\t{password}")
-            say(f"{tenant}: usuário {email} criado")
-        for key, reason in office.get("skipped", {}).items():
-            say(f"{tenant}: {key} fora do servidor ({reason})")
-    if created_users:
-        write_private(user_passwords, "\n".join(created_users) + "\n")
-        say(f"Senhas iniciais dos {len(created_users)} usuário(s) novos em {user_passwords} (0600, não impressas)")
-        say("Cada usuário troca a senha no 1º login. Entregue as senhas por outro canal e apague o arquivo em seguida.")
-    say("Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)")
+            tenant, customer = office["tenant"], office["customer"]
+            if install_profile(directory / "profiles" / customer, customer):
+                say(f"{tenant}: perfil instalado em {customers.customer_dir(customer)}")
+            if office.get("mode", "hosted") == "local":
+                apply_local(store, vault, office, say)
+                continue
+            if store.tenant(tenant) is None:
+                store.add_tenant(tenant, office["name"], customer=customer, connectors=office["connectors"])
+                say(f"{tenant}: escritório criado ({', '.join(office['connectors'])})")
+            else:
+                store.update_tenant(
+                    tenant, name=office["name"], connectors=office["connectors"], mode="hosted", reason=""
+                )
+                say(f"{tenant}: conectores atualizados ({', '.join(office['connectors'])})")
+            opened = credentials_bundle.unseal(
+                (directory / f"{tenant}.jurisync").read_text(encoding="utf-8"), passphrase
+            )
+            if opened["customer"] != customer:
+                raise SystemExit(f"{tenant}.jurisync é de {opened['customer']}, não de {customer}")
+            values, files = dict(opened["env"]), {}
+            for variable, name in opened["file_vars"].items():
+                values.pop(variable, None)
+                files[variable] = opened["files"][name]
+            replace_vault(store, vault, tenant, values, files, office["portals"], customer, say, replace_renewed)
+            existing = {row["email"] for row in store.users()}
+            for email in office.get("users", []):
+                email = email.strip().lower()
+                if email in existing:
+                    continue
+                password = secrets.token_urlsafe(15)
+                store.add_user(email, tenant, password, must_change=True)
+                store.log(tenant, "operador", "usuário criado", email)
+                created_users.append(f"{email}\t{tenant}\t{password}")
+                say(f"{tenant}: usuário {email} criado")
+            for key, reason in office.get("skipped", {}).items():
+                say(f"{tenant}: {key} fora do servidor ({reason})")
+        if created_users:
+            write_private(user_passwords, "\n".join(created_users) + "\n")
+            say(f"Senhas iniciais dos {len(created_users)} usuário(s) novos em {user_passwords} (0600, não impressas)")
+            say(
+                "Cada usuário troca a senha no 1º login. Entregue as senhas por outro canal e apague o arquivo em seguida."
+            )
+        say(
+            "Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)"
+        )
 
 
 def replace_vault(store, vault, tenant, values, files, portal_keys, customer, say, replace_renewed=False):
@@ -507,7 +520,9 @@ def remote_plugin(source, url, out, *, say=print):
         )
         if found:
             local_only[Path(entry).name] = found
-    (out / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    (out / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     say(
         f"Plugin remoto em {out}: "
         + ", ".join(f"{name} -> {entry['url']}" for name, entry in manifest["mcpServers"].items())

@@ -116,7 +116,7 @@ class EnvFileDefaultTest(unittest.TestCase):
     def test_user_env_file_is_used_when_no_path_is_given(self):
         with tempfile.TemporaryDirectory() as directory:
             env = Path(directory) / ".env"
-            env.write_text("JURISYNC_SERVE_TEST=yes\n")
+            env.write_text("JURISYNC_SERVE_TEST=yes\n", encoding="utf-8")
             clean = {
                 key: value for key, value in os.environ.items() if key not in ("JURISYNC_ENV_FILE", "JURISYNC_CUSTOMER")
             }

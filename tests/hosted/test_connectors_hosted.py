@@ -63,8 +63,8 @@ class AdvboxTest(unittest.TestCase):
             client_b, path_b = server.client.get(), session_file()
             require_writes()
         self.assertIsNot(client_a, client_b)
-        self.assertIn("tenants/office-a", str(path_a))
-        self.assertIn("tenants/office-b", str(path_b))
+        self.assertIn("tenants/office-a", Path(path_a).as_posix())
+        self.assertIn("tenants/office-b", Path(path_b).as_posix())
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "true", "ADVBOX_PASSWORD": "server"}):
             with credentials.scope("office-c"), self.assertRaises(PermissionError):
                 require_writes()
@@ -85,7 +85,7 @@ class JuridiqTest(unittest.TestCase):
         with credentials.scope("office-a", {"JURIDIQ_EMAIL": "A@x.br", "JURIDIQ_PASSWORD": "p"}):
             settings = config()
         self.assertEqual((settings["email"], settings["password"]), ("a@x.br", "p"))
-        self.assertIn("tenants/office-a", str(settings["sessionFile"]))
+        self.assertIn("tenants/office-a", Path(settings["sessionFile"]).as_posix())
         with mock.patch.dict(os.environ, {"JURIDIQ_PASSWORD": "server"}), credentials.scope("office-b"):
             self.assertIsNone(config()["password"] or None)
 
@@ -133,7 +133,7 @@ class AccessChecksTest(unittest.TestCase):
 
             path = session_file()
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("{}")
+            path.write_text("{}", encoding="utf-8")
             with mock.patch("jurisync.connectors.advbox.client.AdvboxClient") as client:
                 access.check("advbox")
             self.assertFalse(path.exists())  # the cached cookie cannot pass for a new password
@@ -184,6 +184,7 @@ class ServerGuardsTest(unittest.TestCase):
         self.vault = Vault(Path(self.directory.name) / "v", load_key(generate_key()))
 
     def tearDown(self):
+        self.store.close()
         self.directory.cleanup()
 
     def test_only_tenant_aware_connectors_mount(self):
@@ -294,11 +295,8 @@ class CredentialSaverTest(unittest.TestCase):
         from jurisync.hosted.store import Store
         from jurisync.hosted.vault import Vault
 
-        with tempfile.TemporaryDirectory() as directory:
-            store, vault = (
-                Store(Path(directory) / "store.sqlite"),
-                Vault(Path(directory) / "vault", secrets.token_bytes(32)),
-            )
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "store.sqlite") as store:
+            vault = Vault(Path(directory) / "vault", secrets.token_bytes(32))
             vault.put("office-a", {"ADVBOX_DEVICE_ID": "old", "ADVBOX_EMAIL": "a@x.br"}, {"cert.pfx": b"x"})
             vault.put("office-b", {"ADVBOX_DEVICE_ID": "other"})
             gate = TenantGate(None, connectors=None, store=store, vault=vault, resource="https://mcp.test")
@@ -315,11 +313,8 @@ class CredentialSaverTest(unittest.TestCase):
         import threading
         import time
 
-        with tempfile.TemporaryDirectory() as directory:
-            store, vault = (
-                Store(Path(directory) / "store.sqlite"),
-                Vault(Path(directory) / "vault", secrets.token_bytes(32)),
-            )
+        with tempfile.TemporaryDirectory() as directory, Store(Path(directory) / "store.sqlite") as store:
+            vault = Vault(Path(directory) / "vault", secrets.token_bytes(32))
             vault.put("office-a", {"ADVBOX_EMAIL": "a@x.br"})
             read = vault.get
 
