@@ -204,3 +204,4 @@ Passos para um conector novo:
 | Nomes no vocabulário; todo alias aponta para uma tool listada e funciona | `tests/core/test_names.py` |
 | Prefixo de variável = chave do portal (ou exceção listada); nome antigo aceito; `.env.example` gerado passa no `check-customer` | `tests/core/test_env_names.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |
+| O core não importa `customers`, `portals`, `registry` nem `connectors`, nem dentro de função | `tests/core/test_core_imports.py` |
