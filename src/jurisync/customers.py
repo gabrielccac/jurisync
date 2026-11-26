@@ -81,13 +81,16 @@ def load_setup(name):
         secrets = entry.get("secrets", [])
         if not isinstance(secrets, list) or not all(isinstance(item, str) and item for item in secrets):
             raise ValueError(f"{name}/{key}: secrets must be a list of variable names")
-        setups[key] = PortalSetup(key, method, tuple(secrets))
+        setups[key] = PortalSetup(key, method, tuple(portals.get(key).variable_names(group) for group in secrets))
     pinned = data.get(RESERVED_TABLE, {}).get("set") or {}
-    for variable, on in certificate_switches(setups).items():
-        if variable in pinned and (str(pinned[variable]).strip().lower() in TRUE) != on:
-            raise ValueError(
-                f"{name}: [env].set {variable} = {pinned[variable]!r} contradicts the method declared for its portal"
-            )
+    switches = certificate_switches(setups)
+    for key in setups:
+        variable = portals.get(key).env_name("CERT")
+        for pin in portals.get(key).variable_names(variable).split("|") if variable in switches else ():
+            if pin in pinned and (str(pinned[pin]).strip().lower() in TRUE) != switches[variable]:
+                raise ValueError(
+                    f"{name}: [env].set {pin} = {pinned[pin]!r} contradicts the method declared for its portal"
+                )
     return setups
 
 

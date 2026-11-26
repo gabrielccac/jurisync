@@ -205,7 +205,7 @@ class ServerGuardsTest(unittest.TestCase):
             seen.update(
                 tenant=credentials.tenant(),
                 writes=credentials.env("ADVBOX_ALLOW_WRITES"),
-                cert=credentials.env("PJE_1G_CERT"),
+                cert=credentials.env("TRF1_1G_CERT"),
                 customer=credentials.env("JURISYNC_CUSTOMER"),
             )
 
@@ -251,7 +251,7 @@ class ServerGuardsTest(unittest.TestCase):
         self.store.add_tenant("victor", "Victor", customer="victor", connectors=["advbox"])
         # A copy an older provision stored, and a later portals.toml change.
         self.vault.put("victor", {"ADVBOX_ALLOW_WRITES": "false", "PJE_1G_CERT": "", "JURISYNC_CUSTOMER": "x"})
-        names = ("ADVBOX_ALLOW_WRITES", "PJE_1G_CERT", "JURISYNC_CUSTOMER")
+        names = ("ADVBOX_ALLOW_WRITES", "TRF1_1G_CERT", "JURISYNC_CUSTOMER")
         served = self.gate_values("victor", *names)
         self.assertEqual([served[name] for name in names], ["true", "true", "victor"])
         checked = {}

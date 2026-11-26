@@ -66,7 +66,7 @@ def test_a_certificate_method_switches_the_portal_to_the_a1_login(root):
         encoding="utf-8",
     )
     assert customers.fixed_variables("acme") == {
-        "PJE_1G_CERT": "true",
+        "TRF1_1G_CERT": "true",
         "TRF4_2G_CERT": "true",
         "ADVBOX_ALLOW_WRITES": "true",
     }
