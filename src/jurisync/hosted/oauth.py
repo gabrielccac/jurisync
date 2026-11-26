@@ -161,8 +161,7 @@ class Provider:
 
     def _exchange_code(self, client_id, authorization_code):
         found = self.store.code(authorization_code.code)
-        self.store.delete_code(authorization_code.code)
-        if found is None:
+        if not self.store.delete_code(authorization_code.code) or found is None:
             raise TokenError("invalid_grant", "authorization code expired or already used")
         return self._issue(
             client_id,
@@ -212,7 +211,8 @@ class Provider:
             raise TokenError("invalid_grant", "refresh token expired or revoked")
         if self.store.tenant(row["tenant"]) is None:
             raise TokenError("invalid_grant", "account no longer exists")
-        self.store.delete_pair(refresh_token.token)
+        if not self.store.delete_pair(refresh_token.token):
+            raise TokenError("invalid_grant", "refresh token expired or revoked")
         return self._issue(client_id, row["tenant"], row["subject"], scopes or row["scopes"], row["resource"])
 
     async def load_access_token(self, token):
