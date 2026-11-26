@@ -146,17 +146,23 @@ PUSH_PAGE_SIZE = 50
 MAX_PUSH_PAGES = 100
 
 
-def read_push(session, portal, *, needed=None):
+def read_push(session, portal, *, needed=None, start=None):
     """The processes registered in PJe Push ("Minhas assinaturas"), from ``/push`` with ``PROCESSOS_CADASTRADOS``.
 
     The legacy ``Push/listView.seam`` page of these portals is an empty shell of the old JSF app; the Angular
     "Push" route reads this endpoint. The "related" processes tab (``PROCESSOS_RELACIONADOS``) is not registrations
     and is not returned. ``needed`` stops the paging once that many rows are read (the caller wants one window of
-    the list); ``results_count`` is still the total the portal reports.
+    the list); ``results_count`` is still the total the portal reports. ``start`` is an earlier result of this
+    function: its rows are kept and the paging continues after its last page. At most ``MAX_PUSH_PAGES`` pages are
+    read per call.
     """
     api = Api(session, portal)
     items, total, pages, page = [], 0, 1, 1
-    while page <= min(pages, MAX_PUSH_PAGES) and (needed is None or len(items) < needed):
+    if start:
+        items, total = list(start["items"]), start["results_count"]
+        pages, page = start["total_pages"] or 0, (start["current_page"] or 0) + 1
+    first = page
+    while page <= pages and page - first < MAX_PUSH_PAGES and (needed is None or len(items) < needed):
         data = api.json(
             "/push",
             {

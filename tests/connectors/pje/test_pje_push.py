@@ -290,6 +290,58 @@ class PushRegistryPages(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "did not turn to page 2"):
             self._read(pages, limit=500)
 
+    def test_a_walk_by_offset_continues_where_the_last_call_stopped(self):
+        pages = [_scroller_page(self._numbers(1 + 20 * n, 20), n + 1, 3) for n in range(3)]
+        session = Mock()
+        session.get.return_value = _response(pages[0])
+        session.post.side_effect = [_response(page) for page in pages[1:]]
+        windows = [push.read_push("tjmg-pje-1g", session=session, limit=20, offset=offset) for offset in (0, 20, 40)]
+        # Page 1 once, then one page turn per call, each from the ViewState the previous turn left.
+        self.assertEqual((session.get.call_count, session.post.call_count), (1, 2))
+        bodies = [call.kwargs["data"] for call in session.post.call_args_list]
+        self.assertIn("scroller=2", bodies[0])
+        self.assertIn("scroller=3", bodies[1])
+        self.assertIn("javax.faces.ViewState=state2", bodies[1])
+        self.assertEqual([w["items"][0]["process_number"] for w in windows], self._numbers(1, 41)[::20])
+        self.assertEqual([w["hasMore"] for w in windows], [True, True, False])
+        self.assertEqual((windows[2]["complete"], windows[2]["total_pages"]), (True, 3))
+        # The whole registry is read: a process filter and a window already read need no request.
+        wanted = self._numbers(33, 1)[0]
+        found = push.read_push("tjmg-pje-1g", session=session, process_number=wanted)
+        again = push.read_push("tjmg-pje-1g", session=session, limit=5, offset=10)
+        self.assertEqual((session.get.call_count, session.post.call_count), (1, 2))
+        self.assertEqual(([item["process_number"] for item in found["items"]], found["total"]), ([wanted], 1))
+        self.assertEqual(again["items"][0]["process_number"], self._numbers(11, 1)[0])
+        # Callers get their own copy: changing a returned row leaves the remembered one alone.
+        again["items"][0]["process_number"] = "changed"
+        self.assertNotEqual(push.read_push("tjmg-pje-1g", session=session, limit=1, offset=10)["items"], again["items"])
+
+    def test_a_continuation_the_portal_refuses_starts_over_and_old_rows_expire(self):
+        pages = [_scroller_page(self._numbers(1 + 20 * n, 20), n + 1, 3) for n in range(3)]
+        session = Mock()
+        session.get.return_value = _response(pages[0])
+        # The second call's turn answers page 1 again (the ViewState expired); the restart turns normally.
+        session.post.side_effect = [_response(pages[0]), _response(pages[1])]
+        push.read_push("tjmg-pje-1g", session=session, limit=20)
+        result = push.read_push("tjmg-pje-1g", session=session, limit=20, offset=20)
+        self.assertEqual((session.get.call_count, session.post.call_count), (2, 2))
+        self.assertEqual(result["items"][0]["process_number"], self._numbers(21, 1)[0])
+        session.post.side_effect = [_response(pages[1])]
+        with patch.object(push.time, "monotonic", return_value=push.time.monotonic() + push.WALK_SECONDS + 1):
+            push.read_push("tjmg-pje-1g", session=session, limit=20, offset=20)
+        self.assertEqual((session.get.call_count, session.post.call_count), (3, 3))
+
+    def test_a_failed_read_forgets_the_walk(self):
+        pages = [_scroller_page(self._numbers(1 + 20 * n, 20), n + 1, 3) for n in range(3)]
+        session = Mock()
+        session.get.return_value = _response(pages[0])
+        push.read_push("tjmg-pje-1g", session=session, limit=20)
+        # The continuation answers page 1 again, and so does the restart: an error, and nothing is kept.
+        session.post.side_effect = [_response(pages[0]), _response(pages[0])]
+        with self.assertRaisesRegex(RuntimeError, "did not turn to page 2"):
+            push.read_push("tjmg-pje-1g", session=session, limit=20, offset=20)
+        self.assertIsNone(push._recall(session, "tjmg-pje-1g"))
+
 
 if __name__ == "__main__":
     unittest.main()

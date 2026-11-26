@@ -2,9 +2,13 @@
 """Read the PJe Push registry: the processes the lawyer asked PJe to e-mail movements for."""
 
 import argparse
+import copy
 import json
 import re
 import sys
+import threading
+import time
+import weakref
 from contextlib import redirect_stdout
 from urllib.parse import urljoin, urlsplit
 
@@ -16,6 +20,7 @@ from jurisync.connectors.pje.parsers import parse_process_number, response_html
 from jurisync.connectors.pje.process import login_portal
 from jurisync.core.http import IMPERSONATE, UnsafeUrlError, enable_request_logging, require_url
 from jurisync.core.redaction import url_shape
+from jurisync.core.session_pool import SessionExpired
 
 PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
 PUSH_SUFFIX = "Push/listView.seam?iframe=true"
@@ -38,6 +43,12 @@ RELATED_NOTE = (
 SCROLLER = re.compile(r"Richfaces\.Datascroller\(\s*'([^']+)'")
 # Pages of the registry read per call at most (RichFaces pages hold 10 to 20 rows; the tool returns up to 500).
 MAX_PUSH_PAGES = 50
+# A walk through the registry (offset += limit, or one processNumber after another) read it again from page 1 on
+# every call. The rows read and where the paging stopped are kept this long per session, and the next call
+# continues from there.
+WALK_SECONDS = 300
+_walks = weakref.WeakKeyDictionary()  # session -> {portal: (time, walk)}
+_walks_guard = threading.Lock()
 
 
 def _safe_url(value, *, host=None, path_prefix="/pje/", path_exact=None):
@@ -288,41 +299,67 @@ def _scroller(html):
     return None
 
 
-def _next_pages(session, config, html, pagination, items, needed):
-    """Turn the registry's datascroller page by page, as its "»" does, until ``needed`` rows or the last page.
+def _next_pages(session, walk, needed):
+    """Turn the registry's datascroller from where ``walk`` stopped, as its "»" does, until ``needed`` rows or the
+    last page, at most ``MAX_PUSH_PAGES`` pages per call.
 
-    Returns (rows of the pages after the first, pages read, whether the last page was reached). A page that does
-    not advance (the portal answers the last page again) ends the walk.
+    The rows join ``walk["result"]``, whose pagination then describes the pages read so far. A page that does not
+    advance (the portal answers the last page again) is an error.
     """
-    found = _scroller(html)
-    if not found or not pagination.get("has_next_page"):
-        return [], 1, not pagination.get("has_next_page")
-    form_id, scroller = found
-    url = _portal_url(config.key, f"{config.root}Push/listView.seam")
-    fields = jsf.form_fields(html, form_id)
-    fields["javax.faces.ViewState"] = jsf.view_state(html, "PJe Push list")
-    rows, page, last = [], pagination.get("current_page") or 1, False
-    while page < MAX_PUSH_PAGES and (needed is None or len(items) + len(rows) < needed):
+    result, resume = walk["result"], walk["resume"]
+    items, turned = result["items"], 0
+    while resume and turned < MAX_PUSH_PAGES - 1 and (needed is None or len(items) < needed):
+        page = resume["page"] + 1
         body = {
-            **fields,
+            **resume["fields"],
             "AJAXREQUEST": "_viewRoot",
-            scroller: str(page + 1),
-            "ajaxSingle": scroller,
+            resume["scroller"]: str(page),
+            "ajaxSingle": resume["scroller"],
             "AJAX:EVENTS_COUNT": "1",
         }
-        response = response_html(jsf.post(session, url, body, label=f"PJe Push list page {page + 1}"))
+        response = response_html(jsf.post(session, resume["url"], body, label=f"PJe Push list page {page}"))
         state = BeautifulSoup(response, "html.parser").find("input", attrs={"name": "javax.faces.ViewState"})
         if state is not None and state.get("value"):
-            fields["javax.faces.ViewState"] = state["value"]
-        turned = parse_push_page(response, base_url=url)
-        if turned["current_page"] != page + 1:
-            raise RuntimeError(f"PJe Push list did not turn to page {page + 1}")
-        rows.extend(parse_push_items(response))
-        page += 1
-        if not turned["has_next_page"]:
-            last = True
-            break
-    return rows, page, last
+            resume["fields"]["javax.faces.ViewState"] = state["value"]
+        shown = parse_push_page(response, base_url=resume["url"])
+        if shown["current_page"] != page:
+            raise RuntimeError(f"PJe Push list did not turn to page {page}")
+        items.extend(parse_push_items(response))
+        resume["page"], turned = page, turned + 1
+        if not shown["has_next_page"]:
+            walk["resume"] = resume = None
+    if not turned:
+        return
+    last, count = resume is None, result["results_count"]
+    result["pagination"].update(
+        current_page=page,
+        has_next_page=not last,
+        complete=last and (count is None or count == len(items)),
+        # The datascroller shows at most 10 page buttons (TJMG: "1 … 10" for 23 pages): unknown until read.
+        total_pages=page if last else None,
+    )
+    result.update(result["pagination"])
+
+
+def _enough(result, needed):
+    return not result.get("has_next_page") or (needed is not None and len(result["items"]) >= needed)
+
+
+def _recall(session, portal):
+    with _walks_guard:
+        moment, walk = _walks.get(session, {}).get(portal, (0, None))
+    return walk if time.monotonic() - moment <= WALK_SECONDS else None
+
+
+def _remember(session, portal, walk):
+    try:
+        with _walks_guard:
+            if walk is None:
+                _walks.get(session, {}).pop(portal, None)
+            else:
+                _walks.setdefault(session, {})[portal] = (time.monotonic(), walk)
+    except TypeError:
+        pass  # a session that cannot be weakly referenced is not remembered
 
 
 def _require_permission(session, config, push, push_url):
@@ -343,72 +380,98 @@ def _require_permission(session, config, push, push_url):
 
 
 def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_number=None):
-    """The Push registry, ``limit`` rows from ``offset``; ``process_number`` keeps only that process' rows."""
+    """The Push registry, ``limit`` rows from ``offset``; ``process_number`` keeps only that process' rows.
+
+    Rows a call on the same session read in the last ``WALK_SECONDS`` are reused, and the paging continues from
+    where it stopped; a continuation the portal no longer accepts starts over from page 1.
+    """
     if not 1 <= limit <= MAX_LIMIT or offset < 0:
         raise ValueError(f"limit must be 1 to {MAX_LIMIT} and offset 0 or more")
     if process_number:
         parse_process_number(process_number)
     config = portals.pje(name)
+    # Without a filter the first offset + limit rows are enough; a filter has to see the whole list.
+    needed = None if process_number else offset + limit
     owned_session = session is None
+    walk = None
     try:
         if owned_session:
             session, _ = login_portal(name)
-        if config.kz:
-            # Without a filter the first offset + limit rows are enough; a filter has to see the whole list.
-            needed = None if process_number else offset + limit
-            return _window(kz.read_push(session, name, needed=needed), limit, offset, process_number)
-        panel_url = _portal_url(name, f"{config.root}{PANEL_SUFFIX}")
-        push_url = _portal_url(name, f"{config.root}{PUSH_SUFFIX}")
-        push = session.get(
-            push_url,
-            headers={"Referer": panel_url},
-            allow_redirects=False,
-            timeout=PUSH_TIMEOUT,
-            impersonate=IMPERSONATE,
-        )
-        push_url_result = getattr(push, "url", push_url)
-        if push.status_code == 302:
-            _require_permission(session, config, push, push_url)
-        if push.status_code != 200:
-            raise RuntimeError(f"Push list returned HTTP {push.status_code}")
-        _safe_url(push_url_result, host=config.host, path_exact=f"{config.root}Push/listView.seam")
-        html = response_html(push)
-        items = parse_push_items(html)
-        pagination = parse_push_page(html, len(items), base_url=push_url)
-        # Without a filter the first offset + limit rows are enough; a filter has to see the whole list.
-        more, pages, last = _next_pages(
-            session, config, html, pagination, items, None if process_number else offset + limit
-        )
-        items += more
-        if pages > 1:
-            count = pagination["results_count"]
-            pagination.update(
-                current_page=pages,
-                has_next_page=not last,
-                complete=last and (count is None or count == len(items)),
-            )
-        if pagination["has_next_page"]:
-            # The datascroller shows at most 10 page buttons (TJMG: "1 … 10" for 23 pages): unknown until read.
-            pagination["total_pages"] = None
-        elif pages > 1:
-            pagination["total_pages"] = pages
-        _, related = _registry(html)
-        result = {
-            "success": True,
-            "portal": name,
-            "push_url": _safe_url(push_url, host=config.host, path_exact=f"{config.root}Push/listView.seam"),
-            "pagination": pagination,
-            **pagination,
-            "rows_returned": len(items),
-            "items": items,
-            # Push stores watched processes; movement text arrives in the email.
-            "content_note": "This page lists watched processes, not the individual movement email text.",
-            **({"related_note": RELATED_NOTE} if related else {}),
-        }
-        return _window(result, limit, offset, process_number)
+        walk = _recall(session, name)
+        if walk is not None and not _enough(walk["result"], needed):
+            try:
+                _continue(session, name, config, walk, needed)
+            except SessionExpired:
+                raise
+            except RuntimeError:
+                walk = None
+        if walk is None:
+            walk = _first_page(session, name, config)
+            _continue(session, name, config, walk, needed)
+        return copy.deepcopy(_window(walk["result"], limit, offset, process_number))
+    except BaseException:
+        walk = None
+        raise
     finally:
+        if session is not None:
+            _remember(session, name, walk)
         if owned_session and session is not None:
             session.close()
+
+
+def _continue(session, name, config, walk, needed):
+    if config.kz:
+        walk["result"] = kz.read_push(session, name, needed=needed, start=walk["result"])
+    else:
+        _next_pages(session, walk, needed)
+
+
+def _first_page(session, name, config):
+    """The registry's first page as a walk: its ``result`` and where the datascroller turns next (``resume``)."""
+    if config.kz:
+        return {"result": kz.read_push(session, name, needed=1), "resume": None}
+    panel_url = _portal_url(name, f"{config.root}{PANEL_SUFFIX}")
+    push_url = _portal_url(name, f"{config.root}{PUSH_SUFFIX}")
+    push = session.get(
+        push_url,
+        headers={"Referer": panel_url},
+        allow_redirects=False,
+        timeout=PUSH_TIMEOUT,
+        impersonate=IMPERSONATE,
+    )
+    push_url_result = getattr(push, "url", push_url)
+    if push.status_code == 302:
+        _require_permission(session, config, push, push_url)
+    if push.status_code != 200:
+        raise RuntimeError(f"Push list returned HTTP {push.status_code}")
+    _safe_url(push_url_result, host=config.host, path_exact=f"{config.root}Push/listView.seam")
+    html = response_html(push)
+    items = parse_push_items(html)
+    pagination = parse_push_page(html, len(items), base_url=push_url)
+    resume, found = None, _scroller(html)
+    if pagination["has_next_page"]:
+        # The datascroller shows at most 10 page buttons (TJMG: "1 … 10" for 23 pages): unknown until read.
+        pagination["total_pages"] = None
+        if found:
+            form_id, scroller = found
+            fields = jsf.form_fields(html, form_id)
+            fields["javax.faces.ViewState"] = jsf.view_state(html, "PJe Push list")
+            page_url = _portal_url(config.key, f"{config.root}Push/listView.seam")
+            resume = {"url": page_url, "fields": fields, "scroller": scroller, "page": pagination["current_page"] or 1}
+    _, related = _registry(html)
+    result = {
+        "success": True,
+        "portal": name,
+        "push_url": _safe_url(push_url, host=config.host, path_exact=f"{config.root}Push/listView.seam"),
+        "pagination": pagination,
+        **pagination,
+        "rows_returned": len(items),
+        "items": items,
+        # Push stores watched processes; movement text arrives in the email.
+        "content_note": "This page lists watched processes, not the individual movement email text.",
+        **({"related_note": RELATED_NOTE} if related else {}),
+    }
+    return {"result": result, "resume": resume}
 
 
 def main():

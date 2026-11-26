@@ -471,6 +471,18 @@ def test_push_returns_a_window_and_stops_paging_when_it_has_enough():
     assert (result["total"], result["hasMore"], result["offset"]) == (430, False, 400)
 
 
+def test_a_push_walk_by_offset_reads_each_page_once():
+    from jurisync.connectors.pje import push
+
+    session = Session(push=push_pages(430))
+    windows = [push.read_push("trt7-1g", session=session, limit=50, offset=offset) for offset in range(0, 430, 50)]
+    assert push_calls(session) == list(range(1, 10))
+    assert [w["items"][0]["process_id"] for w in windows] == list(range(1, 430, 50))
+    assert [w["hasMore"] for w in windows] == [True] * 8 + [False]
+    found = push.read_push("trt7-1g", session=session, process_number="0000101-00.2026.5.07.0001")
+    assert (push_calls(session), found["total"]) == (list(range(1, 10)), 1)
+
+
 def test_push_process_filter_reads_the_whole_registry():
     from jurisync.connectors.pje import push
 
