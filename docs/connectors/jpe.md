@@ -58,7 +58,7 @@ mensagem do SSO (`credential_failure`).
 | Ferramenta | Caminho no portal |
 |---|---|
 | `jpe_get_counters()` | página inicial: "Total de Comunicações" (Pendentes de Leitura / de Manifestação) e "Total de Processos" (Ativos / Arquivados / Não protocolizados × Polo Ativo / Polo Passivo); painéis recolhidos são abertos pelo próprio cabeçalho |
-| `jpe_list_communications(status)` | menu Comunicações > Pendentes de Leitura / Pendentes de Manifestação / Lidas / Manifestadas; grade "Processo CNJ, Processo TJ, Classe, Envio, Órgão Julgador, Destinatário, Urgente" e "N resultado(s)" |
+| `jpe_list_intimacoes(status)` | menu Comunicações > Pendentes de Leitura / Pendentes de Manifestação / Lidas / Manifestadas; grade "Processo CNJ, Processo TJ, Classe, Envio, Órgão Julgador, Destinatário, Urgente" e "N resultado(s)" |
 | `jpe_list_processes(query)` | menu Consulta, a lista como ela abre (processos ativos em que a conta é representante, OAB já preenchida) |
 | `jpe_get_process(process_number, include_documents)` | linha da Consulta → botão de visualizar → janela "Dados Processo" (abas Dados de Origem, Dados Básicos, Partes, Petições e Documentos, Andamentos) |
 | `jpe_read_documents(process_number, document_ids, acknowledgeCiencia)` | aba Petições e Documentos → botão de baixar de cada linha |

@@ -46,7 +46,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from jurisync import registry
-from jurisync.core import calls, credentials, errors
+from jurisync.core import calls, credentials, errors, names
 from jurisync.core.mcp import PORTAL_HELP, sanitize_diagnostics, with_portal_note
 from jurisync.core.session_pool import REASONS
 from jurisync.hosted import access
@@ -168,6 +168,7 @@ class Office(MCPServer):
                 self.owner[tool.name] = connector
 
     def _tool_input_schema(self, name):
+        name = names.canonical(name)
         connector = self.owner.get(name)
         return None if connector is None else self.servers[connector]._tool_input_schema(name)
 
@@ -195,6 +196,7 @@ class Office(MCPServer):
             return await self._call_tool(name, arguments, context)
 
     async def _call_tool(self, name, arguments, context):
+        name = names.canonical(name)
         connector = self.owner.get(name)
         if connector is None:
             raise ToolError(f"Unknown tool: {name}")

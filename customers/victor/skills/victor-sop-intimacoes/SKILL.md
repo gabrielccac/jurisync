@@ -49,7 +49,7 @@ dados do cliente estão em `tarefas.md` e `fora-do-mapa.md`.
 
 ## Fluxo por comunicação
 
-0. **Consulta DJEN**: `djen_search_communications` por OAB/UF do perfil
+0. **Consulta DJEN**: `djen_search_comunicacoes` por OAB/UF do perfil
    (`14663/PB`, `42543/PE`, `48647/PE`), tribunal e janela explícitos. Paginar até
    `count`, deduplicar por `id`. A ferramenta é só leitura.
 1. **Escopo e direção** → `references/classificacao.md` §1–§2.
@@ -75,8 +75,8 @@ dados do cliente estão em `tarefas.md` e `fora-do-mapa.md`.
 Os parâmetros de cada ferramenta estão na descrição do próprio MCP; aqui ficam só o papel
 de cada uma e as armadilhas que mudam a decisão.
 
-- **DJEN** (primário, leitura): `djen_search_communications` (use `compact=true` e
-  `textLimit`: uma página completa passa de 270 mil caracteres), `djen_get_certidao_text`
+- **DJEN** (primário, leitura): `djen_search_comunicacoes` (use `compact=true` e
+  `textLimit`: uma página completa passa de 270 mil caracteres), `djen_read_certidao`
   (`extractionStatus=ocr_needed` → peça OCR), `djen_calculate_deadline` (a data do
   documento nos autos não substitui `data_disponibilizacao`).
 - **PJe** (secundário, leitura, portal `trf5-1g` ou `trf5-2g` conforme o `portal` da
@@ -85,11 +85,11 @@ de cada uma e as armadilhas que mudam a decisão.
   `pje_read_expediente_ato` (recusa expedientes com ciência pendente) e
   `pje_read_documents`. A certidão de intimação volta com `expedientes` (prazo por
   destinatário); `save=true` grava o original na pasta compartilhada para anexar.
-- **ADVBOX** (leitura): `advbox_list_lawsuits` (busca por CNJ); `advbox_lawsuit_report`
+- **ADVBOX** (leitura): `advbox_list_lawsuits` (busca por CNJ); `advbox_get_lawsuit_report`
   com `taskSearch` acha o ID DJEN no histórico, concluídas incluídas (limite os
   relatórios com `maxTasks`, `maxNotices`, `maxTextChars`); `advbox_search_tasks` (texto, como o número do processo) vê
-  tarefas **pendentes**; `advbox_list_publications` mostra as intimações que o ADVBOX
-  recebeu e se já foram tratadas (o texto vem de `advbox_activity_details`).
+  tarefas **pendentes**; `advbox_list_publicacoes` mostra as intimações que o ADVBOX
+  recebeu e se já foram tratadas (o texto vem de `advbox_get_activity`).
 - **ADVBOX** (escrita, gate `ADVBOX_ALLOW_WRITES=true`): `advbox_create_task` (rode antes
   com `dryRun=true`), `advbox_update_task` (só tarefa **pendente**; o ADVBOX **substitui**
   a tarefa e devolve um `postId` NOVO), `advbox_complete_task`, `advbox_delete_task`

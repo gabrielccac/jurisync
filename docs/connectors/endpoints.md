@@ -214,8 +214,8 @@ Authentication is session cookies obtained through username/password + TOTP.
 | GET /pje/Painel/painel_usuario/advogado.seam | Imported notification exploration |
 | GET /pje/Push/listView.seam?iframe=true | Watched-process registry; not publication text |
 
-The PJe MCP reads the lawyer panel with `pje_list_expediente_counters` (buckets, and with
-`regions` the regions and inboxes under each) and `pje_list_inbox` (the rows of an inbox, all
+The PJe MCP reads the lawyer panel with `pje_get_counters` (buckets, and with
+`regions` the regions and inboxes under each) and `pje_list_intimacoes` (the rows of an inbox, all
 pages, with the inbox's own search). They only open buckets, expand regions, open inboxes, turn
 pages and press "Pesquisar"; `check_control` in `pje/inbox.py` refuses every other control
 (tomar ciência, responder, select, distribute). The flow is in
@@ -253,7 +253,7 @@ OTP profiles are independently configured as `JFSC_*` and `JFRS_*` variables (le
 
 | MCP tool | Python command | Purpose and limits |
 | --- | --- | --- |
-| `eproc_list_notices` | `queue --portal jfsc\|jfrs --queue open_deadlines\|pending` | Read one observed citation/intimation queue; no mark-read or export action. |
+| `eproc_list_intimacoes` | `queue --portal jfsc\|jfrs --queue open_deadlines\|pending` | Read one observed citation/intimation queue; no mark-read or export action. |
 | `eproc_get_process` | `process --portal jfsc\|jfrs --process-number ... --scope latest\|page` | Read process metadata, parties, events, pagination and document inventory. |
 | `eproc_get_process` with `documentIds` | Same command plus repeated `--document-id` | Read up to five IDs already present in the fresh inventory; HTML/PDF extraction is bounded and reports unresolved states. |
 

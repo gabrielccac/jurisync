@@ -72,7 +72,7 @@ stay for older setups.
   (`<filings>/tenants/<id>`) are per tenant.
 - MCP sessions are bound to the token's principal by the SDK, so one office cannot resume another's session.
 - The vault decrypts per request; the A1 certificate is never written to disk on the server.
-- The PJe draft tools (`pje_draft_write`, `_delete`, `_status`, `_inspect`) are removed from the hosted server, on
+- The PJe draft tools (`pje_fill_draft`, `_delete`, `_status`, `_inspect`) are removed from the hosted server, on
   every URL.
 - Server-wide settings (`JURISYNC_CAPTCHA_API_KEY`, `JURISYNC_CAPTCHA_MODEL`) are read from the process environment
   or the service's systemd credentials (`credentials.machine`), also inside an office's scope; an office's vault

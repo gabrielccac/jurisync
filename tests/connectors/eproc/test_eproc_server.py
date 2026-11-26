@@ -35,7 +35,7 @@ class EprocServerTest(unittest.TestCase):
         async def schema():
             async with Client(server.create_server(["trf4-1g-sc"])) as client:
                 tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-            return tools["eproc_list_notices"].input_schema["properties"]["portal"]
+            return tools["eproc_list_intimacoes"].input_schema["properties"]["portal"]
 
         portal = asyncio.run(schema())
         self.assertEqual(portal.get("enum", [portal.get("const")]), ["trf4-1g-sc"])
@@ -81,7 +81,7 @@ class EprocServerTest(unittest.TestCase):
             mock.patch.object(server.sessions, "_login", side_effect=login),
             mock.patch.object(server, "list_notices", side_effect=lambda queue, **context: next(answers)),
         ):
-            result = self.call(srv, "eproc_list_notices", {"portal": "trf4-1g-sc", "queue": "pending"})
+            result = self.call(srv, "eproc_list_intimacoes", {"portal": "trf4-1g-sc", "queue": "pending"})
         self.assertFalse(result.is_error)
         self.assertEqual(logins, ["trf4-1g-sc", "trf4-1g-sc"])
         server.sessions.close()
@@ -89,7 +89,9 @@ class EprocServerTest(unittest.TestCase):
     def test_unconfigured_portal_is_rejected_before_login(self):
         with mock.patch.object(server, "authenticate") as login:
             result = self.call(
-                server.create_server(["trf4-1g-sc"]), "eproc_list_notices", {"portal": "trf4-1g-rs", "queue": "pending"}
+                server.create_server(["trf4-1g-sc"]),
+                "eproc_list_intimacoes",
+                {"portal": "trf4-1g-rs", "queue": "pending"},
             )
         self.assertTrue(result.is_error)
         login.assert_not_called()
@@ -110,7 +112,7 @@ class EprocServerTest(unittest.TestCase):
             mock.patch.object(server, "list_notices", side_effect=notices),
         ):
             for portal in ("trf4-1g-sc", "trf4-1g-rs", "trf4-1g-sc"):
-                result = self.call(srv, "eproc_list_notices", {"portal": portal, "queue": "pending"})
+                result = self.call(srv, "eproc_list_intimacoes", {"portal": portal, "queue": "pending"})
                 self.assertEqual(result.structured_content["portal"], portal)
         self.assertEqual(logins, ["trf4-1g-sc", "trf4-1g-rs"])
         server.sessions.close()
@@ -124,7 +126,7 @@ class EprocServerTest(unittest.TestCase):
         # It can store a file and, by opening a document, register a ciência.
         self.assertEqual(
             {name: tool.annotations.read_only_hint for name, tool in listed.items()},
-            {"eproc_list_notices": True, "eproc_list_processes": True, "eproc_get_process": False},
+            {"eproc_list_intimacoes": True, "eproc_list_processes": True, "eproc_get_process": False},
         )
         tool = listed["eproc_get_process"]
         self.assertTrue(tool.annotations.destructive_hint)  # a ciência starts a deadline: the same rule in every portal
@@ -211,7 +213,7 @@ class EprocServerTest(unittest.TestCase):
         self.assertIn(WebDriverException, errors._network_errors())
         srv = server.create_server(["trf4-1g-sc"])
         with mock.patch.object(server.sessions, "_login", side_effect=WebDriverException("chrome crashed")):
-            result = self.call(srv, "eproc_list_notices", {"portal": "trf4-1g-sc", "queue": "pending"})
+            result = self.call(srv, "eproc_list_intimacoes", {"portal": "trf4-1g-sc", "queue": "pending"})
         self.assertTrue(result.is_error)
         self.assertIn("chrome crashed", result.content[0].text)
 

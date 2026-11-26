@@ -91,12 +91,12 @@ def create_server(keys=None):
             )
 
     @server.tool(
-        name="eproc_list_notices",
+        name="eproc_list_intimacoes",
         title="List Eproc notices",
         description="Read one citation/intimation queue of an Eproc portal. Read-only.",
         annotations=READ_ONLY,
     )
-    def eproc_list_notices(
+    def eproc_list_intimacoes(
         portal: Portal,
         queue: Annotated[
             Queue,

@@ -25,7 +25,7 @@ from jurisync.connectors.advbox.session import (
     pending_verification,
     require_writes,
 )
-from jurisync.core import calls
+from jurisync.core import calls, names
 from jurisync.core.documents_dir import resolve_saved_document
 from jurisync.core.errors import InputError
 from jurisync.core.mcp import (
@@ -132,6 +132,7 @@ class AdvboxServer(JurisyncServer):
     call with the new session. Writes are never repeated: the agent calls them again."""
 
     async def call_tool(self, name, arguments, context=None):
+        name = names.canonical(name)
         with calls.bound():
             return await self._call_with_verification(name, arguments, context)
 
@@ -225,7 +226,7 @@ StageId = Annotated[
     str,
     Field(
         pattern=r"^\d+$",
-        description="Stage id (Fase) from advbox_task_filters stages, e.g. '3'.",
+        description="Stage id (Fase) from advbox_list_task_filters stages, e.g. '3'.",
     ),
 ]
 SubStageId = Annotated[
@@ -251,7 +252,7 @@ def create_server():
     server = AdvboxServer("advbox")
 
     @server.tool(
-        name="advbox_ensure_session",
+        name="advbox_get_session",
         title="Ensure ADVBOX session",
         description="Authenticate headlessly with the configured trusted device. Read-only.",
         annotations=READ_ONLY,
@@ -336,7 +337,7 @@ def create_server():
     @server.tool(
         name="advbox_search_tasks",
         title="Search ADVBOX tasks",
-        description="Search tasks (Tarefas) by text and/or filters (ids from advbox_task_filters). search matches title, comment, customer, process number (CNJ, NB, atoms like 'ABRIR INTIMAÇÃO'). Without responsible, a text search covers every member, a listing without text only you. Completed tasks need dateFrom and dateTo. Filters matching thousands of tasks are refused. Returns compact tasks (important/urgent/viewed only for your own), total and hasMore. Read-only.",
+        description="Search tasks (Tarefas) by text and/or filters (ids from advbox_list_task_filters). search matches title, comment, customer, process number (CNJ, NB, atoms like 'ABRIR INTIMAÇÃO'). Without responsible, a text search covers every member, a listing without text only you. Completed tasks need dateFrom and dateTo. Filters matching thousands of tasks are refused. Returns compact tasks (important/urgent/viewed only for your own), total and hasMore. Read-only.",
         annotations=READ_ONLY,
     )
     def search_tasks(
@@ -387,7 +388,7 @@ def create_server():
         )
 
     @server.tool(
-        name="advbox_task_filters",
+        name="advbox_list_task_filters",
         title="List ADVBOX task filter options",
         description="Filter options ({id, label}) for advbox_search_tasks: taskTypes, stages, groups, lawsuitTypes, situations, priorities. Read-only.",
         annotations=READ_ONLY,
@@ -396,9 +397,9 @@ def create_server():
         return call(client.task_filters)
 
     @server.tool(
-        name="advbox_list_publications",
+        name="advbox_list_publicacoes",
         title="List ADVBOX publications (intimações)",
-        description="Intimações received by the office, with postId and status. Give period or dateFrom+dateTo; page while hasMore. Text: advbox_activity_details(postId). Fails if the account lacks the Intimações module. Read-only.",
+        description="Intimações received by the office, with postId and status. Give period or dateFrom+dateTo; page while hasMore. Text: advbox_get_activity(postId). Fails if the account lacks the Intimações module. Read-only.",
         annotations=READ_ONLY,
     )
     def list_publications(
@@ -457,14 +458,14 @@ def create_server():
     @server.tool(
         name="advbox_list_workflows",
         title="List ADVBOX task templates",
-        description="Workflow templates (task models); steps via advbox_workflow_tasks. Read-only.",
+        description="Workflow templates (task models); steps via advbox_list_workflow_tasks. Read-only.",
         annotations=READ_ONLY,
     )
     def list_workflows() -> dict[str, Any]:
         return {"result": call(client.list_workflows)}
 
     @server.tool(
-        name="advbox_workflow_tasks",
+        name="advbox_list_workflow_tasks",
         title="Get ADVBOX workflow steps",
         description="Ordered steps of a workflow template (task ids, default responsibles) for advbox_create_task. Read-only.",
         annotations=READ_ONLY,
@@ -473,7 +474,7 @@ def create_server():
         return call(lambda: client.workflow_steps(workflowId))
 
     @server.tool(
-        name="advbox_activity_details",
+        name="advbox_get_activity",
         title="Get ADVBOX activity details",
         description="Details of one activity (Atividade) by postId. Does not mark it viewed. Read-only.",
         annotations=READ_ONLY,
@@ -482,7 +483,7 @@ def create_server():
         return call(lambda: client.activity_details(postId))
 
     @server.tool(
-        name="advbox_lawsuit_report",
+        name="advbox_get_lawsuit_report",
         title="Get ADVBOX lawsuit report",
         description="Lawsuit report: phase, court, action type, responsible, intimações with full text, task/movement history. To fit output limits use taskSearch (e.g. a DJEN id, to check whether it was handled), maxTasks, maxNotices, maxTextChars; the compact block reports totals before cutting. Read-only.",
         annotations=READ_ONLY,
@@ -655,7 +656,7 @@ def create_server():
             str,
             Field(
                 pattern=r"^\d+$",
-                description="Task type id (advbox_workflow_tasks).",
+                description="Task type id (advbox_list_workflow_tasks).",
             ),
         ],
         guests: Annotated[
@@ -703,7 +704,7 @@ def create_server():
             str,
             Field(
                 pattern=r"^\d*$",
-                description="Stage to move the lawsuit to after creation (advbox_task_filters stages).",
+                description="Stage to move the lawsuit to after creation (advbox_list_task_filters stages).",
             ),
         ] = "",
         subStageId: SubStageId = "",
@@ -859,7 +860,7 @@ def create_server():
     @server.tool(
         name="advbox_update_lawsuit_stage",
         title="Change ADVBOX lawsuit stage",
-        description="Move a lawsuit to another stage (Fase; ids from advbox_task_filters stages) and sub-stage (Etapa); nothing else changes. Unknown ids are refused before sending. Returns previous and new stage: call with previous to undo. Confirmed by re-reading the lawsuit, otherwise fails saying NOT confirmed. dryRun also returns the stage's subStageOptions. Needs ADVBOX_ALLOW_WRITES.",
+        description="Move a lawsuit to another stage (Fase; ids from advbox_list_task_filters stages) and sub-stage (Etapa); nothing else changes. Unknown ids are refused before sending. Returns previous and new stage: call with previous to undo. Confirmed by re-reading the lawsuit, otherwise fails saying NOT confirmed. dryRun also returns the stage's subStageOptions. Needs ADVBOX_ALLOW_WRITES.",
         annotations=REPLACE,
     )
     def update_lawsuit_stage(

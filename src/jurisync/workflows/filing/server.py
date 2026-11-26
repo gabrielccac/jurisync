@@ -192,7 +192,7 @@ def create_server():
     @server.tool(
         name="filing_finalize",
         title="Write the filing payload for a prepared run",
-        description="Apply the reviewed choices and write payload.json for pje_draft_write. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition's text. `overrides` maps a file id from the review to {role, type} and nothing else (role is main, supporting or skip; {role: 'skip'} leaves a file out). Omit `facts` to reuse the facts given to prepare. A refusal removes any payload written earlier for this run. Returns a summary of what the draft will contain.",
+        description="Apply the reviewed choices and write payload.json for pje_fill_draft. Refuses unless every file is classified, exactly one main petition remains, and the claim value and author CPF appear in the petition's text. `overrides` maps a file id from the review to {role, type} and nothing else (role is main, supporting or skip; {role: 'skip'} leaves a file out). Omit `facts` to reuse the facts given to prepare. A refusal removes any payload written earlier for this run. Returns a summary of what the draft will contain.",
         annotations=SAVES_FILE,
     )
     def finalize(
@@ -229,7 +229,7 @@ def create_server():
             "runId": runId,
             "ready": bool(result.get("ready")),
             "payload": _payload_view(payload),
-            "next": "Show this to the user. When they approve, call pje_draft_write with stage create-fill, then follow it with pje_draft_status.",
+            "next": "Show this to the user. When they approve, call pje_fill_draft with stage create-fill, then follow it with pje_get_draft_status.",
         }
 
     @server.tool(

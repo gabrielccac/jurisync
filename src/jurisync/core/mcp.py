@@ -16,7 +16,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import TextContent, ToolAnnotations
 
-from jurisync.core import calls, errors, responses
+from jurisync.core import calls, errors, names, responses
 
 # Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
 # They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
@@ -233,13 +233,18 @@ def tool_error(label, error):
 
 class JurisyncServer(MCPServer):
     """The MCP server every connector builds in its ``create_server``: each call gets an id (the ``ref`` of its
-    errors), and a crash reaches the agent as the generic ``[unexpected]`` error with that ref, never its text."""
+    errors), a crash reaches the agent as the generic ``[unexpected]`` error with that ref, never its text, and an
+    old tool name (``names.ALIASES``) calls the tool under its current one."""
 
     def __init__(self, name, **options):
         options.setdefault("version", "1.0.0")
         super().__init__(name, **options)
 
+    def _tool_input_schema(self, name):
+        return super()._tool_input_schema(names.canonical(name))
+
     async def call_tool(self, name, arguments, context=None):
+        name = names.canonical(name)
         with calls.bound():
             try:
                 result = await super().call_tool(name, arguments, context)

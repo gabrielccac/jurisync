@@ -65,10 +65,10 @@ CONNECTORS = {
             # so does the draft search of the same TRF5 filing workflow.
             local_only_tools=frozenset(
                 {
-                    "pje_draft_write",
-                    "pje_draft_delete",
-                    "pje_draft_status",
-                    "pje_draft_inspect",
+                    "pje_fill_draft",
+                    "pje_delete_draft",
+                    "pje_get_draft_status",
+                    "pje_get_draft",
                     "pje_search_pending_drafts",
                 }
             ),
@@ -118,7 +118,7 @@ CONNECTORS = {
                     "juridiq_delete_tag",
                     "juridiq_delete_task",
                     "juridiq_delete_task_template",
-                    "juridiq_mark_publications_read",
+                    "juridiq_mark_publicacoes_read",
                     "juridiq_update_lawsuit",
                     "juridiq_update_tag",
                     "juridiq_update_task",

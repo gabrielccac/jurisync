@@ -95,7 +95,7 @@ def _fill(client, checkpoint, checkpoint_path, payload, stage, verify_all):
         result = client.fill_draft(checkpoint, payload, timeline, verify_all=verify_all, save=save)
     except BaseException as error:
         failed = isinstance(error, Exception)
-        # Read back by pje_draft_status: no URLs, local paths or session tokens in the recorded text.
+        # Read back by pje_get_draft_status: no URLs, local paths or session tokens in the recorded text.
         message = sanitize_diagnostics(f"{type(error).__name__}: {error}")[:300]
         checkpoint.update(status="failed" if failed else "interrupted", error=message, updatedAt=now())
         save(checkpoint)

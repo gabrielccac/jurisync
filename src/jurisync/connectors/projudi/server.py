@@ -46,7 +46,7 @@ TJAM, TJPR = "tjam-1g", "tjpr-projudi-1g"
 LISTS = ("tjgo-1g", TJPR, TJAM)
 CIENCIA_GUARD = (
     "Refused, nothing opened, while a communication of the process may await ciência (see "
-    "projudi_list_intimations): opening it may register the party's ciência and start the deadline. Also refused "
+    "projudi_list_intimacoes): opening it may register the party's ciência and start the deadline. Also refused "
     f"when those lists could not be read in full ('ciência not checked'). {ciencia.AUTHORIZATION}. "
     "ciencia.estado: 'nenhuma' (nothing pending "
     "opened), 'pendente' (refused; intimacoes lists what awaits), 'dada' (ciência may be registered) or "
@@ -293,7 +293,7 @@ def create_server(keys=None):
             return given
 
         @server.tool(
-            name="projudi_list_intimations",
+            name="projudi_list_intimacoes",
             title="List Projudi intimações (TJGO, TJAM, TJPR)",
             description=(
                 "The lawyer desk's intimações/citações, none opened. TJGO: 'diario' (Diário intimações with dates "
@@ -306,7 +306,7 @@ def create_server(keys=None):
             ),
             annotations=READ_ONLY,
         )
-        def projudi_list_intimations(
+        def projudi_list_intimacoes(
             portal: Annotated[Listed, list_portal] = listed[0],
             lists: Annotated[
                 list[Literal[tuple(tjam.INTIMATION_LISTS)]] | None,

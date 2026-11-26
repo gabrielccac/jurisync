@@ -642,5 +642,5 @@ class GuardedServerTest(unittest.TestCase):
     def test_lists_are_tool_errors_on_a_generation_without_them(self):
         with mock.patch.object(base.Adapter, "list_processes", side_effect=NotImplementedError("no list")):
             self.assertTrue(self.call("projudi_list_processes", {}).is_error)
-        listed = self.call("projudi_list_intimations", {"portal": "tjam-1g"})
+        listed = self.call("projudi_list_intimacoes", {"portal": "tjam-1g"})
         self.assertTrue(listed.is_error)

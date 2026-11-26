@@ -78,9 +78,9 @@ class DraftWriteGateTest(PjeServerCase):
 
     def test_every_write_stage_and_the_delete_are_refused_without_the_flag(self):
         calls = [
-            ("pje_draft_write", {"runId": "run1", "stage": stage}) for stage in typing.get_args(server.DraftWriteStage)
+            ("pje_fill_draft", {"runId": "run1", "stage": stage}) for stage in typing.get_args(server.DraftWriteStage)
         ]
-        calls.append(("pje_draft_delete", {"draftId": "123", "authorName": "EXAMPLE"}))
+        calls.append(("pje_delete_draft", {"draftId": "123", "authorName": "EXAMPLE"}))
         jobs = dict(server.fill_jobs)
         # Locally the flag is unset; hosted, an office without it does not inherit the server's own "true".
         for server_flag, office in (
@@ -109,7 +109,7 @@ class DraftWriteGateTest(PjeServerCase):
         self.run_stage.reset_mock()
         self.run_stage.side_effect = SessionExpired("expired mid-write")
         with mock.patch.dict(os.environ, {"PJE_ALLOW_DRAFT_WRITES": "true"}):
-            text, error = call("pje_draft_delete", {"draftId": "123", "authorName": "EXAMPLE"})
+            text, error = call("pje_delete_draft", {"draftId": "123", "authorName": "EXAMPLE"})
         self.assertTrue(error, text)
         self.assertEqual(self.run_stage.call_count, 1)
         self.assertEqual(self.run_stage.call_args.args[0], "delete-draft")
@@ -222,7 +222,7 @@ class WrongCourtBeforeLoginTest(PjeServerCase):
         ("pje_read_documents", {"processNumber": NUMBER, "portal": "tjba-2g", "documentIds": ["1"]}),
         ("pje_read_expediente_ato", {"processNumber": NUMBER, "portal": "trt20-1g", "expedienteId": "9"}),
         ("pje_list_watched_processes", {"processNumber": NUMBER, "portal": "trf1-1g"}),
-        ("pje_list_inbox", {"processNumber": NUMBER, "portal": "trf1-1g"}),
+        ("pje_list_intimacoes", {"processNumber": NUMBER, "portal": "trf1-1g"}),
         ("pje_get_process", {"processNumber": "123", "portal": "trf5-1g"}),
     ]
 

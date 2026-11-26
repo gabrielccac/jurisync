@@ -148,7 +148,7 @@ def portal_servers():
     def get_process(number: str, portal: Literal["tjgo-1g", "tjam-1g"] = "tjgo-1g") -> dict:
         return {"portal": portal}
 
-    @projudi.tool(name="projudi_list_intimations")
+    @projudi.tool(name="projudi_list_intimacoes")
     def intimations(portal: Literal["tjgo-1g"] = "tjgo-1g") -> dict:
         return {"portal": portal}
 
@@ -206,11 +206,11 @@ class PortalChoicesTest(OfficeCase):
             office_a["projudi_get_process"]["description"].endswith("\nPortals: tjam-1g (projudi.tjam.jus.br).")
         )
         self.assertEqual(office_a["projudi_get_process"]["inputSchema"]["required"], ["number", "portal"])
-        self.assertEqual(set(office_b), {"projudi_get_process", "projudi_list_intimations", "stj_get_process"})
+        self.assertEqual(set(office_b), {"projudi_get_process", "projudi_list_intimacoes", "stj_get_process"})
         self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["properties"]["portal"]["enum"],
                          ["tjgo-1g", "tjam-1g"])  # fmt: skip
         self.assertEqual(office_b["projudi_get_process"]["inputSchema"]["required"], ["number"])
-        self.assertNotIn("Portals: ", office_b["projudi_list_intimations"]["description"] or "")  # once per system
+        self.assertNotIn("Portals: ", office_b["projudi_list_intimacoes"]["description"] or "")  # once per system
         shared = self.servers["projudi"]._tool_manager.get_tool("projudi_get_process")
         self.assertEqual(shared.parameters["properties"]["portal"]["enum"], ["tjgo-1g", "tjam-1g"])  # never in place
         self.assertNotIn("Portals: ", shared.description or "")
@@ -221,7 +221,7 @@ class PortalChoicesTest(OfficeCase):
             self.assertEqual(metadata["resource"].rstrip("/"), f"{BASE}/tribunais/mcp")
             token = self.token(client, "user@office-b.test", resource=f"{BASE}/tribunais/mcp")
             courts = self.tools(self.mcp(client, token, "/tribunais/mcp"))
-            self.assertEqual(set(courts), {"projudi_get_process", "projudi_list_intimations", "stj_get_process"})
+            self.assertEqual(set(courts), {"projudi_get_process", "projudi_list_intimacoes", "stj_get_process"})
             self.assertEqual(ping(client, token, "/mcp").status_code, 401)
             self.assertEqual(
                 ping(client, self.token(client, resource=f"{BASE}/mcp"), "/tribunais/mcp").status_code, 401
@@ -364,11 +364,11 @@ class CallsCommandTest(unittest.TestCase):
                 cli.main(["tenant", "add", "office-a", "--name", "A"], say=said.append)
                 with cli.open_store() as store:
                     store.log_call("office-a", "u@a.test", "pje", "pje_get_process", "", 812)
-                    store.log_call("office-a", "u@a.test", "pje", "pje_list_inbox", "LoginRejected", 40)
+                    store.log_call("office-a", "u@a.test", "pje", "pje_list_intimacoes", "LoginRejected", 40)
                 said.clear()
                 cli.main(["calls", "office-a", "--limit", "1"], say=said.append)
         self.assertEqual(len(said), 1)
-        self.assertIn("u@a.test  pje_list_inbox  erro LoginRejected  40 ms", said[0])
+        self.assertIn("u@a.test  pje_list_intimacoes  erro LoginRejected  40 ms", said[0])
 
 
 class PooledCheckTest(unittest.TestCase):

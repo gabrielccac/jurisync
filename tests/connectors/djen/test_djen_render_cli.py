@@ -302,7 +302,7 @@ class McpFormats(unittest.TestCase):
     def search(self, **extra):
         page = {"count": 7, "items": PAGE}
         with mock.patch.object(djen_server, "search_page", return_value=page):
-            return tool("djen_search_communications")(
+            return tool("djen_search_comunicacoes")(
                 inicio=date(2026, 10, 28), fim=date(2026, 10, 28), numeroOab="14663", ufOab="PB", **extra
             )
 

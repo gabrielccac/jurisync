@@ -37,7 +37,7 @@ def as_text(items, declared, pages, complete, formato, text_limit, merged=0):
     check = render.checks(int(declared or 0), items, removed + merged, pages, complete)
     limit = text_limit or 140
     body = (
-        render.summary(items, min(limit, 110), hint="djen_get_certidao_text")
+        render.summary(items, min(limit, 110), hint="djen_read_certidao")
         if formato == "resumo"
         else render.lines(items, limit)
     )
@@ -131,9 +131,9 @@ def create_server():
     server = JurisyncServer("djen")
 
     @server.tool(
-        name="djen_search_communications",
+        name="djen_search_comunicacoes",
         title="Search DJEN communications",
-        description="One page of public DJEN communications for a date window and at least one key (OAB + UF, nomeAdvogado, nomeParte, texto, numeroProcesso). Item portal = issuing system key ('trf5-1g'); when inferred from the CNJ number it can list several ('trf5-1g/trf5-2g'). compact/textLimit shrink big pages (texto_chars = original length; full text: djen_get_certidao_text). No authentication or poll-state mutation.",
+        description="One page of public DJEN communications for a date window and at least one key (OAB + UF, nomeAdvogado, nomeParte, texto, numeroProcesso). Item portal = issuing system key ('trf5-1g'); when inferred from the CNJ number it can list several ('trf5-1g/trf5-2g'). compact/textLimit shrink big pages (texto_chars = original length; full text: djen_read_certidao). No authentication or poll-state mutation.",
         annotations=READ_ONLY,
     )
     def search_communications(
@@ -239,7 +239,7 @@ def create_server():
         return result
 
     @server.tool(
-        name="djen_get_certidao_text",
+        name="djen_read_certidao",
         title="Read DJEN certidão text",
         description="Text of a public DJEN certidão PDF by hash, with extractionStatus (scanned: ocr_needed) and textTruncated.",
         annotations=READ_ONLY,
@@ -249,7 +249,7 @@ def create_server():
             str,
             Field(
                 pattern=r"^[A-Za-z0-9]{1,128}$",
-                description="Item 'hash' from djen_search_communications.",
+                description="Item 'hash' from djen_search_comunicacoes.",
             ),
         ],
         textLimit: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
@@ -312,7 +312,7 @@ def create_server():
     @server.tool(
         name="djen_search_saved",
         title="Run the office's saved DJEN searches",
-        description="Run all saved DJEN searches for one window (max 31 days) and page, merged; items as in djen_search_communications plus savedSearch. Repeat with pagina+1 while any search has more. A failed search reports error and complete=false (its items are missing). Read-only.",
+        description="Run all saved DJEN searches for one window (max 31 days) and page, merged; items as in djen_search_comunicacoes plus savedSearch. Repeat with pagina+1 while any search has more. A failed search reports error and complete=false (its items are missing). Read-only.",
         annotations=READ_ONLY,
     )
     def search_saved(
@@ -405,7 +405,7 @@ def create_server():
                 )
                 limit = textLimit if textLimit != 1500 else 140
                 body = (
-                    render.summary(items, min(limit, 110), hint="djen_get_certidao_text")
+                    render.summary(items, min(limit, 110), hint="djen_read_certidao")
                     if formato == "resumo"
                     else render.lines(items, limit)
                 )

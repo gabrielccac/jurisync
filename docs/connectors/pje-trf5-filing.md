@@ -35,8 +35,8 @@ checkpoint: run ID, step, document or party, status, seconds, and PJe requests (
 
 ## Codex desktop chat and MCP
 
-The PJe MCP exposes `pje_draft_inspect` for current classification choices,
-subject choices, and **Não Protocolados** checks. `pje_draft_write` exposes the
+The PJe MCP exposes `pje_get_draft` for current classification choices,
+subject choices, and **Não Protocolados** checks. `pje_fill_draft` exposes the
 CLI's create/fill stages and requires `PJE_ALLOW_DRAFT_WRITES=true` in the MCP
 process. Neither tool exposes **Protocolar**.
 `pje_search_pending_drafts` searches the first **Não Protocolados** results
@@ -213,7 +213,7 @@ can be continued from PJe's own state instead of started over.
   can fix: the run stops with `DocumentsNeedReview`, naming each one and what PJe has.
 - **Each document has a state** in the checkpoint (`documentStates`: `verified`, `missing`, `wrongType`, `duplicate`,
   with the attempts made and the last row error).
-- **`pje_draft_status` with `checkPje=true` shows the draft, not just a verdict**: `onDraft` (name and type as PJe lists
+- **`pje_get_draft_status` with `checkPje=true` shows the draft, not just a verdict**: `onDraft` (name and type as PJe lists
   them), `ok`, `missing`, `wrongType` (expected and found), `duplicates` and `unexpected`. `verified` needs `missing`,
   `wrongType` and `duplicates` to be empty (`unexpected` is only reported). `next` says what to do: `resume`, `needsHuman: ...` or nothing.
 - **Continue with `resume`**, not `create-fill` (which would create a second draft). It runs `fill` in the background on

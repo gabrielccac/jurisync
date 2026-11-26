@@ -11,7 +11,7 @@ JURISYNC_CUSTOMER=elisandra uv run python -m jurisync.customers elisandra
 ```
 
 DJEN: `djen-searches.json` holds her search payload (OAB 61216/RS, nomeAdvogado
-"ELISANDRA BECKER", tribunal STJ, meio D); pass it to `djen_search_communications` with a
+"ELISANDRA BECKER", tribunal STJ, meio D); pass it to `djen_search_comunicacoes` with a
 date window. A 03/09 to 03/10/2026 run returned 4 STJ communications for one REsp.
 
 Planned: Tramitação Inteligente (native MCP) and a customer skill for the DJEN intimações

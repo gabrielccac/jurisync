@@ -6,7 +6,7 @@ criação quando o usuário pedir a execução com escrita.
 
 ## Passos por comunicação
 
-Para cada ID DJEN da janela (paginar `djen_search_communications` até `count`,
+Para cada ID DJEN da janela (paginar `djen_search_comunicacoes` até `count`,
 deduplicar por `id`; páginas grandes: use `itens` pequeno ou grave em arquivo):
 
 1. **Escopo e direção** (`classificacao.md` §1–§2). Fora do escopo, ruído, ordem a
@@ -17,7 +17,7 @@ deduplicar por `id`; páginas grandes: use `itens` pequeno ou grave em arquivo):
    ou `PJe: sim` com os IDs lidos. Falha do conector ou documento ilegível =
    `PJe: pendente`, nunca "sem informação".
 4. **Duplicata e estado atual** (`tarefas.md` §6): **liste as tarefas do processo**
-   (`advbox_lawsuit_report` + `advbox_search_tasks`), busque o ID DJEN e compare por ato
+   (`advbox_get_lawsuit_report` + `advbox_search_tasks`), busque o ID DJEN e compare por ato
    mesmo sem o ID. Na coluna "duplicata / estado" informe as tarefas conferidas e, se
    houver cobertura, qual (`postId`, data, responsável). "Não conferido" nunca vale como
    "sem duplicata". Para perícia social, veja se já há instrução/responsável (§8 do POP).

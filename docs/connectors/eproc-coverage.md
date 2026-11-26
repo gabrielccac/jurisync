@@ -6,7 +6,7 @@ connector `src/jurisync/connectors/eproc/` (read-only).
 
 ## Cobertura atual
 
-- Tools: `eproc_list_notices` (filas listadas em `QUEUE_KINDS`),
+- Tools: `eproc_list_intimacoes` (filas listadas em `QUEUE_KINDS`),
   `eproc_list_processes` (Relação de Processos do advogado) e
   `eproc_get_process` (eventos + documentos, até 5 docs, `save` opcional).
 - Ações no allowlist (`READ_ACTIONS`/`AJAX_ACTIONS`): as 2 filas + `painel_adv_listar`,
@@ -111,7 +111,7 @@ Não é stack novo.
 
 ## Encaixe proposto na estrutura
 
-1. Generalizar `eproc_list_notices(queue)` → todos os kinds cross-processo (filas +
+1. Generalizar `eproc_list_intimacoes(queue)` → todos os kinds cross-processo (filas +
    audiências + perícias + preparadas + mensagens + conciliações + relação de processos).
 2. `eproc_get_process` → acrescentar seções por-processo (custas, exames/perícia, audiências,
    quesitos, certidão, árvore de documentos, autos completos).

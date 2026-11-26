@@ -37,7 +37,7 @@ no histórico do ADVBOX (§3, §1), não quem protocolou.
 - `CUMPRIR ATO ORDINATÓRIO` `265427` — prazo conforme a certidão. Responsável: **quem fez
   a petição inicial do processo**, porque o ato ordinatório normalmente chega depois do
   peticionamento e quem peticionou conhece o caso. Para achar:
-  1. `advbox_lawsuit_report` do processo com `taskSearch="PETIÇÃO INICIAL"` (inclui as
+  1. `advbox_get_lawsuit_report` do processo com `taskSearch="PETIÇÃO INICIAL"` (inclui as
      concluídas): o responsável da tarefa `PETIÇÃO INICIAL …` (ex.: `PETIÇÃO INICIAL - PREV
      SM-URBANO`) é o responsável do ato ordinatório. Converta o nome no ID pela lista do §2
      (ou `advbox_list_members`).
@@ -195,7 +195,7 @@ nova seria criada e compare**. O passo é obrigatório, também na prévia (a pr
 resultado da checagem).
 
 1. **Liste as tarefas do processo** (pendentes e concluídas):
-   - `advbox_lawsuit_report` do processo, com `maxTasks` suficiente para cobrir o
+   - `advbox_get_lawsuit_report` do processo, com `maxTasks` suficiente para cobrir o
      histórico desde a data da comunicação (inclui concluídas e as de outros usuários);
    - `advbox_search_tasks` com o número do processo em `search`, para as **pendentes** e seu `postId`.
 2. **Busque o ID DJEN**: `taskSearch="{id DJEN}"` no relatório. Achou: é a mesma
@@ -230,7 +230,7 @@ resultado da checagem).
   listagens da integração.
 - Todo POST: `lawsuits_id`, `tasks_id` (átomo, nunca workflow como tipo), `date`
   DD/MM/YYYY, `hour`, `comments`, `create=1`, `v2=1`. As ferramentas (`advbox_create_task`,
-  `advbox_update_task`, `advbox_search_tasks`, `advbox_list_publications`) recebem as datas
+  `advbox_update_task`, `advbox_search_tasks`, `advbox_list_publicacoes`) recebem as datas
   em AAAA-MM-DD (`2026-10-09`) e as convertem para o ADVBOX. Template: some
   `workflow_id`/`workflow_sequence` (um POST por etapa, encadeado via `sequence`).
 - Anexos: `POST /s3` (stage: `root=posts`, `folder=files/temp/{userId}`) imediatamente

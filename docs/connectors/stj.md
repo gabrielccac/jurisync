@@ -28,11 +28,11 @@ os dados do processo e os documentos. É somente leitura em relação ao STJ.
 | `stj_get_process(process, include_documents)` | `getNumeroRegistroByNumeroUnico` / `getNumeroRegistroBySiglaClasseNumero` → `/processo/{reg}`, `/partesadvogados`, `/faseprocessoext`, `/indiceprocesso` | Aceita CNJ, registro STJ (`2026/0000001-0`) ou classe e número (`AREsp 9000002`). Quando um CNJ tem vários registros, usa o mais recente e lista os outros em `relatedRecords`. Não devolve CPF/CNPJ das partes |
 | `stj_read_documents(process, document_ids)` | `/pecas/{reg}/getPecaAutorizacao?indLocal=P&seq={sequencialPeca}` → `/visualizador/externo/processos/{reg}/peca?autorizacao&token` | 1 a 5 ids, todos do índice recém-lido. A autorização da peça nunca sai do cliente. Devolve o texto via `core.document_text` |
 | `stj_download_document(process, document_id)` | idem | Salva o arquivo em `JURISYNC_DOCUMENTS_DIR` como `STJ_<registro>_<id>.pdf` |
-| `stj_list_publications(oab, page, page_size)` | `/api/advogados/minhasOABs/{cpf}` → `/api/advogados/{OAB}/publicacoes` | DJe próprio do STJ, que é legado (casos antigos) |
+| `stj_list_publicacoes(oab, page, page_size)` | `/api/advogados/minhasOABs/{cpf}` → `/api/advogados/{OAB}/publicacoes` | DJe próprio do STJ, que é legado (casos antigos) |
 | `stj_get_counters()` | `/api/advogados/{OAB}/qtdprocessotramitacao`, `processosInteresse`, `/api/mensagens/proxima`, `/api/processo/{registro}/vistasEmAberto` | Resumo: processos ativos/encerrados por OAB, interesses, processos com vista aberta, mensagem não lida do CPE. Intimações não entram (vão pelo DJEN) |
-| `stj_list_inbox(days, include_text)` | vistas em aberto (`values` = `seq` das partes que o advogado representa) + DJEN `siglaTribunal=STJ` | Caixa: vistas abertas, processos ativos com última fase e intimações do DJEN na janela. Nada é aberto nem recebe ciência; a ciência antecipada segue recusada |
+| `stj_list_intimacoes(days, include_text)` | vistas em aberto (`values` = `seq` das partes que o advogado representa) + DJEN `siglaTribunal=STJ` | Caixa: vistas abertas, processos ativos com última fase e intimações do DJEN na janela. Nada é aberto nem recebe ciência; a ciência antecipada segue recusada |
 
-As **intimações** do STJ saem no DJEN (`djen_search_communications` com `tribunal=STJ`). O `djen.resolve_portal`
+As **intimações** do STJ saem no DJEN (`djen_search_comunicacoes` com `tribunal=STJ`). O `djen.resolve_portal`
 reconhece links de `processo.`, `ww2.` e `cpe.web.stj.jus.br` e o CNJ J=3 TR=00 como portal `stj`.
 
 ## Somente leitura

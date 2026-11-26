@@ -11,10 +11,10 @@ class="lawsuit-data">` with hidden `_method=PUT` and `_token`. The stage is two 
 
 | field | screen label | options | notes |
 | --- | --- | --- | --- |
-| `steps_id` (class `list-stages no-trigger`) | **Fase** | 9 office-wide stages: 9 Marketing, 1 Negociação, 6 Consultoria, 2 Administrativo, 3 Judicial, 4 Recursal, 5 Execução/cobrança, 7 Rh/financeiro, 8 Arquivamento | the same ids and labels as `advbox_task_filters` `stages` (the Tarefas filter) |
+| `steps_id` (class `list-stages no-trigger`) | **Fase** | 9 office-wide stages: 9 Marketing, 1 Negociação, 6 Consultoria, 2 Administrativo, 3 Judicial, 4 Recursal, 5 Execução/cobrança, 7 Rh/financeiro, 8 Arquivamento | the same ids and labels as `advbox_list_task_filters` `stages` (the Tarefas filter) |
 | `stages_id` (class `response-stages`) | **Etapa** | the sub-stages of the selected stage (e.g. Judicial: 8144 ANÁLISE/PETIÇÃO INICIAL, 7092 AJUIZADO/EM ANDAMENTO, …) | may be empty (`data-allow-clear`) |
 
-The lawsuit report (`advbox_lawsuit_report`) shows the sub-stage as `info.Fase` and logs every change in the task
+The lawsuit report (`advbox_get_lawsuit_report`) shows the sub-stage as `info.Fase` and logs every change in the task
 history as `Alterou o processo para a fase <STAGE>/<SUB-STAGE>`.
 
 When the stage select changes, the screen (`app.js`, handler on `select.list-stages`) loads the sub-stages with
