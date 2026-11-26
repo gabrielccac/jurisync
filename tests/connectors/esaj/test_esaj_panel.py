@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import pytest
 from curl_cffi.requests import exceptions
 
-from jurisync.connectors.esaj import base, parsers
+from jurisync.connectors.esaj import base, common, dashboard, documents, parsers, process, search
 from jurisync.core.http import UnsafeUrlError
 
 NUMBER = "0000001-00.2026.8.26.0001"
@@ -87,7 +87,7 @@ class Portal:
 def portal(monkeypatch):
     def install(**kwargs):
         fake = Portal(**kwargs)
-        monkeypatch.setattr(base, "request", fake)
+        monkeypatch.setattr(common, "request", fake)
         return fake
 
     return install
@@ -117,7 +117,7 @@ def test_get_process_reads_the_first_instance_detail_when_the_panel_lists_the_se
             return reply(text="")
         return original(session, portal_key, method, path, **kwargs)
 
-    monkeypatch.setattr(base, "request", route)
+    monkeypatch.setattr(common, "request", route)
     result = base.load_process(None, "tjsp-esaj", NUMBER)
     assert result["processNumber"] == NUMBER and result["consultationSource"] == "dashboard"
     assert any(path.startswith("/cpopg/show.do") for path in fake.paths())
@@ -126,8 +126,8 @@ def test_get_process_reads_the_first_instance_detail_when_the_panel_lists_the_se
 def test_a_second_instance_only_entry_falls_back_to_the_first_instance_consultation(portal, monkeypatch):
     portal(by_number=[entry("SG")])
     detail = reply(text=f'<span id="numeroProcesso">{NUMBER}</span>', url=f"{HOST}/cpopg/show.do?processo.codigo=X")
-    monkeypatch.setattr(base, "consultation_search", lambda *a: (detail, "http"))
-    monkeypatch.setattr(base, "paged_movements", lambda *a: ([], True))
+    monkeypatch.setattr(search, "consultation_search", lambda *a: (detail, "http"))
+    monkeypatch.setattr(process, "paged_movements", lambda *a: ([], True))
     assert base.load_process(None, "tjsp-esaj", NUMBER)["consultationSource"] == "http"
 
 
@@ -157,7 +157,7 @@ def test_a_code_that_is_not_a_plain_identifier_is_never_sent(portal):
 
 def test_documents_open_through_the_code_the_consultation_shows(portal, monkeypatch):
     fake = portal(by_code={"AB0000000001": [entry("SG"), entry("PG")]})
-    monkeypatch.setattr(base, "consultation_code", lambda *a: ("AB0000000001", None))
+    monkeypatch.setattr(documents, "consultation_code", lambda *a: ("AB0000000001", None))
     items = base.list_documents(None, "tjsp-esaj", NUMBER)["items"]
     assert items[0]["documentId"] == "7" and "parameters" not in items[0]
     assert fake.paths()[-1].startswith("/cpopg/abrirPastaDigitalIntegracao.do")
@@ -175,13 +175,13 @@ def test_a_second_instance_viewer_is_accepted_and_any_other_path_is_not(portal, 
 
 def test_consultation_code_reads_the_detail_url_or_a_single_result_link(monkeypatch):
     detail = reply(text="", url=f"{HOST}/cpopg/show.do?processo.codigo=AB0000000001&processo.foro=1")
-    monkeypatch.setattr(base, "consultation_search", lambda *a: (detail, "http"))
+    monkeypatch.setattr(search, "consultation_search", lambda *a: (detail, "http"))
     assert base.consultation_code(None, "tjsp-esaj", NUMBER) == ("AB0000000001", detail)
     listing = reply(text='<a href="/cpopg/show.do?processo.codigo=AB0000000002">x</a>', url=f"{HOST}/cpopg/search.do")
-    monkeypatch.setattr(base, "consultation_search", lambda *a: (listing, "http"))
+    monkeypatch.setattr(search, "consultation_search", lambda *a: (listing, "http"))
     assert base.consultation_code(None, "tjsp-esaj", NUMBER) == ("AB0000000002", None)
     many = reply(text=listing.text + '<a href="/cpopg/show.do?processo.codigo=AB0000000003">y</a>', url=listing.url)
-    monkeypatch.setattr(base, "consultation_search", lambda *a: (many, "http"))
+    monkeypatch.setattr(search, "consultation_search", lambda *a: (many, "http"))
     assert base.consultation_code(None, "tjsp-esaj", NUMBER) == (None, None)
 
 
@@ -194,7 +194,7 @@ PASSWORD_DETAIL = (
 def test_records_behind_the_process_password_are_reported_as_such(portal, monkeypatch):
     fake = portal()
     detail = reply(text=PASSWORD_DETAIL, url=f"{HOST}/cpopg/show.do?processo.codigo=AB0000000001")
-    monkeypatch.setattr(base, "consultation_code", lambda *a: ("AB0000000001", detail))
+    monkeypatch.setattr(documents, "consultation_code", lambda *a: ("AB0000000001", detail))
     with pytest.raises(base.EsajBlocked) as error:
         base.document_inventory(None, "tjam-esaj", "0000001-00.2026.8.04.0001")
     assert error.value.reason == "password_required"
@@ -210,7 +210,7 @@ def test_no_viewer_anywhere_keeps_the_old_answer(portal, monkeypatch):
     def captcha(*a):
         raise base.EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
 
-    monkeypatch.setattr(base, "consultation_code", captcha)
+    monkeypatch.setattr(documents, "consultation_code", captcha)
     with pytest.raises(base.EsajBlocked) as error:
         base.document_inventory(None, "tjsp-esaj", NUMBER)
     assert error.value.reason == "flow_required"
@@ -345,7 +345,7 @@ def test_every_movement_page_is_read(monkeypatch):
         seen.append(kwargs["params"])
         return reply(text=pages[kwargs["params"]["cursor"]])
 
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     movements, complete = base.paged_movements(None, "tjsp-esaj", "cpopg", "AB0000000001")
     assert complete and len(movements) == 11 and movements[-1]["text"] == "Movimento 11"
     assert [params["cursor"] for params in seen] == ["", "c2", "c3"]
@@ -353,13 +353,13 @@ def test_every_movement_page_is_read(monkeypatch):
 
 
 def test_a_failed_or_endless_history_is_marked_incomplete(monkeypatch):
-    monkeypatch.setattr(base, "request", lambda *a, **k: reply(text=MIDDLE_PAGE))
-    monkeypatch.setattr(base, "MAX_MOVEMENT_PAGES", 3)
+    monkeypatch.setattr(common, "request", lambda *a, **k: reply(text=MIDDLE_PAGE))
+    monkeypatch.setattr(process, "MAX_MOVEMENT_PAGES", 3)
     movements, complete = base.paged_movements(None, "tjsp-esaj", "cpopg", "AB0000000001")
     assert len(movements) == 15 and not complete
     error = '<div class="mensagemErroMovimentacoes">Não foi possível</div>'
     replies = iter([reply(text=FIRST_PAGE), reply(text=error)])
-    monkeypatch.setattr(base, "request", lambda *a, **k: next(replies))
+    monkeypatch.setattr(common, "request", lambda *a, **k: next(replies))
     movements, complete = base.paged_movements(None, "tjsp-esaj", "cpopg", "AB0000000001")
     assert len(movements) == 5 and not complete
 
@@ -369,13 +369,13 @@ def test_get_process_returns_the_whole_history_and_flags_a_truncated_one(monkeyp
         text=f'<span id="numeroProcesso">{TJAL}</span><a id="btnExibirMovimentacoes">Exibir movimentações</a>',
         url="https://www2.tjal.jus.br/cpopg/show.do?processo.codigo=AB0000000001",
     )
-    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
-    monkeypatch.setattr(base, "consultation_search", lambda *a: (detail, "http"))
+    monkeypatch.setattr(dashboard, "dashboard_process", lambda *a, **k: None)
+    monkeypatch.setattr(search, "consultation_search", lambda *a: (detail, "http"))
     rows = [{"date": "01/01/2026", "text": "Movimento", "documents": []}] * 12
-    monkeypatch.setattr(base, "paged_movements", lambda *a: (rows, True))
+    monkeypatch.setattr(process, "paged_movements", lambda *a: (rows, True))
     result = base.load_process(None, "tjal-esaj", TJAL)
     assert len(result["movements"]) == 12 and "movementsTruncated" not in result
-    monkeypatch.setattr(base, "paged_movements", lambda *a: (rows, False))
+    monkeypatch.setattr(process, "paged_movements", lambda *a: (rows, False))
     assert base.load_process(None, "tjal-esaj", TJAL)["movementsTruncated"] is True
     assert parsers.movements_on_demand(detail.text) and not parsers.movements_on_demand("<table></table>")
 
@@ -391,7 +391,7 @@ def test_every_panel_list_gets_the_long_wait_and_reports_a_timeout(monkeypatch, 
         seen.append((path, kwargs["timeout"]))
         raise exceptions.Timeout("Operation timed out")
 
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     with pytest.raises(base.EsajBlocked) as error:
         if call == "lookup":
             base.dashboard_lookup(None, "tjsp-esaj", {"numerosProcesso": DIGITS})
@@ -421,8 +421,8 @@ def test_a_throttled_consultation_is_asked_again_after_a_pause(monkeypatch):
     detail = reply(text=f'<span id="numeroProcesso">{NUMBER}</span>', url=f"{HOST}/cpopg/show.do?processo.codigo=A1")
     answers = iter([reply(text=THROTTLED, url=f"{HOST}/cpopg/search.do"), detail])
     pauses = []
-    monkeypatch.setattr(base, "request", lambda *a, **k: next(answers))
-    monkeypatch.setattr(base.time, "sleep", pauses.append)
+    monkeypatch.setattr(common, "request", lambda *a, **k: next(answers))
+    monkeypatch.setattr(search.time, "sleep", pauses.append)
     assert base.consult(None, "tjsp-esaj", "cpopg/search.do", params={}) is detail
     assert pauses == [base.THROTTLE_PAUSE]
 
@@ -436,10 +436,10 @@ def test_a_portal_that_keeps_throttling_is_reported_as_such_not_as_a_missing_pro
             return reply(text="<form></form>", url=f"{HOST}/cpopg/open.do")
         return reply(text=THROTTLED, url=f"{HOST}/cpopg/search.do")
 
-    monkeypatch.setattr(base, "request", request)
-    monkeypatch.setattr(base.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
-    monkeypatch.setattr(base, "bridge_search", lambda *a: pytest.fail("the bridge is not a way around the throttle"))
+    monkeypatch.setattr(common, "request", request)
+    monkeypatch.setattr(search.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(dashboard, "dashboard_process", lambda *a, **k: None)
+    monkeypatch.setattr(search, "bridge_search", lambda *a: pytest.fail("the bridge is not a way around the throttle"))
     with pytest.raises(base.EsajBlocked) as error:
         base.load_process(None, "tjsp-esaj", NUMBER)
     assert error.value.reason == "rate_limited"
@@ -507,8 +507,8 @@ class Records:
 def records(monkeypatch):
     def install(detail, **kwargs):
         fake = Records(reply(text=detail, url=f"{HOST}/cpopg/show.do?processo.codigo={CODE}"), **kwargs)
-        monkeypatch.setattr(base, "request", fake)
-        monkeypatch.setattr(base, "consultation_code", lambda *a: (CODE, fake.detail))
+        monkeypatch.setattr(common, "request", fake)
+        monkeypatch.setattr(documents, "consultation_code", lambda *a: (CODE, fake.detail))
         return fake
 
     return install
@@ -595,7 +595,7 @@ def test_a_403_is_still_a_refusal_unless_the_caller_reads_it(monkeypatch):
         def request(self, method, url, **kwargs):
             return SimpleNamespace(status_code=403, url=url, headers={}, text="", content=b"")
 
-    monkeypatch.setattr(base, "follow_redirects", lambda session, response, **kwargs: response)
+    monkeypatch.setattr(common, "follow_redirects", lambda session, response, **kwargs: response)
     with pytest.raises(base.EsajBlocked):
         base.request(Session(), "tjsp-esaj", "GET", "cposg/verificarAcessoPastaDigital.do")
     response = base.request(Session(), "tjsp-esaj", "GET", "cposg/verificarAcessoPastaDigital.do", accept=(403,))

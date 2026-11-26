@@ -9,6 +9,7 @@ import pytest
 from jurisync import customers, portals
 from jurisync.connectors.eproc import client as eproc
 from jurisync.connectors.esaj import base as esaj
+from jurisync.connectors.esaj import cas
 from jurisync.connectors.pje.auth import sessions as pje
 from jurisync.core.session_pool import MissingLogin
 
@@ -111,6 +112,6 @@ def test_esaj_uses_the_declared_password_even_with_an_a1(acme):
 
 def test_esaj_names_the_missing_password_before_reaching_the_portal(acme):
     with acme('[tjam-esaj]\nmethod = "password_totp"\n', **A1):
-        with mock.patch.object(esaj, "login_page", side_effect=AssertionError("no request expected")):
+        with mock.patch.object(cas, "login_page", side_effect=AssertionError("no request expected")):
             with pytest.raises(MissingLogin, match="TJAM_ESAJ_USERNAME"):
                 esaj.login("tjam-esaj")

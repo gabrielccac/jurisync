@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa, utils
 from mcp.server.mcpserver.exceptions import ToolError
 
 from jurisync import portals
-from jurisync.connectors.esaj import base, parsers, server
+from jurisync.connectors.esaj import base, cas, common, dashboard, documents, intimacoes, parsers, search, server
 from jurisync.core.http import UnsafeUrlError
 
 NUMBER = "0000001-00.2026.8.26.0001"
@@ -85,7 +85,7 @@ def test_mailbox_subjects_follow_the_header_charset_not_the_conflicting_meta(mon
     )
     raw = html.encode("latin-1")
     page = SimpleNamespace(content=raw, text=raw.decode("latin-1"), status_code=200, url="https://esaj.tjsp.jus.br/x")
-    monkeypatch.setattr(base, "request", lambda *args, **kwargs: page)
+    monkeypatch.setattr(common, "request", lambda *args, **kwargs: page)
     items = base.list_messages(None, "tjsp-esaj")["items"]
     assert items[0]["subject"] == "Protocolo Eletrônico e-Saj - Petição Intermediária Protocolada"
 
@@ -121,7 +121,7 @@ def test_process_number_and_captcha():
 
 def test_invalid_document_and_pagination_do_not_request(monkeypatch):
     request = Mock()
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     with pytest.raises(ValueError):
         base.document(None, "tjsp-esaj", NUMBER, "https://evil.invalid")
     with pytest.raises(ValueError):
@@ -130,7 +130,7 @@ def test_invalid_document_and_pagination_do_not_request(monkeypatch):
 
 
 def test_document_inventory_block_does_not_acknowledge(monkeypatch):
-    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: [{"documentId": "38"}])
     with pytest.raises(base.EsajBlocked):
         base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)
     with pytest.raises(ValueError):
@@ -262,8 +262,8 @@ def test_a_read_repeated_after_a_new_login_keeps_the_first_ciencia_check(monkeyp
         reads.append(read)
         return {"ciencia": read}
 
-    monkeypatch.setattr(base, "check_ciencia", check)
-    monkeypatch.setattr(base, "document", document)
+    monkeypatch.setattr(intimacoes, "check_ciencia", check)
+    monkeypatch.setattr(documents, "document", document)
     pool = Mock()
     pool.run.side_effect = lambda key, read: (read(None), read(None))[1]  # the pool repeats after a new login
     monkeypatch.setattr(server, "sessions", pool)
@@ -296,8 +296,8 @@ def test_viewer_inventory_process_binding_and_privacy(monkeypatch):
     folder = 'var requestScope = [{"data": {"title": "Pasta"}, "children": []}];'
     with pytest.raises(base.EsajParseError):  # listed nodes, none a document: not an empty folder
         parsers.viewer_documents(folder, NUMBER)
-    monkeypatch.setattr(base, "document_inventory", lambda *a: items)
-    monkeypatch.setattr(base, "check_ciencia", lambda *a: CLEAR)
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: items)
+    monkeypatch.setattr(intimacoes, "check_ciencia", lambda *a: CLEAR)
     assert "parameters" not in str(base.list_documents(None, "tjsp-esaj", NUMBER))
 
 
@@ -311,7 +311,7 @@ def test_dashboard_context_uses_digits(monkeypatch):
         seen.append((args, kwargs))
         return SimpleNamespace(status_code=200, json=lambda: next(replies))
 
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     assert base.dashboard_process(None, "tjsp-esaj", NUMBER)["urlCpo"] == "fixture"
     assert seen[0][1]["params"]["numerosProcesso"] == re.sub(r"\D", "", NUMBER)
     assert seen[1][1]["params"] == {"situacao": "AGUARDANDO_ASSINATURA"}
@@ -330,9 +330,9 @@ def test_dashboard_context_uses_digits(monkeypatch):
     ],
 )
 def test_document_permission_denial_never_fetches_pdf(monkeypatch, status, body, shown):
-    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
     request = Mock(return_value=response(body, status=status))
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     with pytest.raises(base.EsajBlocked) as error:
         base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)
     assert error.value.reason == "receipt_required"
@@ -345,11 +345,11 @@ def test_document_permission_denial_never_fetches_pdf(monkeypatch, status, body,
 
 @pytest.mark.parametrize(("status", "body"), [(204, ""), (200, ""), (200, " \r\n ")])
 def test_document_permission_cleared_only_by_204_or_an_empty_200(monkeypatch, status, body):
-    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
     pdf = Mock(status_code=200, headers={"content-type": "application/pdf"})
     pdf.iter_content.return_value = iter([b"%PDF-fixture"])
     request = Mock(side_effect=[response(body, status=status), pdf])
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     monkeypatch.setattr("jurisync.core.document_text.extract_document_text", lambda *a: ("extracted", "Example"))
     assert base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)["text"] == "Example"
     assert request.call_count == 2
@@ -375,11 +375,11 @@ def test_captcha_uuid_post_follows_redirects_only_on_the_portal():
 
 
 def test_document_bounded_pdf_and_close(monkeypatch):
-    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
     pdf = Mock(status_code=200, headers={"content-type": "application/pdf"})
     pdf.iter_content.return_value = iter([b"%PDF-fixture"])
     request = Mock(side_effect=[response(status=204), pdf])
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     monkeypatch.setattr(
         "jurisync.core.document_text.extract_document_text", lambda *a: ("extracted", "Example https://private/url")
     )
@@ -392,10 +392,10 @@ def test_document_bounded_pdf_and_close(monkeypatch):
 def test_document_oversize_is_not_saved(monkeypatch):
     from jurisync.core.documents import MAX_DOCUMENT_BYTES
 
-    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
     pdf = Mock(status_code=200)
     pdf.iter_content.return_value = iter([b"%PDF-" + b"x" * MAX_DOCUMENT_BYTES])
-    monkeypatch.setattr(base, "request", Mock(side_effect=[response(status=204), pdf]))
+    monkeypatch.setattr(common, "request", Mock(side_effect=[response(status=204), pdf]))
     save = Mock()
     monkeypatch.setattr("jurisync.core.documents_dir.save_document", save)
     with pytest.raises(ValueError, match="exceeds"):
@@ -437,9 +437,9 @@ def test_direct_search_detail_still_loads_ajax_movements(monkeypatch):
     detail = response(html, url="https://esaj.tjsp.jus.br/cpopg/show.do?processo.codigo=fixture")
     mov = response('<tr class="containerMovimentacao"><td>05/11</td><td>Movimento exemplo</td></tr>')
     replies = iter([response("<form></form>"), detail, mov])
-    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
+    monkeypatch.setattr(dashboard, "dashboard_process", lambda *a, **k: None)
     request = Mock(side_effect=lambda *a, **kw: next(replies))
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     result = base.load_process(None, "tjsp-esaj", NUMBER)
     assert len(result["movements"]) == 1
     assert request.call_args.args[3] == "cpopg/carregarMovimentacoesAjax.do"
@@ -450,7 +450,7 @@ def test_petition_tasks_are_read_only_and_sanitized(monkeypatch):
         status_code=200, json=lambda: [{"id": 1, "urlPasta": "https://private", "situacao": "AGUARDANDO_ASSINATURA"}]
     )
     request = Mock(return_value=reply)
-    monkeypatch.setattr(base, "request", request)
+    monkeypatch.setattr(common, "request", request)
     result = base.list_tasks(None, "tjms-esaj", "peticoes")
     assert result["items"] == [{"id": 1, "situacao": "AGUARDANDO_ASSINATURA"}]
     assert request.call_args.args[2:] == ("GET", "tarefas-adv/api/peticoes")
@@ -566,7 +566,7 @@ def test_session_check_uses_the_cas_script_where_the_session_api_is_missing(monk
         response("window.sajcas = { usuarioLogadoNoCasServer: false };"),
     ]
     assert base.refresh("tjam-esaj", session) is None
-    monkeypatch.setattr(base, "request", Mock(return_value=response(status=404)))
+    monkeypatch.setattr(common, "request", Mock(return_value=response(status=404)))
     session.get.side_effect = [response("window.sajcas = { usuarioLogadoNoCasServer: true };")]
     result = base.get_session(session, "tjam-esaj")
     assert result["usuarioLogado"] is True and result["sessionSource"] == "sajcas"
@@ -581,8 +581,8 @@ def test_tjam_process_uses_the_cpopg_consultation(monkeypatch):
         f'<span id="numeroProcesso">{number}</span><span id="classeProcesso">Classe</span>',
         url="https://consultasaj.tjam.jus.br/cpopg/show.do?processo.codigo=X",
     )
-    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
-    monkeypatch.setattr(base, "consultation_search", lambda s, p, adapter, n: (detail, "http"))
+    monkeypatch.setattr(dashboard, "dashboard_process", lambda *a, **k: None)
+    monkeypatch.setattr(search, "consultation_search", lambda s, p, adapter, n: (detail, "http"))
     result = base.load_process(None, "tjam-esaj", number)
     assert result["fields"]["classeProcesso"] == "Classe" and result["consultationSource"] == "http"
 
@@ -593,14 +593,14 @@ def test_a_number_the_consultation_does_not_know_is_reported_as_not_found(monkey
         "<div>Não existem informações disponíveis para os parâmetros informados.</div>",
         url="https://consultasaj.tjam.jus.br/cpopg/search.do",
     )
-    monkeypatch.setattr(base, "dashboard_process", lambda *a, **k: None)
-    monkeypatch.setattr(base, "consultation_search", lambda *a: (page, "http"))
-    monkeypatch.setattr(base, "request", lambda *a, **k: page)
+    monkeypatch.setattr(dashboard, "dashboard_process", lambda *a, **k: None)
+    monkeypatch.setattr(search, "consultation_search", lambda *a: (page, "http"))
+    monkeypatch.setattr(common, "request", lambda *a, **k: page)
 
     def no_token(*a):
         raise base.EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
 
-    monkeypatch.setattr(base, "token_search", no_token)
+    monkeypatch.setattr(search, "token_search", no_token)
     with pytest.raises(base.EsajBlocked) as error:
         base.load_process(None, "tjam-esaj", "0000001-00.2026.8.04.0001")
     assert error.value.reason == "not_found"
@@ -654,9 +654,9 @@ def test_password_form_posts_what_the_login_tab_sends():
 def test_password_login_success_two_factor_and_refusal(monkeypatch, after, cookie, raised):
     monkeypatch.setenv("TJAM_ESAJ_USERNAME", "000.000.000-00")
     monkeypatch.setenv("TJAM_ESAJ_PASSWORD", "secret")
-    monkeypatch.setattr(base.credentials, "has", lambda name: False)
-    monkeypatch.setattr(base, "login_page", lambda s, c: response(PASSWORD_PAGE, url=TJAM_LOGIN))
-    monkeypatch.setattr(base, "load_certificate", lambda **k: pytest.fail("no certificate on a password login"))
+    monkeypatch.setattr(cas.credentials, "has", lambda name: False)
+    monkeypatch.setattr(cas, "login_page", lambda s, c: response(PASSWORD_PAGE, url=TJAM_LOGIN))
+    monkeypatch.setattr(cas, "load_certificate", lambda **k: pytest.fail("no certificate on a password login"))
     session = password_session(after, cookie)
     if cookie:
         assert base.login("tjam-esaj", session=session) is session
@@ -664,7 +664,7 @@ def test_password_login_success_two_factor_and_refusal(monkeypatch, after, cooki
         with pytest.raises(raised, match="e-mail"):
             base.login("tjam-esaj", session=session)
     else:
-        with pytest.raises(base.LoginRejected, match="inválidos") as error:
+        with pytest.raises(cas.LoginRejected, match="inválidos") as error:
             base.login("tjam-esaj", session=session)
         assert not isinstance(error.value, base.EsajTwoFactorRequired)
     assert session.post.call_count == 1
@@ -674,9 +674,9 @@ def test_password_login_success_two_factor_and_refusal(monkeypatch, after, cooki
 def test_the_certificate_wins_when_the_account_has_one(monkeypatch):
     monkeypatch.setenv("TJAM_ESAJ_USERNAME", "000.000.000-00")
     monkeypatch.setenv("TJAM_ESAJ_PASSWORD", "secret")
-    monkeypatch.setattr(base.credentials, "has", lambda name: name == "PJE_A1_P12")
+    monkeypatch.setattr(cas.credentials, "has", lambda name: name == "PJE_A1_P12")
     assert not base.uses_password(portals.esaj("tjam-esaj"))
-    monkeypatch.setattr(base.credentials, "has", lambda name: False)
+    monkeypatch.setattr(cas.credentials, "has", lambda name: False)
     assert base.uses_password(portals.esaj("tjam-esaj"))
     monkeypatch.delenv("TJAM_ESAJ_PASSWORD")
     assert not base.uses_password(portals.esaj("tjam-esaj"))

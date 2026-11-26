@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from jurisync.connectors.esaj import base, bridge, parsers
+from jurisync.connectors.esaj import base, bridge, common, dashboard, documents, parsers, search
 
 NUMBER = "0000001-00.2026.8.12.0001"
 HTML = f"<html><body><div id='numeroProcesso'>{NUMBER}</div><table id='tabelaTodasMovimentacoes'></table></body></html>"
@@ -39,9 +39,9 @@ def test_consultation_search_uses_the_bridge_when_http_blocked(monkeypatch):
     def blocked(*_args, **_kwargs):
         raise base.EsajBlocked("Consultation requires CAPTCHA", "captcha_required")
 
-    monkeypatch.setattr(base, "request", blocked)
+    monkeypatch.setattr(common, "request", blocked)
     monkeypatch.setattr(
-        base, "bridge_search", lambda *_args: base.BridgeResponse("https://esaj.tjms.jus.br/cpopg5/search.do", HTML)
+        search, "bridge_search", lambda *_args: base.BridgeResponse("https://esaj.tjms.jus.br/cpopg5/search.do", HTML)
     )
     response, source = base.consultation_search(Mock(), "tjms-esaj", adapter, NUMBER)
     assert source == "browser_bridge"
@@ -51,10 +51,10 @@ def test_consultation_search_uses_the_bridge_when_http_blocked(monkeypatch):
 def test_detail_blocked_by_captcha_goes_through_the_bridge(monkeypatch):
     captcha_page = '<html><body><div class="g-recaptcha" data-sitekey="fixture"></div></body></html>'
     monkeypatch.setattr(
-        base, "dashboard_process", lambda *_args, **_kwargs: {"urlCpo": "https://esaj.tjms.jus.br/cpopg5/show.do"}
+        dashboard, "dashboard_process", lambda *_args, **_kwargs: {"urlCpo": "https://esaj.tjms.jus.br/cpopg5/show.do"}
     )
     monkeypatch.setattr(
-        base,
+        common,
         "request",
         lambda *_args, **_kwargs: SimpleNamespace(
             content=captcha_page.encode(),
@@ -65,7 +65,7 @@ def test_detail_blocked_by_captcha_goes_through_the_bridge(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        base,
+        search,
         "bridge_page",
         lambda *_args: base.BridgeResponse("https://esaj.tjms.jus.br/cpopg5/show.do", HTML),
     )
@@ -109,7 +109,7 @@ def test_launch_command_is_headless_and_has_no_stealth_flags(monkeypatch):
 
 
 def test_document_without_parameters_reports_password_required(monkeypatch):
-    monkeypatch.setattr(base, "document_inventory", lambda *_args: [{"documentId": "38"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *_args: [{"documentId": "38"}])
     with pytest.raises(base.EsajBlocked) as error:
         base.document(None, "tjsp-esaj", NUMBER, "38", read={"estado": "nenhuma"})
     assert error.value.reason == "password_required"
@@ -164,7 +164,7 @@ def test_token_page_appends_minted_token(monkeypatch):
         def json(self):
             return {"uuidCaptcha": "sajcaptcha_fixture"}
 
-    monkeypatch.setattr(base, "request", fake_request)
+    monkeypatch.setattr(common, "request", fake_request)
     monkeypatch.setattr(recaptcha, "mint_token", lambda *a, **k: "TOKEN123")
     session = SimpleNamespace(post=lambda *a, **k: FakePosted())
     base.token_page(session, "tjms-esaj", "https://esaj.tjms.jus.br/cpopg5/show.do?processo.codigo=X")
