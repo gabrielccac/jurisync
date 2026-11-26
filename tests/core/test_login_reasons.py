@@ -53,11 +53,11 @@ def test_reason_comes_from_the_exception_or_its_type():
 
 
 def test_tool_errors_carry_the_reason_code():
-    with pytest.raises(ToolError, match=r"^PJe request failed \[otp_refused\]: code refused$"):
-        with tool_errors("PJe", RuntimeError):
+    with pytest.raises(ToolError, match=r"^\[otp_refused\] PJe: code refused\nPróximo passo: não repita agora; "):
+        with tool_errors("PJe"):
             raise LoginRejected("code refused", reason="otp_refused")
-    with pytest.raises(ToolError, match=r"^PJe request failed: not found$"):
-        with tool_errors("PJe", ValueError):
+    with pytest.raises(ToolError, match=r"^\[invalid_request\] PJe: not found\nPróximo passo: "):
+        with tool_errors("PJe"):
             raise ValueError("not found")
 
 
