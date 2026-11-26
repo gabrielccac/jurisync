@@ -15,12 +15,14 @@ projeto que executa o workflow:
 """
 
 import argparse
+import contextvars
 import json
 import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from jurisync.connectors.djen import bridge
@@ -35,6 +37,8 @@ MAX_CADERNO_BYTES = 512 * 1024 * 1024
 OAB_VARIANTS = ("", "-A", "-B", "-E", "-N", "-O", "-S")
 REQUEST_TIMEOUT = 30
 MAX_RETRIES = 2
+# Variants read at once: the API answers each in about a second, and more parallel requests risk its 429.
+MAX_PARALLEL_VARIANTS = 3
 MAX_PDF_BYTES = 10 * 1024 * 1024
 
 
@@ -201,17 +205,44 @@ def fetch_all_variants(
     timeout=REQUEST_TIMEOUT,
     **extra,
 ):
-    """Busca as 7 variantes de OAB e agrega sem duplicar (id = id da comunicação)."""
-    seen = {}
-    total = 0
-    for variant in OAB_VARIANTS:
-        count, items = fetch_all(
+    """Busca as 7 variantes de OAB e agrega sem duplicar (id = id da comunicação).
+
+    As variantes correm em paralelo; se alguma falhar, levanta DjenError citando cada variante que falhou, para que
+    o poll não avance o estado com uma janela incompleta.
+    """
+    results = each_variant(
+        lambda variant: fetch_all(
             f"{numero_base}{variant}", uf_oab, data_inicio, data_fim, sigla_tribunal, itens_por_pagina, timeout, **extra
         )
+    )
+    failures = [(variant, result) for variant, result in results if isinstance(result, Exception)]
+    if failures:
+        detail = ", ".join(f"{numero_base}{variant}: {type(error).__name__}" for variant, error in failures)
+        raise DjenError(f"DJEN OAB variants failed ({detail})") from failures[0][1]
+    seen = {}
+    total = 0
+    for _, (count, items) in results:
         total += count
         for item in items:
             seen.setdefault(item["id"], item)
     return {"count": total, "unique": len(seen), "items": list(seen.values())}
+
+
+def each_variant(read, variants=OAB_VARIANTS):
+    """``[(variant, read(variant) or the exception it raised)]`` in ``variants`` order, a few variants at a time.
+
+    Each read runs in a copy of the caller's context, so the office's bridge settings reach the worker threads.
+    """
+
+    def attempt(variant):
+        try:
+            return read(variant)
+        except Exception as error:  # reported per variant; the caller decides whether a partial result is usable
+            return error
+
+    with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_VARIANTS, len(variants))) as pool:
+        futures = [pool.submit(contextvars.copy_context().run, attempt, variant) for variant in variants]
+        return [(variant, future.result()) for variant, future in zip(variants, futures, strict=True)]
 
 
 def fetch_certidao(comunicacao_hash, timeout=REQUEST_TIMEOUT):

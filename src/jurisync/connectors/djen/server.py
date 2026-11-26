@@ -13,7 +13,7 @@ from pydantic import BeforeValidator, Field
 
 from jurisync import customers
 from jurisync.connectors.djen import render
-from jurisync.connectors.djen.client import OAB_VARIANTS, DjenError, _check_window, fetch_certidao, search_page
+from jurisync.connectors.djen.client import DjenError, _check_window, each_variant, fetch_certidao, search_page
 from jurisync.connectors.djen.deadlines import DEFAULT_COURT, calculate_deadline
 from jurisync.connectors.djen.documents import resolve_portal
 from jurisync.connectors.djen.normalize import compact_item, normalize_item
@@ -55,7 +55,8 @@ def run_search(params, pagina, itens, variants=True):
     """One page of one search. With an OAB and ``variants``, one page per registration suffix, merged by id.
 
     Returns ``count`` (sum of the variants' totals), ``returned`` (items read before merging), ``more`` and, when
-    the variants ran, ``oabVariants`` with each suffix's numbers.
+    the variants ran, ``oabVariants`` with each suffix's numbers. The variants are read in parallel; one that fails
+    is reported with its ``error`` and the others are kept. When every variant fails, the first error is raised.
     """
     number = params.get("numeroOab")
     if not (number and variants):
@@ -63,9 +64,15 @@ def run_search(params, pagina, itens, variants=True):
         count = int(result.get("count") or 0)
         return {**result, "count": count, "returned": len(result["items"]), "more": pagina * itens < count}
     base = re.sub(r"(?i)-[ABENOS]$", "", str(number))
+    results = each_variant(lambda suffix: search_page({**params, "numeroOab": base + suffix}, pagina, itens))
+    if all(isinstance(page, Exception) for _, page in results):
+        raise results[0][1]
     items, seen, report = [], set(), []
-    for suffix in OAB_VARIANTS:
-        page = search_page({**params, "numeroOab": base + suffix}, pagina, itens)
+    for suffix, page in results:
+        if isinstance(page, Exception):
+            error = sanitize_diagnostics(page) or type(page).__name__
+            report.append({"numeroOab": base + suffix, "count": 0, "returned": 0, "more": False, "error": error})
+            continue
         count = int(page.get("count") or 0)
         for item in page["items"]:
             if item["id"] not in seen:
@@ -87,6 +94,10 @@ def run_search(params, pagina, itens, variants=True):
         "more": any(r["more"] for r in report),
         "oabVariants": report,
     }
+
+
+def _failed_variants(result):
+    return [variant["numeroOab"] for variant in result.get("oabVariants") or () if "error" in variant]
 
 
 # Clients send digit-only strings such as '61216' as JSON numbers; take them back as text.
@@ -188,7 +199,7 @@ def search_communications(
     for item in items:
         item["portal"] = resolve_portal(item)
     if formato != "json":
-        complete = pagina == 1 and not more
+        complete = pagina == 1 and not more and not _failed_variants(result)
         pages = len(result.get("oabVariants") or [1])
         return as_text(
             [compact_item(item, 0) for item in items], result.get("count"), pages, complete, formato, textLimit, merged
@@ -368,8 +379,10 @@ def search_saved(
             )
             if "oabVariants" in result:
                 entry["oabVariants"] = result["oabVariants"]
+                if failed := [v for v in result["oabVariants"] if "error" in v]:
+                    entry["error"] = "; ".join(f"{v['numeroOab']}: {v['error']}" for v in failed)
             report.append(entry)
-        complete = not failures
+        complete = not any("error" in entry for entry in report)
         if text_view:
             returned = sum(r["returned"] for r in report)
             check = render.checks(
