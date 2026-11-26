@@ -23,6 +23,7 @@ from jurisync import portals
 from jurisync.connectors.pje.parsers import jsf_data, parse_process_number
 from jurisync.connectors.pje.search import discover_controls, post_ajax, search_process
 from jurisync.connectors.pje.server import sessions
+from jurisync.core.errors import summary
 from jurisync.core.mcp import load_env_file
 from jurisync.paths import STATE_DIR
 
@@ -203,8 +204,8 @@ def poll_once(args):
                     "baseline_incomplete": not bool(old_keys),
                 }
             )
-        except Exception as error:
-            errors.append({"numero_processo": number, "error": str(error)})
+        except Exception as error:  # noqa: BLE001 - one process's failure must not stop the watch
+            errors.append({"numero_processo": number, "error": summary(error)})
 
     save_json(args.state_file, state)
     return {

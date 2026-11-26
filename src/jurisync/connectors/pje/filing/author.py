@@ -80,7 +80,7 @@ class AuthorMixin:
         if address is not None and inline_address:
             try:
                 html, inline = self._enter_address_before_insert(html, detail_fields, address)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - logged; the classic address flow takes over
                 # Nothing is saved until Incluir, so a reload discards the form and the classic flow can start over.
                 log.warning("Inline author address failed (%s); using the separate address step", error)
                 return self.add_author(draft_url, author_cpf, expected_name, address, inline_address=False)

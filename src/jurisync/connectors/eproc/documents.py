@@ -211,7 +211,7 @@ def read_selected_documents(process, document_ids, *, session, portal, save=Fals
                 if reply is not None:
                     try:
                         reply.close()
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - closing a reply must not lose the result
                         pass
         results.append(result)
     return results

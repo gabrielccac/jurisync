@@ -119,5 +119,16 @@ class ServerTest(unittest.TestCase):
                 self.assertIsInstance(server, JurisyncServer)
 
 
+class SummaryTest(unittest.TestCase):
+    def test_a_batch_item_keeps_the_code_and_message_of_an_anticipated_failure(self):
+        self.assertEqual(errors.summary(ValueError("data inválida")), "[invalid_request] data inválida")
+
+    def test_a_bug_in_a_batch_item_keeps_its_text_in_the_log_only(self):
+        with self.assertLogs("jurisync.core.errors", "ERROR") as logged, errors.calls.bound() as ref:
+            line = errors.summary(KeyError("segredo-interno"))
+        self.assertEqual(line, f"[unexpected] falha inesperada no servidor (ref={ref})")
+        self.assertIn("segredo-interno", "\n".join(logged.output))
+
+
 if __name__ == "__main__":
     unittest.main()

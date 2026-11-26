@@ -11,6 +11,7 @@ Anything ``describe`` does not recognize is a bug: its text stays in the server 
 ``[unexpected]`` error with the same ref.
 """
 
+import logging
 import urllib.error
 from dataclasses import dataclass
 
@@ -208,3 +209,15 @@ UNEXPECTED = Problem(
     False,
     OPERATOR,
 )
+
+log = logging.getLogger(__name__)
+
+
+def summary(error):
+    """One line for a failure a batch records and moves past: ``[code] message`` when anticipated. A bug becomes
+    ``[unexpected]`` with the call's ref; its text and trace go only to the log."""
+    problem = describe(error)
+    if problem is not None:
+        return f"[{problem.code}] {problem.message}"
+    log.error("unexpected failure in a batch item (ref=%s)", calls.current() or "-", exc_info=error)
+    return f"[{UNEXPECTED.code}] {UNEXPECTED.message}" + (f" (ref={calls.current()})" if calls.current() else "")
