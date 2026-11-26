@@ -411,8 +411,8 @@ class ServerTest(Base):
         )  # fmt: skip
         for name, tool in tools.items():
             with self.subTest(name=name):
-                self.assertFalse(tool.annotations.destructive_hint)
                 opens = name in ("tucujuris_read_documents", "tucujuris_download_document")
+                self.assertEqual(tool.annotations.destructive_hint, opens)  # a ciência starts a deadline
                 self.assertEqual(tool.annotations.read_only_hint, not opens)
                 self.assertEqual("acknowledgeCiencia" in tool.input_schema["properties"], opens)
 
