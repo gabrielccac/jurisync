@@ -77,7 +77,10 @@ class HttpAccessTest(unittest.TestCase):
     def test_a_lan_bind_answers_to_its_own_address_under_the_secret_path(self):
         app, prefix = self.app(host="192.168.1.10")
         self.assertNotEqual(prefix, "")
-        self.assertNotEqual(core_mcp.http_prefix("0.0.0.0"), "")
+        for wildcard in ("0.0.0.0", "::"):
+            with self.assertRaises(SystemExit):
+                core_mcp.http_prefix(wildcard)
+        self.assertNotEqual(core_mcp.http_prefix("0.0.0.0", "abc.trycloudflare.com"), "")
         with TestClient(app) as client:
             self.assertEqual(self.post(client, "/a/mcp", "192.168.1.10:8000").status_code, 404)
             self.assertEqual(self.post(client, f"{prefix}/a/mcp", "192.168.1.10:8000").status_code, 200)

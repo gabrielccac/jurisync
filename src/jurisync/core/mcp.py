@@ -264,6 +264,8 @@ def http_prefix(host, public_host=None):
     """
     if not public_host and host in ("127.0.0.1", "localhost", "::1"):
         return ""
+    if not public_host and host in ("0.0.0.0", "::", ""):
+        raise SystemExit(f"--host {host} names no address a client could use: give the LAN address or --public-host")
     secret = os.environ.get(HTTP_SECRET_VAR, "").strip()
     if secret and not re.fullmatch(r"[A-Za-z0-9_-]{24,}", secret):
         raise SystemExit(f"{HTTP_SECRET_VAR}: use 24 or more letters, digits, - or _")

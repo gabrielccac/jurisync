@@ -151,7 +151,8 @@ jurisync-http pje advbox --public-host <name>.trycloudflare.com
 ```
 
 `jurisync-http` answers only to this machine (`Host`/`Origin` checked against DNS rebinding) and to the host given in
-`--public-host`. With `--public-host` (or a `--host` other than 127.0.0.1) every URL starts with a secret path, printed
+`--public-host`. With `--public-host` (or `--host` set to a LAN address; 0.0.0.0 needs `--public-host`) every URL
+starts with a secret path, printed
 at start: `https://<name>.trycloudflare.com/<secret>/pje/mcp`. Add one custom connector per server in ChatGPT's
 developer mode with that URL, with no authentication; set `JURISYNC_HTTP_SECRET` (24+ letters, digits, `-` or `_`) to
 keep the same URL across restarts. **This is for local tests only**: whoever has the full URL calls the tools with
