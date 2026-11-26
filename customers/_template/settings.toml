@@ -1,0 +1,17 @@
+# Escolhas do escritório que não são segredo (opcional: sem este arquivo valem os padrões abaixo).
+
+# PJe: "ask" (padrão) recusa ler uma comunicação com ciência pendente sem o usuário concordar; "allow" lê e avisa.
+[pje]
+ciencia_on_read = "ask"
+
+# "hosted" (padrão): o escritório usa o servidor hospedado. "local": fica no computador do escritório (token A3, por
+# exemplo); o servidor só lembra dele, sem credenciais, usuários nem ferramentas.
+[hosted]
+mode = "hosted"
+reason = ""
+
+# Buscas salvas do DJEN (djen_search_saved). A UF é obrigatória.
+# [[djen.searches]]
+# label = "Fulana · OAB/UF 00000"
+# numeroOab = "00000"
+# ufOab = "UF"

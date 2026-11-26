@@ -182,6 +182,44 @@ def customer_env_path(name=None):
     return customer_dir(name) / ".env" if name else None
 
 
+def names():
+    """Every customer folder (``_template`` and other ``_``/``.`` folders are not customers)."""
+    root = customers_dir()
+    if not root.is_dir():
+        return []
+    return sorted(path.name for path in root.iterdir() if path.is_dir() and not path.name.startswith(("_", ".")))
+
+
+def validate(name):
+    """What keeps a customer folder from working, one line each; empty when it is ready. Reads no secret values."""
+    folder = customer_dir(name)
+    try:
+        setups = load_setup(name)
+        required, optional = extra_variables(name)
+    except (ValueError, tomllib.TOMLDecodeError) as error:
+        return [str(error)]
+    problems = []
+    if not setups and not required:
+        problems.append(f"{name}: portals.toml declares no portal and no [env] secrets")
+    for read in (ciencia_on_read, hosted_mode):
+        try:
+            read(name)
+        except (ValueError, tomllib.TOMLDecodeError) as error:
+            problems.append(f"{name}: {error}")
+    example = folder / ".env.example"
+    if example.is_file():
+        listed = {
+            line.lstrip("# ").split("=", 1)[0].strip()
+            for line in example.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+        }
+        groups = [group for setup in setups.values() for group in setup.secrets] + list(required)
+        for group in dict.fromkeys(groups):
+            if not any(variable.strip() in listed for variable in group.split("|")):
+                problems.append(f"{name}: .env.example lacks {group}")
+    return problems
+
+
 def check(name):
     """Report, per portal, the method and which secrets are still missing. Never prints values."""
     return {key: {"method": setup.method, "missing": list(setup.missing())} for key, setup in load_setup(name).items()}

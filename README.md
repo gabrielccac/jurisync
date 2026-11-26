@@ -185,8 +185,10 @@ Shared code never imports from `customers/`.
   (`python -m jurisync.workflows.filing --help`, profile `victor`); TRF1
   spreadsheet watcher (`python -m customers.victor.workflows.pje1g_watch --help`).
 
-Add a customer by creating `customers/<name>/` with a README, its skills under
-`skills/`, and a symlink in `.claude/skills/` for each skill.
+Add a customer by copying `customers/_template/` to `customers/<name>/` and following its README: `portals.toml`
+(login method and variable names per portal), `settings.toml`, `.env.example` and a README. `jurisync-setup
+check-customer <name>` checks the folder without reading secrets, and the test suite runs the same check on every
+folder. Skills go under `skills/`, with a symlink in `.claude/skills/` for each one.
 
 ## Command line
 

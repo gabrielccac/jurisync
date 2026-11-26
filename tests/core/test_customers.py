@@ -87,23 +87,48 @@ def test_customer_name_cannot_escape_directory(root):
         customers.customer_dir("../etc")
 
 
-def test_victor_setup_is_valid():
-    monkeypatch_dir = os.environ.pop("JURISYNC_CUSTOMERS_DIR", None)
-    try:
-        assert set(customers.load_setup("victor")) == {
-            "trf5-1g",
-            "trf5-2g",
-            "trf5-tru",
-            "trf1-1g",
-            "trf1-2g",
-            "trf3-1g",
-            "trf3-2g",
-            "tjpe-1g",
-            "tjpe-2g",
-        }
-    finally:
-        if monkeypatch_dir:
-            os.environ["JURISYNC_CUSTOMERS_DIR"] = monkeypatch_dir
+@pytest.mark.parametrize("name", [*customers.names(), "_template"])
+def test_every_customer_folder_is_valid(name, monkeypatch):
+    monkeypatch.delenv("JURISYNC_CUSTOMERS_DIR", raising=False)
+    assert customers.validate(name) == []
+
+
+def test_victor_setup_is_valid(monkeypatch):
+    monkeypatch.delenv("JURISYNC_CUSTOMERS_DIR", raising=False)
+    assert set(customers.load_setup("victor")) == {
+        "trf5-1g",
+        "trf5-2g",
+        "trf5-tru",
+        "trf1-1g",
+        "trf1-2g",
+        "trf3-1g",
+        "trf3-2g",
+        "tjpe-1g",
+        "tjpe-2g",
+    }
+
+
+def test_validate_reports_what_breaks_a_folder(root):
+    (root / "acme" / ".env.example").write_text("ACME_USER=\nACME_2FA_QR=\n")
+    (root / "acme" / "settings.toml").write_text('[hosted]\nmode = "cloud"\n')
+    problems = customers.validate("acme")
+    assert "acme: .env.example lacks ACME_PASS" in problems
+    assert not any("ACME_2FA" in problem for problem in problems)  # one name of an A|B group is enough
+    assert any("mode must be one of" in problem for problem in problems)
+    (root / "empty").mkdir()
+    assert customers.validate("empty") == [f"customer 'empty' has no portals.toml at {root / 'empty' / 'portals.toml'}"]
+    assert customers.names() == ["acme", "empty"]
+
+
+def test_check_customer_command(root):
+    from jurisync.install import setup
+
+    lines = []
+    assert setup.main(["check-customer", "acme"], say=lines.append) == 0
+    assert lines == ["Tudo certo."]
+    (root / "acme" / "portals.toml").write_text('[trf1-1g]\nmethod = "magic"\n')
+    assert setup.main(["check-customer"], say=lines.append) == 1
+    assert lines[-1] == "1 problema(s)."
 
 
 def test_ciencia_on_read_defaults_to_ask_and_follows_settings_toml(root):
