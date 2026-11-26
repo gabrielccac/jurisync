@@ -25,6 +25,7 @@ from jurisync.connectors.advbox.session import (
     pending_verification,
     require_writes,
 )
+from jurisync.core import calls
 from jurisync.core.documents_dir import resolve_saved_document
 from jurisync.core.errors import InputError
 from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, serve, tool_error, tool_errors
@@ -122,6 +123,10 @@ class AdvboxServer(JurisyncServer):
     call with the new session. Writes are never repeated: the agent calls them again."""
 
     async def call_tool(self, name, arguments, context=None):
+        with calls.bound():
+            return await self._call_with_verification(name, arguments, context)
+
+    async def _call_with_verification(self, name, arguments, context):
         try:
             return await super().call_tool(name, arguments, context)
         except ToolError as error:
