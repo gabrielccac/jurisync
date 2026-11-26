@@ -32,7 +32,9 @@ class Portal:
     instance: str  # "1g" | "2g"
     host: str
     root: str  # application path: "/pje/", "/eprocV2/" ("/" when not wired)
-    auth: str  # "password_totp" | "certificate_totp" | "certificate_mtls" | "certificate_challenge" | "browser_totp" | "password" | "none"
+    # "password_totp" | "certificate_totp" | "certificate_mtls" | "certificate_challenge" | "browser_totp" | "password" |
+    # "none": the portal's usual login, the default for an office whose portals.toml declares no method for it
+    auth: str
     env_prefix: str = ""
     legacy_env_prefixes: tuple[str, ...] = ()
     region: str = ""  # CNJ "TR" segment, e.g. "01"

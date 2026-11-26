@@ -62,11 +62,13 @@ REFUSED = {
 
 
 def configured_portals():
-    """e-SAJ portals whose login is set in the current credentials, as ``base.login`` picks it: the A1 certificate
-    (every portal) or, without one, login and password; ``()`` when none is."""
-    return customers.profile_portals(
-        key for key in portals.keys("esaj") if base.has_certificate() or base.uses_password(portals.esaj(key))
-    )
+    """e-SAJ portals whose login is set in the current credentials, as ``base.login`` picks it: login and password
+    where it uses the password (``base.uses_password``), else the A1 certificate; ``()`` when none is."""
+
+    def ready(config):
+        return base.password_credentials(config) is not None if base.uses_password(config) else base.has_certificate()
+
+    return customers.profile_portals(key for key in portals.keys("esaj") if ready(portals.esaj(key)))
 
 
 def refusal(error):

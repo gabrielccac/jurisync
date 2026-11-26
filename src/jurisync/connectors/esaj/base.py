@@ -17,10 +17,10 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.core import certificate, ciencia, credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, follow_redirects, log_request, require_url
-from jurisync.core.session_pool import LoginRejected, SessionExpired
+from jurisync.core.session_pool import LoginRejected, MissingLogin, SessionExpired
 
 SERVICE_PATH = "tarefas-adv/j_spring_cas_security_check"
 CHALLENGE = re.compile(r"hashDesafio\s*=\s*'([A-Za-z0-9+/=]+)'")
@@ -186,7 +186,11 @@ def password_credentials(config):
 
 
 def uses_password(config):
-    """Password login when the account has no A1 certificate and sets ``<PREFIX>_USERNAME``/``_PASSWORD``."""
+    """Password login when the customer's ``portals.toml`` declares a method other than a ``certificate_*`` one for the
+    portal; without a declaration, when the account has no A1 certificate and sets ``<PREFIX>_USERNAME``/``_PASSWORD``."""
+    declared = customers.declared_method(config)
+    if declared:
+        return not declared.startswith("certificate")
     file_name, _pin = certificate.credential_names("ESAJ")
     return not credentials.has(file_name) and password_credentials(config) is not None
 
@@ -217,12 +221,16 @@ def login(portal, *, pin=None, p12_path=None, session=None):
     """An authenticated ``requests.Session``: the A1 certificate when the account has one, else login and password."""
     config = portals.esaj(portal)
     password_login = uses_password(config)
-    if not password_login:
+    if password_login:
+        account = password_credentials(config)
+        if account is None:
+            raise MissingLogin(f"Set {config.env_name('USERNAME')} and {config.env_name('PASSWORD')} in .env")
+    else:
         key, cert, _chain = load_certificate(pin=pin, p12_path=p12_path)
     session = session or requests.Session()
     page = login_page(session, config)
     if password_login:
-        action, fields = password_form(page.text, page.url, config, *password_credentials(config))
+        action, fields = password_form(page.text, page.url, config, *account)
     else:
         action, fields = login_form(page.text, page.url, config)
         fields["certificadoSelecionado"] = certificate_der_b64(cert)

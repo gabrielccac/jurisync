@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from bs4 import BeautifulSoup
 from curl_cffi.requests.exceptions import RequestException
 
-from jurisync import portals
+from jurisync import customers, portals
 from jurisync.connectors.eproc import ciencia
 from jurisync.connectors.eproc.auth import login, portal_totp_account
 from jurisync.connectors.eproc.certificate import cert_login
@@ -194,6 +194,19 @@ def uses_a3(portal):
     return (config.env("AUTH") or credentials.env("EPROC_AUTH")).strip().lower() == "a3"
 
 
+def auth_method(portal):
+    """How this install logs in to the portal: the A3 token (``uses_a3``); else the method the customer's
+    ``portals.toml`` declares (a ``certificate_*`` method logs in with the A1, any other with the password); without a
+    declaration, the A1 where the portal opts in with ``<PREFIX>_CERT=true`` and the password otherwise."""
+    config = portals.eproc(portal)
+    if uses_a3(portal):
+        return "a3_totp"
+    declared = customers.declared_method(config)
+    if declared:
+        return declared
+    return "certificate_totp" if config.uses_certificate() else "browser_totp"
+
+
 def authenticate(portal):
     config = portals.eproc(portal)
     certificate = uses_a3(portal)
@@ -201,7 +214,7 @@ def authenticate(portal):
         from jurisync.connectors.eproc import a3
 
         return a3.login(portal)
-    if config.uses_certificate():
+    if auth_method(portal).startswith("certificate"):
         return cert_login(portal)
     username, password = _credentials(portal)
     account = portal_totp_account(portal)
