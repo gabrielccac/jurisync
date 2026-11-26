@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -139,7 +140,7 @@ def run_stdio(server, on_exit=None):
     """
     from jurisync.core.http import enable_request_logging
 
-    enable_request_logging()
+    enable_request_logging(structured=True)
     sys.stdout.flush()
     # Deliberately never closed: fd 1 belongs to the process, not to this wrapper.
     sys.stdout = io.TextIOWrapper(open(1, "wb", buffering=0, closefd=False), encoding="utf-8", write_through=True)  # noqa: SIM115
@@ -245,13 +246,43 @@ class JurisyncServer(MCPServer):
 
     async def call_tool(self, name, arguments, context=None):
         name = names.canonical(name)
-        with calls.bound():
+        with calls.bound(tool=name, portal=portal_key(arguments)):
+            started, code = time.monotonic(), "unexpected"
             try:
                 result = await super().call_tool(name, arguments, context)
+                code = errors.code_of(error_text(result)) if getattr(result, "is_error", False) else ""
+                return compact_text(name, result)
             except UnexpectedToolError as error:
                 log.error("tool %s failed unexpectedly (ref=%s)", name, calls.current(), exc_info=error.__cause__)
                 raise UnexpectedToolError(errors.render(name, errors.UNEXPECTED, sanitize_diagnostics)) from error
-            return compact_text(name, result)
+            except ToolError as error:
+                code = errors.code_of(str(error)) or "tool_error"
+                raise
+            finally:
+                log.info(
+                    "tool %s %s",
+                    name,
+                    f"failed: {code}" if code else "done",
+                    extra={
+                        "event": "call",
+                        "ok": not code,
+                        "error_code": code,
+                        "duration_ms": round((time.monotonic() - started) * 1000),
+                    },
+                )
+
+
+def portal_key(arguments):
+    """The portal a call names, only when it is a known key (any other argument value never reaches a log)."""
+    from jurisync import portals
+
+    value = (arguments or {}).get("portal") if isinstance(arguments, dict) else None
+    return value if isinstance(value, str) and value in portals.PORTALS else ""
+
+
+def error_text(result):
+    content = getattr(result, "content", None) or []
+    return content[0].text if content and isinstance(content[0], TextContent) else ""
 
 
 def compact_text(name, result):
@@ -361,7 +392,7 @@ def serve(server, on_exit=None, argv=None):
         return run_stdio(server, on_exit=on_exit)
     from jurisync.core.http import enable_request_logging
 
-    enable_request_logging()
+    enable_request_logging(structured=True)
     path = http_prefix(args.host, args.public_host) + "/mcp"
     for url in http_urls(args.host, args.port, args.public_host, "", [path]):
         print(f"MCP em {url}", file=sys.stderr)

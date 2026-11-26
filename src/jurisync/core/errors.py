@@ -11,6 +11,7 @@ Anything ``describe`` does not recognize is a bug: its text stays in the server 
 ``[unexpected]`` error with the same ref.
 """
 
+import re
 import urllib.error
 from dataclasses import dataclass
 
@@ -199,6 +200,13 @@ def render(label, problem, clean):
     if calls.current():
         meta += f" · ref={calls.current()}"
     return f"[{problem.code}] {label}: {message}\nPróximo passo: {problem.next_step}\n{meta}"
+
+
+def code_of(text):
+    """The code a rendered error starts with (``[portal_unavailable] ...``, also after the SDK prefix
+    "Error executing tool x: "), or "" for any other text."""
+    found = re.match(r"(?:Error executing tool \S+: )?\[([a-z0-9_]+)\]", text or "")
+    return found.group(1) if found else ""
 
 
 UNEXPECTED = Problem(

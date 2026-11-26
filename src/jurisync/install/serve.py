@@ -63,7 +63,7 @@ def main(argv=None):
 
     from jurisync.core.http import enable_request_logging
 
-    enable_request_logging()
+    enable_request_logging(structured=True)
     names = args.servers or list(DEFAULT_SERVERS)
     prefix = http_prefix(args.host, args.public_host)
     app, closers = build_app(names, args.host, args.public_host, prefix)

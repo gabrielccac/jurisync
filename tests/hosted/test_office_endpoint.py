@@ -340,6 +340,7 @@ class AuditTest(OfficeCase):
             ],
         )
         self.assertTrue(all(isinstance(row["duration_ms"], int) and row["at"] for row in rows))
+        self.assertEqual([row["error_code"] for row in rows], ["", "", "not_enabled", ""])
         dump = json.dumps([dict(row) for row in self.store._run("select * from calls")])
         self.assertNotIn("SEGREDO", dump)
         self.assertNotIn("pin-office-a", dump)

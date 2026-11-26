@@ -64,7 +64,8 @@ create table if not exists calls (
     error text not null default '',
     duration_ms integer not null,
     portal text not null default '',
-    reason text not null default ''
+    reason text not null default '',
+    error_code text not null default ''
 );
 create index if not exists calls_by_tenant on calls (tenant, id);
 create index if not exists calls_by_time on calls (at);
@@ -150,6 +151,7 @@ class Store:
             ("tenants", "reason", "text not null default ''"),
             ("calls", "portal", "text not null default ''"),  # and before the monitoring API
             ("calls", "reason", "text not null default ''"),
+            ("calls", "error_code", "text not null default ''"),  # and before errors had one format
             # Every password stored before users could choose their own was set by the operator: due for a change.
             ("users", "must_change", "integer not null default 1"),
         ):
@@ -404,14 +406,15 @@ class Store:
         rows = self._run("select * from audit where tenant = ? order by id desc limit ?", tenant, limit)
         return [dict(row) for row in rows]
 
-    def log_call(self, tenant, user, connector, tool, error, duration_ms, portal="", reason=""):
-        """One line per tool call: who, which tool and portal, how it ended (``reason``: why a login failed).
+    def log_call(self, tenant, user, connector, tool, error, duration_ms, portal="", reason="", error_code=""):
+        """One line per tool call: who, which tool and portal, how it ended (``reason``: why a login failed;
+        ``error_code``: the code of the error the agent got, as in docs/padroes.md, section 5).
 
         Arguments and results are never stored; ``portal`` is only ever a portal key.
         """
         self._run(
-            "insert into calls (at, tenant, user, connector, tool, ok, error, duration_ms, portal, reason) "
-            "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "insert into calls (at, tenant, user, connector, tool, ok, error, duration_ms, portal, reason, error_code) "
+            "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             int(time.time()),
             tenant,
             user,
@@ -422,6 +425,7 @@ class Store:
             duration_ms,
             portal,
             reason,
+            error_code,
         )
 
     def calls(self, tenant, limit=30):
