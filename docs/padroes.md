@@ -122,7 +122,8 @@ Helpers em `jurisync.core.responses`:
   registra um `WARNING` quando uma resposta passa do orçamento.
 - **Texto cortado diz como continuar:** `fit_texts` reparte o orçamento entre os textos (os curtos ficam inteiros) e
   marca cada texto cortado com `truncated: {shown, total, nextOffset}`; a tool aceita `offset` para ler o resto
-  (`pje_read_documents`). Tool sem `offset` usa `fitted`, cuja `note` manda ler menos documentos por chamada.
+  (`pje_read_documents`). Tool sem `offset` usa `fitted`: um documento lido sozinho fica com o limite do conector e
+  vários repartem `TEXT_BUDGET`, com uma `note` mandando ler menos documentos por chamada.
   `textTruncated` continua para clientes antigos.
 - **Listas:** `listing(items, key=..., total=..., more=...)` dá `{<key>: [...], returned, total, next}`; `total` é o
   que o portal informa (ou `null`) e `next` diz como pedir o resto (ou `null`). Conector novo usa o envelope;

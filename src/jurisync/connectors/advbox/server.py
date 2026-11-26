@@ -554,10 +554,11 @@ def create_server():
     ) -> CallToolResult:
         metadata = call(lambda: documents.download_file(url, filename=filename))
         markdown = metadata.pop("markdown", None)
-        content = [_text(json.dumps(metadata, ensure_ascii=False, indent=2))]
+        structured = {**metadata, "textReturned": bool(markdown)}
+        content = [_text(json.dumps(structured, ensure_ascii=False, indent=2))]
         if markdown:
             content.append(_text(f"Extracted PDF Markdown:\n\n{markdown}"))
-        return CallToolResult(content=content, structured_content={**metadata, "textReturned": bool(markdown)})
+        return CallToolResult(content=content, structured_content=structured)
 
     @server.tool(
         name="advbox_download_folder",
@@ -573,12 +574,10 @@ def create_server():
     ) -> CallToolResult:
         result = call(lambda: documents.download_folder(customerId, folder, max_files=maxFiles, ocr=ocr))
         files = result.pop("files")
-        content = [_text(json.dumps(result, ensure_ascii=False, indent=2))]
+        structured = {**result, "filesParsed": sum(1 for file in files if file.get("markdown"))}
+        content = [_text(json.dumps(structured, ensure_ascii=False, indent=2))]
         content += [_text(f"--- {file['name']} ---\n\n{file['markdown']}") for file in files if file.get("markdown")]
-        return CallToolResult(
-            content=content,
-            structured_content={**result, "filesParsed": sum(1 for file in files if file.get("markdown"))},
-        )
+        return CallToolResult(content=content, structured_content=structured)
 
     @server.tool(
         name="advbox_save_folder",

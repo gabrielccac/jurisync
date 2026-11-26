@@ -60,19 +60,40 @@ class CompactTextTest(unittest.TestCase):
         @server.tool(name="exemplo_download_document")
         def exemplo_download_document() -> CallToolResult:
             return CallToolResult(
-                content=[TextContent(type="text", text='{"saved": true}'), TextContent(type="text", text="# Texto")],
+                content=[
+                    TextContent(type="text", text='{\n  "saved": true,\n  "textReturned": true\n}'),
+                    TextContent(type="text", text="# Texto"),
+                ],
                 structured_content={"saved": True, "textReturned": True},
             )
 
         result = asyncio.run(server.call_tool("exemplo_download_document", {}))
-        self.assertEqual([block.text for block in result.content], ['{"saved": true}', "# Texto"])
+        self.assertEqual([block.text for block in result.content], ['{"saved":true,"textReturned":true}', "# Texto"])
+
+    def test_a_text_copy_that_differs_from_the_structured_content_is_left_alone(self):
+        server = JurisyncServer("exemplo")
+
+        @server.tool(name="exemplo_download_document")
+        def exemplo_download_document() -> CallToolResult:
+            return CallToolResult(
+                content=[TextContent(type="text", text='{"saved": true}')],
+                structured_content={"saved": True, "textReturned": True},
+            )
+
+        result = asyncio.run(server.call_tool("exemplo_download_document", {}))
+        self.assertEqual(result.content[0].text, '{"saved": true}')
 
 
 class FittedTest(unittest.TestCase):
-    def test_a_document_read_alone_is_never_cut_below_the_connector_cap(self):
+    def test_a_document_read_alone_keeps_the_connector_cap(self):
         reads = [{"text": "x" * 55_000}]
-        self.assertEqual(responses.fitted(reads, alone=60_000), {})
+        self.assertEqual(responses.fitted(reads), {})
         self.assertEqual(len(reads[0]["text"]), 55_000)
+
+    def test_several_documents_share_the_text_budget(self):
+        reads = [{"text": "x" * 60_000}, {"text": "y" * 60_000}]
+        self.assertIn("note", responses.fitted(reads))
+        self.assertEqual(sum(len(read["text"]) for read in reads), responses.TEXT_BUDGET)
 
 
 class PjeReadDocumentsBudgetTest(unittest.TestCase):
