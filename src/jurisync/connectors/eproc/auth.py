@@ -28,6 +28,9 @@ def _selenium_errors():
 
 
 CAPTCHA_INPUT = "#txtInfraCaptcha"
+# Rounds of clicking "Enviar" on the CAPTCHA page before the login gives up: a challenge the click does not solve
+# would otherwise keep a Chrome, a login slot and the office's session lock forever.
+MAX_CAPTCHA_ROUNDS = 3
 PANEL_READY = 'a[aria-describedby="processoscomprazoemaberto"]'
 # TJMG's panel builds the deadline table in JS without that aria attribute; its panel form is always present.
 PANEL_READY_ALT = ("#frmPainelAdvogado",)
@@ -161,6 +164,21 @@ def submit_captcha(driver):
                 raise RuntimeError("Could not submit the eproc CAPTCHA") from None
 
 
+def pass_captcha(driver, step, timeout=25):
+    """The step after the CAPTCHA page, when ``step`` is it: "Enviar" is clicked at most ``MAX_CAPTCHA_ROUNDS`` times."""
+    for _round in range(MAX_CAPTCHA_ROUNDS):
+        if step != "captcha":
+            return step
+        submit_captcha(driver)
+        step = wait_for_step(driver, timeout=timeout)
+    if step != "captcha":
+        return step
+    raise LoginFailed(
+        f"eproc still shows its CAPTCHA after {MAX_CAPTCHA_ROUNDS} submissions; it cannot be solved automatically",
+        reason="captcha",
+    )
+
+
 def session_from_cookies(cookies):
     """Copy the complete browser cookie jar into an in-memory HTTP session."""
     session = requests.Session()
@@ -240,10 +258,7 @@ def _submit_otp(driver, code):
         except _selenium_errors().StaleElementReferenceException:
             pass  # the page already moved on after the code was typed
     time.sleep(1)
-    step = wait_for_step(driver, timeout=30)
-    while step == "captcha":
-        submit_captcha(driver)
-        step = wait_for_step(driver, timeout=30)
+    step = pass_captcha(driver, wait_for_step(driver, timeout=30), timeout=30)
     if step == "home":
         step = open_panel(driver)
     return step
@@ -340,10 +355,7 @@ def login(username, password, account, *, portal, certificate=False):
         driver.click(submit)
         time.sleep(1)
 
-        step = wait_for_step(driver)
-        while step == "captcha":
-            submit_captcha(driver)
-            step = wait_for_step(driver)
+        step = pass_captcha(driver, wait_for_step(driver))
         if step == "home":
             step = open_panel(driver)
         if step == "login":

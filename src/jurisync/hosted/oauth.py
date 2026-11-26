@@ -87,7 +87,7 @@ class Provider:
     # Clients
 
     async def get_client(self, client_id):
-        info = self.store.client(client_id)
+        info = await anyio.to_thread.run_sync(self.store.client, client_id)
         return OAuthClientInformationFull.model_validate_json(info) if info else None
 
     async def register_client(self, client_info):
@@ -150,19 +150,21 @@ class Provider:
         return construct_redirect_uri(str(params.redirect_uri), code=code, state=params.state, iss=self.issuer)
 
     async def load_authorization_code(self, client, authorization_code):
-        found = self.store.code(authorization_code)
+        found = await anyio.to_thread.run_sync(self.store.code, authorization_code)
         if found is None:
             return None
         code = AuthorizationCode.model_validate(found[1])
         return code if code.client_id == client.client_id else None
 
     async def exchange_authorization_code(self, client, authorization_code):
+        return await anyio.to_thread.run_sync(self._exchange_code, client.client_id, authorization_code)
+
+    def _exchange_code(self, client_id, authorization_code):
         found = self.store.code(authorization_code.code)
-        self.store.delete_code(authorization_code.code)
-        if found is None:
+        if not self.store.delete_code(authorization_code.code) or found is None:
             raise TokenError("invalid_grant", "authorization code expired or already used")
         return self._issue(
-            client.client_id,
+            client_id,
             found[0],
             authorization_code.subject,
             authorization_code.scopes,
@@ -188,7 +190,7 @@ class Provider:
         return OAuthToken(access_token=access, expires_in=ACCESS_TTL, refresh_token=refresh, scope=" ".join(scopes))
 
     async def load_refresh_token(self, client, refresh_token):
-        row = self.store.token(refresh_token, "refresh")
+        row = await anyio.to_thread.run_sync(self.store.token, refresh_token, "refresh")
         if row is None or row["client_id"] != client.client_id:
             return None
         return RefreshToken(
@@ -201,16 +203,20 @@ class Provider:
         )
 
     async def exchange_refresh_token(self, client, refresh_token, scopes):
+        return await anyio.to_thread.run_sync(self._exchange_refresh, client.client_id, refresh_token, scopes)
+
+    def _exchange_refresh(self, client_id, refresh_token, scopes):
         row = self.store.token(refresh_token.token, "refresh")
         if row is None:
             raise TokenError("invalid_grant", "refresh token expired or revoked")
         if self.store.tenant(row["tenant"]) is None:
             raise TokenError("invalid_grant", "account no longer exists")
-        self.store.delete_pair(refresh_token.token)
-        return self._issue(client.client_id, row["tenant"], row["subject"], scopes or row["scopes"], row["resource"])
+        if not self.store.delete_pair(refresh_token.token):
+            raise TokenError("invalid_grant", "refresh token expired or revoked")
+        return self._issue(client_id, row["tenant"], row["subject"], scopes or row["scopes"], row["resource"])
 
     async def load_access_token(self, token):
-        row = self.store.token(token, "access")
+        row = await anyio.to_thread.run_sync(self.store.token, token, "access")
         if row is None:
             return None
         return AccessToken(
@@ -224,7 +230,7 @@ class Provider:
         )
 
     async def revoke_token(self, token):
-        self.store.delete_pair(token.token)
+        await anyio.to_thread.run_sync(self.store.delete_pair, token.token)
 
 
 class BrowserBinding:

@@ -6,6 +6,9 @@ same tenant and key are serialized because JSF/PHP view state is not safe to sha
 A session idle longer than ``revalidate_after`` seconds is checked with
 ``refresh`` before reuse; a failed check or a failed call triggers a new login.
 
+Waiting is bounded: a call gives up after ``JURISYNC_SESSION_WAIT_SECONDS`` waiting for the same office's call on the
+portal, and after ``JURISYNC_LOGIN_WAIT_SECONDS`` waiting for a login slot, with ``SessionBusy`` instead of hanging.
+
 Logins are the expensive, risky step: at most ``JURISYNC_MAX_LOGINS`` run at once in the process, and
 credentials a portal rejected are not sent again for ``login_cooldown`` seconds (a few wrong passwords lock
 the account). Sessions unused for ``idle_ttl`` seconds are closed the next time the pool is used.
@@ -25,6 +28,8 @@ from jurisync.core import credentials
 DEFAULT_LOGIN_COOLDOWN = 15 * 60
 DEFAULT_IDLE_TTL = 30 * 60
 DEFAULT_MAX_LOGINS = 2
+DEFAULT_SESSION_WAIT = 10 * 60
+DEFAULT_LOGIN_WAIT = 5 * 60
 
 
 class SessionExpired(RuntimeError):
@@ -44,6 +49,10 @@ REFUSALS = (
     "blocked",
 )
 REASONS = (*REFUSALS, "captcha", "portal_unavailable", "login_missing", "unexpected")
+
+
+class SessionBusy(RuntimeError):
+    """The call waited too long for the office's session (another call holds it) or for a login slot; nothing was sent."""
 
 
 class LoginFailed(RuntimeError):
@@ -147,6 +156,8 @@ class SessionPool:
         revalidate_after=120,
         login_cooldown=None,
         idle_ttl=DEFAULT_IDLE_TTL,
+        session_wait=None,
+        login_wait=None,
         clock=time.monotonic,
         wall_clock=time.time,
     ):
@@ -156,6 +167,8 @@ class SessionPool:
         self._revalidate_after = revalidate_after
         self._login_cooldown = login_cooldown
         self._idle_ttl = idle_ttl
+        self._session_wait = session_wait
+        self._login_wait = login_wait
         self._clock = clock
         self._wall_clock = wall_clock
         self._entries = {}  # key -> (session, last successful use; -inf after a failed call, credentials signature)
@@ -170,16 +183,30 @@ class SessionPool:
             return self._login_cooldown
         return _env_number("JURISYNC_LOGIN_COOLDOWN_SECONDS", DEFAULT_LOGIN_COOLDOWN)
 
+    def _wait(self, configured, name, default):
+        return configured if configured is not None else _env_number(name, default)
+
     def _lock(self, key):
         with self._guard:
             return self._locks.setdefault(key, threading.Lock())
 
     @contextmanager
-    def _held(self, key):
-        """Hold the key's lock. Eviction may drop an idle lock between lookup and acquire: then take the new one."""
+    def _held(self, key, wait=True):
+        """Hold the key's lock. Eviction may drop an idle lock between lookup and acquire: then take the new one.
+
+        With ``wait`` the lock is awaited at most the session wait, then ``SessionBusy``; without, indefinitely.
+        """
+        deadline = time.monotonic() + self._wait(
+            self._session_wait, "JURISYNC_SESSION_WAIT_SECONDS", DEFAULT_SESSION_WAIT
+        )
         while True:
             lock = self._lock(key)
-            lock.acquire()
+            if not wait:
+                lock.acquire()
+            elif not lock.acquire(timeout=max(0, deadline - time.monotonic())):
+                raise SessionBusy(
+                    f"{key[1]}: another call of this office on the portal is still running; try again in a few minutes"
+                )
             with self._guard:
                 current = self._locks.get(key) is lock
             if current:
@@ -257,7 +284,10 @@ class SessionPool:
                 f"No login is configured for {portal} on this account; configured: {', '.join(self._only)}"
             )
         self._check_cooldown(key)
-        with login_slots():
+        slots = login_slots()
+        if not slots.acquire(timeout=self._wait(self._login_wait, "JURISYNC_LOGIN_WAIT_SECONDS", DEFAULT_LOGIN_WAIT)):
+            raise SessionBusy(f"{portal}: every login slot of the server stayed busy; try again in a few minutes")
+        try:
             began = time.monotonic()
             try:
                 value = (login or self._login)(portal)
@@ -271,6 +301,8 @@ class SessionPool:
                 raise
             _report_login(portal, None, began)
             return value
+        finally:
+            slots.release()
 
     def fresh_login(self, portal, login=None):
         """A new login under the pool's rules (cool-down, login slots) that the pool does not keep; the caller closes it."""
@@ -377,5 +409,5 @@ class SessionPool:
         with self._guard:
             keys = list(self._entries)
         for key in keys:
-            with self._held(key):
+            with self._held(key, wait=False):
                 self._discard(key)

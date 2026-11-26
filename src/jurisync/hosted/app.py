@@ -21,6 +21,7 @@ import time
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from urllib.parse import urlsplit
 
+import anyio
 from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser, BearerAuthBackend, RequireAuthMiddleware
@@ -173,7 +174,7 @@ class Office(MCPServer):
         for connector, server in self.servers.items():
             if connector not in tenant["connectors"]:
                 continue
-            offered, noted = offered_portals(connector), False
+            offered, noted = await anyio.to_thread.run_sync(offered_portals, connector), False
             for tool in await server.list_tools():
                 if not granted(connector, tool.name):
                     continue
@@ -204,7 +205,7 @@ class Office(MCPServer):
                 raise NotEnabled(
                     f"{name} changes {SYSTEMS.get(connector, connector)}: writes are not enabled for this office"
                 )
-            offered = offered_portals(connector)
+            offered = await anyio.to_thread.run_sync(offered_portals, connector)
             if offered is not None:
                 self._check_portal(connector, name, arguments, offered)
             result = await self.servers[connector].call_tool(name, arguments, context)
@@ -219,7 +220,10 @@ class Office(MCPServer):
         finally:
             duration = round((time.monotonic() - started) * 1000)
             portal = self._portal(connector, name, arguments)
-            self.store.log_call(tenant["id"], user, connector, name, error, duration, portal, reason)
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(
+                    self.store.log_call, tenant["id"], user, connector, name, error, duration, portal, reason
+                )
 
     def _portal(self, connector, name, arguments):
         """The portal key a call names (or defaults to) for the call log; anything else is not recorded."""
@@ -297,7 +301,7 @@ class TenantGate:
         user = scope.get("user")
         token = user.access_token if isinstance(user, AuthenticatedUser) else None
         tenant_id = self.open_tenant or ((token.claims or {}).get("tenant") if token else None)
-        tenant = self.store.tenant(tenant_id) if tenant_id else None
+        tenant = await anyio.to_thread.run_sync(self.store.tenant, tenant_id) if tenant_id else None
         if tenant is None:
             return await JSONResponse({"error": "invalid_token"}, status_code=401)(scope, receive, send)
         if token:
@@ -317,11 +321,15 @@ class TenantGate:
                 },
                 status_code=403,
             )(scope, receive, send)
-        values, files = self.vault.get(tenant["id"])
+        # Reading and decrypting the vault and hashing it for the scope's signature stay off the event loop.
+        values, files = await anyio.to_thread.run_sync(self.vault.get, tenant["id"])
+        office_scope = await anyio.to_thread.run_sync(
+            lambda: access.tenant_scope(tenant, values, files, saver=self._saver(tenant["id"]))
+        )
         user = (token.subject or "") if token else ""
         marker = caller.set((tenant, user))
         try:
-            with access.tenant_scope(tenant, values, files, saver=self._saver(tenant["id"])):
+            with office_scope:
                 await self.app(scope, receive, send)
         finally:
             caller.reset(marker)

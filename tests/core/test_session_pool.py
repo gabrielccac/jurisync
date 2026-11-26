@@ -218,3 +218,75 @@ def test_changed_credentials_drop_the_session_and_the_cooldown():
     with credentials.scope("office", {"PASSWORD": "fixed"}):
         portal.pool.check("trf1-1g")  # the operator stored a new password: the cool-down is lifted
     assert len(portal.logins) == 4
+
+
+def test_a_call_waits_for_the_offices_session_only_so_long():
+    portal = Portal(session_wait=0.2)
+    inside, release = threading.Event(), threading.Event()
+
+    def hold():
+        with portal.pool.session("tjx"):
+            inside.set()
+            release.wait(5)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert inside.wait(5)
+    began = time.monotonic()
+    with pytest.raises(session_pool.SessionBusy, match="another call of this office"):
+        portal.use("tjx")
+    assert time.monotonic() - began < 3
+    release.set()
+    holder.join(5)
+    assert portal.use("tjx") == "/tjx/1"
+
+
+def test_the_session_wait_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("JURISYNC_SESSION_WAIT_SECONDS", "0.1")
+    portal = Portal()
+    with portal.pool.session("tjx"):
+        failed = []
+        thread = threading.Thread(
+            target=lambda: failed.append(pytest.raises(session_pool.SessionBusy, portal.use, "tjx"))
+        )
+        thread.start()
+        thread.join(5)
+    assert failed and not thread.is_alive()
+
+
+def test_a_login_waits_for_a_slot_only_so_long_and_sends_nothing(monkeypatch):
+    monkeypatch.setenv("JURISYNC_MAX_LOGINS", "1")
+    inside, release = threading.Event(), threading.Event()
+
+    def stuck_login(portal):
+        inside.set()
+        release.wait(5)
+        return portal
+
+    busy = SessionPool(stuck_login, lambda portal, value: value, lambda value: None)
+    waiting = Portal(login_wait=0.2)
+    holder = threading.Thread(target=lambda: busy.check("tjx"))
+    holder.start()
+    assert inside.wait(5)
+    with pytest.raises(session_pool.SessionBusy, match="login slot"):
+        waiting.use("tjy")
+    assert waiting.logins == []
+    release.set()
+    holder.join(5)
+    assert waiting.use("tjy") == "/tjy/1"
+
+
+def test_a_failed_login_gives_back_its_slot_and_the_session_lock(monkeypatch):
+    monkeypatch.setenv("JURISYNC_MAX_LOGINS", "1")
+    attempts = []
+
+    def failing(portal):
+        attempts.append(portal)
+        raise session_pool.LoginFailed("captcha", reason="captcha")
+
+    pool = SessionPool(failing, lambda portal, value: value, lambda value: None, session_wait=0.2, login_wait=0.2)
+    for _ in range(3):
+        with pytest.raises(session_pool.LoginFailed):
+            with pool.session("tjx"):
+                pass
+    assert attempts == ["tjx"] * 3

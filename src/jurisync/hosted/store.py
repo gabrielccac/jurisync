@@ -304,7 +304,8 @@ class Store:
         return rows[0]["tenant"], json.loads(rows[0]["record"])
 
     def delete_code(self, code):
-        self._run("delete from codes where digest = ?", digest(code))
+        """Whether this call removed the code: of two redemptions only one gets True."""
+        return bool(self._run("delete from codes where digest = ? returning digest", digest(code)))
 
     def save_token(self, token, *, kind, client_id, tenant, subject, scopes, resource, expires, pair):
         self._run(
@@ -330,10 +331,14 @@ class Store:
         return row
 
     def delete_pair(self, token):
-        """Revoke a token and the access/refresh token issued with it."""
-        rows = self._run("select pair from tokens where digest = ?", digest(token))
-        if rows:
-            self._run("delete from tokens where pair = ?", rows[0]["pair"])
+        """Revoke a token and the access/refresh token issued with it; whether this call removed them (one statement:
+        of two rotations of one refresh token only one gets True)."""
+        return bool(
+            self._run(
+                "delete from tokens where pair = (select pair from tokens where digest = ?) returning digest",
+                digest(token),
+            )
+        )
 
     # Audit trail and portal checks
 

@@ -1,10 +1,12 @@
 """The hosted endpoints (/mcp, /tribunais/mcp, per connector), the per-call audit log and the pooled login check."""
 
+import asyncio
 import json
 import os
 import tempfile
 import time
 import unittest
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 from unittest import mock
@@ -410,3 +412,31 @@ class PooledCheckTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EventLoopTest(OfficeCase):
+    def test_store_and_vault_are_used_off_the_event_loop(self):
+        on_loop, used = [], []
+
+        def spy(name, method):
+            def call(*args, **kwargs):
+                used.append(name)
+                with suppress(RuntimeError):
+                    asyncio.get_running_loop()
+                    on_loop.append(name)
+                return method(*args, **kwargs)
+
+            return call
+
+        with TestClient(self.app, base_url=BASE) as client:
+            token = self.token(client, resource=f"{BASE}/mcp")
+            with (
+                mock.patch.object(self.store, "tenant", spy("tenant", self.store.tenant)),
+                mock.patch.object(self.store, "token", spy("token", self.store.token)),
+                mock.patch.object(self.store, "log_call", spy("log_call", self.store.log_call)),
+                mock.patch.object(self.vault, "get", spy("vault", self.vault.get)),
+            ):
+                office = self.mcp(client, token)
+                self.assertEqual(self.data(self.call(office, "alpha_whoami"))["tenant"], "office-a")
+        self.assertTrue({"tenant", "token", "log_call", "vault"} <= set(used), used)
+        self.assertEqual(on_loop, [])
