@@ -103,7 +103,7 @@ def test_downloaded_documents_land_in_the_offices_folder(monkeypatch, tmp_path):
     monkeypatch.setattr(base, "request", fake_request)
     for tenant in ("office-a", "office-b"):
         with credentials.scope(tenant, {}):
-            saved = base.document(None, "tjsp-esaj", NUMBER, "38", download=True)["savedAs"]
+            saved = base.document(None, "tjsp-esaj", NUMBER, "38", download=True, read={"estado": "nenhuma"})["savedAs"]
         path = tmp_path / "tenants" / tenant / saved
         assert path.read_bytes() == f"%PDF-{tenant}".encode()
     assert not [entry for entry in tmp_path.iterdir() if entry.is_file()]

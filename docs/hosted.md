@@ -185,6 +185,25 @@ jurisync-hosted calls <office> --limit 50         # tool calls: user, tool, ok/e
 Sign-in pages (OAuth) pause an e-mail after 8 wrong passwords in 15 minutes. `jurisync-hosted user password <e-mail>`
 changes a Jurisync user's password and ends that user's sessions and tokens.
 
+## Monitoring API (internal)
+
+`src/jurisync/hosted/monitor.py`, read-only JSON at `/monitor`, served only when the service has `JURISYNC_MONITOR_TOKEN` (systemd
+credential; every request sends it as `Authorization: Bearer`). It is the operator's, not an office's: wrong tokens are
+throttled per address, and without the variable the paths answer 404.
+
+| Path | Answers |
+|---|---|
+| `/monitor/status` | The process (since when, address), offices, users signed in, portals by state, open sessions, login blocks, calls of the last 24 h, one line per system |
+| `/monitor/portals` | Each portal some office has: reachable now, logins of the last 24 h (with reasons), and per office the last check and last call |
+| `/monitor/sessions` | Open portal sessions (idle time, state), logins in cool-down and why, users signed in (client, connector, last call) |
+| `/monitor/calls?office=&connector=&portal=&errors=1&limit=100` | The latest tool calls |
+| `/monitor/usage?hours=24&office=` | Calls, errors, median and p95 duration per office, system, portal, tool and user; errors and login results by reason |
+
+Reachability is an anonymous GET of each portal's entry page every `JURISYNC_PROBE_SECONDS` (600; `0` off): `no ar`, `recusando` (403/429,
+usually a WAF) or `fora do ar`. A portal that answers may still refuse a login, which `logins_24h` shows. Each call row
+also keeps the portal key and the login failure reason, and each login a pool tries is one row (`logins`); both are
+purged after 90 days. Arguments, results and process numbers are never stored.
+
 ## Validation per office
 
 Run for every office before it uses the server for real. Each step names what proves it.

@@ -10,7 +10,7 @@
 # $CREDENTIALS_DIRECTORY: never from the environment, a command line or the unit file.
 set -euo pipefail
 
-ALLOWED="JURISYNC_VAULT_KEY JURISYNC_CAPTCHA_API_KEY"
+ALLOWED="JURISYNC_VAULT_KEY JURISYNC_CAPTCHA_API_KEY JURISYNC_MONITOR_TOKEN"
 MODE=set
 case "${1:-}" in
   --generate) MODE=generate; shift ;;

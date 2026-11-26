@@ -121,6 +121,27 @@ class PjeNotificationChecks(unittest.TestCase):
         self.assertTrue(result["success"])
         session.close.assert_called_once()
 
+    def test_a_portal_that_refuses_the_push_page_says_so(self):
+        # TRF6 PJe, 25/11/2026: Push/listView.seam answers 302 to error.seam, "Sem permissão para acessar a página."
+        refused = "<html><div>Sem permissão para acessar a página.</div></html>"
+        for location, html, message in (
+            ("/pje/error.seam?cid=1", refused, "does not let this account open the Push page"),
+            ("/pje/error.seam?cid=1", "<html>Erro inesperado</html>", "Push list returned HTTP 302"),
+            ("/pje/login.seam", refused, "Push list returned HTTP 302"),
+            ("https://other.example/pje/error.seam", refused, "Push list returned HTTP 302"),
+        ):
+            with self.subTest(location=location, html=html):
+                session = Mock()
+                session.get.side_effect = [
+                    SimpleNamespace(status_code=302, url="x", content=b"", headers={"Location": location}),
+                    SimpleNamespace(
+                        status_code=200, url="x", content=html.encode(), headers={"Content-Type": "text/html"}
+                    ),
+                ]
+                with self.assertRaisesRegex(RuntimeError, message):
+                    push.read_push("trf6-pje-1g", session=session)
+                self.assertEqual(session.get.call_count, 2 if "/pje/error.seam" in location[:15] else 1)
+
     def test_push_process_pattern_and_row_parsing(self):
         assert push.PROCESS_RE.findall("1016572-38.2026.4.01.0000") == ["1016572-38.2026.4.01.0000"]
         push_sample = """

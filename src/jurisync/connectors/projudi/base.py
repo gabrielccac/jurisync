@@ -144,8 +144,7 @@ class Adapter:
 
     def pending_ciencia(self, session, portal, process_number):
         """Communications of this process whose ciência a document read could register, checked before anything is
-        opened: ``{"items": [...], "unchecked": reason or None}``, or ``None`` when the generation has no such list
-        (TJAM checks its agenda inside ``download``)."""
+        opened: ``{"items": [...], "unchecked": reason or None}``, or ``None`` when the generation has no such list."""
         return None
 
     def list_intimations(self, session, portal):
@@ -270,8 +269,7 @@ def check_ciencia(adapter, session, portal, process_number, acknowledge=False):
     """Run the generation's pending-ciência check before anything of the process is opened.
 
     Refuses (``CienciaPending``/``CienciaUnchecked``) unless the caller acknowledges; otherwise returns the ``ciencia``
-    block of the read that follows. A generation without the check (TJAM refuses inside ``download``) reads only when
-    nothing is pending: ``nenhuma``.
+    block of the read that follows (``nenhuma`` for a generation without such a list).
     """
     state = adapter.pending_ciencia(session, portal, adapter.normalize_number(process_number, portal))
     if state is None:

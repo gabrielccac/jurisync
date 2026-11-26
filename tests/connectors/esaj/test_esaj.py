@@ -13,6 +13,7 @@ from jurisync.connectors.esaj import base, parsers, server
 from jurisync.core.http import UnsafeUrlError
 
 NUMBER = "0000001-00.2026.8.26.0001"
+CLEAR = {"estado": "nenhuma"}
 
 
 def response(body="", status=200, url="https://esaj.tjsp.jus.br/cpopg/show.do"):
@@ -131,9 +132,9 @@ def test_invalid_document_and_pagination_do_not_request(monkeypatch):
 def test_document_inventory_block_does_not_acknowledge(monkeypatch):
     monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38"}])
     with pytest.raises(base.EsajBlocked):
-        base.document(None, "tjsp-esaj", NUMBER, "38")
+        base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)
     with pytest.raises(ValueError):
-        base.document(None, "tjsp-esaj", NUMBER, "99")
+        base.document(None, "tjsp-esaj", NUMBER, "99", read=CLEAR)
 
 
 def test_server_block_and_tenant_session_usage(monkeypatch):
@@ -165,8 +166,12 @@ async def test_tools_and_registration():
         "esaj_read_document",
         "esaj_download_document",
     }
-    # Only the download writes a file (the shared documents folder); nothing is destructive.
-    assert {t.name for t in tools if not t.annotations.read_only_hint} == {"esaj_download_document"}
+    # The document tools may register a ciência once acknowledged, and the download writes a file; nothing is destructive.
+    opening = [t for t in tools if not t.annotations.read_only_hint]
+    assert {t.name for t in opening} == {"esaj_list_documents", "esaj_read_document", "esaj_download_document"}
+    for tool in opening:
+        assert tool.input_schema["properties"]["acknowledgeCiencia"].get("default") is None
+        assert "acknowledgeCiencia" not in tool.input_schema.get("required", [])
     assert not any(t.annotations.destructive_hint for t in tools)
     assert all(t.title for t in tools)
     assert not hasattr(base, "list_intimacoes")
@@ -229,16 +234,41 @@ def test_main_logs_in_only_where_a_login_is_set(monkeypatch):
 def test_document_tools_always_report_the_ciencia(monkeypatch):
     pool = Mock()
     monkeypatch.setattr(server, "sessions", pool)
-    pool.run.return_value = {"processNumber": NUMBER, "text": "teor"}
-    assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == {"estado": "nenhuma"}
-    pool.run.side_effect = base.EsajBlocked("Opening this document may register the receipt", "intimacao_pending")
-    result = server.open_document("tjsp-esaj", lambda s: {})
-    assert result["success"] is False and result["error"] == "intimacao_pending"
-    assert result["ciencia"]["estado"] == "pendente"
-    assert "nada foi aberto" in result["ciencia"]["aviso"]
+    pool.run.return_value = {"processNumber": NUMBER, "text": "teor", "ciencia": CLEAR}
+    assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == CLEAR
+    for reason, state in (
+        ("intimacao_pending", "pendente"),
+        ("receipt_required", "pendente"),
+        ("ciencia_unchecked", "nenhuma"),
+    ):
+        pool.run.side_effect = base.EsajBlocked("nothing was opened", reason)
+        result = server.open_document("tjsp-esaj", lambda s: {})
+        assert result["success"] is False and result["error"] == reason
+        assert result["ciencia"]["estado"] == state
+        assert "nada foi aberto" in result["ciencia"]["aviso"].lower()
     pool.run.side_effect = base.EsajBlocked("needs the process password", "password_required")
     with pytest.raises(ToolError, match=r"\[password_required\]"):
         server.open_document("tjsp-esaj", lambda s: {})
+
+
+def test_a_read_repeated_after_a_new_login_keeps_the_first_ciencia_check(monkeypatch):
+    checks, reads = [], []
+
+    def check(session, portal, number, acknowledge):
+        checks.append(acknowledge)
+        return {"estado": "dada"} if len(checks) == 1 else CLEAR
+
+    def document(session, portal, number, document_id, *, download, read):
+        reads.append(read)
+        return {"ciencia": read}
+
+    monkeypatch.setattr(base, "check_ciencia", check)
+    monkeypatch.setattr(base, "document", document)
+    pool = Mock()
+    pool.run.side_effect = lambda key, read: (read(None), read(None))[1]  # the pool repeats after a new login
+    monkeypatch.setattr(server, "sessions", pool)
+    assert server.read_document("tjsp-esaj", NUMBER, "38", True)["ciencia"]["estado"] == "dada"
+    assert checks == [True] and len(reads) == 2
 
 
 def viewer_html(number=NUMBER, document_id="38", restricted=False):
@@ -267,6 +297,7 @@ def test_viewer_inventory_process_binding_and_privacy(monkeypatch):
     with pytest.raises(base.EsajParseError):  # listed nodes, none a document: not an empty folder
         parsers.viewer_documents(folder, NUMBER)
     monkeypatch.setattr(base, "document_inventory", lambda *a: items)
+    monkeypatch.setattr(base, "check_ciencia", lambda *a: CLEAR)
     assert "parameters" not in str(base.list_documents(None, "tjsp-esaj", NUMBER))
 
 
@@ -303,8 +334,8 @@ def test_document_permission_denial_never_fetches_pdf(monkeypatch, status, body,
     request = Mock(return_value=response(body, status=status))
     monkeypatch.setattr(base, "request", request)
     with pytest.raises(base.EsajBlocked) as error:
-        base.document(None, "tjsp-esaj", NUMBER, "38")
-    assert error.value.reason == "intimacao_pending"
+        base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)
+    assert error.value.reason == "receipt_required"
     assert shown.removesuffix(" )") in str(error.value)
     assert "x" * 201 not in str(error.value)
     assert "secret" not in str(error.value) and "private" not in str(error.value)
@@ -320,21 +351,8 @@ def test_document_permission_cleared_only_by_204_or_an_empty_200(monkeypatch, st
     request = Mock(side_effect=[response(body, status=status), pdf])
     monkeypatch.setattr(base, "request", request)
     monkeypatch.setattr("jurisync.core.document_text.extract_document_text", lambda *a: ("extracted", "Example"))
-    assert base.document(None, "tjsp-esaj", NUMBER, "38")["text"] == "Example"
+    assert base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)["text"] == "Example"
     assert request.call_count == 2
-
-
-def test_document_has_no_acknowledgement_argument():
-    """e-SAJ exposes no way to accept a receipt through the connector, so a pending intimação always refuses."""
-    import inspect
-
-    assert set(inspect.signature(base.document).parameters) == {
-        "session",
-        "portal",
-        "number",
-        "document_id",
-        "download",
-    }
 
 
 def test_captcha_uuid_post_follows_redirects_only_on_the_portal():
@@ -365,7 +383,7 @@ def test_document_bounded_pdf_and_close(monkeypatch):
     monkeypatch.setattr(
         "jurisync.core.document_text.extract_document_text", lambda *a: ("extracted", "Example https://private/url")
     )
-    result = base.document(None, "tjsp-esaj", NUMBER, "38")
+    result = base.document(None, "tjsp-esaj", NUMBER, "38", read=CLEAR)
     assert result["text"] == "Example [url]"
     pdf.close.assert_called_once()
     assert request.call_args.kwargs["stream"] is True
@@ -381,7 +399,7 @@ def test_document_oversize_is_not_saved(monkeypatch):
     save = Mock()
     monkeypatch.setattr("jurisync.core.documents_dir.save_document", save)
     with pytest.raises(ValueError, match="exceeds"):
-        base.document(None, "tjsp-esaj", NUMBER, "38", download=True)
+        base.document(None, "tjsp-esaj", NUMBER, "38", download=True, read=CLEAR)
     save.assert_not_called()
     pdf.close.assert_called_once()
 

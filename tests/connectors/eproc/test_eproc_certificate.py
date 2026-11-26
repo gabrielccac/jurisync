@@ -184,7 +184,7 @@ TJMG_CODE = """
 
 
 def page(url, text="", status=200):
-    return mock.Mock(status_code=status, url=url, text=text, headers={})
+    return mock.Mock(status_code=status, url=url, text=text, content=text.encode(), headers={})
 
 
 class FakeSession:
@@ -334,6 +334,30 @@ class LoginFlowTest(unittest.TestCase):
                 ],
                 {},
             )
+
+    def test_a_cpf_the_portal_does_not_know_is_not_a_certificate_refusal(self):
+        # TJBA, 26/11/2026: the certificate is accepted and the portal offers the lawyer's registration; the notice
+        # sits in UTF-8 in a hidden textarea of a page read as Latin-1
+        base = "https://eproc1g.tjba.jus.br/eproc/"
+        body = (
+            '<textarea id="txaInfraMsg" style="display:none">Não foi localizado usuário com este CPF (000).</textarea>'
+        )
+        notice = page(base + "externo_controlador.php?acao=principal", body.encode().decode("iso-8859-1"))
+        notice.content = body.encode()
+        with self.assertRaisesRegex(certificate.LoginRejected, "no user for this certificate's CPF") as raised:
+            self.run_login(
+                "tjba-eproc-1g",
+                [
+                    ("GET", base, page(base, TJMG_LOGIN.replace("tjmg", "tjba"))),
+                    (
+                        "POST",
+                        base + "externo_controlador.php?acao=login_cert",
+                        notice,
+                    ),
+                ],
+                {},
+            )
+        self.assertEqual(raised.exception.reason, "not_registered")
 
     def test_keycloak_that_asks_the_code_right_after_the_certificate(self):
         login = "https://sso.tjpr.jus.br/auth/realms/eproc/protocol/openid-connect/auth?client_id=eproc1g"
@@ -638,6 +662,14 @@ class Trf6BrowserEntryTest(unittest.TestCase):
         ):
             self.browse(stuck)
         self.assertEqual((caught.exception.reason, len(stuck.opened)), ("portal_unavailable", 2))
+
+    def test_the_home_still_carrying_the_challenge_script_goes_to_the_sso_entry(self):
+        home = '<script src="/TSPD/08f?type=9"></script><form id="frmLogin" action="index.php"></form>'
+        driver = FakeDriver([home, home, TRF6_BUTTON])
+        with mock.patch.object(certificate, "BROWSER_SETTLE", 0):
+            _, result = self.browse(driver)
+        self.assertEqual(driver.opened, [self.config.login_url, self.config.url(certificate.SSO_ENTRY)])
+        self.assertEqual(result.text, TRF6_BUTTON)
 
     def test_an_entry_that_does_not_load_is_portal_unavailable(self):
         driver = FakeDriver([""])

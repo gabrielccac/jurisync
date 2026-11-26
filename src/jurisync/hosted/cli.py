@@ -256,6 +256,7 @@ def certificate_remove(args, say):
 
 def portal_list(args, say):
     from jurisync.hosted import access
+    from jurisync.hosted.provision import NO_DEVICE
 
     store, vault = open_store(), open_vault()
     office = require_existing(store, args.tenant)
@@ -288,7 +289,11 @@ def portal_list(args, say):
         )
     for service in registry.SERVICES:
         if all(values.get(name) for name in registry.get(service).login):
-            say(f"{service:<16} {registry.label(service):<9} {methods[access.PASSWORD]:<16} {'':<9}{result(service)}")
+            device = registry.get(service).device
+            status = result(service)
+            if device and not values.get(device):
+                status = NO_DEVICE + ("" if service not in checks else f" (último teste: {status})")
+            say(f"{service:<16} {registry.label(service):<9} {methods[access.PASSWORD]:<16} {'':<9}{status}")
 
 
 def served_now(office, values, files, keys):

@@ -34,6 +34,8 @@ class PortalRegistryTest(unittest.TestCase):
                 "trf5-2g",
                 "trf3-1g",
                 "trf3-2g",
+                "trf6-pje-1g",
+                "trf6-pje-2g",
                 "trf5-tru",
                 "trf5-legacy",
                 "tjap-1g",
@@ -67,6 +69,8 @@ class PortalRegistryTest(unittest.TestCase):
                 "trt17-2g",
                 "trt19-1g",
                 "trt19-2g",
+                "trt23-1g",
+                "trt23-2g",
                 "trt24-1g",
                 "trt24-2g",
                 "trt3-1g",
@@ -77,6 +81,7 @@ class PortalRegistryTest(unittest.TestCase):
                 "tjmt-1g",
                 "tjmt-2g",
                 "tjdft-1g",
+                "tjdft-2g",
                 "tjpa-1g",
                 "tjmg-pje-1g",
                 "tjmg-pje-tr",
@@ -99,6 +104,7 @@ class PortalRegistryTest(unittest.TestCase):
             (
                 "tjmg-1g",
                 "tjmg-2g",
+                "tjba-eproc-1g",
                 "tjms-eproc-1g",
                 "tjrj-eproc-1g",
                 "tjrj-eproc-2g",
@@ -114,6 +120,7 @@ class PortalRegistryTest(unittest.TestCase):
                 "trf2-1g-es",
                 "trf2-2g",
                 "tjrs-1g",
+                "tjrs-2g",
                 "tjsc-1g",
                 "tjsc-2g",
                 "tjac-1g",
@@ -164,6 +171,21 @@ class PortalRegistryTest(unittest.TestCase):
             self.assertEqual(portals.for_host(host).key, key)
         self.assertEqual([p.key for p in portals.for_process("0801148-12.2026.8.20.5135")], ["tjrn-1g", "tjrn-2g"])
         self.assertEqual([p.key for p in portals.for_process("7001234-56.2026.8.22.0001")], ["tjro-1g", "tjro-2g"])
+
+    def test_portals_beside_another_system_come_only_from_their_host_or_the_setup(self):
+        for host, key in (
+            ("pje1g.trf6.jus.br", "trf6-pje-1g"),
+            ("pje2g.trf6.jus.br", "trf6-pje-2g"),
+            ("pje2i.tjdft.jus.br", "tjdft-2g"),
+            ("eproc1g.tjba.jus.br", "tjba-eproc-1g"),
+        ):
+            with self.subTest(portal=key):
+                self.assertEqual(portals.for_host(host).key, key)
+                self.assertFalse(portals.get(key).guess_by_number)
+        self.assertEqual([p.key for p in portals.for_process("6001234-56.2026.4.06.3800")], ["trf6-1g", "trf6-2g"])
+        self.assertEqual([p.key for p in portals.for_process("0701234-56.2026.8.07.0001")], ["tjdft-1g"])
+        self.assertEqual([p.key for p in portals.for_process("5001234-56.2026.8.21.0001")], ["tjrs-1g", "tjrs-2g"])
+        self.assertEqual([p.key for p in portals.for_process("0001234-56.2026.5.23.0001")], ["trt23-1g", "trt23-2g"])
 
     def test_host_and_process_routing(self):
         for key, region, instance in (

@@ -223,7 +223,7 @@ def intimation(code, ciencia=False):
     return {"id": "1", "titulo": "Intimação", "descricao": "Texto", "cdProcesso": code, "ciencia": ciencia}
 
 
-def test_a_process_with_an_intimacao_without_ciencia_never_opens(portal):
+def test_a_process_with_an_intimacao_without_ciencia_opens_only_when_acknowledged(portal):
     fake = portal(
         intimations=[intimation("AB0000000001"), intimation("AB0000000002", ciencia=True)],
         by_number=[entry("PG")],
@@ -233,10 +233,13 @@ def test_a_process_with_an_intimacao_without_ciencia_never_opens(portal):
         with pytest.raises(base.EsajBlocked) as error:
             read(None, "tjsp-esaj", NUMBER)
         assert error.value.reason == "intimacao_pending"
+        assert "acknowledgeCiencia=true" in str(error.value)
     assert not any("abrirPasta" in path or "pastadigital" in path for path in fake.paths())
     # The codes go to the panel together, as its own page sends them; only those without ciência.
     lookup = next(kwargs for _m, path, kwargs in fake.seen if kwargs.get("params") and path.endswith("processos"))
     assert lookup["params"] == [("cdsProcesso", "AB0000000001")]
+    listed = base.list_documents(None, "tjsp-esaj", NUMBER, acknowledge_ciencia=True)
+    assert listed["items"][0]["documentId"] == "7" and listed["ciencia"]["estado"] == "dada"
 
 
 def test_an_intimacao_of_another_process_does_not_close_this_one(portal):
@@ -245,7 +248,8 @@ def test_an_intimacao_of_another_process_does_not_close_this_one(portal):
         by_number=[entry("PG")],
         by_code={"AB0000000009": [entry("PG", number=OTHER, code="AB0000000009")]},
     )
-    assert base.document_inventory(None, "tjsp-esaj", NUMBER)[0]["documentId"] == "7"
+    listed = base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert listed["items"][0]["documentId"] == "7" and listed["ciencia"] == {"estado": "nenhuma"}
 
 
 @pytest.mark.parametrize(
@@ -256,20 +260,26 @@ def test_an_intimacao_of_another_process_does_not_close_this_one(portal):
         [intimation(None)],
     ],
 )
-def test_the_guard_fails_closed(portal, intimations):
+def test_an_unchecked_ciencia_opens_only_when_acknowledged(portal, intimations):
     fake = portal(intimations=intimations, by_number=[entry("PG")])
-    with pytest.raises(base.EsajBlocked) as error:
-        base.document_inventory(None, "tjsp-esaj", NUMBER)
-    assert error.value.reason == "intimacao_pending"
+    with pytest.raises(base.EsajBlocked, match="acknowledgeCiencia=true") as error:
+        base.list_documents(None, "tjsp-esaj", NUMBER)
+    assert error.value.reason == "ciencia_unchecked"
     assert not any("abrirPasta" in path for path in fake.paths())
+    assert base.list_documents(None, "tjsp-esaj", NUMBER, acknowledge_ciencia=True)["ciencia"]["estado"] == (
+        "desconhecida"
+    )
 
 
-def test_an_unreadable_intimacao_list_keeps_documents_closed(portal):
+def test_an_unreadable_intimacao_list_opens_only_when_acknowledged(portal):
     fake = portal(by_number=[entry("PG")], timeout=True)
-    with pytest.raises(base.EsajBlocked) as error:
-        base.document_inventory(None, "tjsp-esaj", NUMBER)
+    with pytest.raises(base.EsajBlocked, match="acknowledgeCiencia=true") as error:
+        base.list_documents(None, "tjsp-esaj", NUMBER)
     assert error.value.reason == "portal_timeout"
     assert not any("abrirPasta" in path for path in fake.paths())
+    assert base.list_documents(None, "tjsp-esaj", NUMBER, acknowledge_ciencia=True)["ciencia"]["estado"] == (
+        "desconhecida"
+    )
 
 
 # --- Bug: TJSP's intimações list timing out -----------------------------------------------------------------------

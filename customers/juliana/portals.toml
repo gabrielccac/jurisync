@@ -49,6 +49,26 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJAC_1G_2FA_DATA"]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJAC_2G_2FA_DATA"]
 
+[tjrs-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRS_1G_2FA_DATA"]
+
+[tjpr-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPR_1G_2FA_DATA"]
+
+[tjpr-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJPR_2G_2FA_DATA"]
+
+[trf6-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF6_2FA_DATA"]
+
+[trf6-2g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TRF6_2FA_DATA"]
+
 # PJe: A1 + conta PDPJ do autenticador (SSO nacional).
 [tjmg-pje-1g]
 method = "certificate_totp"
@@ -111,6 +131,10 @@ secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJBA_1G_2FA_DATA"]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "TJRO_1G_2FA_DATA"]
 
+[trf1-1g]
+method = "certificate_totp"
+secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_1G_2FA_DATA"]
+
 [trf3-1g]
 method = "certificate_totp"
 secrets = ["PJE_A1_P12", "PJE_A1_PIN", "PJE_TRF3_1G_2FA_DATA"]
@@ -128,10 +152,18 @@ secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 method = "certificate_challenge"
 secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
 
-# Fora após a validação de 23/11: Eproc TJRS (A1 recusado: conferir cadastro/vínculo do certificado ou mandar
-# usuário e senha) e TJPR 1G/2G (código da 1ª conta "Eproc/TJPR" recusado: dizer qual conta é de cada grau).
-# Pendentes (fora até chegar a senha): Eproc TRF6 e TJTO (login com usuário e senha + autenticador), Projudi TJPR e
-# TJRR (CPF e senha + autenticador). Sem conector: Eproc TJAL e TJSE, Projudi TJBA.
+[tjsp-esaj]
+method = "certificate_challenge"
+secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
+
+[tjam-esaj]
+method = "certificate_challenge"
+secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
+
+# 25/11: TJRS aceitou o A1; no TJPR vale a 2ª conta "Eproc/TJPR" do autenticador (1G e 2G); TRF6 (eproc) entra com o A1.
+# Pendentes: Eproc TJTO (o servidor de certificado do tribunal recusa a conexão; falta usuário e senha), Projudi TJPR,
+# TJRR e TJAM (CPF e senha) e PJe TRF6 (login ok, portal ainda não cadastrado).
+# Sem conector: Eproc TJAL e TJSE, Projudi TJBA.
 
 [env]
-set = { TJMG_1G_CERT = "true", TJMG_2G_CERT = "true", TJSP_1G_CERT = "true", TJSP_2G_CERT = "true", TJSC_1G_CERT = "true", TJSC_2G_CERT = "true", TJRJ_1G_CERT = "true", TJRJ_2G_CERT = "true", TJMS_1G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJMG_PJE_1G_CERT = "true", TJMG_PJE_TR_CERT = "true", TJAP_1G_CERT = "true", TJPE_1G_CERT = "true", PJE_TRF3_1G_CERT = "true", TJSP_1G_USER_PROFILE = "MG144366", TJSP_2G_USER_PROFILE = "MG144366", TJGO_1G_USER_PROFILE = "MG144366" }
+set = { TJMG_1G_CERT = "true", TJMG_2G_CERT = "true", TJSP_1G_CERT = "true", TJSP_2G_CERT = "true", TJSC_1G_CERT = "true", TJSC_2G_CERT = "true", TJRJ_1G_CERT = "true", TJRJ_2G_CERT = "true", TJMS_1G_CERT = "true", TJAC_1G_CERT = "true", TJAC_2G_CERT = "true", TJRS_1G_CERT = "true", TJPR_1G_CERT = "true", TJPR_2G_CERT = "true", TRF6_CERT = "true", TJMG_PJE_1G_CERT = "true", TJMG_PJE_TR_CERT = "true", TJAP_1G_CERT = "true", TJPE_1G_CERT = "true", PJE_TRF3_1G_CERT = "true", PJE_1G_CERT = "true", TJSP_1G_USER_PROFILE = "MG144366", TJSP_2G_USER_PROFILE = "MG144366", TJGO_1G_USER_PROFILE = "MG144366" }

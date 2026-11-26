@@ -16,6 +16,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from jurisync import portals
+from jurisync.connectors.pje.parsers import parse_process_number
 
 PROCESS_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
 # Saved process results from before canonical portal keys used bare instance names.
@@ -124,7 +125,7 @@ def _validate_process(process, expected_number):
         raise PublicationError("process number does not exactly match publication")
     if not isinstance(number, str) or not PROCESS_RE.fullmatch(number):
         raise PublicationError("process must be an exact formatted CNJ process number")
-    if number.split(".")[3] != config.region:
+    if not config.owns_number(parse_process_number(number)):
         raise PublicationError("process number does not match portal tribunal")
     metadata = {
         "processNumber": number,

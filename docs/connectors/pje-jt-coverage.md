@@ -12,3 +12,5 @@ Validated with an A1 certificate + TOTP through the national SSO (`flavor="kz"`,
 | trt1-2g | 2026-11-13 | counters (1/0/0), Meus Expedientes (vazia no momento), process read e document read via Acervo Geral (PDF + text) | |
 | trt3-1g | 2026-11-13 | counters (14/4/7), Meus Expedientes (4 caixas), process read (23 expedientes completos), document read (PDF + text) | 19 intimacoes/30d |
 | trt3-2g | 2026-11-13 | counters (2/0/1), Meus Expedientes (vazia no momento), process read e document read via Acervo Geral (PDF + text) | |
+| trt23-1g | 2026-11-25 | counters, acervo (1), process read, document read | conta com 1 processo |
+| trt23-2g | 2026-11-25 | — | login aceito; conta sem cadastro neste PJe (`not_registered`) |

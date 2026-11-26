@@ -32,9 +32,11 @@ Juridiq. Fora do registro: `jurisync-filing` (preparação de protocolo, local) 
 ciência; o usuário sempre fica sabendo o que a leitura fez. Por sistema, hoje:
 
 - Eproc: abre os documentos pedidos e informa (`dada`/`pendente`/`desconhecida`).
-- PJe, Projudi e JPe: um ato pendente volta como `pendente` (nada aberto) até o usuário concordar
-  (`acknowledgeCiencia=true`; no PJe também `[pje] ciencia_on_read = "allow"` no `settings.toml`).
-- e-SAJ, Tucujuris e STJ: nunca abrem o que daria ciência.
+- PJe, Projudi (todos), e-SAJ, JPe e Tucujuris: um ato pendente volta como `pendente` (nada aberto) até o usuário
+  concordar (`acknowledgeCiencia=true`; no PJe também `[pje] ciencia_on_read = "allow"` no `settings.toml`). Nenhum
+  sistema bloqueia sem saída (decisão de 25/11/2026): quem decide é o usuário, pelo agente.
+- e-SAJ: se o próprio portal pedir a confirmação de recebimento (`receipt_required`), ela ainda é feita no portal.
+- STJ: nada ali registra ciência.
 
 **Sessões** (`core/session_pool.py`): uma sessão por (escritório, portal), reaproveitada entre chamadas.
 `sessions.run` refaz o login uma vez quando a sessão expira (PJe, Eproc, e-SAJ, Projudi, STJ, Tucujuris, JPe). No
@@ -82,6 +84,8 @@ Todo login falho traz um motivo fixo (`core/session_pool.REASONS`) com a explica
   - e-SAJ: `esaj_list_processes` lista os processos de 1º grau pela consulta por OAB de cada OAB da sessão
     (paginada, `complete` por OAB). Juliana: TJAL 5, TJMS 1 (via token). TJAM sem suporte (portal antigo sem
     auth/session); 2º grau fora.
+- Portais novos (25/11): `trt23-1g/2g`, `tjdft-2g`, `tjrs-2g`, `trf6-pje-1g/2g` e `tjba-eproc-1g`
+  (`connectors/portais-novos-2026-11-25.md`); `Portal.inherited` para processos que vieram de outro tribunal.
 
 ## Próximas etapas (em ordem)
 

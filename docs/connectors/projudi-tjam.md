@@ -34,7 +34,7 @@ registra a leitura, nunca é seguido; nenhum link de linha sai no resultado).
   `prazoDecorrendo`, `lidasSemPrazo`, `cumpridas`, `prazoPerdido30/90/180` e as de citação (`citacoes...`; o menu de
   Citações não tem "Novas"). Padrão: novas, ultimoDia, prazoDecorrendo e as três de citação com prazo. Colunas:
   número, parte intimada, data de postagem, data da intimação, prazo. `awaitingCiencia` traz os processos da agenda
-  "Aguardando Ciência" da mesa (a mesma que trava o download).
+  "Aguardando Ciência" da mesa (a mesma consultada antes de abrir documento; pendente só abre com `acknowledgeCiencia=true`).
 - **Processos** (`situation`: todos, ativos, suspensos, arquivados...; padrão ativos): número, partes por polo,
   distribuição/arquivamento, classe (e vara de origem nos recursos); `deskCounts` traz os contadores da mesa.
 

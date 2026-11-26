@@ -303,7 +303,7 @@ class SessionAndReadsTest(unittest.TestCase):
         self.assertNotIn("00.000.000/0001-00", str(process))
         self.assertFalse(any("ciencia" in call[1] or "logout" in call[1] for call in session.calls))
 
-    def test_index_files_and_a_download_cleared_by_an_empty_agenda(self):
+    def test_index_files_and_a_download(self):
         session = FakeSession(self.routes())
         process, index = base.load_process(tjam.ADAPTER, session, KEY, NUMBER)
         (file,) = index[0]["files"]
@@ -312,15 +312,29 @@ class SessionAndReadsTest(unittest.TestCase):
         content, _ = tjam.ADAPTER.download(session, KEY, "1001", file["hash"])
         self.assertTrue(content.startswith(b"%PDF-"))
 
-    def test_a_pending_intimacao_blocks_the_files_of_that_process(self):
+    def test_a_pending_intimacao_opens_only_when_acknowledged(self):
         session = FakeSession(self.routes(agenda=AGENDA_PENDING))
-        _, index = base.load_process(tjam.ADAPTER, session, KEY, NUMBER)
-        with self.assertRaises(legacy.DocumentsBlocked) as blocked:
-            tjam.ADAPTER.download(session, KEY, "1001", index[0]["files"][0]["hash"])
-        self.assertEqual(blocked.exception.ciencia["estado"], "pendente")
-        self.assertFalse(any("arquivo.do" in call[1] for call in session.calls))
+        with self.assertRaises(base.CienciaPending) as refused:
+            base.read_documents(tjam.ADAPTER, session, KEY, NUMBER, ["1001"])
+        self.assertEqual(refused.exception.ciencia["estado"], "pendente")
+        self.assertIn("acknowledgeCiencia=true", str(refused.exception))
+        self.assertFalse(any("arquivo.do" in call[1] or "pesquisar" in call[1] for call in session.calls))
+        _, documents, ciencia = base.read_documents(
+            tjam.ADAPTER, session, KEY, NUMBER, ["1001"], acknowledge_ciencia=True
+        )
+        self.assertEqual((documents[0]["format"], ciencia["estado"]), ("pdf", "dada"))
+        self.assertEqual(ciencia["intimacoes"][0]["process"], NUMBER)
         with self.assertRaises(ValueError):
             tjam.ADAPTER.download_url(KEY, "1001", "../evil")
+
+    def test_an_unreadable_agenda_is_unchecked_and_never_a_dead_end(self):
+        session = FakeSession(self.routes(agenda="<html>outra página</html>"))
+        with self.assertRaises(base.CienciaUnchecked):
+            base.read_documents(tjam.ADAPTER, session, KEY, NUMBER, ["1001"])
+        _, documents, ciencia = base.read_documents(
+            tjam.ADAPTER, session, KEY, NUMBER, ["1001"], acknowledge_ciencia=True
+        )
+        self.assertEqual((documents[0]["format"], ciencia["estado"]), ("pdf", "desconhecida"))
 
 
 if __name__ == "__main__":

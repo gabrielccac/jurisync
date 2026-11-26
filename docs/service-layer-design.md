@@ -84,7 +84,7 @@ uma leitura. Meta medida: `get_process` seguido de `read_documents` no mesmo pro
 - Serviço **Listing** (sincronizador, contadores, listas, capa, movimentações) não tem caminho para
   `fetch_ato`, `read_documents` do PJe/PJe-JT, documentos do Eproc, abertura no e-SAJ/Projudi. Teste que
   importa o módulo do sincronizador e falha se esses símbolos forem alcançáveis.
-- Serviço **Opening** devolve sempre o bloco `ciencia` (`core/ciencia.py`). PJe, Projudi e JPe pedem
+- Serviço **Opening** devolve sempre o bloco `ciencia` (`core/ciencia.py`). PJe, Projudi, e-SAJ, JPe e Tucujuris pedem
   `acknowledgeCiencia=true` para um ato pendente; o Eproc abre e informa (decisão: o usuário é informado, não
   travado).
 - Anotações: ferramentas de abertura com `readOnlyHint=false`, `destructiveHint=true` (hoje

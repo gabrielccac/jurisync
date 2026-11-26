@@ -36,6 +36,7 @@ class Portal:
     env_prefix: str = ""
     legacy_env_prefixes: tuple[str, ...] = ()
     region: str = ""  # CNJ "TR" segment, e.g. "01"
+    inherited: tuple[str, ...] = field(default=())  # other "TR" segments of cases moved here (TRF6: TRF1's MG cases)
     justice: str = "4"  # CNJ "J" segment: "4" federal (default), "8" state courts
     origins: tuple[str, ...] = field(default=())  # CNJ "OOOO" prefixes served by this portal
     wired: bool = True  # False: recognized, but no connector yet
@@ -58,11 +59,11 @@ class Portal:
         """Whether a parsed CNJ number (``parse_process_number``) can be in this portal.
 
         A superior court (region ``00``, e.g. TST) keeps the number of the court of origin, so any region of its
-        branch of justice is accepted there; every other portal needs its own region.
+        branch of justice is accepted there; every other portal needs its own region or one it inherited cases from.
         """
         if self.region == "00":
             return parts[3] == self.justice
-        return parts[4] == self.region
+        return parts[4] == self.region or parts[4] in self.inherited
 
     @property
     def id(self):
@@ -137,6 +138,14 @@ PORTALS = {
         # TRF3 (SP/MS) serves the same PJe under /pje/; the password flow is the default, the A1 certificate opts in.
         Portal("trf3-1g", "pje", "TRF3", "1g", "pje1g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_1G", region="03"),
         Portal("trf3-2g", "pje", "TRF3", "2g", "pje2g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_2G", region="03"),
+        # TRF6 (MG) keeps its older cases in PJe beside the Eproc (trf6-1g/2g). No SSO: the login page carries
+        # ASSINATURA_MENSAGEM, which the A1 signs (certificate._legacy_login), and no code is asked; after it, the
+        # panel is the PJe 2.x one. Cases moved from the TRF1 keep its 4.01 numbers, and region 06 is the Eproc's too,
+        # so only a link host or the customer's setup picks these two.
+        Portal("trf6-pje-1g", "pje", "TRF6", "1g", "pje1g.trf6.jus.br", "/pje/", "certificate_totp", "TRF6_PJE_1G",
+               region="06", inherited=("01",), guess_by_number=False),
+        Portal("trf6-pje-2g", "pje", "TRF6", "2g", "pje2g.trf6.jus.br", "/pje/", "certificate_totp", "TRF6_PJE_2G",
+               region="06", inherited=("01",), guess_by_number=False),
         # pjett.trf5.jus.br is "2º Grau e TRU": the Tribunal's 2nd instance AND the Turma Regional de Uniformização
         # (the page header says so). Own PJe host, same SSO and A1 certificate. The key "trf5-tru" is kept for
         # compatibility (customers' portals.toml and PJE_TRF5_TRU_* secrets). Its cases keep the JEF number, so only
@@ -286,6 +295,14 @@ PORTALS = {
             region="19", justice="5", flavor="kz",
         ),
         Portal(
+            "trt23-1g", "pje", "TRT23", "1g", "pje.trt23.jus.br", "/primeirograu/", "certificate_totp", "TRT23_1G",
+            region="23", justice="5", flavor="kz",
+        ),
+        Portal(
+            "trt23-2g", "pje", "TRT23", "2g", "pje.trt23.jus.br", "/segundograu/", "certificate_totp", "TRT23_2G",
+            region="23", justice="5", flavor="kz",
+        ),
+        Portal(
             "trt24-1g", "pje", "TRT24", "1g", "pje.trt24.jus.br", "/primeirograu/", "certificate_totp", "TRT24_1G",
             region="24", justice="5", flavor="kz",
         ),
@@ -311,6 +328,10 @@ PORTALS = {
                region="13", justice="8"),
         Portal("tjmg-2g", "eproc", "TJMG", "2g", "eproc2g.tjmg.jus.br", "/eproc/", "certificate_totp", "TJMG_2G",
                region="13", justice="8"),
+        # TJBA's Eproc (being deployed beside its PJe): the classic login form with the certificate button, like TJMG. Not
+        # validated yet: on 13/11/2026 the portal knew no user for the A1's CPF. Region 05 is the PJe's too.
+        Portal("tjba-eproc-1g", "eproc", "TJBA", "1g", "eproc1g.tjba.jus.br", "/eproc/", "browser_totp", "TJBA_EPROC_1G",
+               region="05", justice="8", guess_by_number=False),
         # TJMS also has e-SAJ; a process number alone cannot identify its eproc cases.
         Portal("tjms-eproc-1g", "eproc", "TJMS", "1g", "eproc1g.tjms.jus.br", "/eproc/", "certificate_totp", "TJMS_1G",
                region="12", justice="8", guess_by_number=False),
@@ -333,6 +354,10 @@ PORTALS = {
                region="11", justice="8", guess_by_number=False),
         Portal("tjdft-1g", "pje", "TJDFT", "1g", "pje.tjdft.jus.br", "/pje/", "certificate_totp", "TJDFT_1G",
                region="07", justice="8"),
+        # TJDFT 2G: own host, same PDPJ SSO (client "pje-tjdft-2g"). An appeal keeps its number, so only the customer's
+        # setup or a link host picks it.
+        Portal("tjdft-2g", "pje", "TJDFT", "2g", "pje2i.tjdft.jus.br", "/pje/", "certificate_totp", "TJDFT_2G",
+               region="07", justice="8", guess_by_number=False),
         Portal("tjpa-1g", "pje", "TJPA", "1g", "pje.tjpa.jus.br", "/pje/", "certificate_totp", "TJPA_1G",
                region="14", justice="8"),
         # TJMG runs PJe (juizados) beside its Eproc; same SSO (client "pje-tjmg-1g"). Region 13 is Eproc's too, so
@@ -400,6 +425,9 @@ PORTALS = {
         # TJRS serves its Eproc under /eproc/ (public document links use it); state justice is CNJ J=8, TR=21.
         Portal("tjrs-1g", "eproc", "TJRS", "1g", "eproc1g.tjrs.jus.br", "/eproc/", "browser_totp", "TJRS_1G",
                legacy_env_prefixes=("TJRS",), region="21", justice="8", wired=True),
+        # TJRS 2G: same Keycloak (keycloak-eks.tjrs.jus.br) and account as the 1G, reached through the national broker.
+        Portal("tjrs-2g", "eproc", "TJRS", "2g", "eproc2g.tjrs.jus.br", "/eproc/", "browser_totp", "TJRS_2G",
+               region="21", justice="8"),
         # State-court Eprocs below are registered for Denis (authenticator profiles
         # Eproc/TJSC, Eproc/TJTO, Eproc/TNU, Eproc/TJSP); the Eproc connector serves them.
         Portal("tjsc-1g", "eproc", "TJSC", "1g", "eproc1g.tjsc.jus.br", "/eproc/", "browser_totp", "TJSC_1G",

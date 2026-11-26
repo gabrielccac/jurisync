@@ -15,9 +15,10 @@ import urllib.parse
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
+from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
-from jurisync.core import certificate, credentials
+from jurisync.core import certificate, ciencia, credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, follow_redirects, log_request, require_url
 from jurisync.core.session_pool import LoginRejected, SessionExpired
 
@@ -434,7 +435,8 @@ def pending_intimation_numbers(session, portal):
         return set()
     if "" in codes:
         raise EsajBlocked(
-            "An intimação without ciência has no process code: documents stay closed", "intimacao_pending"
+            "An intimação without ciência has no process code, so it is unknown whether it is of this process",
+            "ciencia_unchecked",
         )
     resolved = {}
     for start in range(0, len(codes), 50):
@@ -444,21 +446,55 @@ def pending_intimation_numbers(session, portal):
                 resolved[item["cdProcesso"]] = re.sub(r"\D", "", str(item.get("nuProcesso") or ""))
     if set(codes) - set(resolved) or not all(resolved.values()):
         raise EsajBlocked(
-            "The panel did not resolve every intimação without ciência to a process: documents stay closed",
-            "intimacao_pending",
+            "The panel did not resolve every intimação without ciência to a process, so it is unknown whether one is "
+            "of this process",
+            "ciencia_unchecked",
         )
     return set(resolved.values())
 
 
-def ensure_no_pending_intimation(session, portal, number):
-    """Refuse before the document viewer opens when the process has an intimação without ciência."""
-    if re.sub(r"\D", "", number) in pending_intimation_numbers(session, portal):
+CIENCIA_GIVEN = (
+    "Este processo tinha intimação sem ciência no painel: abrir os documentos pode ter registrado a ciência e iniciado "
+    "o prazo. Informe o advogado."
+)
+CIENCIA_UNKNOWN = (
+    "Não foi possível verificar se o processo tinha intimação sem ciência: se tinha, abrir os documentos pode ter "
+    "registrado a ciência e iniciado o prazo. Informe o advogado."
+)
+
+
+def check_ciencia(session, portal, number, acknowledge=False):
+    """The ``ciencia`` block of a read of this process, checked before its document viewer opens.
+
+    Unless the caller acknowledges, an intimação without ciência (``intimacao_pending``) or a panel list that does not
+    say (``ciencia_unchecked``, or the list's own failure) refuses with nothing opened.
+    """
+    number = process_number(number, portal)
+    try:
+        pending = re.sub(r"\D", "", number) in pending_intimation_numbers(session, portal)
+    except SessionExpired:
+        raise
+    except EsajBlocked as error:
+        if acknowledge:
+            return ciencia.report(ciencia.UNKNOWN, CIENCIA_UNKNOWN)
         raise EsajBlocked(
-            "This process has an intimação without ciência in the panel. Opening its documents could register the "
-            "ciência and start the deadline, so the connector does not open them. Open it in the portal if the user "
-            "decides to receive it.",
+            f"ciência not checked: {error}. Nothing was opened. Opening the documents anyway may register a ciência "
+            f"and start the deadline. {ciencia.AUTHORIZATION}.",
+            error.reason,
+        ) from None
+    except (RuntimeError, RequestException):
+        if acknowledge:
+            return ciencia.report(ciencia.UNKNOWN, CIENCIA_UNKNOWN)
+        raise
+    if not pending:
+        return ciencia.report(ciencia.NONE)
+    if not acknowledge:
+        raise EsajBlocked(
+            "This process has an intimação without ciência in the panel. Nothing was opened. Opening its documents "
+            f"may register the ciência and start the deadline. {ciencia.AUTHORIZATION}.",
             "intimacao_pending",
         )
+    return ciencia.report(ciencia.GIVEN, CIENCIA_GIVEN)
 
 
 def process_number(value, portal):
@@ -1092,8 +1128,6 @@ def document_inventory(session, portal, number):
     from jurisync.connectors.esaj import parsers
 
     number = process_number(number, portal)
-    # Checked before anything of the process opens: a pending intimação keeps all its documents closed.
-    ensure_no_pending_intimation(session, portal, number)
     item = dashboard_process(session, portal, number, petitions=False)
     if not item or not item.get("urlPasta"):
         # The consultation names the process code, which the panel resolves for the cases on the account's panel.
@@ -1121,9 +1155,11 @@ def document_inventory(session, portal, number):
     return parsers.viewer_documents(response.text, number)
 
 
-def list_documents(session, portal, number):
+def list_documents(session, portal, number, *, acknowledge_ciencia=False):
+    read = check_ciencia(session, portal, number, acknowledge_ciencia)
     inventory = document_inventory(session, portal, number)
     return {
+        "ciencia": read,
         "processNumber": number,
         "items": [{k: v for k, v in item.items() if k != "parameters"} for item in inventory],
     }
@@ -1146,21 +1182,25 @@ def permission_refusal(response):
     return f"HTTP {response.status_code}" + (f": {redact_text(text)[:200]}" if text else "")
 
 
-def document(session, portal, number, document_id, *, download=False):
+def document(session, portal, number, document_id, *, download=False, acknowledge_ciencia=False, read=None):
+    """One PDF of the process and the ``ciencia`` block of opening it. ``read`` is the block of this call's earlier
+    check (a read repeated after a new login: what the first try opened may no longer be pending)."""
     from jurisync.connectors.esaj.parsers import redact_text
     from jurisync.core.document_text import extract_document_text
     from jurisync.core.documents import MAX_DOCUMENT_BYTES, read_limited, validate_document_ids
     from jurisync.core.documents_dir import save_document
 
     validate_document_ids([document_id])
+    if read is None:
+        read = check_ciencia(session, portal, number, acknowledge_ciencia)
     inventory = document_inventory(session, portal, number)
     entry = next((item for item in inventory if item["documentId"] == document_id), None)
     if entry is None:
         raise ValueError("documentId is not in the current process inventory")
     if not entry.get("parameters"):
         raise EsajBlocked("Document requires a password or restricted access flow", "password_required")
-    # This POST only checks permission. Receipt/signature endpoints are never invoked, and there is no way to
-    # acknowledge a receipt through this connector: anything but a clean "yes" stops before the PDF is requested.
+    # This POST only checks permission. When the portal itself wants the receipt confirmed first (its own dialog, not
+    # mapped yet), nothing but that step opens the document, so anything but a clean "yes" stops before the PDF.
     permission = request(
         session,
         portal,
@@ -1171,10 +1211,10 @@ def document(session, portal, number, document_id, *, download=False):
     refusal = permission_refusal(permission)
     if refusal:
         raise EsajBlocked(
-            "Opening this document may register the receipt of an intimação and start its deadline; "
-            f"the connector stopped before opening it (portal answered {refusal}). Open it in the portal if the "
-            "user decides to receive it.",
-            "intimacao_pending",
+            "The portal itself asks to confirm the receipt of an intimação before it serves this document "
+            f"(it answered {refusal}); nothing was opened. This connector does not have that step yet and "
+            "acknowledgeCiencia does not replace it: confirm the receipt in the portal, then read it here.",
+            "receipt_required",
         )
     response = request(session, portal, "GET", "pastadigital/getPDF.do?" + entry["parameters"], stream=True)
     try:
@@ -1190,6 +1230,7 @@ def document(session, portal, number, document_id, *, download=False):
         "documentId": document_id,
         "contentType": "application/pdf",
         "bytes": len(content),
+        "ciencia": read,
     }
     if download:
         import uuid

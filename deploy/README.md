@@ -42,6 +42,7 @@ Then on the VPS:
 ```bash
 sudo /opt/jurisync/app/deploy/set-secret.sh JURISYNC_CAPTCHA_API_KEY   # OpenRouter key (TJES WAF, TJTO image); typed, not echoed
 sudo /opt/jurisync/app/deploy/set-secret.sh --reveal JURISYNC_VAULT_KEY # once: keep it in the password manager
+sudo /opt/jurisync/app/deploy/set-secret.sh --generate JURISYNC_MONITOR_TOKEN   # monitoring API (/monitor, docs/hosted.md)
 sudo systemctl restart jurisync-hosted
 journalctl -u jurisync-quicktunnel -n 5                                  # the temporary address (quick tunnel only)
 ```

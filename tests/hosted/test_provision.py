@@ -153,7 +153,9 @@ class PlanTest(ProvisionCase):
         self.assertEqual(alfa.portals, ["trf5-1g", "trf1-1g", "advbox"])
         self.assertEqual(alfa.connectors, ["pje", "djen", "advbox"])
         self.assertEqual(alfa.endpoints, ["/tribunais/mcp", "/advbox/mcp"])
-        self.assertEqual(alfa.checks, alfa.portals)  # every served portal and service gets its first login
+        # Every served portal gets its first login; ADVBOX has no device id yet, so its login waits for the code.
+        self.assertEqual(alfa.checks, ["trf5-1g", "trf1-1g"])
+        self.assertIn(f"advbox: {provision.NO_DEVICE}", alfa.notes)
         self.assertTrue(any("MINDCHAT_API_KEY" in note for note in alfa.notes))
         # Legacy names count once renamed; the portal without its password is left out with the reason.
         self.assertEqual(beta.portals, ["trf4-1g-sc"])

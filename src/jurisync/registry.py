@@ -20,6 +20,7 @@ class Connector:
     close: str | None = "sessions.close"  # attribute path called on exit
     login: tuple = ()  # account variables of a service without portals (ADVBOX, Juridiq)
     settings: tuple = ()  # other variables of that service an office may set
+    device: str = ""  # the one of them the service only gives once the client passes a code (ADVBOX device id)
     local_only_tools: frozenset = frozenset()  # tools that only work on the office's computer
     write_grant: str = ""  # variable that lets an office see and call the connector's writes
     write_tools: frozenset = frozenset()  # the tools that grant opens
@@ -40,6 +41,10 @@ class Connector:
     def sessions(self):
         """The connector's session pool."""
         return importlib.import_module(self.module).sessions
+
+    def pool(self):
+        """Its ``SessionPool``; None for a service that keeps no portal session."""
+        return getattr(importlib.import_module(self.module), "sessions", None)
 
     def load(self, **options):
         """``(MCPServer, close callback or None)``; ``options`` go to ``create_server``."""
@@ -86,6 +91,7 @@ CONNECTORS = {
             close="client.close",
             login=("ADVBOX_EMAIL", "ADVBOX_PASSWORD"),
             settings=("ADVBOX_DEVICE_ID", "ADVBOX_UPLOAD_FOLDER"),
+            device="ADVBOX_DEVICE_ID",
             write_grant="ADVBOX_ALLOW_WRITES",
             write_tools=frozenset(
                 {

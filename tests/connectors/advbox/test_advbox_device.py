@@ -14,7 +14,7 @@ from mcp.client.client import Client
 from jurisync.connectors.advbox import server
 from jurisync.connectors.advbox import session as advbox_session
 from jurisync.connectors.advbox.parsers import parse_verification_form, parse_verification_recipient
-from jurisync.connectors.advbox.session import AdvboxDeviceVerification, AdvboxSession, CodeRefused
+from jurisync.connectors.advbox.session import AdvboxDeviceMissing, AdvboxDeviceVerification, AdvboxSession, CodeRefused
 from jurisync.core import credentials
 
 ENV = {"ADVBOX_EMAIL": "Joana@Dominio.com", "ADVBOX_PASSWORD": "pw", "ADVBOX_DEVICE_ID": "a" * 32}
@@ -179,6 +179,21 @@ class PendingVerificationTest(DeviceCase):
         with mock.patch.object(credentials, "save") as save:
             self.assertEqual(self.session.verify_device(CODE), {"verified": True, "deviceSaved": True})
         save.assert_called_once_with("ADVBOX_DEVICE_ID", device)
+
+    def test_an_account_without_a_device_sends_nothing_until_the_user_agrees(self):
+        values = {name: value for name, value in ENV.items() if name != "ADVBOX_DEVICE_ID"}
+        saved = []
+        with credentials.scope("t1", values, saver=lambda name, value: saved.append((name, value))):
+            with self.assertRaisesRegex(AdvboxDeviceMissing, "newDevice=true"):
+                self.session.using(lambda s: None)
+            self.assertEqual(self.advbox.logins, 0)
+            with self.assertRaises(AdvboxDeviceVerification):
+                self.session.start_new_device()
+            self.login()  # another call meanwhile: the code is awaited, no second one is sent
+            self.assertEqual(self.advbox.logins, 1)
+            self.assertEqual(self.session.verify_device(CODE), {"verified": True, "deviceSaved": True})
+            self.assertEqual(self.session.using(lambda s: "ok"), "ok")
+        self.assertEqual(saved, [("ADVBOX_DEVICE_ID", self.advbox.devices[-1])])
 
     def test_offices_do_not_share_attempts(self):
         saved = []

@@ -111,7 +111,7 @@ def test_launch_command_is_headless_and_has_no_stealth_flags(monkeypatch):
 def test_document_without_parameters_reports_password_required(monkeypatch):
     monkeypatch.setattr(base, "document_inventory", lambda *_args: [{"documentId": "38"}])
     with pytest.raises(base.EsajBlocked) as error:
-        base.document(None, "tjsp-esaj", NUMBER, "38")
+        base.document(None, "tjsp-esaj", NUMBER, "38", read={"estado": "nenhuma"})
     assert error.value.reason == "password_required"
 
 

@@ -6,9 +6,9 @@ names, roles, dates, descriptions and ids; no CPF, address or internal key leave
 and consumption keys needed to download a file stay in the index, never in a tool result.
 
 Ciência: an unread comunicação has no ``dt_intimacao``; the portal records its ciência only when the lawyer marks it
-read (``processar-comunicacao``, refused by ``client.guard``) or when the deadline for tacit ciência passes. To keep a
-read from ever looking like opening the act, files of a movement that originated an unread comunicação are not read
-or downloaded (``CienciaPending``); they are listed with ``pendingCiencia: true``.
+read (``processar-comunicacao``, refused by ``client.guard``) or when the deadline for tacit ciência passes. Reading the
+act may still count as knowing of it, so files of a movement that originated an unread comunicação (listed with
+``pendingCiencia: true``) are read or downloaded only when the caller acknowledges (``CienciaPending`` otherwise).
 """
 
 import hashlib
@@ -33,9 +33,21 @@ CIENCIA_PENDING = (
     "decurso do prazo de ciência tácita."
 )
 
+CIENCIA_GIVEN = (
+    "Foram abertos arquivos de comunicação não lida no Tucujuris: a leitura pode contar como ciência e iniciar o prazo. "
+    "A comunicação continua como não lida no portal até o advogado marcá-la. Informe o usuário."
+)
+
 
 class CienciaPending(ValueError):
-    """A file of a movement whose comunicação is still unread: refused so the read cannot count as ciência."""
+    """A file of a movement whose comunicação is still unread: refused unless the caller acknowledges.
+
+    ``ciencia`` is the block of the refused read: nothing was opened.
+    """
+
+    def __init__(self, message, ciencia):
+        super().__init__(message)
+        self.ciencia = ciencia
 
 
 class ProcessNotFound(LookupError):
@@ -339,8 +351,12 @@ def load_process(session, process_number, documents=True):
     return process, files, pending
 
 
-def ciencia_of(process):
-    """The ``ciencia`` block of a read: files of an unread comunicação are never opened, so at most 'pendente'."""
+def ciencia_of(process, opened=()):
+    """The ``ciencia`` block of a read that opened the files ``opened`` of this process."""
+    movements = {file["movementId"] for file in opened}
+    given = [item for item in process["_unread"] if item.get("movementId") and item["movementId"] in movements]
+    if given:
+        return ciencia.report(ciencia.GIVEN, CIENCIA_GIVEN, given)
     if process["_unread"]:
         return ciencia.report(ciencia.PENDING, CIENCIA_PENDING, process["_unread"])
     return ciencia.report(ciencia.NONE)
@@ -360,24 +376,25 @@ def file_format(content, content_type):
     return "html" if "html" in (content_type or "").casefold() else "other"
 
 
-def _selected(files, pending, document_ids):
+def _selected(process, files, pending, document_ids, acknowledge):
     validate_document_ids(document_ids, pattern=DOCUMENT_ID)
     if any(identifier not in files for identifier in document_ids):
         raise ValueError("Selected document ID is not in this process")
     blocked = [identifier for identifier in document_ids if files[identifier]["movementId"] in pending]
-    if blocked:
+    if blocked and not acknowledge:
         raise CienciaPending(
-            f"document(s) {', '.join(blocked)} belong to a movement with an unread comunicação; reading them could "
-            "count as ciência, so they are not opened. The comunicação stays pending until the lawyer reads it in "
-            "Tucujuris"
+            f"document(s) {', '.join(blocked)} belong to a movement with an unread comunicação. Nothing was opened. "
+            f"Reading them may count as ciência and start the deadline. {ciencia.AUTHORIZATION}.",
+            ciencia_of(process),
         )
     return [files[identifier] for identifier in document_ids]
 
 
-def read_documents(session, process_number, document_ids):
+def read_documents(session, process_number, document_ids, *, acknowledge_ciencia=False):
     process, files, pending = load_process(session, process_number)
     results = []
-    for file in _selected(files, pending, document_ids):
+    selected = _selected(process, files, pending, document_ids, acknowledge_ciencia)
+    for file in selected:
         result = {"documentId": file["id"], "name": file["name"], "movementId": file["movementId"]}
         results.append(result)
         content, content_type = client.download(session, file)
@@ -397,18 +414,18 @@ def read_documents(session, process_number, document_ids):
                 "textTruncated": len(text) > MAX_TEXT_CHARACTERS,
             }
         )
-    return process["number"], results, ciencia_of(process)
+    return process["number"], results, ciencia_of(process, selected)
 
 
-def download_document(session, process_number, document_id):
+def download_document(session, process_number, document_id, *, acknowledge_ciencia=False):
     process, files, pending = load_process(session, process_number)
-    (file,) = _selected(files, pending, [document_id])
+    (file,) = _selected(process, files, pending, [document_id], acknowledge_ciencia)
     content, content_type = client.download(session, file)
     result = {
         "documentId": file["id"],
         "name": file["name"],
         "movementId": file["movementId"],
-        "ciencia": ciencia_of(process),
+        "ciencia": ciencia_of(process, [file]),
     }
     if content is None:
         return {**result, "saved": False, "reason": content_type}

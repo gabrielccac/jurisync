@@ -266,7 +266,7 @@ def _otp_form(response):
     return BeautifulSoup(getattr(response, "text", "") or "", "html.parser").find("form", id="kc-otp-login-form")
 
 
-def _answer_otp(session, response, account, config, *, sleep=time.sleep, clock=time.time):
+def _answer_otp(session, response, account, config, *, sleep=time.sleep, clock=time.time, follow=None):
     """Answer the SSO's OTP form; when the SSO shows the form again (it refused the code), once more next window.
 
     A form shown again after both codes is a real refusal (``LoginRejected``, ``otp_refused``) with the SSO's own
@@ -297,7 +297,7 @@ def _answer_otp(session, response, account, config, *, sleep=time.sleep, clock=t
             timeout=60,
         )
         log_request("POST", action, response.status_code)
-        response = _follow(session, response)
+        response = follow(response) if follow else _follow(session, response)
     if _otp_form(response) is not None:
         alert = alert_text(BeautifulSoup(response.text, "html.parser")) or alert_text(
             BeautifulSoup(refused.text, "html.parser")
@@ -309,6 +309,33 @@ def _answer_otp(session, response, account, config, *, sleep=time.sleep, clock=t
             reason="otp_refused",
         )
     return response
+
+
+def _submit_certificate(session, page, config, signer, mensagem):
+    """Sign the login page's challenge and submit its form with the callback's code; the answer is not followed."""
+    token = str(uuid.uuid4())
+    payload = native_signer.build_payload(token, mensagem, signer.sign(mensagem), signer.chain64())
+    native_signer.post_result(session, payload)
+
+    soup = BeautifulSoup(page.text, "html.parser")
+    # TRF5-style pages post the signed challenge to loginForm; JT SSO pages
+    # (via authenticateSSO.seam) use kc-form-login with the same pjeoffice fields.
+    form = soup.find("form", id="loginForm") or soup.find("form", id="kc-form-login")
+    if not form or not form.get("action"):
+        raise RuntimeError(f"{config.tribunal} login form was not returned")
+    action = urllib.parse.urljoin(page.url, form["action"])
+    require_allowed_url(action)
+    return _submit_code(session, action, token)
+
+
+def sso_login(session, config, page, account, signer, *, follow, sleep=time.sleep, clock=time.time):
+    """The certificate and code steps of another system's login (JPe) on the SSO ``page`` it opened.
+
+    ``follow(response)`` follows the caller's redirects; the page they end on is returned.
+    """
+    _, mensagem = _challenge(page.text, config)
+    response = follow(_submit_certificate(session, page, config, signer, mensagem))
+    return _answer_otp(session, response, account, config, sleep=sleep, clock=clock, follow=follow)
 
 
 def _login(session, config, account, signer, *, sleep=time.sleep, clock=time.time):
@@ -352,20 +379,7 @@ def _login(session, config, account, signer, *, sleep=time.sleep, clock=time.tim
         log_request("GET", entry, page.status_code)
         _require_available(page, config)
         _, mensagem = _challenge(page.text, config)
-    token = str(uuid.uuid4())
-    payload = native_signer.build_payload(token, mensagem, signer.sign(mensagem), signer.chain64())
-    native_signer.post_result(session, payload)
-
-    soup = BeautifulSoup(page.text, "html.parser")
-    # TRF5-style pages post the signed challenge to loginForm; JT SSO pages
-    # (via authenticateSSO.seam) use kc-form-login with the same pjeoffice fields.
-    form = soup.find("form", id="loginForm") or soup.find("form", id="kc-form-login")
-    if not form or not form.get("action"):
-        raise RuntimeError(f"{config.tribunal} login form was not returned")
-    action = urllib.parse.urljoin(page.url, form["action"])
-    require_allowed_url(action)
-
-    response = _follow(session, _submit_code(session, action, token))
+    response = _follow(session, _submit_certificate(session, page, config, signer, mensagem))
     _require_registered(response, config)
     if _authenticated(response, config.host, config.root):
         log.info("%s certificate login complete (no OTP asked) -> %s", config.key, url_shape(response.url))

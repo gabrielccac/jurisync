@@ -47,7 +47,9 @@ from starlette.routing import Mount, Route
 from jurisync import registry
 from jurisync.core import credentials
 from jurisync.core.mcp import PORTAL_HELP, with_portal_note
+from jurisync.core.session_pool import REASONS
 from jurisync.hosted import access
+from jurisync.hosted.monitor import Monitor
 from jurisync.hosted.oauth import SCOPE, BrowserBinding, Provider, login_routes
 from jurisync.hosted.throttle import IP_MAX_FAILURES, Throttle
 
@@ -189,7 +191,7 @@ class Office(MCPServer):
         if connector is None:
             raise ToolError(f"Unknown tool: {name}")
         tenant, user = caller.get() or ({"id": "", "connectors": []}, "")
-        started, error = time.monotonic(), ""
+        started, error, reason = time.monotonic(), "", ""
         try:
             if tenant.get("mode") == "local":
                 raise NotEnabled(
@@ -210,11 +212,24 @@ class Office(MCPServer):
                 error = "ToolResult"
             return result
         except BaseException as exc:
-            error = type(exc.__cause__ or exc).__name__
+            cause = exc.__cause__ or exc
+            error = type(cause).__name__
+            reason = cause.reason if getattr(cause, "reason", None) in REASONS else ""
             raise
         finally:
             duration = round((time.monotonic() - started) * 1000)
-            self.store.log_call(tenant["id"], user, connector, name, error, duration)
+            portal = self._portal(connector, name, arguments)
+            self.store.log_call(tenant["id"], user, connector, name, error, duration, portal, reason)
+
+    def _portal(self, connector, name, arguments):
+        """The portal key a call names (or defaults to) for the call log; anything else is not recorded."""
+        field = portal_field(self.servers[connector], name) or {}
+        portal = (arguments or {}).get("portal") or field.get("const") or field.get("default")
+        spec = registry.CONNECTORS.get(connector)
+        keys = spec.portals() if spec else ()
+        if portal is None and len(keys) == 1:
+            portal = keys[0]
+        return portal if portal in keys else ""
 
     def _check_portal(self, connector, name, arguments, offered):
         label = SYSTEMS.get(connector, connector)
@@ -398,6 +413,8 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
         servers[name] = server
         if close:
             closers.append(close)
+    monitor = Monitor(store, vault, servers, base_url, offered_portals)
+    routes += monitor.routes()
     systems = ", ".join(SYSTEMS.get(name, name) for name in servers)
     # path name -> (Office, connectors it serves; None: all). Tool names already carry their connector, and Office
     # refuses a name served twice.
@@ -467,10 +484,13 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
         async with AsyncExitStack() as stack:
             for sub in apps.values():
                 await stack.enter_async_context(sub.router.lifespan_context(sub))
+            await stack.enter_async_context(monitor.running())
             yield
 
     middleware = [
         Middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier)),
         Middleware(AuthContextMiddleware),
     ]
-    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan), closers
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app.state.monitor = monitor
+    return app, closers

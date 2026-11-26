@@ -303,13 +303,19 @@ class ReadTest(Base):
         self.assertEqual(dict(lookup["params"]), {"situacao": "porprocesso", "numero_unico": N1})
         self.assert_read_only()
 
-    def test_documents_of_a_pending_movement_are_never_downloaded(self):
+    def test_documents_of_a_pending_movement_open_only_when_acknowledged(self):
         with self.assertRaises(process.CienciaPending):
             process.read_documents(self.session, N1, ["9003", "9004"])
-        with self.assertRaises(process.CienciaPending):
+        with self.assertRaisesRegex(process.CienciaPending, "acknowledgeCiencia=true") as refused:
             process.download_document(self.session, N1, "9004")
+        self.assertEqual(refused.exception.ciencia["estado"], "pendente")
         self.assertEqual(self.http.calls(api("publico/download-anexo-movimento-consulta-publica")), [])
-        self.assert_read_only()
+        with mock.patch.object(process, "extract_document_text", return_value=("extracted", "Ato sintético")):
+            _, documents, ciencia = process.read_documents(self.session, N1, ["9004"], acknowledge_ciencia=True)
+        self.assertEqual(documents[0]["extractionStatus"], "extracted")
+        self.assertEqual(ciencia["estado"], "dada")
+        self.assertEqual([item["movementId"] for item in ciencia["intimacoes"]], ["7003"])
+        self.assert_read_only()  # the comunicação is not marked as read
 
     def test_read_documents_downloads_by_the_index_never_by_caller_input(self):
         with mock.patch.object(process, "extract_document_text", return_value=("extracted", "Decisão sintética")):
@@ -406,7 +412,17 @@ class ServerTest(Base):
         for name, tool in tools.items():
             with self.subTest(name=name):
                 self.assertFalse(tool.annotations.destructive_hint)
-                self.assertEqual(tool.annotations.read_only_hint, name != "tucujuris_download_document")
+                opens = name in ("tucujuris_read_documents", "tucujuris_download_document")
+                self.assertEqual(tool.annotations.read_only_hint, not opens)
+                self.assertEqual("acknowledgeCiencia" in tool.input_schema["properties"], opens)
+
+    def test_a_ciencia_refusal_is_a_result_with_its_block(self):
+        block = {"estado": "pendente"}
+        pool = mock.Mock()
+        pool.run.side_effect = lambda key, read: read(None)
+        with mock.patch.object(server, "sessions", pool):
+            result = server.open_documents(mock.Mock(side_effect=process.CienciaPending("refused", block)))
+        self.assertEqual((result["success"], result["error"], result["ciencia"]), (False, "ciencia_pending", block))
 
     def test_configured_portals(self):
         self.assertEqual(server.configured_portals(), ("tjap-tucujuris",))

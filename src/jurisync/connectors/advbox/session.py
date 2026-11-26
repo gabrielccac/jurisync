@@ -55,6 +55,16 @@ class AdvboxDeviceVerification(RuntimeError):
         )
 
 
+class AdvboxDeviceMissing(MissingLogin):
+    """The account has no device id yet: nothing was sent to ADVBOX."""
+
+    def __init__(self):
+        super().__init__(
+            "This ADVBOX account has no verified device yet. Tell the user ADVBOX will send a code to the account's "
+            "e-mail; once they agree and can read it, call advbox_verify_device with newDevice=true, then pass the code."
+        )
+
+
 class CodeRefused(RuntimeError):
     def __init__(self, left):
         self.left = left
@@ -227,13 +237,15 @@ class AdvboxSession:
 
     def _login(self, device=None):
         email, password = _required("ADVBOX_EMAIL"), _required("ADVBOX_PASSWORD")
-        device = device or _required("ADVBOX_DEVICE_ID")
         pending = pending_verification()
         if pending:
             self.jar = None
             if pending.problem:
                 raise RuntimeError(pending.problem)
             raise AdvboxDeviceVerification(pending.sent_to)
+        device = device or (credentials.env("ADVBOX_DEVICE_ID") or "").strip()
+        if not device:
+            raise AdvboxDeviceMissing()
         self.jar = {}
         page, _ = self._send_following(f"{BASE_URL}/login")
         if not _ok(page):

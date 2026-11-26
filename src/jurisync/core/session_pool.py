@@ -109,6 +109,19 @@ def _env_number(name, default, convert=float):
         return default
 
 
+# ``on_login(portal, error, duration_ms)`` after every login a pool tries (hosted telemetry); error is None on success.
+on_login = None
+
+
+def _report_login(portal, error, began):
+    if on_login is None:
+        return
+    try:
+        on_login(portal, error, round((time.monotonic() - began) * 1000))
+    except Exception:
+        pass  # Telemetry never costs a login.
+
+
 _login_slots = None
 _login_slots_guard = threading.Lock()
 
@@ -245,12 +258,19 @@ class SessionPool:
             )
         self._check_cooldown(key)
         with login_slots():
+            began = time.monotonic()
             try:
-                return (login or self._login)(portal)
+                value = (login or self._login)(portal)
             except LoginRejected as error:
                 with self._guard:
                     self._rejected[key] = (self._clock(), self._wall_clock(), error.reason, credentials.signature())
+                _report_login(portal, error, began)
                 raise
+            except Exception as error:
+                _report_login(portal, error, began)
+                raise
+            _report_login(portal, None, began)
+            return value
 
     def fresh_login(self, portal, login=None):
         """A new login under the pool's rules (cool-down, login slots) that the pool does not keep; the caller closes it."""
@@ -324,6 +344,34 @@ class SessionPool:
         key = self._drop(portal)
         with self._guard:
             self._rejected.pop(key, None)
+
+    def snapshot(self):
+        """``(open sessions, cool-downs)`` of every tenant, for the operator: names, times and reasons only."""
+        now = self._clock()
+        with self._guard:
+            entries, used, rejected = dict(self._entries), dict(self._used), dict(self._rejected)
+        sessions = [
+            {
+                "escritorio": tenant,
+                "portal": portal,
+                "sem_uso_ha_s": round(now - used.get((tenant, portal), now)),
+                # After a failed call the next use checks the session first.
+                "estado": "a verificar" if last_ok == float("-inf") else "ativa",
+            }
+            for (tenant, portal), (_value, last_ok, _signature) in entries.items()
+        ]
+        cooling = [
+            {
+                "escritorio": tenant,
+                "portal": portal,
+                "motivo": reason,
+                "recusado": int(wall),
+                "libera_em_s": round(self._cooldown() - (now - at)),
+            }
+            for (tenant, portal), (at, wall, reason, _signature) in rejected.items()
+            if now - at < self._cooldown()
+        ]
+        return sessions, cooling
 
     def close(self):
         with self._guard:

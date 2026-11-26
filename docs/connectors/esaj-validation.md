@@ -64,7 +64,7 @@ dois tribunais, além de tarefas, inventário, leitura e download no TJMS.
   permissão que o próprio visualizador faz. Só após HTTP 200/204 é solicitado
   `GET /pastadigital/getPDF.do` com os parâmetros vindos da árvore autenticada.
   A operação de receber intimação não é chamada. Se a permissão exigir esse
-  fluxo, a leitura para antes do PDF.
+  fluxo, a leitura para antes do PDF (`receipt_required`).
 - No TJSP, a resposta de `/cpopg/carregarMovimentacoesAjax.do` usa linhas
   `tr.containerMovimentacao`, agora reconhecidas pelo parser.
 
@@ -132,7 +132,8 @@ Nada foi commitado, enviado ao GitHub ou protocolado.
   resolvidos para números (`processos?cdsProcesso=...`, como faz o painel). Se
   o processo estiver entre eles, a resposta é `intimacao_pending` e nada do
   processo é aberto. Se a lista não puder ser lida ou algum código não for
-  resolvido, a trava também fecha. A checagem `validarAberturaIntimacaoNaoRecebida`
+  resolvido, a trava também fecha. Nos dois casos `acknowledgeCiencia=true`
+  (decisão do usuário, 25/11/2026) abre e o bloco `ciencia` informa. A checagem `validarAberturaIntimacaoNaoRecebida`
   antes do PDF continua.
 - **Instância.** O painel devolve uma entrada por instância (`PG` e `SG`), em
   ordem variável. A de 1º grau é a escolhida; uma entrada só de 2º grau

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, keycloak, legacy, parsers, tjam, tjpr
+from jurisync.connectors.projudi import base, keycloak, parsers, tjam, tjpr
 
 KEY = "tjpr-projudi-1g"
 APP = "https://projudi.tjpr.jus.br/projudi/"
@@ -113,30 +113,31 @@ class CienciaTest(unittest.TestCase):
 
         return mock.patch.object(tjpr.ADAPTER, "_read_list", side_effect=read_list)
 
-    def download(self, number):
-        with (
-            mock.patch.object(tjpr.ADAPTER, "_process_files", return_value={"number": number}),
-            mock.patch.object(base.Adapter, "download", return_value=(b"%PDF-", "application/pdf")) as opened,
-        ):
-            try:
-                return tjpr.ADAPTER.download(object(), KEY, "1001", "a" * 16), opened
-            except legacy.DocumentsBlocked as blocked:
-                self.assertFalse(opened.called)
-                return blocked, opened
+    def pending(self, number):
+        return tjpr.ADAPTER.pending_ciencia(object(), KEY, number)
 
-    def test_a_process_awaiting_ciencia_in_either_instance_is_refused(self):
+    def test_a_process_awaiting_ciencia_in_either_instance_is_reported(self):
         for number in ("0000001-00.2026.8.16.0001", "0000002-00.2026.8.16.0001"):
             with self.subTest(number=number), self.read():
-                blocked, _ = self.download(number)
-                self.assertEqual(blocked.ciencia["estado"], "pendente")
+                state = self.pending(number)
+                self.assertEqual((state["items"][0]["process"], state["unchecked"]), (number, None))
+                with self.assertRaises(base.CienciaPending):
+                    base.check_ciencia(tjpr.ADAPTER, object(), KEY, number)
+                block = base.check_ciencia(tjpr.ADAPTER, object(), KEY, number, acknowledge=True)
+                self.assertEqual(block["estado"], "dada")
 
-    def test_another_process_opens_and_an_incomplete_list_refuses(self):
+    def test_another_process_is_clear_and_an_incomplete_or_failed_list_is_unchecked(self):
+        other = "0000009-00.2026.8.16.0001"
         with self.read():
-            result, opened = self.download("0000009-00.2026.8.16.0001")
-            self.assertTrue(opened.called)
-            self.assertEqual(result[1], "application/pdf")
+            self.assertEqual(self.pending(other), {"items": [], "unchecked": None})
         with self.read(complete=False):
-            self.assertIsInstance(self.download("0000009-00.2026.8.16.0001")[0], legacy.DocumentsBlocked)
+            self.assertIn("in full", self.pending(other)["unchecked"])
+        for error in (RuntimeError("HTTP 500"), ValueError("no instance choice")):
+            with mock.patch.object(tjpr.ADAPTER, "_read_list", side_effect=error):
+                self.assertIn("could not be read", self.pending(other)["unchecked"])
+        with mock.patch.object(tjpr.ADAPTER, "_read_list", side_effect=base.ProjudiSessionExpired("expired")):
+            with self.assertRaises(base.ProjudiSessionExpired):
+                self.pending(other)
 
 
 class DecodeTest(unittest.TestCase):

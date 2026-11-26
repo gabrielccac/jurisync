@@ -81,12 +81,11 @@ um detalhe responde `requer_chave_consumo`.
      `processar-comunicacao` é recusada com qualquer método, antes de qualquer envio. As outras rotas que alteram
      algo (`segundo-fator-confirmar/resetar`, `definir-acesso-vara`, `seguir-processo`, `gerar-chave-consumo`,
      `salvar-senha`) também estão em `FORBIDDEN`.
-  2. Os arquivos de um movimento que originou uma comunicação ainda não lida (`id_movimento_origem`) não são lidos
-     nem baixados (`CienciaPending`). Eles aparecem com `pendingCiencia: true`. Não confirmamos que abrir o arquivo
-     registra a ciência no Tucujuris (o SPA só registra pelo botão), mas por segurança o conector não abre esses
-     arquivos.
+  2. Os arquivos de um movimento que originou uma comunicação ainda não lida (`id_movimento_origem`) só são lidos ou
+     baixados com `acknowledgeCiencia=true` (`CienciaPending` sem ele; decisão de 25/11/2026). Eles aparecem com `pendingCiencia: true`. Não confirmamos que abrir o arquivo
+     registra a ciência no Tucujuris (o SPA só registra pelo botão), então o usuário decide.
   3. Testes: `GuardTest.test_marking_a_comunicacao_read_is_refused_for_every_method`,
-     `test_a_refused_request_is_never_sent`, `ReadTest.test_documents_of_a_pending_movement_are_never_downloaded`
+     `test_a_refused_request_is_never_sent`, `ReadTest.test_documents_of_a_pending_movement_open_only_when_acknowledged`
      e, em cada leitura, `assert_read_only` (só os dois POSTs do login saem).
 
 ## Hosted

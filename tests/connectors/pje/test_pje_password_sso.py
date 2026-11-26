@@ -57,6 +57,18 @@ def test_superior_court_accepts_origin_numbers_of_its_branch_only():
     assert not trt12.owns_number(parse_process_number("0000371-73.2026.5.18.0018"))
 
 
+def test_trf6_pje_accepts_the_numbers_it_inherited_from_the_trf1():
+    from jurisync.connectors.pje.process import require_own_number
+
+    for number in ("0004400-74.2019.4.01.3800", "1001234-56.2023.4.06.3800"):
+        assert require_own_number("trf6-pje-1g", number)
+    for number in ("1001234-56.2023.4.05.8300", "1001234-56.2023.8.01.0001", "1001234-56.2023.5.06.0001"):
+        with pytest.raises(ValueError, match="does not belong to TRF6"):
+            require_own_number("trf6-pje-1g", number)
+    with pytest.raises(ValueError, match="does not belong to TRF1"):
+        require_own_number("trf1-1g", "1001234-56.2023.4.06.3800")
+
+
 def test_court_refusal_after_the_sso_is_read_from_the_callback_page():
     page = "<script>\n\t\tvar mensagemErroLogin = 'Senha expirada. Solicite uma nova senha';\n</script>"
     assert sso.portal_login_error(page) == "Senha expirada. Solicite uma nova senha"

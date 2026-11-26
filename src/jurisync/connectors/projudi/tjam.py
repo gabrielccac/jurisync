@@ -21,8 +21,8 @@ Safety rules (the generic read rules are in ``legacy.py``):
 - one credential POST per ``login``; no retry (a wrong password counts toward a lock) and ``SessionPool`` blocks
   further logins after ``LoginRejected``;
 - a WAF/CAPTCHA page (F5 "Request Rejected") stops the login (``HumanVerificationRequired``), never bypassed;
-- a document is read only when the desk's intimação agenda ("Aguardando Ciência") has no entry for that process:
-  otherwise ``DocumentsBlocked``, because opening a file there could count as reading the intimação;
+- before a document is opened, the desk's intimação agenda ("Aguardando Ciência") says whether the process awaits
+  ciência (``pending_ciencia``): opening a file there could count as reading the intimação, so the caller decides;
 - the connector never asks for or uses the internal Projudi certificate password.
 
 Lists (observed live on 2026-11-23, one login): the frameset menu groups its ``add_menu`` links under section headers
@@ -47,9 +47,8 @@ from curl_cffi.requests.exceptions import RequestException
 from jurisync import portals
 from jurisync.connectors.projudi import base, legacy, parsers
 from jurisync.connectors.projudi.legacy import HumanVerificationRequired, MissingCredentials
-from jurisync.core.ciencia import NONE, PENDING, report
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
-from jurisync.core.session_pool import LoginRejected
+from jurisync.core.session_pool import LoginRejected, SessionExpired
 
 LOGIN_PATH = "usuario/logon.do"
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9]{3,30}")
@@ -539,6 +538,18 @@ class TjamAdapter(legacy.LegacyAdapter):
         response = self.request(session, portal, "POST", DESK, data={"selectedIcon": "tabIntimacoes"})
         return pending_intimations(parsers.decode(response.content))
 
+    def pending_ciencia(self, session, portal, process_number):
+        """Whether the desk shows this process with an intimação awaiting reading: opening its files could register it."""
+        try:
+            numbers, complete = self._awaiting(session, portal)
+        except SessionExpired:
+            raise
+        except (RuntimeError, ValueError, RequestException) as error:
+            return {"items": [], "unchecked": f"the desk's pending intimations could not be read ({str(error)[:120]})"}
+        items = [{"kind": "intimação aguardando leitura", "process": process_number}] * (process_number in numbers)
+        unchecked = None if complete else "the desk's pending intimations could not be read in full"
+        return {"items": items, "unchecked": unchecked}
+
     def list_intimations(self, session, portal, *, lists=None, instances=("1",), max_pages=10):
         """The desk's intimação and citação lists (default: the ones awaiting reading or with a running deadline),
         per instance, without opening any. Rows of ``novas`` await reading: opening them registers the ciência."""
@@ -673,25 +684,7 @@ class TjamAdapter(legacy.LegacyAdapter):
         return portals.projudi(portal).url(f"arquivo.do?_tj={hash_value}")
 
     def download(self, session, portal, document_id, hash_value):
-        """A file, only when the desk's intimação agenda lists nothing pending for the process that is open."""
-        number = self._process_files(session)["number"]
-        numbers, complete = self._awaiting(session, portal)
-        if number in numbers or not complete:
-            raise legacy.DocumentsBlocked(
-                "This process has an intimação awaiting ciência for this account (or the agenda could not be read in "
-                "full): opening its files could count as reading it. Open it in the portal if the user decides to.",
-                report(
-                    PENDING,
-                    "Este processo tem intimação aguardando ciência; nada foi aberto. Abrir seus arquivos pode "
-                    "registrar a ciência e iniciar o prazo: abra no portal se o usuário decidir.",
-                )
-                if number in numbers
-                else report(
-                    NONE,
-                    "Nada foi aberto: a agenda de intimações não pôde ser lida por inteiro, então não se sabe se este "
-                    "processo tem intimação aguardando ciência.",
-                ),
-            )
+        """A file. The ciência of the process is checked once per call, before it is opened (``pending_ciencia``)."""
         content, kind = base.Adapter.download(self, session, portal, document_id, hash_value)
         if (
             content is not None

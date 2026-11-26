@@ -129,6 +129,8 @@ def test_only_the_judicial_portals_use_the_rest_flavor():
         "trt17-2g",
         "trt19-1g",
         "trt19-2g",
+        "trt23-1g",
+        "trt23-2g",
         "trt24-1g",
         "trt24-2g",
         "trt4-1g",

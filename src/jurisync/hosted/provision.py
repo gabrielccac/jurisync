@@ -46,6 +46,8 @@ PROFILE_FILES = ("portals.toml", "settings.toml")
 # Systems the hosted server serves, in the order a tenant lists them.
 SYSTEM_ORDER = tuple(registry.CONNECTORS)
 SERVICES = {name: registry.get(name).login for name in registry.SERVICES}
+# Not a check: it would only say the same. The client's code does it, in Claude (advbox_verify_device, newDevice=true).
+NO_DEVICE = "falta verificar o aparelho: pelo Claude do escritório, com o código que o ADVBOX envia ao e-mail da conta"
 WRITE_GRANTS = tuple(connector.write_grant for connector in registry.CONNECTORS.values() if connector.write_grant)
 # Portals whose login meets a CAPTCHA the server answers with JURISYNC_CAPTCHA_API_KEY (or the captcha-ocr extra).
 CAPTCHA_PORTALS = {"tjes-1g": "AWS WAF"}
@@ -176,7 +178,11 @@ def plan_office(customer, values, *, name=None, ready=None):
     for service, required in SERVICES.items():
         if all(values.get(name, "").strip() for name in required):
             plan.portals.append(service)
-            plan.checks.append(service)
+            device = registry.get(service).device
+            if device and not values.get(device, "").strip():
+                plan.notes.append(f"{service}: {NO_DEVICE}")
+            else:
+                plan.checks.append(service)
     if switched:
         plan.notes.append(
             "no computador do escritório estes portais entram pelo A3; no servidor usam o login declarado "

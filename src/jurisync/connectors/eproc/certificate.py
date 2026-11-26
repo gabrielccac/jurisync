@@ -36,6 +36,8 @@ PROFILE_FORM = "frmEscolherUsuario"
 PROFILE_BUTTON = re.compile(r"acaoLogar\(\s*['\"]?([^'\")\s]+)['\"]?\s*\)")
 PROFILE_ACTION = re.compile(r"\.action\s*=\s*'([^']*pessoa_usuario_logar[^']*)'")
 OAB = re.compile(r"\b[A-Z]{2}[\s./-]*[0-9][0-9.]*(?:-[A-Z])?\b")
+# The classic portals' answer to an accepted certificate whose CPF has no user there (TJBA, 13/11/2026).
+UNKNOWN_CPF = re.compile(r"N[ãa]o foi localizado usu[áa]rio com este CPF", re.I)
 PERSISTENT_CHOICE = re.compile(r"padr[aã]o|liberar|remember|trust|device", re.I)
 
 
@@ -76,6 +78,9 @@ BOT_CHALLENGE = re.compile(
     r"bobcmn|TSPD|cf-chl|challenge-platform|_Incapsula_Resource|verify you are human|captcha", re.I
 )
 BOT_REFUSAL = re.compile(r"The requested URL was rejected|Request Rejected", re.I)
+# The portal's own home keeps the F5 "TSPD" script after the challenge is cleared (TRF6, 25/11/2026): its login form
+# tells it from a challenge.
+PORTAL_HOME = re.compile(r"""id=["']?frmLogin\b""")
 # A page that is neither a challenge nor the certificate option (the portal's own home, a classic form) is given this
 # long before the browser opens the SSO entry instead, as the HTTP login does.
 BROWSER_SETTLE = 8
@@ -196,10 +201,14 @@ def _browser_seen(driver):
     return seen + (f", title {title!r}" if title else "")
 
 
+def _challenged(html):
+    return bool(BOT_CHALLENGE.search(html)) and not PORTAL_HOME.search(html)
+
+
 def _browser_failure(config, driver, html):
     """``LoginFailed`` for an entry that never offered the certificate, with what the browser was showing."""
     seen = _browser_seen(driver)
-    if BOT_CHALLENGE.search(html):
+    if _challenged(html):
         return LoginFailed(
             f"{config.tribunal} eproc login page did not open in the browser: the portal's bot challenge did not let "
             f"it through in {BROWSER_ENTRY_TIMEOUT} s ({seen}); nothing was sent",
@@ -249,7 +258,7 @@ def _browser_login_page(session, config):
                     reason="captcha",
                 )
             now = time.monotonic()
-            if BOT_CHALLENGE.search(html):
+            if _challenged(html):
                 settled = None
             elif settled is None:
                 settled = now
@@ -520,6 +529,13 @@ def cert_login(portal, *, pin=None, p12_path=None, session=None):
                     require_login_url(config, link), impersonate=IMPERSONATE, allow_redirects=False, timeout=TIMEOUT
                 ),
             )
+    # TJBA sends this notice in UTF-8 inside a hidden infra textarea while the page is read as Latin-1
+    if UNKNOWN_CPF.search(response.content.decode("utf-8", errors="replace")):
+        raise LoginRejected(
+            f"{config.key}: the portal has no user for this certificate's CPF (Não foi localizado usuário com este CPF); "
+            "the lawyer has to register in this eproc. Retrying will not help.",
+            reason="not_registered",
+        )
     if not is_panel(response.url) or not any(c.name == "PHPSESSID" for c in session.cookies.jar):
         raise RuntimeError(f"eproc certificate login did not reach the panel ({_landing(response)})")
     return session, response.text, rooted(config, response.url)

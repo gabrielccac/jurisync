@@ -48,10 +48,10 @@ TJAM, TJPR = "tjam-1g", "tjpr-projudi-1g"
 # Portals whose adapter lists the desk's intimações and processes.
 LISTS = ("tjgo-1g", TJPR, TJAM)
 CIENCIA_GUARD = (
-    "TJGO: refused, nothing opened, while a communication of the process may await ciência (see "
+    "Refused, nothing opened, while a communication of the process may await ciência (see "
     "projudi_list_intimations): opening it may register the party's ciência and start the deadline. Also refused "
-    f"when those lists could not be read in full ('ciência not checked'). {ciencia.AUTHORIZATION}. TJAM, TJPR: an "
-    "intimação awaiting ciência blocks the process (no override). ciencia.estado: 'nenhuma' (nothing pending "
+    f"when those lists could not be read in full ('ciência not checked'). {ciencia.AUTHORIZATION}. "
+    "ciencia.estado: 'nenhuma' (nothing pending "
     "opened), 'pendente' (refused; intimacoes lists what awaits), 'dada' (ciência may be registered) or "
     "'desconhecida' (acknowledged, lists unreadable)."
 )

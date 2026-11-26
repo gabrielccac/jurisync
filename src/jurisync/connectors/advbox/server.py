@@ -166,7 +166,7 @@ def ensure_session() -> dict[str, Any]:
 @server.tool(
     name="advbox_verify_device",
     title="Verify ADVBOX device",
-    description="When a call says ADVBOX sent a device code, ask the user and pass it (3 attempts). Only if the user says the stored device stopped working: newDevice=true, then pass the code sent. Changes the account's trusted devices; no write grant needed.",
+    description="When a call says ADVBOX sent a device code, ask the user and pass it (3 attempts). newDevice=true only if a call says the account has no verified device, or the user says the stored one stopped working, and the user agrees to receive a code; then pass it. Changes the account's trusted devices; no write grant needed.",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True),
 )
 async def verify_device(
@@ -174,7 +174,7 @@ async def verify_device(
         str,
         Field(max_length=32, description="Code ADVBOX sent; empty with newDevice=true."),
     ] = "",
-    newDevice: Annotated[bool, Field(description="Only when the user asks.")] = False,
+    newDevice: Annotated[bool, Field(description="Only with the user's agreement: ADVBOX e-mails a code.")] = False,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
     session = client.session

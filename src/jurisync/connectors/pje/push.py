@@ -23,6 +23,8 @@ PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}(?!\d)")
 # TJBA 2G lists appeals' incidents as "<number>R1.1.EDCiv": the registration is of that incident, under the same number.
 INCIDENT_RE = re.compile(r"R\d+(?:\.\d+)*\.[A-Za-z]+")
 EMPTY_PUSH = re.compile(r"n[ãa]o\s+h[áa]\s+nenhum\s+processo\s+cadastrado\s+na\s+sua\s+lista", re.I)
+# The portal's error page when it gives the account no Push page (TRF6).
+NO_PERMISSION = re.compile(r"sem\s+permiss[ãa]o\s+para\s+acessar\s+a\s+p[áa]gina", re.I)
 PUSH_TIMEOUT = 90
 # The registered-processes grid (TJRJ: j_id214:processosCadastradosTable), as opposed to "Processos relacionados".
 PUSH_GRID_ID = "processoscadastrados"
@@ -323,6 +325,22 @@ def _next_pages(session, config, html, pagination, items, needed):
     return rows, page, last
 
 
+def _require_permission(session, config, push, push_url):
+    """Say it plainly when the redirect is the portal's own error page refusing the Push to this account."""
+    target = urljoin(push_url, push.headers.get("Location") or "")
+    parts = urlsplit(target)
+    if (parts.hostname, parts.path) != (config.host, f"{config.root}error.seam"):
+        return
+    page = session.get(target, allow_redirects=False, timeout=PUSH_TIMEOUT, impersonate=IMPERSONATE)
+    if page.status_code == 200 and NO_PERMISSION.search(
+        BeautifulSoup(response_html(page), "html.parser").get_text(" ")
+    ):
+        raise RuntimeError(
+            f"{config.key}: the portal does not let this account open the Push page (Sem permissão para acessar a "
+            "página); pje_list_processes lists the account's processes"
+        )
+
+
 def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_number=None):
     """The Push registry, ``limit`` rows from ``offset``; ``process_number`` keeps only that process' rows."""
     if not 1 <= limit <= MAX_LIMIT or offset < 0:
@@ -348,6 +366,8 @@ def read_push(name, *, session=None, limit=DEFAULT_LIMIT, offset=0, process_numb
             impersonate=IMPERSONATE,
         )
         push_url_result = getattr(push, "url", push_url)
+        if push.status_code == 302:
+            _require_permission(session, config, push, push_url)
         if push.status_code != 200:
             raise RuntimeError(f"Push list returned HTTP {push.status_code}")
         _safe_url(push_url_result, host=config.host, path_exact=f"{config.root}Push/listView.seam")

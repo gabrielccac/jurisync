@@ -12,10 +12,8 @@ secrets = ["PJE_TRF3_1G_USERNAME", "PJE_TRF3_1G_PASSWORD", "PJE_TRF3_1G_2FA_DATA
 method = "browser_totp"
 secrets = ["TRF2_1G_RJ_USERNAME", "TRF2_1G_RJ_PASSWORD", "TRF2_1G_RJ_2FA_DATA"]
 
-# eSAJ: o portal aceita usuário+senha (+ código de 6 dígitos), mas o conector só implementa certificado A1. Login/senha guardados no .env para quando o login por senha existir.
-[tjsp-esaj]
-method = "certificate_challenge"
-secrets = ["ESAJ_A1_P12|PJE_A1_P12", "ESAJ_A1_PIN|PJE_A1_PIN"]
+# e-SAJ TJSP fora: a senha entra, mas o portal manda um código ao e-mail a cada login, e o conector não o lê (reteste de
+# 25/11). Com um A1: [tjsp-esaj] method = "certificate_challenge", secrets ESAJ_A1_P12|PJE_A1_P12 e o PIN.
 
 [tjsp-1g]
 method = "browser_totp"

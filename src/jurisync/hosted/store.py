@@ -61,9 +61,21 @@ create table if not exists calls (
     tool text not null,
     ok integer not null,
     error text not null default '',
-    duration_ms integer not null
+    duration_ms integer not null,
+    portal text not null default '',
+    reason text not null default ''
 );
 create index if not exists calls_by_tenant on calls (tenant, id);
+create index if not exists calls_by_time on calls (at);
+create table if not exists logins (
+    id integer primary key autoincrement,
+    at integer not null,
+    tenant text not null,
+    portal text not null,
+    reason text not null,
+    duration_ms integer not null
+);
+create index if not exists logins_by_time on logins (at);
 create table if not exists portal_checks (
     tenant text not null,
     portal text not null,
@@ -85,7 +97,7 @@ create table if not exists tokens (
 );
 """
 
-# Tool calls are kept this long, then dropped by ``purge``.
+# Tool calls and logins are kept this long, then dropped by ``purge``.
 CALLS_KEPT = 90 * 24 * 3600
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 
@@ -111,6 +123,14 @@ def check_password(password, stored):
     return hmac.compare_digest(derived.hex(), expected)
 
 
+def client_name(info):
+    """The name an OAuth client registered with ("Claude", "ChatGPT"); empty when it gave none."""
+    try:
+        return str(json.loads(info or "{}").get("client_name") or "")
+    except ValueError:
+        return ""
+
+
 class Store:
     def __init__(self, path):
         self.path = Path(path)
@@ -123,10 +143,14 @@ class Store:
         self._db.execute("pragma journal_mode = wal")
         self._db.execute("pragma foreign_keys = on")
         self._db.executescript(SCHEMA)
-        columns = {row["name"] for row in self._db.execute("pragma table_info(tenants)")}
-        for column, definition in (("mode", "text not null default 'hosted'"), ("reason", "text not null default ''")):
-            if column not in columns:  # stores created before local-only offices existed
-                self._db.execute(f"alter table tenants add column {column} {definition}")
+        for table, column, definition in (
+            ("tenants", "mode", "text not null default 'hosted'"),  # stores created before local-only offices existed
+            ("tenants", "reason", "text not null default ''"),
+            ("calls", "portal", "text not null default ''"),  # and before the monitoring API
+            ("calls", "reason", "text not null default ''"),
+        ):
+            if column not in {row["name"] for row in self._db.execute(f"pragma table_info({table})")}:
+                self._db.execute(f"alter table {table} add column {column} {definition}")
         self._lock = threading.Lock()
         self.path.chmod(0o600)
 
@@ -185,6 +209,7 @@ class Store:
     def remove_tenant(self, tenant):
         self._run("delete from portal_checks where tenant = ?", tenant)
         self._run("delete from calls where tenant = ?", tenant)
+        self._run("delete from logins where tenant = ?", tenant)
         self._run("delete from tokens where tenant = ?", tenant)
         self._run("delete from codes where tenant = ?", tenant)
         self._run("delete from tenants where id = ?", tenant)
@@ -326,11 +351,14 @@ class Store:
         rows = self._run("select * from audit where tenant = ? order by id desc limit ?", tenant, limit)
         return [dict(row) for row in rows]
 
-    def log_call(self, tenant, user, connector, tool, error, duration_ms):
-        """One line per tool call: who, which tool, how it ended. Arguments and results are never stored."""
+    def log_call(self, tenant, user, connector, tool, error, duration_ms, portal="", reason=""):
+        """One line per tool call: who, which tool and portal, how it ended (``reason``: why a login failed).
+
+        Arguments and results are never stored; ``portal`` is only ever a portal key.
+        """
         self._run(
-            "insert into calls (at, tenant, user, connector, tool, ok, error, duration_ms) "
-            "values (?, ?, ?, ?, ?, ?, ?, ?)",
+            "insert into calls (at, tenant, user, connector, tool, ok, error, duration_ms, portal, reason) "
+            "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             int(time.time()),
             tenant,
             user,
@@ -339,11 +367,71 @@ class Store:
             int(not error),
             error,
             duration_ms,
+            portal,
+            reason,
         )
 
     def calls(self, tenant, limit=30):
         rows = self._run("select * from calls where tenant = ? order by id desc limit ?", tenant, limit)
         return [dict(row) for row in rows]
+
+    def recent_calls(self, *, tenant="", connector="", portal="", errors=False, limit=100):
+        """The latest calls of every office, narrowed by the filters given."""
+        where, args = [], []
+        for column, value in (("tenant", tenant), ("connector", connector), ("portal", portal)):
+            if value:
+                where.append(f"{column} = ?")
+                args.append(value)
+        if errors:
+            where.append("ok = 0")
+        clause = f" where {' and '.join(where)}" if where else ""
+        rows = self._run(f"select * from calls{clause} order by id desc limit ?", *args, limit)
+        return [dict(row) for row in rows]
+
+    def calls_since(self, at):
+        return [dict(row) for row in self._run("select * from calls where at >= ?", int(at))]
+
+    def last_portal_calls(self):
+        """The latest call of each office on each portal."""
+        rows = self._run(
+            "select * from calls where id in (select max(id) from calls where portal != '' group by tenant, portal)"
+        )
+        return [dict(row) for row in rows]
+
+    def log_login(self, tenant, portal, reason, duration_ms):
+        """One line per portal login tried; ``reason`` is empty when it got in."""
+        self._run(
+            "insert into logins (at, tenant, portal, reason, duration_ms) values (?, ?, ?, ?, ?)",
+            int(time.time()),
+            tenant,
+            portal,
+            reason,
+            duration_ms,
+        )
+
+    def logins_since(self, at):
+        return [dict(row) for row in self._run("select * from logins where at >= ?", int(at))]
+
+    def signed_in(self):
+        """Users with a live sign-in, per client (Claude, ChatGPT) and address; never the tokens."""
+        rows = self._run(
+            "select tenant, subject, tokens.client_id, resource, clients.info, max(expires) as until, "
+            "(select max(at) from calls where calls.tenant = tokens.tenant and user = subject) as last_call "
+            "from tokens left join clients on clients.client_id = tokens.client_id where expires >= ? "
+            "group by tenant, subject, tokens.client_id, resource order by tenant, subject",
+            int(time.time()),
+        )
+        return [
+            {
+                "escritorio": row["tenant"],
+                "usuario": row["subject"],
+                "cliente": client_name(row["info"]),
+                "conector": row["resource"] or "",
+                "valido_ate": row["until"],
+                "ultima_chamada": row["last_call"],
+            }
+            for row in rows
+        ]
 
     def save_check(self, tenant, portal, ok, message):
         self._run(
@@ -368,3 +456,4 @@ class Store:
         self._run("delete from codes where expires < ?", now)
         self._run("delete from tokens where expires < ?", int(now))
         self._run("delete from calls where at < ?", int(now) - CALLS_KEPT)
+        self._run("delete from logins where at < ?", int(now) - CALLS_KEPT)
