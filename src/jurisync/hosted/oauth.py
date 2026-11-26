@@ -4,10 +4,16 @@ Built on the SDK's ``OAuthAuthorizationServerProvider``; the SDK serves the OAut
 URIs and client authentication. This module decides who the user is (e-mail + password of a tenant user) and records
 which tenant every code and token acts for. Access tokens last one hour; refresh tokens 30 days and rotate on use.
 
-Anyone may register a client, so the sign-in is tied to the browser that opened ``/authorize``: that response sets a
-per-request cookie and ``/login`` answers only to the browser holding it. A ``/login`` link passed to someone else is
-dead. A whole ``/authorize`` link passed to someone else still works, which is why the page names the client and the
-host that receives the access.
+Anyone may register a client, but only with redirect URIs on Claude's or ChatGPT's hosts, on this machine, or on a
+host the operator allows in ``JURISYNC_OAUTH_REDIRECT_HOSTS``: a link that sends the code anywhere else is refused at
+registration, and a client stored before the rule (or after the operator dropped its host) is treated as unknown.
+
+The sign-in is tied to the browser that opened ``/authorize``: that response sets a per-request cookie and ``/login``
+answers only to the browser holding it. A ``/login`` link passed to someone else is dead. A whole ``/authorize`` link
+passed to someone else still works, which is why the page names the client and the host that receives the access.
+
+A user whose password the operator set (new user, reset) chooses a new one before the code is issued; any user may do
+the same by ticking the box on the sign-in page.
 """
 
 import hashlib
@@ -15,7 +21,7 @@ import hmac
 import html
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import parse_qs, urlsplit
 
 import anyio
@@ -34,6 +40,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route, request_response
 
+from jurisync.hosted.store import MIN_PASSWORD
 from jurisync.hosted.throttle import client_address
 
 SCOPE = "jurisync"
@@ -49,9 +56,11 @@ LOGIN_PATH = "/login"
 LOGIN_COOKIE = "jurisync_login_"
 MAX_LOGIN_BODY = 64 * 1024
 MAX_PASSWORD_CHECKS = 4
-# Where Claude and ChatGPT receive the authorization code; any other redirect host gets a warning on the sign-in page.
+# Where Claude and ChatGPT receive the authorization code. Registration accepts redirects only to these, to this machine
+# and to the hosts in REDIRECT_HOSTS_VAR; an operator-allowed host still gets a warning on the sign-in page.
 KNOWN_HOSTS = {"claude.ai", "claude.com", "chatgpt.com", "chat.openai.com"}
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+REDIRECT_HOSTS_VAR = "JURISYNC_OAUTH_REDIRECT_HOSTS"
 
 
 @dataclass(frozen=True)
@@ -60,6 +69,7 @@ class Pending:
     params: AuthorizationParams
     expires: float
     browser: str  # the cookie value only the browser that opened /authorize holds
+    user: tuple | None = None  # (e-mail, tenant, stored hash) once the password matched and a new one is due
 
 
 def login_cookie(request_id):
@@ -67,12 +77,18 @@ def login_cookie(request_id):
     return LOGIN_COOKIE + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:16]
 
 
+def redirect_hosts(value):
+    """The extra redirect hosts an operator allows, from ``REDIRECT_HOSTS_VAR`` (comma or space separated)."""
+    return frozenset(host.strip().lower() for host in (value or "").replace(",", " ").split())
+
+
 class Provider:
-    def __init__(self, store, base_url, issuer=None):
+    def __init__(self, store, base_url, issuer=None, allowed_hosts=()):
         self.store = store
         self.base_url = base_url.rstrip("/")
         # RFC 9207: must be the exact string the metadata document gives as ``issuer``.
         self.issuer = issuer or self.base_url
+        self.allowed_hosts = frozenset(allowed_hosts)
         self._pending = {}
         self._purged = time.monotonic()
         self.store.purge()
@@ -86,14 +102,24 @@ class Provider:
 
     # Clients
 
+    def refused_redirects(self, client):
+        return [str(uri) for uri in client.redirect_uris or () if not redirect_allowed(uri, self.allowed_hosts)]
+
     async def get_client(self, client_id):
         info = await anyio.to_thread.run_sync(self.store.client, client_id)
-        return OAuthClientInformationFull.model_validate_json(info) if info else None
+        client = OAuthClientInformationFull.model_validate_json(info) if info else None
+        return None if client is None or self.refused_redirects(client) else client
 
     async def register_client(self, client_info):
         info = client_info.model_dump_json()
         if len(info) > MAX_CLIENT_INFO:
             raise RegistrationError("invalid_client_metadata", "client metadata is too large")
+        refused = self.refused_redirects(client_info)
+        if refused or not client_info.redirect_uris:
+            raise RegistrationError(
+                "invalid_redirect_uri",
+                f"redirect URI not allowed on this server: {', '.join(refused) or 'none given'}",
+            )
         self.store.save_client(client_info.client_id, info)
         self.store.prune_clients(MAX_CLIENTS)
 
@@ -124,6 +150,12 @@ class Provider:
         if entry is None or not hmac.compare_digest(entry.browser.encode(), (browser or "").encode("utf-8")):
             return None
         return entry
+
+    def verified(self, request_id, email, tenant, current):
+        """The password matched and a new one is due: the request waits for it, bound to that user and password."""
+        entry = self._pending.get(request_id)
+        if entry is not None:
+            self._pending[request_id] = replace(entry, user=(email, tenant, current))
 
     def complete(self, request_id, email, tenant):
         """Issue the authorization code for a signed-in user and return where to send the browser.
@@ -273,14 +305,21 @@ class BrowserBinding:
         )
 
 
-def redirect_target(redirect_uri):
-    """``(what to show, known)`` for the address that receives the authorization code."""
+def redirect_allowed(redirect_uri, allowed_hosts=frozenset()):
+    """Whether the code may go there: https on Claude's, ChatGPT's or an operator-allowed host, or this machine."""
     parts = urlsplit(str(redirect_uri))
-    host = parts.hostname or ""
-    known = (parts.scheme == "https" and host in KNOWN_HOSTS) or (
+    host = (parts.hostname or "").lower()
+    return (parts.scheme == "https" and (host in KNOWN_HOSTS or host in allowed_hosts)) or (
         parts.scheme in ("http", "https") and host in LOCAL_HOSTS
     )
-    return (host if host and parts.scheme in ("http", "https") else f"{parts.scheme}://{host}"), known
+
+
+def redirect_target(redirect_uri):
+    """``(what to show, known)``: known for Claude, ChatGPT and this machine; any other host gets the warning."""
+    parts = urlsplit(str(redirect_uri))
+    host = parts.hostname or ""
+    shown = host if host and parts.scheme in ("http", "https") else f"{parts.scheme}://{host}"
+    return shown, redirect_allowed(redirect_uri)
 
 
 def client_label(client):
@@ -303,8 +342,31 @@ volta para <strong>{host}</strong>.</p>
  style="width:100%;padding:.6rem;font-size:1rem"></label></p>
 <p><label>Senha<br><input name="password" type="password" required autocomplete="current-password"
  style="width:100%;padding:.6rem;font-size:1rem"></label></p>
+<p><label><input name="change" type="checkbox" value="1"> Quero trocar minha senha</label></p>
 <p><button style="padding:.6rem 1.2rem;font-size:1rem">Entrar e autorizar</button></p>
 </form></body></html>"""
+
+CHANGE_PAGE = """<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Jurisync</title>
+<body style="font-family:system-ui;max-width:26rem;margin:4rem auto;padding:0 1rem">
+<h1>Escolha uma senha nova</h1>
+<p>{reason}</p>
+{error}
+<form method="post" action="/login">
+<input type="hidden" name="request" value="{request}">
+<p><label>E-mail<br><input name="email" type="email" value="{email}" readonly autocomplete="username"
+ style="width:100%;padding:.6rem;font-size:1rem"></label></p>
+<p><label>Senha nova (mínimo de {minimum} caracteres)<br><input name="new_password" type="password" required
+ minlength="{minimum}" autofocus autocomplete="new-password" style="width:100%;padding:.6rem;font-size:1rem"></label></p>
+<p><label>Repita a senha nova<br><input name="confirm" type="password" required minlength="{minimum}"
+ autocomplete="new-password" style="width:100%;padding:.6rem;font-size:1rem"></label></p>
+<p><button style="padding:.6rem 1.2rem;font-size:1rem">Salvar senha e autorizar</button></p>
+</form></body></html>"""
+
+FORCED = (
+    "A sua senha foi definida pelo administrador do Jurisync. Para continuar, escolha uma senha que só você conheça."
+)
+CHOSEN = "Escolha a senha nova. As conexões abertas com a senha antiga serão encerradas."
 
 WARNING = (
     "<p style='border:2px solid #b00020;color:#b00020;padding:.8rem'><strong>Atenção:</strong> {host} não é um "
@@ -347,6 +409,61 @@ def login_routes(provider, throttle, address_throttle):
             headers=PAGE_HEADERS,
         )
 
+    def change_page(request_id, email, error="", status_code=200):
+        message = f"<p style='color:#b00020'>{html.escape(error)}</p>" if error else ""
+        return HTMLResponse(
+            CHANGE_PAGE.format(
+                reason=FORCED if provider.store.must_change(email) else CHOSEN,
+                error=message,
+                request=html.escape(request_id, quote=True),
+                email=html.escape(email, quote=True),
+                minimum=MIN_PASSWORD,
+            ),
+            status_code=status_code,
+            headers=PAGE_HEADERS,
+        )
+
+    def finish(request_id, email, tenant):
+        target = provider.complete(request_id, email, tenant)
+        if target is None:
+            return EXPIRED
+        response = RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
+        response.delete_cookie(login_cookie(request_id), path=LOGIN_PATH)
+        return response
+
+    async def checked(function, *args):
+        """Run a scrypt-bound store call off the event loop, at most ``MAX_PASSWORD_CHECKS`` at once; None when busy."""
+        if checking[0] >= MAX_PASSWORD_CHECKS:
+            return None
+        checking[0] += 1
+        try:
+            return (await anyio.to_thread.run_sync(function, *args),)
+        finally:
+            checking[0] -= 1
+
+    async def change(request_id, entry, form):
+        """Second step: the user whose password matched sets a new one, then the code is issued."""
+        if entry.user is None:
+            return EXPIRED
+        email, tenant, current = entry.user
+        password = str(form.get("new_password", ""))
+        if password != str(form.get("confirm", "")):
+            return change_page(request_id, email, "As duas senhas não conferem.")
+        if len(password) < MIN_PASSWORD:
+            return change_page(request_id, email, f"Use pelo menos {MIN_PASSWORD} caracteres.")
+        same = await checked(provider.store.authenticate, email, password)
+        if same is None:
+            return change_page(request_id, email, "Servidor ocupado. Tente de novo em instantes.", 503)
+        if same[0] is not None:
+            return change_page(request_id, email, "Escolha uma senha diferente da atual.")
+        changed = await checked(provider.store.change_password, email, tenant, current, password)
+        if changed is None:
+            return change_page(request_id, email, "Servidor ocupado. Tente de novo em instantes.", 503)
+        if not changed[0]:
+            return EXPIRED  # reset, moved or removed since the sign-in: that sign-in no longer counts
+        provider.store.log(tenant, email, "senha trocada pelo usuário")
+        return finish(request_id, email, tenant)
+
     def parked(request: Request, request_id):
         return provider.pending(request_id, request.cookies.get(login_cookie(request_id)))
 
@@ -361,31 +478,28 @@ def login_routes(provider, throttle, address_throttle):
         entry = parked(request, request_id)
         if entry is None:
             return EXPIRED
+        if "new_password" in form:
+            return await change(request_id, entry, form)
         email = str(form.get("email", "")).strip().lower()
         address = client_address(
             request.client.host if request.client else "", request.headers.get("x-forwarded-for", "")
         )
         if throttle.blocked(email) or address_throttle.blocked(address):
             return page(request_id, entry, "Muitas tentativas. Aguarde 15 minutos e tente de novo.", 429)
-        if checking[0] >= MAX_PASSWORD_CHECKS:
+        # scrypt takes a while by design: off the event loop, so tool calls keep flowing meanwhile.
+        found = await checked(provider.store.credential, email, str(form.get("password", "")))
+        if found is None:
             return page(request_id, entry, "Servidor ocupado. Tente de novo em instantes.", 503)
-        checking[0] += 1
-        try:
-            # scrypt takes a while by design: off the event loop, so tool calls keep flowing meanwhile.
-            tenant = await anyio.to_thread.run_sync(provider.store.authenticate, email, str(form.get("password", "")))
-        finally:
-            checking[0] -= 1
+        tenant, current = found[0] or (None, None)
         if tenant is None:
             throttle.fail(email)
             address_throttle.fail(address)
             return page(request_id, entry, "E-mail ou senha incorretos.")
         throttle.clear(email)
-        target = provider.complete(request_id, email, tenant)
-        if target is None:
-            return EXPIRED
-        response = RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
-        response.delete_cookie(login_cookie(request_id), path=LOGIN_PATH)
-        return response
+        if form.get("change") or provider.store.must_change(email):
+            provider.verified(request_id, email, tenant, current)
+            return change_page(request_id, email)
+        return finish(request_id, email, tenant)
 
     return [
         Route(LOGIN_PATH, show, methods=["GET"]),

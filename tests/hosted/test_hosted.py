@@ -177,7 +177,7 @@ class HostedAppTest(unittest.TestCase):
         registration = client.post(
             "/register",
             json={
-                "redirect_uris": ["https://claude.test/callback"],
+                "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
                 "token_endpoint_auth_method": "none",
                 "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
@@ -191,7 +191,7 @@ class HostedAppTest(unittest.TestCase):
                 "client_id": registration["client_id"],
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",
-                "redirect_uri": "https://claude.test/callback",
+                "redirect_uri": "https://claude.ai/api/mcp/auth_callback",
                 "state": "s1",
                 "resource": f"{BASE}/fake/mcp",
             },
@@ -214,7 +214,7 @@ class HostedAppTest(unittest.TestCase):
                 "code": query["code"][0],
                 "client_id": registration["client_id"],
                 "code_verifier": verifier,
-                "redirect_uri": "https://claude.test/callback",
+                "redirect_uri": "https://claude.ai/api/mcp/auth_callback",
                 "resource": f"{BASE}/fake/mcp",
             },
         )

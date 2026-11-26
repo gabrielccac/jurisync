@@ -51,7 +51,7 @@ from jurisync.core.mcp import PORTAL_HELP, with_portal_note
 from jurisync.core.session_pool import REASONS
 from jurisync.hosted import access
 from jurisync.hosted.monitor import Monitor
-from jurisync.hosted.oauth import SCOPE, BrowserBinding, Provider, login_routes
+from jurisync.hosted.oauth import REDIRECT_HOSTS_VAR, SCOPE, BrowserBinding, Provider, login_routes, redirect_hosts
 from jurisync.hosted.throttle import IP_MAX_FAILURES, Throttle
 
 log = logging.getLogger(__name__)
@@ -380,7 +380,9 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
         load = hosted_load
     base_url = base_url.rstrip("/")
     issuer = EXACT_URL.validate_python(base_url)
-    provider = Provider(store, base_url, issuer=str(issuer))
+    provider = Provider(
+        store, base_url, issuer=str(issuer), allowed_hosts=redirect_hosts(os.environ.get(REDIRECT_HOSTS_VAR))
+    )
     verifier = ProviderTokenVerifier(provider)
     registration, revocation = (
         ClientRegistrationOptions(enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]),

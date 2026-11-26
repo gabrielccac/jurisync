@@ -55,7 +55,8 @@ ssh <vps> 'sudo shred -u /var/lib/jurisync/rollout.passphrase'
 
 `apply` cria ou atualiza o escritório, troca o conteúdo do cofre pelo do pacote (portais retirados saem; o
 `ADVBOX_DEVICE_ID` renovado no servidor é mantido) e cria os usuários com senha aleatória em
-`/var/lib/jurisync/hosted/new-user-passwords.txt`. Nenhum login em portal acontece aqui.
+um arquivo novo por execução, `/var/lib/jurisync/hosted/new-user-passwords-<data>-<id>.txt`. O advogado troca essa
+senha no primeiro login. Nenhum login em portal acontece aqui.
 
 ### A4. Provar os logins no servidor
 
@@ -89,7 +90,7 @@ reiniciar o servidor.
 1. Mandar a cada advogado a Parte B, com os endereços do escritório (`endpoints` do `plan.json`: sempre
    `https://<domínio>/tribunais/mcp`; mais `/advbox/mcp` ou `/juridiq/mcp` se ele usa), o e-mail dele e a senha (a
    senha por outro canal: WhatsApp separado, ligação). Na Parte B, apagar o passo do ADVBOX/Juridiq se o escritório
-   não usa. Depois apagar `new-user-passwords.txt`.
+   não usa. Depois apagar o `new-user-passwords-*.txt`.
 2. Acompanhar o primeiro uso: `sudo jurisync-admin calls <nome> --limit 20`.
 
 ### A6. Manutenção

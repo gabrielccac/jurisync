@@ -18,7 +18,7 @@ from starlette.testclient import TestClient
 
 from jurisync.core import credentials
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
-from jurisync.hosted.oauth import login_cookie, redirect_target
+from jurisync.hosted.oauth import REDIRECT_HOSTS_VAR, login_cookie, redirect_hosts, redirect_target
 from jurisync.hosted.store import Store
 from jurisync.hosted.throttle import Throttle, client_address
 from jurisync.hosted.vault import Vault, generate_key, load_key
@@ -152,8 +152,7 @@ class BrowserBindingTest(SignInCase):
 
     def test_a_forwarded_login_link_is_dead_in_another_browser(self):
         attacker, victim = TestClient(self.app, base_url=BASE), TestClient(self.app, base_url=BASE)
-        request_id, _ = self.authorize(attacker, self.register(attacker, "https://evil.test/cb"), pkce()[1],
-                                       redirect_uri="https://evil.test/cb")  # fmt: skip
+        request_id, _ = self.authorize(attacker, self.register(attacker), pkce()[1])
         shown = victim.get(f"/login?request={request_id}")
         self.assertEqual(shown.status_code, 400)
         self.assertNotIn("<form", shown.text)
@@ -213,11 +212,39 @@ class SignInPageTest(SignInCase):
         self.assertIn("<strong>claude.ai</strong>", text)
         self.assertNotIn("Atenção", text)
 
-    def test_other_hosts_get_a_warning_but_are_not_blocked(self):
-        text = self.page("https://claude.ai.evil.test/cb", "Claude")
-        self.assertIn("<strong>claude.ai.evil.test</strong>", text)
-        self.assertIn("Atenção", text)
-        self.assertIn("<form", text)
+    def test_other_hosts_are_refused_at_registration(self):
+        client = TestClient(self.app, base_url=BASE)
+        for uri in ("https://claude.ai.evil.test/cb", "http://claude.ai/cb", "cursor://anysphere/cb"):
+            body = {"redirect_uris": [uri], "token_endpoint_auth_method": "none", "client_name": "Claude"}
+            response = client.post("/register", json=body)
+            self.assertEqual(response.status_code, 400, uri)
+            self.assertEqual(response.json()["error"], "invalid_redirect_uri")
+        mixed = {"redirect_uris": [CALLBACK, "https://evil.test/cb"], "token_endpoint_auth_method": "none"}
+        self.assertEqual(client.post("/register", json=mixed).status_code, 400)
+        self.assertEqual(self.store._run("select count(*) as total from clients")[0]["total"], 0)
+
+    def test_a_client_stored_before_the_rule_is_unknown(self):
+        client = TestClient(self.app, base_url=BASE)
+        client_id = self.register(client)
+        info = self.store.client(client_id).replace("claude.ai", "evil.test")
+        self.store.save_client(client_id, info)
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "code_challenge": pkce()[1],
+            "code_challenge_method": "S256",
+            "redirect_uri": "https://evil.test/api/mcp/auth_callback",
+            "state": "s1",
+        }
+        response = client.get("/authorize", params=params, follow_redirects=False)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("evil.test", response.headers.get("location", ""))
+
+    def test_redirect_hosts_parse_the_operator_list(self):
+        self.assertEqual(
+            redirect_hosts(" App.Example.com, other.test  third.test,"), {"app.example.com", "other.test", "third.test"}
+        )
+        self.assertEqual(redirect_hosts(None), frozenset())
 
     def test_the_client_name_is_escaped_and_may_be_missing(self):
         text = self.page(CALLBACK, '<script>alert(1)</script>"><b>')
@@ -240,23 +267,47 @@ class SignInPageTest(SignInCase):
         self.assertEqual(redirect_target("cursor://anysphere/cb")[0], "cursor://anysphere")
 
 
+class AllowedRedirectHostTest(SignInCase):
+    environment = {REDIRECT_HOSTS_VAR: "app.example.test"}
+
+    def test_an_allowed_host_signs_in_with_the_warning(self):
+        callback = "https://app.example.test/cb"
+        client = TestClient(self.app, base_url=BASE)
+        client_id = self.register(client, callback, "App")
+        verifier, challenge = pkce()
+        request_id, _ = self.authorize(client, client_id, challenge, redirect_uri=callback)
+        text = client.get(f"/login?request={request_id}").text
+        self.assertIn("<strong>app.example.test</strong>", text)
+        self.assertIn("Atenção", text)
+        login = self.submit(client, request_id)
+        self.assertTrue(login.headers["location"].startswith(callback))
+        code = parse_qs(urlsplit(login.headers["location"]).query)["code"][0]
+        self.assertEqual(self.exchange(client, client_id, code, verifier, callback).status_code, 200)
+
+    def test_only_https_and_only_the_named_host(self):
+        client = TestClient(self.app, base_url=BASE)
+        for uri in ("http://app.example.test/cb", "https://other.example.test/cb"):
+            body = {"redirect_uris": [uri], "token_endpoint_auth_method": "none"}
+            self.assertEqual(client.post("/register", json=body).status_code, 400, uri)
+
+
 class AvailabilityTest(SignInCase):
     patches = {"IP_MAX_FAILURES": 2}
 
     def test_the_password_check_runs_off_the_event_loop(self):
         seen = []
 
-        def authenticate(email, password):
+        def credential(email, password):
             try:
                 asyncio.get_running_loop()
                 seen.append("loop")
             except RuntimeError:
                 seen.append("thread")
-            return "office-a"
+            return "office-a", "hash"
 
         client = TestClient(self.app, base_url=BASE)
         request_id, _ = self.authorize(client, self.register(client), pkce()[1])
-        with mock.patch.object(self.store, "authenticate", authenticate):
+        with mock.patch.object(self.store, "credential", credential):
             self.assertEqual(self.submit(client, request_id).status_code, 302)
         self.assertEqual(seen, ["thread"])
 
@@ -541,6 +592,97 @@ class OldStoreMigrationTest(unittest.TestCase):
             store.remove_user("u@a.test")
             store.remove_tenant("office-a")
             store.purge()
+
+    def test_users_stored_before_the_password_change_must_change_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "store.sqlite"
+            store = Store(path)
+            store.add_tenant("office-a", "A")
+            store._db.close()
+            old = sqlite3.connect(path)
+            old.execute("alter table users drop column must_change")
+            old.execute("insert into users values ('u@a.test', 'office-a', 'scrypt$00$00', 0)")
+            old.commit()
+            old.close()
+            store = Store(path)
+            self.assertTrue(store.must_change("u@a.test"))
+            store.add_user("new@a.test", "office-a", PASSWORD)
+            self.assertFalse(store.must_change("new@a.test"))
+            store._db.close()
+
+
+class PasswordChangeTest(SignInCase):
+    EMAIL = "user@office-a.test"
+    NEW = "outra-senha-bem-longa"
+
+    def start(self, client, **form):
+        client_id = self.register(client)
+        verifier, challenge = pkce()
+        request_id, _ = self.authorize(client, client_id, challenge)
+        data = {"request": request_id, "email": self.EMAIL, "password": PASSWORD, **form}
+        return client_id, verifier, request_id, client.post("/login", data=data, follow_redirects=False)
+
+    def change(self, client, request_id, password, confirm=None):
+        data = {"request": request_id, "email": self.EMAIL, "new_password": password, "confirm": confirm or password}
+        return client.post("/login", data=data, follow_redirects=False)
+
+    def test_an_operator_set_password_is_changed_before_the_code_is_issued(self):
+        self.store.set_password(self.EMAIL, PASSWORD, must_change=True)
+        client = TestClient(self.app, base_url=BASE)
+        client_id, verifier, request_id, response = self.start(client)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("definida pelo administrador", response.text)
+        self.assertNotIn("code=", response.headers.get("location", ""))
+        self.assertIn("não conferem", self.change(client, request_id, self.NEW, self.NEW + "x").text)
+        self.assertIn("pelo menos 12", self.change(client, request_id, "curta").text)
+        self.assertIn("diferente da atual", self.change(client, request_id, PASSWORD).text)
+        done = self.change(client, request_id, self.NEW)
+        self.assertEqual(done.status_code, 302, done.text)
+        code = parse_qs(urlsplit(done.headers["location"]).query)["code"][0]
+        self.assertEqual(self.exchange(client, client_id, code, verifier).status_code, 200)
+        self.assertFalse(self.store.must_change(self.EMAIL))
+        self.assertIsNone(self.store.authenticate(self.EMAIL, PASSWORD))
+        self.assertEqual(self.store.authenticate(self.EMAIL, self.NEW), "office-a")
+        self.assertEqual(self.store.history("office-a")[0]["action"], "senha trocada pelo usuário")
+
+    def test_any_user_may_choose_to_change_the_password(self):
+        client = TestClient(self.app, base_url=BASE)
+        _, _, request_id, response = self.start(client, change="1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Escolha a senha nova", response.text)
+        self.assertEqual(self.change(client, request_id, self.NEW).status_code, 302)
+        self.assertEqual(self.store.authenticate(self.EMAIL, self.NEW), "office-a")
+
+    def test_without_the_box_a_user_signs_in_directly(self):
+        client = TestClient(self.app, base_url=BASE)
+        self.assertEqual(self.start(client)[3].status_code, 302)
+
+    def test_the_new_password_step_needs_the_current_password_first(self):
+        client = TestClient(self.app, base_url=BASE)
+        request_id, _ = self.authorize(client, self.register(client), pkce()[1])
+        self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
+        self.assertEqual(self.store.authenticate(self.EMAIL, PASSWORD), "office-a")
+
+    def test_a_reset_or_removal_after_the_sign_in_voids_the_pending_change(self):
+        for revoke in (
+            lambda: self.store.set_password(self.EMAIL, "senha-do-operador-nova", must_change=True),
+            lambda: self.store.remove_user(self.EMAIL),
+        ):
+            self.store.add_user(self.EMAIL, "office-a", PASSWORD, must_change=True)
+            client = TestClient(self.app, base_url=BASE)
+            _, _, request_id, response = self.start(client)
+            self.assertEqual(response.status_code, 200)
+            revoke()
+            self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
+            self.assertIsNone(self.store.authenticate(self.EMAIL, self.NEW))
+
+    def test_a_wrong_password_never_reaches_the_new_password_step(self):
+        self.store.set_password(self.EMAIL, PASSWORD, must_change=True)
+        client = TestClient(self.app, base_url=BASE)
+        request_id, _ = self.authorize(client, self.register(client), pkce()[1])
+        wrong = self.submit(client, request_id, password="senha-errada-longa")
+        self.assertIn("incorretos", wrong.text)
+        self.assertEqual(self.change(client, request_id, self.NEW).status_code, 400)
 
 
 if __name__ == "__main__":

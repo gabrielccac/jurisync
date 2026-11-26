@@ -25,7 +25,8 @@ are kept, so the plan can be edited and exported again.
 
 ``apply`` creates or updates each tenant, replaces its vault content with its bundle (without a login:
 the first login of each portal is ``jurisync-hosted portal check``, run one at a time), installs the profiles and adds
-the plan's users with generated passwords written to a 0600 file.
+the plan's users with generated passwords written to a new 0600 file per run (never appended to). Each user replaces
+that password at the first sign-in; deliver the file through a separate channel and delete it.
 """
 
 import json
@@ -375,7 +376,10 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace
     plan = json.loads((directory / PLAN).read_text(encoding="utf-8"))
     passphrase = rollout_passphrase(passphrase_file, create=False)
     store, vault = cli.open_store(), cli.open_vault()
-    user_passwords = Path(user_passwords or cli.data_dir() / "new-user-passwords.txt")
+    stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+    user_passwords = Path(user_passwords or cli.data_dir() / f"new-user-passwords-{stamp}.txt").expanduser()
+    if user_passwords.exists():
+        raise SystemExit(f"{user_passwords} já existe: entregue e apague as senhas anteriores ou escolha outro arquivo")
     created_users = []
     for office in plan["offices"]:
         if only and office["tenant"] not in only:
@@ -406,16 +410,16 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace
             if email in existing:
                 continue
             password = secrets.token_urlsafe(15)
-            store.add_user(email, tenant, password)
+            store.add_user(email, tenant, password, must_change=True)
             store.log(tenant, "operador", "usuário criado", email)
             created_users.append(f"{email}\t{tenant}\t{password}")
             say(f"{tenant}: usuário {email} criado")
         for key, reason in office.get("skipped", {}).items():
             say(f"{tenant}: {key} fora do servidor ({reason})")
     if created_users:
-        previous = user_passwords.read_text(encoding="utf-8") if user_passwords.is_file() else ""
-        write_private(user_passwords, previous + "\n".join(created_users) + "\n")
+        write_private(user_passwords, "\n".join(created_users) + "\n")
         say(f"Senhas iniciais dos {len(created_users)} usuário(s) novos em {user_passwords} (0600, não impressas)")
+        say("Cada usuário troca a senha no 1º login. Entregue as senhas por outro canal e apague o arquivo em seguida.")
     say("Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)")
 
 

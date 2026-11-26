@@ -146,14 +146,18 @@ This writes `[mcp_servers.pje]` and `[mcp_servers.advbox]` to `~/.codex/config.t
 public HTTPS, not local programs, so serve the servers over HTTP from one process and expose it through a tunnel.
 
 ```bash
-jurisync-http pje advbox            # http://127.0.0.1:8000/pje/mcp and /advbox/mcp
-cloudflared tunnel --url http://127.0.0.1:8000
+cloudflared tunnel --url http://127.0.0.1:8000         # prints https://<name>.trycloudflare.com
+jurisync-http pje advbox --public-host <name>.trycloudflare.com
 ```
 
-In ChatGPT's developer mode, add a custom connector per server with the tunnel URL plus `/pje/mcp` (and
-`/advbox/mcp`), with no authentication. **This is for local tests only**: anyone with the tunnel URL can call
-the tools with the machine's credentials, so stop the tunnel when you finish. One server alone also runs with
-`jurisync-pje --http --port 8000`. Mutable state (ADVBOX session, downloads) lives in `~/.local/share/jurisync/`
+`jurisync-http` answers only to this machine (`Host`/`Origin` checked against DNS rebinding) and to the host given in
+`--public-host`. With `--public-host` (or `--host` set to a LAN address; 0.0.0.0 needs `--public-host`) every URL
+starts with a secret path, printed
+at start: `https://<name>.trycloudflare.com/<secret>/pje/mcp`. Add one custom connector per server in ChatGPT's
+developer mode with that URL, with no authentication; set `JURISYNC_HTTP_SECRET` (24+ letters, digits, `-` or `_`) to
+keep the same URL across restarts. **This is for local tests only**: whoever has the full URL calls the tools with
+the machine's credentials, so keep it private and stop the tunnel when you finish. One server alone also runs with
+`jurisync-pje --http --port 8000` (same `--public-host`). Mutable state (ADVBOX session, downloads) lives in `~/.local/share/jurisync/`
 for an installed package and beside the code in a checkout.
 
 ## Connectors

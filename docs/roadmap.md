@@ -128,7 +128,7 @@ Do antigo `backlog.md` e dos planos arquivados, ainda abertas e não cobertas ac
 - **Sem conector ainda**: Meu INSS/GERID (navegador + CAPTCHA), Jurichat.
 - **Decisões em aberto**: onde roda a instância atual do Victor (e do Fabrício, hoje fora do ar) e provedor/domínio
   da VM de produção.
-- **Instalação local**: `jurisync-http` local sem autenticação.
+- **Instalação local**: `jurisync-http` exposto só com caminho secreto (sem OAuth).
 
 ## Decisões tomadas
 
