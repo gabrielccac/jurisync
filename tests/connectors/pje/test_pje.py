@@ -531,7 +531,7 @@ if __name__ == "__main__":
 
 def test_a_local_server_offers_and_logs_in_only_where_the_account_has_a_login(monkeypatch):
     from jurisync.connectors.pje import server
-    from jurisync.core.mcp import PORTAL_HELP, offer_portals
+    from jurisync.portals import PORTAL_HELP, offer_portals
 
     for name in [n for n in os.environ if n.startswith(("PJE_", "TJ", "TRF", "TRT", "TST"))]:
         monkeypatch.delenv(name)

@@ -25,10 +25,8 @@ from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.errors import NotSupported
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
-    PORTAL_HELP,
     READ_ONLY,
     JurisyncServer,
-    offer_portals,
     sanitize_diagnostics,
     serve,
     tool_errors,
@@ -36,6 +34,7 @@ from jurisync.core.mcp import (
 from jurisync.core.responses import fitted
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import load_env_file
+from jurisync.portals import PORTAL_HELP, offer_portals
 
 DEFAULT_PORTAL = "tjgo-1g"
 ADAPTERS = {adapter.flavor: adapter for adapter in (tjgo.ADAPTER, tjam.ADAPTER, tjba.ADAPTER, tjpr.ADAPTER)}

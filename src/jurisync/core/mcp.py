@@ -243,38 +243,6 @@ def compact_text(name, result):
     return result.model_copy(update={"content": content})
 
 
-# The ``portal`` field of every tool: the enum holds the keys, and one tool of the server lists them with their hosts.
-PORTAL_HELP = "Portal key; see the enum."
-PORTAL_NOTE = "\nPortals: "
-
-
-def portal_note(keys):
-    """The portals once, with their hosts: the line ``offer_portals`` (local) and ``Office`` (hosted) add to one tool."""
-    from jurisync import portals
-
-    return PORTAL_NOTE + ", ".join(f"{key} ({portals.get(key).host})" for key in keys) + "."
-
-
-def with_portal_note(description, keys):
-    return (description or "").partition(PORTAL_NOTE)[0] + portal_note(keys)
-
-
-def offer_portals(server, keys):
-    """List only ``keys`` as the ``portal`` choices of the server's tools, and the portals once, in its first tool.
-
-    An agent shown every wired portal tries the ones the account has no login for.
-    """
-    keys, noted = list(keys), False
-    for tool in server._tool_manager.list_tools():
-        field = tool.parameters.get("properties", {}).get("portal")
-        if field is None or "const" in field:
-            continue
-        field["enum"] = [key for key in field.get("enum", keys) if key in keys] or keys
-        field["description"] = PORTAL_HELP
-        if not noted:
-            tool.description, noted = with_portal_note(tool.description, keys), True
-
-
 LOOPBACK = ("127.0.0.1", "localhost", "[::1]")
 HTTP_SECRET_VAR = "JURISYNC_HTTP_SECRET"
 
