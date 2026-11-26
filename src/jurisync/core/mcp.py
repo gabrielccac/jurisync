@@ -13,9 +13,9 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import ToolAnnotations
+from mcp.types import TextContent, ToolAnnotations
 
-from jurisync.core import calls, errors
+from jurisync.core import calls, errors, responses
 
 # Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
 # They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
@@ -237,10 +237,22 @@ class JurisyncServer(MCPServer):
     async def call_tool(self, name, arguments, context=None):
         with calls.bound():
             try:
-                return await super().call_tool(name, arguments, context)
+                result = await super().call_tool(name, arguments, context)
             except UnexpectedToolError as error:
                 log.error("tool %s failed unexpectedly (ref=%s)", name, calls.current(), exc_info=error.__cause__)
                 raise UnexpectedToolError(errors.render(name, errors.UNEXPECTED, sanitize_diagnostics)) from error
+            return compact_text(name, result)
+
+
+def compact_text(name, result):
+    """Replace the SDK's indented text copy of a structured answer with compact JSON; log an answer over the budget."""
+    structured = getattr(result, "structured_content", None)
+    if structured is None:
+        return result
+    text = responses.compact(structured)
+    if len(text) > responses.BUDGET:
+        log.warning("tool %s answered %d characters, over the %d budget", name, len(text), responses.BUDGET)
+    return result.model_copy(update={"content": [TextContent(type="text", text=text)]})
 
 
 # The ``portal`` field of every tool: the enum holds the keys, and one tool of the server lists them with their hosts.

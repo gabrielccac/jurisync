@@ -42,6 +42,7 @@ from jurisync.core.mcp import (
     tool_error,
     tool_errors,
 )
+from jurisync.core.responses import TEXT_BUDGET, fit_texts
 from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read
@@ -247,6 +248,9 @@ def create_server():
             ),
         ],
         textLimit: Annotated[int, Field(ge=200, le=100000, description="Max characters per text.")] = 20000,
+        offset: Annotated[
+            int, Field(ge=0, description="Start each text here: a cut text's truncated.nextOffset reads the rest.")
+        ] = 0,
         save: Annotated[
             bool,
             Field(description="true returns savedAs file names."),
@@ -272,11 +276,12 @@ def create_server():
                     acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
                 ),
             )
-        for document in result.get("documents", []):
-            for read in (document, *document.get("anexos", [])):
-                text = read.get("text", "")
-                read["textTruncated"] = len(text) > textLimit
-                read["text"] = text[:textLimit]
+        reads = [read for document in result.get("documents", []) for read in (document, *document.get("anexos", []))]
+        if fit_texts(reads, offset=offset, limit=textLimit):
+            result["note"] = (
+                f"Texts were cut to fit {TEXT_BUDGET} characters per answer: read the rest with the same documentIds "
+                "(or only the cut one) and offset=truncated.nextOffset."
+            )
         return require_success("PJe", result)
 
     @server.tool(

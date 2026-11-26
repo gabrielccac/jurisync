@@ -49,7 +49,7 @@ class TemplateTest(unittest.TestCase):
         with mock.patch.object(client, "intimacoes", return_value=INTIMACOES):
             result = call("exemplo_list_intimacoes")
         structured = result[1] if isinstance(result, tuple) else result.structured_content
-        self.assertEqual(structured["count"], 1)
+        self.assertEqual((structured["returned"], structured["next"]), (1, None))
         self.assertEqual(structured["intimacoes"][0]["processNumber"], "0000001-00.2026.8.00.0001")
         self.assertIn("untrusted", structured["notice"])
 
