@@ -14,6 +14,11 @@ from jurisync.connectors.djen import cli, render
 from jurisync.connectors.djen import server as djen_server
 
 
+def tool(name):
+    """The function behind a DJEN tool, called directly."""
+    return djen_server.create_server()._tool_manager.get_tool(name).fn
+
+
 def raw(n, tipo="Intimação", texto="", processo="0011664-61.2026.4.05.8303"):
     return {
         "id": n,
@@ -297,7 +302,7 @@ class McpFormats(unittest.TestCase):
     def search(self, **extra):
         page = {"count": 7, "items": PAGE}
         with mock.patch.object(djen_server, "search_page", return_value=page):
-            return djen_server.search_communications(
+            return tool("djen_search_communications")(
                 inicio=date(2026, 10, 28), fim=date(2026, 10, 28), numeroOab="14663", ufOab="PB", **extra
             )
 

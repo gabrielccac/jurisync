@@ -46,8 +46,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from jurisync import registry
-from jurisync.core import credentials
-from jurisync.core.mcp import PORTAL_HELP, with_portal_note
+from jurisync.core import calls, credentials, errors
+from jurisync.core.mcp import PORTAL_HELP, sanitize_diagnostics, with_portal_note
 from jurisync.core.session_pool import REASONS
 from jurisync.hosted import access
 from jurisync.hosted.monitor import Monitor
@@ -83,7 +83,12 @@ caller = contextvars.ContextVar("jurisync_caller", default=None)
 
 
 class NotEnabled(ToolError):
-    pass
+    """A call this office cannot make here, in the errors format; by default only support can enable it."""
+
+    def __init__(self, message, *, code="not_enabled", actor=errors.OPERATOR, next_step=None):
+        next_step = next_step or "não repita; peça ao usuário para acionar o suporte do Jurisync, que habilita isto."
+        problem = errors.Problem(code, message, next_step, False, actor)
+        super().__init__(errors.render("Jurisync", problem, sanitize_diagnostics))
 
 
 def granted(connector, tool):
@@ -96,8 +101,6 @@ def hosted_load(name):
     """``Connector.load`` with every portal wired (``Office`` narrows them per office), and with the writes a connector
     registers only when allowed: each office's grant decides who sees and calls them."""
     connector = registry.get(name)
-    if connector.attribute != "create_server()":
-        return connector.load()
     parameters = inspect.signature(importlib.import_module(connector.module).create_server).parameters
     options = {}
     if connector.portals() and "keys" in parameters:
@@ -188,6 +191,10 @@ class Office(MCPServer):
         return tools
 
     async def call_tool(self, name, arguments, context=None):
+        with calls.bound():
+            return await self._call_tool(name, arguments, context)
+
+    async def _call_tool(self, name, arguments, context):
         connector = self.owner.get(name)
         if connector is None:
             raise ToolError(f"Unknown tool: {name}")
@@ -245,11 +252,17 @@ class Office(MCPServer):
         portal = arguments.get("portal") or field.get("const")
         if portal is None and field.get("default") not in (None, *offered):
             raise NotEnabled(
-                f"{name}: give the portal, one of the portals configured for this office: {', '.join(offered)}"
+                f"{name}: give the portal, one of the portals configured for this office: {', '.join(offered)}",
+                code="invalid_input",
+                actor=errors.AGENT,
+                next_step="chame de novo com portal igual a um dos configurados.",
             )
         if portal is not None and portal not in offered:
             raise NotEnabled(
-                f"{name}: no login is configured for {portal} on this office; configured: {', '.join(offered)}"
+                f"{name}: no login is configured for {portal} on this office; configured: {', '.join(offered)}",
+                code="invalid_input",
+                actor=errors.AGENT,
+                next_step="chame de novo com um dos portais configurados; se o usuário precisa deste, peça ao suporte.",
             )
 
 

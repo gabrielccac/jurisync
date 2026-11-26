@@ -59,7 +59,7 @@ class WriteGateTest(unittest.TestCase):
 
     def call_all(self, scope=None):
         async def run():
-            async with Client(server.server) as client:
+            async with Client(server.create_server()) as client:
                 return {name: await client.call_tool(name, arguments) for name, arguments in WRITE_CALLS.items()}
 
         with scope or credentials.scope("office-a", {}):
@@ -67,7 +67,7 @@ class WriteGateTest(unittest.TestCase):
 
     def test_the_gated_tools_are_every_advbox_write(self):
         async def tools():
-            async with Client(server.server) as client:
+            async with Client(server.create_server()) as client:
                 return (await client.list_tools()).tools
 
         writes = {tool.name for tool in asyncio.run(tools()) if not tool.annotations.read_only_hint} - NOT_GATED

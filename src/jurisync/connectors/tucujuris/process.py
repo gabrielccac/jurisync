@@ -20,6 +20,7 @@ from jurisync.core import ciencia
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.documents_dir import save_document
+from jurisync.core.errors import NotFound
 
 MAX_TEXT_CHARACTERS = 60_000
 DOCUMENT_ID = re.compile(r"[0-9]{1,20}(?:-[0-9]{1,3})?")
@@ -50,7 +51,7 @@ class CienciaPending(ValueError):
         self.ciencia = ciencia
 
 
-class ProcessNotFound(LookupError):
+class ProcessNotFound(NotFound):
     pass
 
 

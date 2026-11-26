@@ -32,6 +32,7 @@ from jurisync.connectors.advbox.parsers import (
     parse_verification_recipient,
 )
 from jurisync.core import credentials
+from jurisync.core.errors import WritesDisabled
 from jurisync.core.session_pool import LoginRejected, MissingLogin
 from jurisync.paths import STATE_DIR
 
@@ -117,15 +118,13 @@ def _drop_verification():
 
 def require_writes():
     if credentials.env("ADVBOX_ALLOW_WRITES") != "true":
-        raise PermissionError(
-            "ADVBOX writes are disabled. Set ADVBOX_ALLOW_WRITES=true after confirming the operation."
-        )
+        raise WritesDisabled("ADVBOX writes are disabled for this office.", setting="ADVBOX_ALLOW_WRITES=true")
 
 
 def _required(name):
     value = (credentials.env(name) or "").strip()
     if not value:
-        raise MissingLogin(f"Set {name} in .env")
+        raise MissingLogin(f"{name} is not configured")
     return value
 
 

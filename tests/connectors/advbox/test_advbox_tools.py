@@ -16,6 +16,12 @@ from jurisync.connectors.advbox.parsers import (
 from jurisync.connectors.advbox.session import AdvboxSession
 from jurisync.core.documents_dir import save_document
 
+
+def tool(name):
+    """The function behind an ADVBOX tool, called directly."""
+    return server.create_server()._tool_manager.get_tool(name).fn
+
+
 REPORT = {
     "processNumber": "0007535-13.2026.4.05.8303",
     "sections": {
@@ -175,7 +181,7 @@ class CreateTaskToolTest(unittest.TestCase):
             mock.patch.object(server.client, "preview_task", return_value={"dryRun": True}) as preview,
             mock.patch.object(server.client, "create_task") as create,
         ):
-            result = server.create_task(**self.ARGS, attachmentFiles=["a_1.pdf"], dryRun=True)
+            result = tool("advbox_create_task")(**self.ARGS, attachmentFiles=["a_1.pdf"], dryRun=True)
         self.assertEqual(result, {"dryRun": True})
         create.assert_not_called()
         self.assertEqual(preview.call_args.args[1][0]["filename"], "a_1.pdf")
@@ -187,11 +193,11 @@ class CreateTaskToolTest(unittest.TestCase):
             mock.patch.object(server.client, "list_publications", return_value={}) as publications,
             mock.patch.object(server.client, "list_lawsuits", return_value={}) as lawsuits,
         ):
-            server.search_tasks(dateFrom="2026-11-01", dateTo="2026-11-30")
-            server.list_publications(dateFrom="2026-10-01", dateTo="2026-10-09")
-            server.list_lawsuits(dateFrom="2026-10-01")
+            tool("advbox_search_tasks")(dateFrom="2026-11-01", dateTo="2026-11-30")
+            tool("advbox_list_publications")(dateFrom="2026-10-01", dateTo="2026-10-09")
+            tool("advbox_list_lawsuits")(dateFrom="2026-10-01")
             with self.assertRaises(Exception):
-                server.search_tasks(dateFrom="2026-02-30", dateTo="2026-03-01")
+                tool("advbox_search_tasks")(dateFrom="2026-02-30", dateTo="2026-03-01")
         self.assertEqual(
             (search.call_args.kwargs["dateFrom"], search.call_args.kwargs["dateTo"]), ("01/11/2026", "30/11/2026")
         )
@@ -203,12 +209,12 @@ class CreateTaskToolTest(unittest.TestCase):
     def test_real_creation_still_needs_the_write_gate(self):
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "false"}):
             with self.assertRaises(Exception) as caught:
-                server.create_task(**self.ARGS)
+                tool("advbox_create_task")(**self.ARGS)
         self.assertIn("ADVBOX_ALLOW_WRITES", str(caught.exception))
 
     def test_more_than_five_attachments_are_refused(self):
         with self.assertRaises(Exception) as caught:
-            server.create_task(
+            tool("advbox_create_task")(
                 **self.ARGS,
                 attachmentFiles=[f"f{n}_1.pdf" for n in range(5)],
                 attachments=[server.Attachment(filename="x.pdf", contentBase64="eA==")],

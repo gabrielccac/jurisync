@@ -5,18 +5,15 @@ from datetime import date
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from curl_cffi.requests.exceptions import RequestException
-from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from jurisync.connectors.juridiq.api import JuridiqApi, JuridiqError
+from jurisync.connectors.juridiq.api import JuridiqApi
 from jurisync.core import credentials
-from jurisync.core.mcp import READ_ONLY, load_env_file, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, serve, tool_errors
 
 ADDITIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
-ERRORS = (JuridiqError, ValueError, PermissionError, OSError, RequestException)
 
 Text = Annotated[str, Field(min_length=1)]
 OneOrMany = Text | Annotated[list[Text], Field(min_length=1)]
@@ -291,10 +288,10 @@ def _payload(model):
 def create_server(allow_writes=None, api=None):
     allow_writes = credentials.env("JURIDIQ_ALLOW_WRITES") == "true" if allow_writes is None else allow_writes
     api = api or JuridiqApi()
-    server = MCPServer("juridiq", version="1.0.0")
+    server = JurisyncServer("juridiq")
 
     def call(handler):
-        with tool_errors("Juridiq", *ERRORS):
+        with tool_errors("Juridiq"):
             value = handler()
         # Lists and raw text are wrapped as the Node SDK did: structured content must be an object.
         return value if isinstance(value, dict) else {"result": value}

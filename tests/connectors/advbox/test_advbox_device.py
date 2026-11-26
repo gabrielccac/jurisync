@@ -269,7 +269,7 @@ class ElicitationTest(DeviceCase):
 
         async def run():
             options = {"elicitation_callback": elicit} if answers else {}
-            async with Client(server.server, mode=mode, **options) as client:
+            async with Client(server.create_server(), mode=mode, **options) as client:
                 return await client.call_tool(name, arguments or {})
 
         return asyncio.run(run())

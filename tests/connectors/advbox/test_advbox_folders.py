@@ -21,6 +21,12 @@ from jurisync.connectors.advbox.client import AdvboxClient, UnconfirmedWriteErro
 from jurisync.connectors.advbox.documents import AdvboxDocuments, folder_name, folder_path
 from jurisync.connectors.advbox.parsers import parse_uploaded_file
 
+
+def tool(name):
+    """The function behind an ADVBOX tool, called directly."""
+    return server.create_server()._tool_manager.get_tool(name).fn
+
+
 CUSTOMER = "10000001"
 
 
@@ -292,24 +298,26 @@ class FolderTools(unittest.TestCase):
         (self.root / "minuta.docx").write_bytes(b"PK")
 
     def test_files_come_from_the_shared_documents_folder(self):
-        result = server.upload_files(CUSTOMER, "00-PROTOCOLAR", ["procuracao.pdf", "minuta.docx"])
+        result = tool("advbox_upload_files")(CUSTOMER, "00-PROTOCOLAR", ["procuracao.pdf", "minuta.docx"])
         self.assertEqual([item["filename"] for item in result["files"]], ["procuracao.pdf", "minuta.docx"])
 
     def test_paths_outside_the_shared_folder_are_refused(self):
         outside = self.root.parent / "fora.pdf"
         for name in ("../fora.pdf", str(outside), "sub/procuracao.pdf", ".env", "nada.pdf", "script.sh"):
             with self.subTest(name=name), self.assertRaises(Exception):
-                server.upload_files(CUSTOMER, "00-PROTOCOLAR", [name])
+                tool("advbox_upload_files")(CUSTOMER, "00-PROTOCOLAR", [name])
         self.assertEqual(self.advbox.kinds("upload"), [])
 
     def test_create_folder_tool_and_write_gate(self):
-        self.assertTrue(server.create_folder(CUSTOMER, "Nova")["created"])
+        self.assertTrue(tool("advbox_create_folder")(CUSTOMER, "Nova")["created"])
         with mock.patch.dict(os.environ, {"ADVBOX_ALLOW_WRITES": "false"}):
-            self.assertTrue(server.create_folder(CUSTOMER, "Outra", dryRun=True)["dryRun"])
-            self.assertTrue(server.upload_files(CUSTOMER, "00-PROTOCOLAR", ["procuracao.pdf"], dryRun=True)["dryRun"])
+            self.assertTrue(tool("advbox_create_folder")(CUSTOMER, "Outra", dryRun=True)["dryRun"])
+            self.assertTrue(
+                tool("advbox_upload_files")(CUSTOMER, "00-PROTOCOLAR", ["procuracao.pdf"], dryRun=True)["dryRun"]
+            )
             for write in (
-                lambda: server.create_folder(CUSTOMER, "Outra"),
-                lambda: server.upload_files(CUSTOMER, "00-PROTOCOLAR", ["procuracao.pdf"]),
+                lambda: tool("advbox_create_folder")(CUSTOMER, "Outra"),
+                lambda: tool("advbox_upload_files")(CUSTOMER, "00-PROTOCOLAR", ["procuracao.pdf"]),
             ):
                 with self.assertRaises(Exception) as caught:
                     write()
@@ -321,7 +329,7 @@ class FolderTools(unittest.TestCase):
         from mcp.client.client import Client
 
         async def tools():
-            async with Client(server.server) as client:
+            async with Client(server.create_server()) as client:
                 return {tool.name: tool for tool in (await client.list_tools()).tools}
 
         listed = asyncio.run(tools())
