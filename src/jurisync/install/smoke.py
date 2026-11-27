@@ -15,6 +15,8 @@ the file a running server uses is neither read nor overwritten.
 Each portal gets one attempt and the run stops at the first refused login or CAPTCHA: the same password or
 authenticator usually serves other portals, and a few refusals lock the account. Consecutive logins wait for a new
 authenticator window, because portals refuse a code already used. Results carry codes and times, never values.
+An A3 login refused by the token (a wrong PIN, a cancelled authorisation in the cloud A3's app) stops the run too:
+a few wrong PINs lock the token.
 """
 
 import argparse
@@ -32,6 +34,7 @@ from pathlib import Path
 
 from jurisync import customers, portals, registry
 from jurisync.core import credentials
+from jurisync.core.a3 import PinError
 from jurisync.core.session_pool import EXPLANATIONS, REFUSALS, login_reason
 
 TOTP_PERIOD = 30
@@ -178,6 +181,8 @@ def run(found, *, say=print, attempt=login, wait=wait_for_new_code):
             wait(say)
         logged = True
         say(f"{target.key}: login ({target.method})...")
+        if target.method.startswith("a3"):
+            say("  A3: se o app do certificado pedir (desktopID: push no celular ou código), aprove agora")
         began = time.monotonic()
         try:
             attempt(target)
@@ -188,7 +193,7 @@ def run(found, *, say=print, attempt=login, wait=wait_for_new_code):
                 Result(target.key, target.method, "falha", reason, round(time.monotonic() - began, 1), detail)
             )
             say(f"  falha [{reason}] {EXPLANATIONS[reason]}")
-            if reason in STOP_REASONS or needs_person(error):
+            if reason in STOP_REASONS or needs_person(error) or isinstance(error, PinError):
                 stopped = f"{target.key} [{reason}]"
                 say("  parando: outra tentativa pode bloquear a conta ou exige uma pessoa")
             continue
