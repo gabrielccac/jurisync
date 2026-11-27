@@ -297,8 +297,8 @@ def create_server(keys=None):
         name="eproc_list_custas",
         title="List Eproc generated payment guias",
         description=(
-            "List the guias the user already generated in the portal: custas, or depósitos judiciais (TRF4 and TRF6 "
-            "menus). A portal whose menu has no such list answers not_available. Nothing is generated or paid. "
+            "List the guias the user already generated in the portal: custas, or depósitos judiciais. A portal whose "
+            "menu has no such list answers not_available. Nothing is generated or paid. "
             "kind picks the list; one page. "
             "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). "
             + ENVELOPE
