@@ -124,11 +124,15 @@ def test_victor_setup_is_valid(monkeypatch):
 
 def test_validate_reports_what_breaks_a_folder(root):
     (root / "acme" / ".env.example").write_text("ACME_USER=\nACME_2FA_QR=\n", encoding="utf-8")
-    (root / "acme" / "settings.toml").write_text('[hosted]\nmode = "cloud"\n', encoding="utf-8")
+    (root / "acme" / "settings.toml").write_text(
+        '[hosted]\nmode = "cloud"\n[eproc]\nciencia_on_read = "yes"\n', encoding="utf-8"
+    )
     problems = customers.validate("acme")
     assert "acme: .env.example lacks ACME_PASS" in problems
     assert not any("ACME_2FA" in problem for problem in problems)  # one name of an A|B group is enough
     assert any("mode must be one of" in problem for problem in problems)
+    assert any("[eproc] ciencia_on_read must be one of" in problem for problem in problems)
+    assert not any("[pje]" in problem for problem in problems)
     (root / "empty").mkdir()
     assert customers.validate("empty") == [f"customer 'empty' has no portals.toml at {root / 'empty' / 'portals.toml'}"]
     assert customers.names() == ["acme", "empty"]
@@ -152,6 +156,17 @@ def test_ciencia_on_read_defaults_to_ask_and_follows_settings_toml(root):
     (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "sometimes"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="ciencia_on_read"):
         customers.ciencia_on_read()
+
+
+def test_eproc_ciencia_on_read_has_its_own_table(root):
+    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "allow"\n', encoding="utf-8")
+    assert customers.ciencia_on_read(system="eproc") == "ask"
+    (root / "acme" / "settings.toml").write_text('[eproc]\nciencia_on_read = "allow"\n', encoding="utf-8")
+    assert customers.ciencia_on_read(system="eproc") == "allow"
+    assert customers.ciencia_on_read() == "ask"
+    (root / "acme" / "settings.toml").write_text('[eproc]\nciencia_on_read = "yes"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\[eproc\] ciencia_on_read"):
+        customers.ciencia_on_read(system="eproc")
 
 
 def test_ciencia_on_read_without_a_customer_is_ask(monkeypatch):

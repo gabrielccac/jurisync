@@ -1,14 +1,18 @@
 """Ciência block of eproc process reads (``core.ciencia.report``).
 
 Opening the document of a citação/intimação whose deadline was not opened yet may make the lawyer count as notified,
-which starts the deadline. Eproc documents are always read (owner's decision, 2026-11-09); before anything is opened
-the client reads the lawyer's pending queues (the panel's "citações/intimações pendentes" lists) and looks for the
-process there, so the result can tell the user what the read did or would do:
+which starts the deadline. Before anything is opened the client reads the lawyer's pending queues (the panel's
+"citações/intimações pendentes" lists) and looks for the process there. As in the PJe, a read that would open documents
+of a process in a pending queue, or of one whose queues could not be read to their end, is refused with nothing opened
+(``check``) unless the user agreed (``acknowledgeCiencia``, or ``[eproc] ciencia_on_read = "allow"``). This replaced the
+2026-11-09 rule "Eproc documents are always read" (JURI-21, 2026-11-27). The result tells the user what the read did
+or would do:
 
 - not in any pending queue, every queue read to its end: ``nenhuma``;
-- in a pending queue: ``dada`` when documents were opened, ``pendente`` when none were (``intimacoes``, ``aviso``);
-- the queues could not be read to their end: ``desconhecida`` when documents were opened (``motivo``), else
-  ``nenhuma`` with an ``aviso``.
+- in a pending queue: ``dada`` when documents were opened (acknowledged), ``pendente`` when none were (``intimacoes``,
+  ``aviso``);
+- the queues could not be read to their end: ``desconhecida`` when documents were opened (acknowledged, ``motivo``),
+  else ``nenhuma`` with an ``aviso``.
 
 The timeline describes each intimação with its deadline (TJMG and JFRS, 27/11/2026): "Expedida/certificada a intimação
 eletrônica Refer. ao Evento 40 ( AUTOR - name) Prazo: 10 dias Status:ABERTO Data inicial da contagem do prazo:
@@ -24,7 +28,7 @@ block names the requested documents that belong to the pending event.
 
 import re
 
-from jurisync.core.ciencia import GIVEN, NONE, PENDING, UNKNOWN, report
+from jurisync.core.ciencia import AUTHORIZATION, GIVEN, NONE, PENDING, UNKNOWN, report
 
 # The queues of ``client.QUEUE_KINDS`` that list citações/intimações still waiting for ciência.
 PENDING_QUEUES = ("pending", "pending_urgent", "pending_agreement", "art334")
@@ -121,6 +125,14 @@ def deadlines(events):
     return sorted(result, key=lambda item: int(item["eventId"]) if item["eventId"].isdigit() else 0)
 
 
+class CienciaPending(ValueError):
+    """Opening documents of this process may register the ciência of a pending intimação; nothing was opened."""
+
+
+class CienciaUnchecked(CienciaPending):
+    """The pending queues could not be read to their end, so whether a ciência is pending is unknown."""
+
+
 def awaiting_events(events):
     """Timeline events that announce an intimação still waiting to be opened, with the events they refer to: a
     deadline whose status is neither ABERTO nor FECHADO, or any event that says "aguardando abertura"."""
@@ -187,11 +199,35 @@ def _deadline_days(notices, markers):
     return days.pop() if len(days) == 1 else None
 
 
+def check(*, notices, problem, acknowledge):
+    """Refuse a read that would open documents while an intimação awaits ciência or the queues are unread.
+
+    Runs before anything is opened; ``acknowledge`` is the user's agreement (now, in advance, or the customer's
+    setting). The error says what was found and how to go on.
+    """
+    if acknowledge:
+        return
+    if notices:
+        shown = "; ".join(_describe(row) for row in notices[:5])
+        raise CienciaPending(
+            f"ciência pending: this process has a citação/intimação awaiting ciência ({shown}). Nothing was opened. "
+            "Opening its documents may register the ciência and start the deadline. Without documentIds the process "
+            f"is read with nothing opened. {AUTHORIZATION}."
+        )
+    if problem:
+        raise CienciaUnchecked(
+            f"ciência not checked: the lawyer's pending queues could not be read to their end ({problem}), so it is "
+            "unknown whether this process has an intimação awaiting ciência. Nothing was opened. Try "
+            "again later (eproc_list_intimacoes queue='pending' shows the queue when it can be read). Opening its "
+            f"documents anyway may register the ciência and start the deadline. {AUTHORIZATION}."
+        )
+
+
 def notice(process_number, document_ids, *, notices, problem, events, events_complete):
     """The ``ciencia`` block of a read that opened ``document_ids`` (``None``: no document was opened).
 
     ``notices`` are this process' rows in the pending queues, ``problem`` says why the queues could not be read to
-    their end (``None`` when they were). Never refuses: the documents are read either way.
+    their end (``None`` when they were). Opened documents in those cases were acknowledged (``check``).
     """
     opened = document_ids is not None
     if not notices and problem:

@@ -32,9 +32,10 @@ Juridiq. Fora do registro: `jurisync-filing` (preparação de protocolo, local) 
 `nenhuma`, `dada`, `pendente` ou `desconhecida`, com `aviso` em português para repassar ao usuário. Ler pode dar
 ciência; o usuário sempre fica sabendo o que a leitura fez. Por sistema, hoje:
 
-- Eproc: abre os documentos pedidos e informa (`dada`/`pendente`/`desconhecida`).
-- PJe, Projudi (todos), e-SAJ, JPe e Tucujuris: um ato pendente volta como `pendente` (nada aberto) até o usuário
-  concordar (`acknowledgeCiencia=true`; no PJe também `[pje] ciencia_on_read = "allow"` no `settings.toml`). Nenhum
+- PJe, Eproc, Projudi (todos), e-SAJ, JPe e Tucujuris: um ato pendente volta como `pendente` (nada aberto) até o
+  usuário concordar (`acknowledgeCiencia=true`; no PJe e no Eproc também `[pje]`/`[eproc]` `ciencia_on_read =
+  "allow"` no `settings.toml`). O Eproc abria sempre os documentos pedidos até 27/11/2026 (decisão de 09/11, revista
+  no JURI-21; ver `docs/connectors/eproc-coverage.md`). Nenhum
   sistema bloqueia sem saída (decisão de 25/11/2026): quem decide é o usuário, pelo agente.
 - e-SAJ: se o próprio portal pedir a confirmação de recebimento (`receipt_required`), ela ainda é feita no portal.
 - STJ: nada ali registra ciência.

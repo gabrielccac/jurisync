@@ -22,7 +22,7 @@ from jurisync.connectors.pje.expedientes import (
 from jurisync.connectors.pje.parsers import parse_process_number
 from jurisync.core import ciencia
 from jurisync.core.http import enable_request_logging
-from jurisync.core.redaction import drop_keys
+from jurisync.core.redaction import drop_keys, mask_cpf
 from jurisync.core.session_pool import MissingLogin, SessionExpired
 from jurisync.core.totp import configured_account
 
@@ -150,7 +150,9 @@ def fetch_process(
                 "all": "bounded_timeline_pages",
             }[scope],
             "metadata": result.get("process_details") or result.get("metadata") or {},
-            "parties": result.get("parties") or [],
+            "parties": {group: [mask_cpf(entry) for entry in entries] for group, entries in result["parties"].items()}
+            if result.get("parties")
+            else [],
             "timeline": selected,
             "documentInventory": inventory,
             "expedientes": _expedientes(result.get("expedientes"), complete=_expedientes_complete(result)),
