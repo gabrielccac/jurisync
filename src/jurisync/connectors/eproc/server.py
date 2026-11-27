@@ -38,7 +38,7 @@ from jurisync.core.mcp import (
     serve,
     tool_errors,
 )
-from jurisync.core.responses import ENVELOPE, listing
+from jurisync.core.responses import DATES, ENVELOPE, dated, listing
 from jurisync.core.session_pool import SessionExpired, SessionPool
 from jurisync.customers import ciencia_on_read, load_env_file
 from jurisync.portals import PORTAL_HELP, offer_portals
@@ -101,8 +101,13 @@ def create_server(keys=None):
                 ),
             )
 
-    def enveloped(result, max_pages=None):
-        """The common list envelope; ``next`` only when the portal's pager has pages a larger maxPages reaches."""
+    QUEUE_DATES = ("requestedAt", "deadlineStart", "deadlineEnd", "sessionStart", "sessionEnd")
+
+    def enveloped(result, dates, max_pages=None):
+        """The common list envelope, the items' ``dates`` in ISO; ``next`` only when the portal's pager has pages a
+        larger maxPages reaches."""
+        for item in result.get("items") or []:
+            dated(item, *dates)
         pagination = result.get("pagination") or {}
         pages = pagination.get("totalPages") or 0
         more = None
@@ -119,8 +124,13 @@ def create_server(keys=None):
             "(queues[] says what each queue gave). With queue: that queue only. "
             + intimacao.DESCRIPTION
             + " Rows also "
-            "carry queue, processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
-            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
+            "carry queue, cienciaPendente (true in the pending queues; situacao says whether it awaits the ciência or "
+            "the DJEN publication; it is about this row, while the ciência lock of eproc_get_process covers the "
+            "whole process: a false row does not mean the process' documents may be opened), "
+            "processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "deadlineEnd. Counts of every queue: eproc_get_counters. "
+            + DATES
+            + " "
             + ENVELOPE
             + " Read-only: opens no intimação."
         ),
@@ -141,7 +151,8 @@ def create_server(keys=None):
             ),
         ] = None,
     ) -> dict[str, Any]:
-        return enveloped(call(portal, lambda **context: list_notices(queue, **context)))
+        result = call(portal, lambda **context: list_notices(queue, **context))
+        return enveloped(result, QUEUE_DATES)
 
     @server.tool(
         name="eproc_get_counters",
@@ -172,9 +183,11 @@ def create_server(keys=None):
             "Cost: one page of each list by default; maxPages reads more of long lists; kind reads only one of the "
             "two. "
             "Each item: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
-            "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO; items "
-            "without one come last) and observation. lists[] says what each list gave (problem when it could not be "
-            "read). " + ENVELOPE
+            "parties, event (what was scheduled), location, start and end, date (the day of start; items without one "
+            "come last) and observation. lists[] says what each list gave (problem when it could not be read). "
+            + DATES
+            + " "
+            + ENVELOPE
         ),
         annotations=READ_ONLY,
     )
@@ -206,12 +219,15 @@ def create_server(keys=None):
             Field(ge=0, description="Items to skip, from next when an answer was cut to fit the size budget."),
         ] = 0,
     ) -> dict[str, Any]:
-        return call(
+        result = call(
             portal,
             lambda **context: list_hearings(
                 situation, kind, processNumber, max_pages=maxPages, offset=offset, **context
             ),
         )
+        for hearing in result.get("audiencias") or []:
+            dated(hearing, "start", "end")
+        return result
 
     @server.tool(
         name="eproc_list_processes",
@@ -224,6 +240,8 @@ def create_server(keys=None):
             "procedural role is in eproc_get_process), class, subject, last event, dates, claim value. "
             "pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread. "
+            + DATES
+            + " "
             + ENVELOPE
             + " Details and documents: eproc_get_process. Read-only."
         ),
@@ -260,7 +278,7 @@ def create_server(keys=None):
                 **context,
             ),
         )
-        return enveloped(result, maxPages)
+        return enveloped(result, ("lastEventAt", "filedAt"), maxPages)
 
     @server.tool(
         name="eproc_get_process",
@@ -282,7 +300,9 @@ def create_server(keys=None):
             "aberto/fechado/aguardando_abertura, closedBy, start and end ISO dates, djenAvailable/djenPublished). "
             "metadata.additionalInformation: the Informações Adicionais (justiça gratuita, sigilo, prevenção, valor "
             "da causa...); audiencias and pericias: the process' lists (null where the portal has no such button). "
-            "save=true stores each read document (HTML as PDF) in the shared documents folder."
+            "save=true stores each read document (HTML as PDF) in the shared documents folder. timeline[].dateTime, "
+            "metadata.cover.filedAt, audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and "
+            "eventos: " + DATES
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -314,7 +334,7 @@ def create_server(keys=None):
             Field(description=ciencia.ACKNOWLEDGE),
         ] = None,
     ) -> dict[str, Any]:
-        return call(
+        result = call(
             portal,
             lambda **context: fetch_process(
                 processNumber,
@@ -325,6 +345,19 @@ def create_server(keys=None):
                 **context,
             ),
         )
+        dated((result.get("metadata") or {}).get("cover") or {}, "filedAt")
+        for event in result.get("timeline") or []:
+            dated(event, "dateTime")
+        for hearing in result.get("audiencias") or []:
+            dated(hearing, "start", "end")
+        for prazo in result.get("prazos") or []:
+            dated(prazo, "dateTime")
+        block = result.get("ciencia") or {}
+        for row in block.get("intimacoes") or []:
+            dated(row, *QUEUE_DATES)
+        for marker in block.get("eventos") or []:
+            dated(marker, "dateTime")
+        return result
 
     return server
 

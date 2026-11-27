@@ -8,6 +8,37 @@ from bs4 import BeautifulSoup
 
 from jurisync.core.jsf import jsf_data, response_html  # noqa: F401 - the PJe modules import them from here
 
+SIDES = re.compile(r"\s+[Xx]\s+")
+AND_OTHERS = re.compile(r"\s+e outros(?:\s*\(\d+\))?$", re.IGNORECASE)
+PARTY = re.compile(r"^(?P<name>.*?)(?:\s+-\s+(?:CPF|CNPJ):\s*(?P<taxId>[^()]*?))?(?:\s+\((?P<role>[^()]*)\))?$")
+POLES = {"active": "active", "passive": "passive", "other_interested": "other"}
+
+
+def parties_of_sides(text):
+    """``[{pole, role, name}]`` of a list's "AUTHOR X DEFENDANT" text, ``andOthers`` when a side has more parties.
+
+    The lists show no role, only the two sides, so ``role`` is None (the process has it: pje_get_process).
+    """
+    parties = []
+    for pole, side in zip(("active", "passive"), SIDES.split(text or "", maxsplit=1), strict=False):
+        others = AND_OTHERS.search(side)
+        name = (side[: others.start()] if others else side).strip()
+        if name:
+            parties.append({"pole": pole, "role": None, "name": name, **({"andOthers": True} if others else {})})
+    return parties
+
+
+def party_entries(groups):
+    """``[{pole, role, name, taxId?}]`` of the process' ``{active, passive, other_interested}`` texts such as
+    "NAME - CPF: 123.***.***-09 (EXEQUENTE)"; the CPF comes already masked."""
+    parties = []
+    for group, entries in (groups or {}).items():
+        for entry in entries:
+            found = PARTY.match(entry)
+            party = {"pole": POLES.get(group, "other"), "role": found["role"], "name": found["name"].strip()}
+            parties.append({**party, "taxId": found["taxId"].strip()} if found["taxId"] else party)
+    return parties
+
 
 def parse_process_number(value):
     match = re.fullmatch(r"(\d{7})-(\d{2})\.(\d{4})\.(\d)\.(\d{2})\.(\d{4})", value.strip())

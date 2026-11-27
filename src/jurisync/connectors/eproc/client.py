@@ -43,7 +43,7 @@ from jurisync.connectors.eproc.parsers import (
 from jurisync.core import credentials, intimacao
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.redaction import drop_keys
-from jurisync.core.responses import BUDGET, compact, listing
+from jurisync.core.responses import BUDGET, compact, dated, listing
 from jurisync.core.session_pool import MissingLogin, SessionExpired
 from jurisync.customers import load_env_file
 
@@ -430,7 +430,8 @@ def situation(item, queue):
 
 
 def _situated(items, queue):
-    return [{**item, "queue": queue, **situation(item, queue)} for item in items]
+    pending = queue in ciencia.PENDING_QUEUES
+    return [{**item, "queue": queue, "cienciaPendente": pending, **situation(item, queue)} for item in items]
 
 
 def list_notices(queue=None, *, session=None, panel_html=None, panel_url=None, portal):
@@ -854,19 +855,16 @@ def list_hearings(
             if "problem" in entry:
                 problems.append(f"the {list_kind} list: {entry['problem']}")
             items.extend(
-                {
-                    "kind": list_kind,
-                    **item,
-                    "date": _iso_date(item["start"]),
-                }
+                # ISO start/end (portal text in startText/endText for one cycle) before the budget is measured.
+                dated({"kind": list_kind, **item, "date": _iso_date(item["start"])}, "start", "end")
                 for item in found
             )
-        dated = sorted(
+        with_date = sorted(
             (item for item in items if item["date"]),
-            key=lambda item: (item["date"], item["start"][11:]),
+            key=lambda item: item["start"] or item["date"],
             reverse=situation != "upcoming",
         )
-        items = dated + [item for item in items if not item["date"]]  # undated last in every order
+        items = with_date + [item for item in items if not item["date"]]  # undated last in every order
         complete = all(entry["complete"] for entry in lists)
         if process_number:
             items = [item for item in items if item["processNumber"] == process_number]

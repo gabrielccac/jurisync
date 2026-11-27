@@ -17,6 +17,10 @@ ENVELOPE = (
     "unknown) and next the arguments to replace in this same call, keeping every other argument as it was, to read "
     "more (null when this tool can read no more); the new call reads again from the first page."
 )
+DATES = (
+    "Dates are ISO (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS) and empty ones null; for one cycle a date the portal wrote "
+    "otherwise keeps that text in <field>Text."
+)
 BR_DATE = re.compile(r"(\d{2})/(\d{2})/(\d{4})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?")
 
 
@@ -52,6 +56,19 @@ def iso(value):
     except ValueError:
         return text
     return moment.date().isoformat() if hour is None else moment.isoformat()
+
+
+def dated(item, *keys):
+    """Put the dates in ``keys`` of ``item`` in ISO (``iso``). A value whose text changes keeps the portal's text
+    under ``<key>Text`` for one cycle (docs/padroes.md), so a reader of the old format still finds it."""
+    for key in keys:
+        if key not in item:
+            continue
+        value, converted = item[key], iso(item[key])
+        if converted != value and value not in (None, ""):
+            item[f"{key}Text"] = value
+        item[key] = converted
+    return item
 
 
 def _shares(wanted, budget):

@@ -185,7 +185,10 @@ class HearingSituationsTest(unittest.TestCase):
         )
         first = result["audiencias"][0]
         self.assertEqual((first["kind"], first["processNumber"], first["number"]), ("conciliacao", SECOND, SECOND))
-        self.assertEqual((first["start"], first["date"]), ("20/05/2026 09:30:00", "2026-05-20"))
+        self.assertEqual(
+            (first["start"], first["startText"], first["end"], first["date"]),
+            ("2026-05-20T09:30:00", "20/05/2026 09:30:00", "2026-05-20T17:00:00", "2026-05-20"),
+        )
 
     def test_kind_and_process_number_narrow_the_read(self):
         portal = Portal(r=page(row(FIRST, "10/03/2026 14:00:00"), row(SECOND, "11/03/2026 14:00:00")))
