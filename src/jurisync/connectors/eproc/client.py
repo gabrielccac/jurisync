@@ -30,7 +30,7 @@ from jurisync.connectors.eproc.parsers import (
     parse_process_list_page,
     report_page_request,
 )
-from jurisync.core import credentials
+from jurisync.core import credentials, intimacao
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.redaction import drop_keys
 from jurisync.core.session_pool import MissingLogin, SessionExpired
@@ -47,8 +47,14 @@ QUEUE_KINDS = {
     "art334": "citacao_art334_pendente_listar",
     "expired_deadline": "citacao_intimacao_decurso_prazo_listar",
     "hearing_notice": "intimacao_de_pauta_listar",
+    # Parts of the open-deadline queue: the urgent deadlines (``urgente=true``) and those expiring today
+    # (``vence_hoje=S``), each a link of its own in the panel.
+    "urgent": "citacao_intimacao_prazo_aberto_listar",
+    "due_today": "citacao_intimacao_prazo_aberto_listar",
 }
 QUEUE_ACTIONS = set(QUEUE_KINDS.values())
+# The narrowed links of the open-deadline queue (``parsers.LINK_VARIANTS``).
+QUEUE_VARIANTS = {"urgent": "urgente", "due_today": "vence_hoje"}
 # Where the queue links sit in the panel's "citacao/intimacao" state payload (TJSP and other multi-context panels
 # draw the counters through an ajax call instead of static links).
 STATE_LINKS = {
@@ -59,6 +65,7 @@ STATE_LINKS = {
     "art334": "citacaoArt334",
     "expired_deadline": "decursoPrazo",
     "hearing_notice": "intimacaoPauta",
+    "urgent": "intimacaoAbertoUrgente",
 }
 PROCESS_REPORT_ACTION = "relatorio_processo_procurador_listar"
 READ_ACTIONS = QUEUE_ACTIONS | {
@@ -303,10 +310,38 @@ def _state_links(session, panel, *, panel_url, portal):
 
 
 def _state_link(links, queue, portal):
-    link = (links or {}).get(STATE_LINKS[queue])
+    link = (links or {}).get(STATE_LINKS.get(queue))
     if not isinstance(link, str) or _route_action(urljoin(portals.eproc(portal).base_url, link)) != QUEUE_KINDS[queue]:
         return None
+    if _variant(link) != QUEUE_VARIANTS.get(queue):
+        return None
     return link
+
+
+def _variant(link):
+    """The narrowing parameter of a queue link (``urgente``, ``vence_hoje``), or None for the full list."""
+    query = parse_qs(urlsplit(link).query)
+    return next((name for name in QUEUE_VARIANTS.values() if name in query), None)
+
+
+def _queue_endpoint(session, panel, queue, *, panel_url, portal):
+    """The link of ``queue``: the panel's own link, else the one its state payload advertises; None without one."""
+    if queue not in QUEUE_KINDS:
+        raise ValueError(f"queue must be one of {', '.join(QUEUE_KINDS)}")
+    variant = QUEUE_VARIANTS.get(queue)
+    if variant:
+        endpoint = ((panel.get("variants") or {}).get(QUEUE_KINDS[queue]) or {}).get(variant)
+    else:
+        try:
+            endpoint = _panel_endpoint(panel, queue)
+        except RuntimeError:
+            endpoint = None
+    # A narrowed link ("vence_hoje=S") lists only part of the queue; prefer the full link of the state payload.
+    if (endpoint is None or _variant(endpoint) != variant) and queue in STATE_LINKS:
+        endpoint = _state_endpoint(session, panel, queue, panel_url=panel_url, portal=portal) or endpoint
+    if endpoint is None or _variant(endpoint) != variant:
+        return None
+    return endpoint
 
 
 def _route_action(url, *, ajax=False):
@@ -339,9 +374,40 @@ def _redact(value):
     return drop_keys(value, REDACTED_KEYS)
 
 
-def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal):
+def _iso_date(value):
+    """``dd/mm/aaaa[ hh:mm[:ss]]`` -> ``aaaa-mm-dd``; None when the text holds no date."""
+    found = re.search(r"(\d{2})/(\d{2})/(\d{4})", value or "")
+    return f"{found[3]}-{found[2]}-{found[1]}" if found else None
+
+
+def situation(item, queue):
+    """The shared ``situacao``/``prazoFinal`` keys (``core.intimacao``) of one queue row.
+
+    A pending row whose deadline start reads "Aguarda publicação no DJEN" (every pending TJMG row, 27/11/2026) waits
+    for the publication, which gives the ciência; the portal does not let it be opened early.
+    """
+    end = _iso_date(item.get("deadlineEnd"))
+    if queue in ciencia.PENDING_QUEUES:
+        waiting = "publica" in (item.get("deadlineStart") or "").casefold()
+        return intimacao.fields(intimacao.AWAITING_PUBLICATION if waiting else intimacao.AWAITING_CIENCIA)
+    if queue in ("open_deadlines", "urgent", "due_today"):
+        return intimacao.fields(intimacao.RUNNING if end else intimacao.UNKNOWN, end, "portal")
+    if queue == "expired_deadline":
+        return intimacao.fields(intimacao.EXPIRED, end, "portal")
+    return intimacao.fields(intimacao.UNKNOWN, end, "portal")
+
+
+def _situated(items, queue):
+    return [{**item, "queue": queue, **situation(item, queue)} for item in items]
+
+
+def list_notices(queue=None, *, session=None, panel_html=None, panel_url=None, portal):
+    """One queue's rows; without ``queue``, what needs the lawyer: the pending queues and the open deadlines together.
+
+    Every row carries ``situacao``, ``prazoFinal`` and ``prazoFinalTipo`` (``core.intimacao``) and its ``queue``.
+    """
     portal = portals.eproc(portal).key  # aliases in, current key out
-    if queue not in QUEUE_KINDS:
+    if queue is not None and queue not in QUEUE_KINDS:
         raise ValueError(f"queue must be one of {', '.join(QUEUE_KINDS)}")
     owned = session is None
     if owned:
@@ -349,13 +415,9 @@ def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal
     try:
         base_url = portals.eproc(portal).base_url
         panel = parse_panel(panel_html, base_url)
-        try:
-            endpoint = _panel_endpoint(panel, queue)
-        except RuntimeError:
-            endpoint = None
-        # A static "vence_hoje=S" link lists only the deadlines expiring today; prefer the panel's full queue link.
-        if endpoint is None or "vence_hoje" in endpoint:
-            endpoint = _state_endpoint(session, panel, queue, panel_url=panel_url, portal=portal) or endpoint
+        if queue is None:
+            return _attention(session, panel, panel_url=panel_url, portal=portal)
+        endpoint = _queue_endpoint(session, panel, queue, panel_url=panel_url, portal=portal)
         if endpoint is None:
             raise RuntimeError(f"Authenticated panel did not expose the {queue} queue")
         require_route(urljoin(panel_url or base_url, endpoint), portal=portal)
@@ -377,13 +439,59 @@ def list_notices(queue, *, session=None, panel_html=None, panel_url=None, portal
             "source": "eproc",
             "portal": portal,
             "queue": queue,
-            "items": _redact(items),
+            "items": _redact(_situated(items, queue)),
             "pagination": _redact(parsed.get("pagination", {})),
             "diagnostics": [],
         }
     finally:
         if owned:
             session.close()
+
+
+def _attention(session, panel, *, panel_url, portal):
+    """The pending queues and the open-deadline queue in one list, each intimação once."""
+    queues = list(pending_queues(session, panel, panel_url=panel_url, portal=portal))
+    base_url = portals.eproc(portal).base_url
+    endpoint = _queue_endpoint(session, panel, "open_deadlines", panel_url=panel_url, portal=portal)
+    if endpoint is None:
+        queues.append(("open_deadlines", [], False, "the panel did not expose the open_deadlines queue"))
+    else:
+        url = urljoin(panel_url or base_url, endpoint)
+        require_route(url, {QUEUE_KINDS["open_deadlines"]}, portal=portal)
+        response, body = request(session, "GET", url, portal=portal)
+        error = _response_error(response, body)
+        if error == "session_expired":
+            raise SessionExpired("eproc session expired")
+        if error:
+            queues.append(("open_deadlines", [], False, f"the open_deadlines queue answered {error}"))
+        else:
+            parsed = parse_process_list_page(body, base_url)
+            complete = bool((parsed.get("pagination") or {}).get("complete"))
+            queues.append(("open_deadlines", parsed.get("items", []), complete, None))
+    items, seen = [], set()
+    for queue, rows, _, _ in queues:
+        for row in _situated(rows, queue):
+            key = row.get("id") or (row.get("number"), row.get("deadlineEvent"), row.get("requestedAt"))
+            if key not in seen:
+                seen.add(key)
+                items.append(row)
+    problems = [problem for *_, problem in queues if problem]
+    return {
+        "success": any(not problem for *_, problem in queues),
+        "source": "eproc",
+        "portal": portal,
+        "queue": None,
+        "queues": [
+            {"queue": queue, "count": len(rows), "complete": complete, **({"problem": problem} if problem else {})}
+            for queue, rows, complete, problem in queues
+        ],
+        "items": _redact(items),
+        "pagination": {
+            "itemCount": len(items),
+            "complete": not problems and all(complete for _, _, complete, _ in queues),
+        },
+        "diagnostics": problems,
+    }
 
 
 def pending_queues(session, panel, *, panel_url, portal):
@@ -773,7 +881,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
     queue = subparsers.add_parser("queue")
     queue.add_argument("--portal", choices=portals.keys("eproc"), required=True)
-    queue.add_argument("--queue", choices=tuple(QUEUE_KINDS), required=True)
+    queue.add_argument("--queue", choices=tuple(QUEUE_KINDS), help="omit for what needs attention")
     processes = subparsers.add_parser("processes", help="List Relação de Processos with default filters")
     processes.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     processes.add_argument("--max-pages", type=int, default=1)

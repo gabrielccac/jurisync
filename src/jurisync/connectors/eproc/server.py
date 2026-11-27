@@ -23,7 +23,7 @@ from jurisync.connectors.eproc.client import (
     list_processes,
     request,
 )
-from jurisync.core import certificate
+from jurisync.core import certificate, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
     READ_ONLY,
@@ -91,18 +91,33 @@ def create_server(keys=None):
 
     @server.tool(
         name="eproc_list_intimacoes",
-        title="List Eproc notices",
-        description="Read one citation/intimation queue of an Eproc portal. Read-only.",
+        title="List Eproc intimações",
+        description=(
+            "List the lawyer's citações/intimações of an Eproc portal. Without queue: what needs attention, the pending "
+            "queues (awaiting ciência or the DJEN publication) and the open deadlines together, each intimação once "
+            "(queues[] says what each queue gave). With queue: that queue only. "
+            + intimacao.DESCRIPTION
+            + " Rows also "
+            "carry queue, number, court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. Read-only: opens no "
+            "intimação."
+        ),
         annotations=READ_ONLY,
     )
     def eproc_list_intimacoes(
         portal: Portal,
         queue: Annotated[
-            Queue,
+            Queue | None,
             Field(
-                description="'open_deadlines': prazo aberto, deadline running; 'pending': citação/intimação awaiting ciência."
+                description=(
+                    "Omit for what needs attention. 'pending': awaiting ciência or publication; 'pending_urgent', "
+                    "'pending_agreement', 'art334': the other pending queues; 'open_deadlines': prazo aberto, deadline "
+                    "running; 'urgent': open urgent deadlines; 'due_today': deadlines ending today; "
+                    "'expired_deadline': deadlines that ended in the last 30 days (decurso de prazo); 'hearing_notice': "
+                    "intimações de pauta."
+                )
             ),
-        ],
+        ] = None,
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_notices(queue, **context))
 

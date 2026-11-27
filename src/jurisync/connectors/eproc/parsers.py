@@ -21,19 +21,33 @@ def _query(href):
     return parse_qs(urlsplit(href).query, keep_blank_values=True)
 
 
+# Query parameters that narrow a panel link to part of its list: the deadlines expiring today, the urgent ones, the
+# Relação de Processos by latest movement, the next hearing. A link with one of them is kept apart from the full list.
+LINK_VARIANTS = ("vence_hoje", "urgente", "ord_ultimas_movimentacoes", "proxima")
+
+
 def parse_panel(html, base_url):
     """Discover only routes visibly advertised by the authenticated panel."""
     soup = BeautifulSoup(html, "html.parser")
     queues = {}
     actions = {}
+    variants = {}
     for element in soup.select("a[href], form[action]"):
         absolute = _href(element.get("href") or element.get("action"), base_url)
-        action = _query(absolute).get("acao", [""])[0]
+        query = _query(absolute)
+        action = query.get("acao", [""])[0]
         if not action:
+            continue
+        variant = next((name for name in LINK_VARIANTS if name in query), None)
+        if variant:
+            variants.setdefault(action, {}).setdefault(variant, absolute)
             continue
         actions.setdefault(action, absolute)
         if action in {"citacao_intimacao_prazo_aberto_listar", "citacao_intimacao_pendente_listar"}:
             queues.setdefault(action, absolute)
+    for action, found in variants.items():
+        # A panel that shows only the narrowed link (TJMG: "vencendo hoje") still advertises the route.
+        actions.setdefault(action, next(iter(found.values())))
 
     form = soup.select_one("form#formPesquisaRapida")
     quick = {}
@@ -64,6 +78,7 @@ def parse_panel(html, base_url):
         },
         "queueActions": queues,
         "actions": actions,
+        "variants": variants,
         "quickSearch": quick,
         "stateEndpoint": state,
     }

@@ -106,6 +106,7 @@ TJSP_STATE = {
                 "citacaoArt334": "controlador.php?acao=citacao_art334_pendente_listar&hash=d",
                 "intimacaoPauta": "controlador.php?acao=intimacao_de_pauta_listar&hash=e",
                 "intimacaoAberto": "controlador.php?acao=citacao_intimacao_prazo_aberto_listar&hash=f",
+                "intimacaoAbertoUrgente": "controlador.php?acao=citacao_intimacao_prazo_aberto_listar&urgente=true&hash=u",
                 "decursoPrazo": "controlador.php?acao=citacao_intimacao_decurso_prazo_listar&hash=g",
             }
         }
@@ -152,7 +153,11 @@ class TjspQueueTests(unittest.TestCase):
             result, urls = self.run_queue(queue)
             self.assertTrue(result["success"], queue)
             self.assertIn(f"acao={action}&", urls[-1], queue)
+            if queue == "due_today":  # the panel's own "expiring today" link, the only one there is
+                self.assertIn("vence_hoje=S", urls[-1])
+                continue
             self.assertNotIn("vence_hoje", urls[-1], queue)
+            self.assertEqual("urgente=true" in urls[-1], queue == "urgent", queue)
             self.assertIn("estado=SP", urls[0])  # the user's own context, not another tab
 
     def test_state_link_with_another_action_is_ignored(self):
