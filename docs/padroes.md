@@ -192,7 +192,8 @@ Helpers em `jurisync.core.responses`:
   que guarda lista há só o nome novo, porque a cópia dobraria a resposta e estouraria o orçamento. Dicts cujas
   chaves são dados (`partiesByPole`, `responses.DATA_KEYS`) não mudam. O orçamento e o `fit_texts` medem a
   resposta já em camelCase. No `pje_get_process`, `filedAt`, `lastDistribution` e `timeline[].date`
-  saem em ISO, enquanto `filed_at`, `last_distribution` e `timeline[].dateText` guardam o texto da página.
+  saem em ISO, enquanto `filed_at`, `last_distribution` e `timeline[].dateText` guardam o valor antigo: o texto da
+  página no painel JSF ("19 jun. 2025") e, no PJe-JT (kz), o ISO que `filed_at` já trazia.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **`ciencia`** é só o bloco de estado (`core.ciencia.report`). Quem deu a ciência e quando, por expediente do PJe, é
