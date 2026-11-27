@@ -171,7 +171,7 @@ Helpers em `jurisync.core.responses`:
   forma (`core.redaction.url_shape`).
 - Servidores (MCP local, hospedado, `jurisync-serve`) escrevem uma linha JSON por evento no stderr (`core.logs`):
   `at, level, logger, message` e os campos da chamada em curso, `call, tool, tenant, portal` (`core.calls`, um
-  `ContextVar`; `portal` só quando é uma chave conhecida). Cada chamada termina com uma linha `event: "call"`, `ok`,
+  `ContextVar`; `portal` só com formato de chave; o core não conhece os portais). Cada chamada termina com uma linha `event: "call"`, `ok`,
   `error_code` (o `[code]` que o agente recebeu, seção 5) e `duration_ms`; um bug traz `exception` e `trace` sob o
   mesmo `call` do `ref`. CLIs continuam em texto. `JURISYNC_LOG_FORMAT=text|json` força um dos dois.
 - Para ler: `jq 'select(.call == "c-1a2b3c4d")'` junta tudo de uma chamada; `select(.event == "call" and .ok == false)`
