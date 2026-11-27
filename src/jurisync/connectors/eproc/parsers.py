@@ -66,11 +66,26 @@ def parse_panel(html, base_url):
         }
 
     state = None
+    instances = {}
     for element in soup.select("[data-urlassinadacarregamento]"):
         candidate = _href(element.get("data-urlassinadacarregamento"), base_url)
-        if _query(candidate).get("acao_ajax", [""])[0] == "retornar_citacao_intimacao_estado":
-            state = candidate
-            break
+        query = _query(candidate)
+        if query.get("acao_ajax", [""])[0] != "retornar_citacao_intimacao_estado":
+            continue
+        state = state or candidate
+        name = query.get("estado", [""])[0]
+        entry = instances.setdefault(name, {"instance": name, "label": "", "current": False, "url": candidate})
+        entry["current"] = entry["current"] or query.get("usuarioAtual", [""])[0] == "true"
+        entry["label"] = entry["label"] or text(element)
+    counters = re.search(r"[\"']([^\"'\s]*controlador_ajax\.php\?acao_ajax=listar_painel_advogado[^\"'\s]*)[\"']", html)
+    due_today = next(
+        (
+            text(anchor)
+            for anchor in soup.select('a[href*="vence_hoje=S"]')
+            if "citacao_intimacao_prazo_aberto_listar" in anchor.get("href", "")
+        ),
+        "",
+    )
     return {
         "queues": {
             "open_deadlines": queues.get("citacao_intimacao_prazo_aberto_listar"),
@@ -81,6 +96,12 @@ def parse_panel(html, base_url):
         "variants": variants,
         "quickSearch": quick,
         "stateEndpoint": state,
+        # The counters of each instance's citações/intimações tab (TJMG: MG and TJMG; JFRS: RS, TRF4, SC, PR).
+        "instances": list(instances.values()),
+        # The ajax call that fills the panel's counters, and the fieldsets the panel asks it for.
+        "countersEndpoint": _href(html_lib.unescape(counters.group(1)), base_url) if counters else None,
+        "counterFieldsets": list(dict.fromkeys(re.findall(r"buscarDadosPainel\(\s*'(\w+)'\s*\)", html))),
+        "dueTodayCount": int(due_today) if due_today.isdigit() else None,
     }
 
 
@@ -640,3 +661,15 @@ def process_links(html, base_url):
         if anchor is not None:
             links[key] = _href(anchor.get("href"), base_url)
     return links
+
+
+def parse_panel_counters(body):
+    """``{name: count}`` of one ``listar_painel_advogado`` XML reply (``<fldAudiencia><audienciaFutura>2</...>``), or
+    None when the reply is not that XML (TJMG answers fldDepositosJudiciais with a PHP error, 27/11/2026)."""
+    found = re.fullmatch(r"\s*(?:<\?xml[^>]*\?>)?\s*<(\w+)>(.*)</\1>\s*", body or "", re.S)
+    if not found:
+        return None
+    values = {}
+    for name, value in re.findall(r"<(\w+)>\s*([^<]*?)\s*</\1>", found.group(2)):
+        values[name] = int(value) if value.isdigit() else html_lib.unescape(value)
+    return values

@@ -10,11 +10,12 @@ import json
 import re
 import sys
 import time
+import warnings
 import weakref
 from contextlib import redirect_stdout
 from urllib.parse import parse_qs, urljoin, urlsplit
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import customers, portals
@@ -28,6 +29,7 @@ from jurisync.connectors.eproc.parsers import (
     parse_event_response,
     parse_lawyer_process_report,
     parse_panel,
+    parse_panel_counters,
     parse_process_detail,
     parse_process_exams,
     parse_process_hearings,
@@ -89,7 +91,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
-AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado"}
+AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado", "listar_painel_advogado"}
 MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit
 # Seconds the pending queues read for one session answer the next process reads; opening a document drops them,
 # since the intimação it belongs to may no longer be pending.
@@ -130,7 +132,10 @@ def _decode(response):
 
 def classify_body(body):
     lowered = body.casefold()
-    soup = BeautifulSoup(body, "html.parser")
+    with warnings.catch_warnings():
+        # The panel's counters answer XML; it is only searched for a login form here.
+        warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+        soup = BeautifulSoup(body, "html.parser")
     if soup.select_one("#username, [name='username'], [name=\"username\"]") or any(
         token in lowered
         for token in (
@@ -566,6 +571,164 @@ def pending_notices(session, panel, process_number, *, panel_url, portal):
         if not found and not complete:
             problem = problem or f"the {queue} queue was not read to its end"
     return rows, problem
+
+
+# The panel's counter fieldsets (``listar_painel_advogado``): a label for the fieldset and for each counter. A name
+# missing here is shown as the portal sends it.
+PANEL_COUNTERS = {
+    "fldCitacaoIntimacaoAdvogado": (
+        "Citações/Intimações",
+        {
+            "citacaoIntimacaoUrgente": "Pendentes urgentes",
+            "citacaoIntimacao": "Pendentes",
+            "citacaoIntimacaoAcordo": "Pendentes com proposta de acordo",
+            "processoPrazoAberto": "Prazo aberto",
+            "processoPrazoAbertoUrgente": "Prazo aberto urgente",
+            "dias": "Dias considerados no decurso de prazo",
+            "decurso": "Decurso de prazo",
+            "intimacaoPauta": "Intimações de pauta",
+        },
+    ),
+    "fldAudiencia": (
+        "Audiências",
+        {
+            "audienciaFutura": "Futuras",
+            "audienciaRealizada": "Realizadas",
+            "audienciaNaoRealizada": "Não realizadas",
+            "audienciaFuturaConciliacao": "Conciliação: futuras",
+            "audienciaRealizadaConciliacao": "Conciliação: realizadas",
+            "audienciaNaoRealizadaConciliacao": "Conciliação: não realizadas",
+        },
+    ),
+    "fldPericia": ("Perícias", {"periciaFutura": "Futuras"}),
+    "fldConciliacoes": (
+        "Conciliações",
+        {
+            "fcCriados": "Criadas",
+            "fcAbertos": "Abertas",
+            "fcAcordos": "Acordos",
+            "fcRecusas": "Recusas",
+            "fcDecursos": "Decursos",
+            "fcMensagem": "Mensagens não respondidas",
+            "fcPropostas": "Propostas",
+        },
+    ),
+    "fldDepositosJudiciais": ("Depósitos judiciais", {"depositosJudiciaisComSaldo": "Com saldo"}),
+    "fldPeticoesIniciaisPreparadas": (
+        "Petições iniciais preparadas",
+        {
+            "peticoesIniciaisPreparadas": "Preparadas",
+            "peticoesIniciaisJaPreparadas": "Já preparadas",
+            "peticoesIniciaisPreparadasEscritorio": "Preparadas pelo escritório",
+            "peticoesIniciaisJaPreparadasEscritorio": "Já preparadas pelo escritório",
+        },
+    ),
+    "fldMovimentacoesPendentesCriadas": (
+        "Movimentações pendentes",
+        {
+            "movimentacoesPendentesCriadas": "Criadas",
+            "movimentacoesPreparadasCriadasEscritorio": "Preparadas pelo escritório",
+        },
+    ),
+    "fldRecursosTribunal": ("Recursos ao tribunal", {"agravo": "Agravos"}),
+    "fldSubstabelecimento": (
+        "Substabelecimentos",
+        {"substabelecimentosRecebidos": "Recebidos", "substabelecimentosEfetuados": "Efetuados"},
+    ),
+    "fldPeticoesSiapro": (
+        "Petições Siapro",
+        {
+            "peticoesSiaproPendentes": "Pendentes",
+            "peticoesSiaproJuntadas": "Juntadas",
+            "peticoesSiaproCanceladas": "Canceladas",
+        },
+    ),
+}
+# The citações/intimações counters of one instance (``retornar_citacao_intimacao_estado``), named as the queues of
+# eproc_list_intimacoes.
+INSTANCE_COUNTERS = {
+    "numCitacaoIntimacaoPendente": "pending",
+    "numCitacaoIntimacaoPendenteUrgente": "pending_urgent",
+    "numCitacaoIntimacaoPendenteAcordo": "pending_agreement",
+    "numCitacaoArt334Pendente": "art334",
+    "numCitacaoIntimacaoAberto": "open_deadlines",
+    "numCitacaoIntimacaoAbertoUrgente": "urgent",
+    "numDecursoPrazo": "expired_deadline",
+    "numCitacaoIntimacaoPauta": "hearing_notice",
+    "dias": "expiredDeadlineDays",
+}
+
+
+def read_counters(*, session=None, panel_html=None, panel_url=None, portal):
+    """The panel's counters: every fieldset the panel fills by ajax, and the citações/intimações counters of each
+    instance tab. A fieldset or instance the portal fails to answer is reported in its own entry; the others stand."""
+    portal = portals.eproc(portal).key
+    owned = session is None
+    if owned:
+        session, panel_html, panel_url = authenticate(portal)
+    try:
+        base_url = portals.eproc(portal).base_url
+        panel = parse_panel(panel_html, base_url)
+        diagnostics = []
+        fieldsets = []
+        endpoint = panel.get("countersEndpoint")
+        if endpoint is None:
+            diagnostics.append("panel_counters_unavailable")
+        else:
+            url = urljoin(panel_url or base_url, endpoint)
+            fieldsets = [_fieldset(session, url, name, portal=portal) for name in panel["counterFieldsets"]]
+        instances = [_instance(session, entry, panel_url or base_url, portal=portal) for entry in panel["instances"]]
+        instances.sort(key=lambda entry: not entry["current"])
+        return {
+            "success": bool(fieldsets or instances),
+            "source": "eproc",
+            "portal": portal,
+            "panel": fieldsets,
+            "instances": instances,
+            "dueToday": panel.get("dueTodayCount"),
+            "diagnostics": diagnostics,
+        }
+    finally:
+        if owned:
+            session.close()
+
+
+def _ajax(session, url, *, portal, data=None):
+    """One panel ajax read; the body, or None when the portal answered an error. A login page expires the session."""
+    require_route(url, AJAX_ACTIONS, ajax=True, portal=portal)
+    response, body = request(session, "POST" if data is not None else "GET", url, data=data, ajax=True, portal=portal)
+    error = _response_error(response, body)
+    if error == "session_expired":
+        raise SessionExpired("eproc session expired")
+    return None if error else body
+
+
+def _fieldset(session, url, name, *, portal):
+    label, names = PANEL_COUNTERS.get(name, (name, {}))
+    body = _ajax(session, url, portal=portal, data={"idFieldset": name, "exibePauta": "1"})
+    values = parse_panel_counters(body) if body is not None else None
+    if values is None:
+        return {"fieldset": name, "label": label, "counters": [], "error": "the portal did not answer this fieldset"}
+    return {
+        "fieldset": name,
+        "label": label,
+        "counters": [{"key": key, "label": names.get(key, key), "count": value} for key, value in values.items()],
+    }
+
+
+def _instance(session, entry, base, *, portal):
+    found = {"instance": entry["instance"], "label": entry["label"] or entry["instance"], "current": entry["current"]}
+    body = _ajax(session, urljoin(base, entry["url"]), portal=portal)
+    try:
+        results = (json.loads(body).get("usuarios") or [{}])[0].get("resultados") or {}
+    except (TypeError, ValueError, AttributeError, IndexError):
+        return {**found, "counters": {}, "error": "the portal did not answer this instance"}
+    counters = {}
+    for key, name in INSTANCE_COUNTERS.items():
+        value = str(results.get(key, ""))
+        if value.isdigit():
+            counters[name] = int(value)
+    return {**found, "counters": counters}
 
 
 MAX_REPORT_PAGES = 20

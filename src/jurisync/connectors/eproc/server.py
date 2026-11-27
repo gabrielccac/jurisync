@@ -21,6 +21,7 @@ from jurisync.connectors.eproc.client import (
     fetch_process,
     list_notices,
     list_processes,
+    read_counters,
     request,
 )
 from jurisync.core import certificate, intimacao
@@ -120,6 +121,24 @@ def create_server(keys=None):
         ] = None,
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_notices(queue, **context))
+
+    @server.tool(
+        name="eproc_get_counters",
+        title="Get Eproc panel counters",
+        description=(
+            "Read the counters of the lawyer's Eproc panel. panel: each fieldset the panel fills (citações/intimações, "
+            "audiências, perícias, conciliações, depósitos judiciais, petições iniciais preparadas, movimentações "
+            "pendentes, recursos, substabelecimentos...) with label and count per counter; a fieldset the portal fails "
+            "to answer carries error. instances: the citações/intimações counters of every instance tab of the panel "
+            "(the portal's own section, the court of appeal, sister sections), named as the eproc_list_intimacoes "
+            "queues; current=true is the instance this portal lists, the others are read in their own portal. "
+            "dueToday: deadlines ending today. "
+            "Read-only: opens nothing."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_get_counters(portal: Portal) -> dict[str, Any]:
+        return call(portal, lambda **context: read_counters(**context))
 
     @server.tool(
         name="eproc_list_processes",
