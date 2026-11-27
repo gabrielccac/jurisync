@@ -9,9 +9,13 @@ connector `src/jurisync/connectors/eproc/` (read-only).
 - Tools: `eproc_list_intimacoes` (filas listadas em `QUEUE_KINDS`; sem fila, pendentes e prazos abertos juntos,
   cada item com `situacao`/`prazoFinal` de `core.intimacao`), `eproc_get_counters` (contadores do painel e de cada
   instância), `eproc_list_audiencias` (audiências futuras e de conciliação), `eproc_list_processes` (Relação de
-  Processos do advogado; baixados ficam de fora em todo portal salvo `includeArchived`, filtro `prazo`) e
+  Processos do advogado; baixados ficam de fora em todo portal salvo `includeArchived`, filtros `prazo` e
+  `intimationDateFrom`/`intimationDateTo`), `eproc_search_processes` (Consulta Processual do tribunal) e
   `eproc_get_process` (eventos, `prazos` de cada intimação, informações adicionais, audiências e perícias,
   documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026.
+- As duas tools de lista aceitam `processNumber` (filtro aplicado aqui sobre as linhas lidas: nenhuma das duas listas
+  do portal tem campo de número; com o filtro, `total` do envelope é o achado quando a lista foi lida inteira, senão
+  `null`); todo item traz `processNumber` ao lado de `number`, que fica por um ciclo.
 - Ações no allowlist (`READ_ACTIONS`/`AJAX_ACTIONS`): as 2 filas + `painel_adv_listar`,
   `processo_pesquisa_rapida`, `processo_selecionar`, `processo_consulta_listar`,
   `relatorio_processo_procurador_listar`,
@@ -53,8 +57,18 @@ não uma busca irrestrita de todos os processos do tribunal. Em todos os portais
 esses valores quando disponíveis. As partes vêm com `pole` (`active` para "Autores Principais",
 `passive` para "Réu(s)"): a relação não mostra o polo processual (Requerente no TRF4, Apelante
 no TRF6), que só aparece em `eproc_get_process` (`parties[].role`).
-Lê somente a página retornada; consultar `pagination.complete` e `totalItems` antes de
-considerar a lista completa. Não percorre páginas nem altera filtros automaticamente.
+Com `maxPages` maior que 1 as páginas seguintes são pedidas como o pager faz (o formulário de novo, com
+`hdnInfraPaginaAtual`). Nenhum portal mostrou a contagem de páginas do pager (`totalPages` nulo), então a leitura
+segue o total da legenda ("(843 registros - 1 a 500)") e para quando ele é atingido, quando uma página volta vazia,
+repetida ou de outra lista, em `maxPages` ou no orçamento de 60k caracteres.
+`next` traz o `maxPages` que lê o resto, estimado pelo tamanho da página quando o pager não diz.
+Consultar `pagination.complete` e `totalItems` antes de considerar a lista completa.
+
+**Data da intimação.** `intimationDateFrom`/`intimationDateTo` (`AAAA-MM-DD`) vão para "Data Início"/"Data Fim"
+(`dataInicioField`/`dataFimField`, `DD/MM/AAAA`), no mesmo reenvio do formulário que `prazo` e
+`includeArchived`; num formulário que só tenha "Data da Intimação" (`dataIntimacaoField`) cabe um dia só. Os quatro
+tribunais capturados têm os três campos ao lado de "Prazo"; que Início/Fim filtram a data da intimação (e não a
+do prazo) é leitura da tela, ainda não conferida com linhas reais.
 
 O parser dedicado foi conferido com a captura de sete processos do TRF6 1G; outros
 portais dependem do mesmo layout e do link no painel. Ausência do link, layout
@@ -63,6 +77,29 @@ Hashes e links assinados não são expostos no resultado. A suíte Eproc contém
 
 `parse_panel()` descobre as ações anunciadas; `require_route` permite somente as rotas
 mapeadas. Novas telas continuam exigindo parser e inclusão explícita no allowlist.
+
+## Consulta Processual (`eproc_search_processes`, 2026-11-27)
+
+Busca no tribunal, não na carteira do advogado: devolve processos de terceiros (consulta pública), diferente de
+`eproc_list_processes`. Um critério por chamada: `partyName` (pelo menos nome e sobrenome, como o portal exige),
+`taxId` (CPF ou CNPJ, só dígitos e `. - /`, enviado formatado), `oab` (UF e até 6 dígitos, enviado como
+`SC012345`, o formato da ajuda do portal) ou `originNumber` (originário/relacionado); `includeClosed` marca
+"Exibir Baixados"; `maxPages` até 5.
+
+O GET de `processo_consultar` traz o formulário `frmProcessoListaAjax`; cada opção de `tipoPesquisa` diz o
+próprio valor e a rota AJAX que o Consultar chama (`data-acaoConsultaAssinada`): `processos_consulta_por_nome_parte`,
+`..._documento_identificacao`, `..._oab`, `..._originario`. O valor e a rota são lidos do formulário; tipo ausente
+no portal é `invalid_input`. Essas rotas ficam fora de `READ_ACTIONS`/`AJAX_ACTIONS`: só a busca, que as nomeia,
+chega nelas, e um teste prova que rotas de escrita (movimentar, peticionar, distribuir, confirmar pauta) continuam
+bloqueadas. O resultado é lido pelos `<th>` da tabela (número, classe, partes com polo, assunto, órgão, situação,
+autuação em ISO; o resto em `extra`), com CPF mascarado; nada do que foi buscado vai para log ou erro.
+
+**Precisa de validação ao vivo.** Não há captura de resposta da busca: o formato (HTML ou JSON com HTML), a
+paginação (`hdnInfraPaginaAtual` com os campos `hdnInfra*` da resposta) e os cabeçalhos são inferidos da estrutura
+do formulário. A página tem CAPTCHA (`divInfraCaptcha`); se o portal pedir, a tool responde `captcha_required`. Pela
+ajuda dos tribunais, a busca por nome pode devolver primeiro uma lista de pessoas para escolher
+(`numIdPessoa`): esse caso volta como `search_answer_without_processes`, ainda não atendido. "Pesquisa Fonética"
+(`chkNomeParte`) não é exposta.
 
 ## Features planejadas
 
