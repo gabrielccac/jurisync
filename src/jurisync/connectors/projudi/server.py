@@ -174,7 +174,7 @@ def create_server(keys=None):
     portal_field = Field(description=PORTAL_HELP)
     number_field = Field(
         min_length=1,
-        description="CNJ number with punctuation; TJGO also takes its lists' short number (0000000-00).",
+        description="CNJ number with punctuation; some portals also take their lists' short number (0000000-00).",
     )
 
     @server.tool(
@@ -282,26 +282,26 @@ def create_server(keys=None):
     if listed:
         list_portal = Field(description=PORTAL_HELP)
         Listed = Literal[listed]  # noqa: N806 - a type built from the configured portals
-        desk_pages = Field(ge=1, le=50, description="TJAM, TJPR: pages of 20 rows per list; default 10.")
-        desk_instances = Field(description='TJAM, TJPR: ["1"] (1º grau), ["2"] (2º grau) or both.')
+        desk_pages = Field(ge=1, le=50, description="Desk-list portals: pages of 20 rows per list; default 10.")
+        desk_instances = Field(description='Desk-list portals: ["1"] (1º grau), ["2"] (2º grau) or both.')
 
         def desk_only(portal, **options):
             given = {name: value for name, value in options.items() if value is not None}
             if given and portals.projudi(portal).key not in (TJAM, TJPR):
-                raise ValueError(f"{', '.join(given)} apply to {TJAM} and {TJPR} only")
+                raise ValueError(f"{', '.join(given)} do not apply to {portal}: it has no desk lists")
             return given
 
         @server.tool(
             name="projudi_list_intimacoes",
-            title="List Projudi intimações (TJGO, TJAM, TJPR)",
+            title="List Projudi intimações",
             description=(
-                "The lawyer desk's intimações/citações, none opened. TJGO: 'diario' (Diário intimações with dates "
-                "and possible deadline; awaitingPublication while publication is ahead), "
+                "The lawyer desk's intimações/citações, none opened, as the portal groups them: either 'diario' "
+                "(Diário intimações with dates and possible deadline; awaitingPublication while publication is ahead), "
                 "'awaitingPublicationNotOnHome' (unpublished, removed from home), 'portalPending' (awaiting reading: "
-                "reading their documents registers ciência). TJAM, TJPR: 'lists' (desk lists, rows with deadline as shown; "
-                "'novas' rows have cienciaPendente=true: opening registers the reading) and awaitingCiencia "
-                "(processes awaiting ciência). Each list has the portal's total; complete=false: not read in full. "
-                "Read-only."
+                "reading their documents registers ciência); or, on desk-list portals, 'lists' (desk lists, rows with "
+                "deadline as shown; 'novas' rows have cienciaPendente=true: opening registers the reading) and "
+                "awaitingCiencia (processes awaiting ciência). Each list has the portal's total; complete=false: not "
+                "read in full. Read-only."
             ),
             annotations=READ_ONLY,
         )
@@ -309,7 +309,7 @@ def create_server(keys=None):
             portal: Annotated[Listed, list_portal] = listed[0],
             lists: Annotated[
                 list[Literal[tuple(tjam.INTIMATION_LISTS)]] | None,
-                Field(description="TJAM, TJPR: desk lists to read (JSON list); default the pending ones."),
+                Field(description="Desk-list portals: desk lists to read (JSON list); default the pending ones."),
             ] = None,
             instances: Annotated[list[Literal["1", "2"]] | None, desk_instances] = None,
             maxPages: Annotated[int | None, desk_pages] = None,  # noqa: N803 - same name as the other list tools
@@ -325,12 +325,12 @@ def create_server(keys=None):
 
         @server.tool(
             name="projudi_list_processes",
-            title="List Projudi lawyer processes (TJGO, TJAM, TJPR)",
+            title="List Projudi lawyer processes",
             description=(
                 "The lawyer's own processes, in groups with the portal's total (may differ) and complete=false "
-                "when fewer rows came back. TJGO: active ones by serventia type, short number, parties; "
-                "hearingsToday = home hearing counters; portal_timeout: try later. TJAM, TJPR: 'Processos' (1º grau) and "
-                "'Recursos' (2º grau) of one situation; deskCounts per situation. Read-only."
+                "when fewer rows came back: either active ones by serventia type, short number, parties, with "
+                "hearingsToday = home hearing counters (portal_timeout: try later); or, on desk-list portals, "
+                "'Processos' (1º grau) and 'Recursos' (2º grau) of one situation, deskCounts per situation. Read-only."
             ),
             annotations=READ_ONLY,
         )
@@ -338,7 +338,7 @@ def create_server(keys=None):
             portal: Annotated[Listed, list_portal] = listed[0],
             situation: Annotated[
                 Literal[tuple(tjam.PROCESS_LISTS)] | None,
-                Field(description="TJAM, TJPR: situation list; default 'ativos'."),
+                Field(description="Desk-list portals: situation list; default 'ativos'."),
             ] = None,
             instances: Annotated[list[Literal["1", "2"]] | None, desk_instances] = None,
             maxPages: Annotated[int | None, desk_pages] = None,  # noqa: N803 - same name as the other list tools

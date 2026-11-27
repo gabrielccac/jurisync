@@ -228,7 +228,7 @@ def create_server():
     @server.tool(
         name="pje_read_documents",
         title="Read PJe documents",
-        description="Read 1-5 documents of a PJe process by id. Each has its status and text, or a failure saying why it was not read; status extracted_unnumbered: the text omits the process number; short_html: a short cover page, text not vouched for. A short cover (a petição typed as only its title) comes with anexos, the documents attached in the same timeline entry (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline days), which hold the client's deadline. save=true stores the original files in the shared documents folder as savedAs, for advbox_create_task. Ciência: reading the act of a communication whose ciência is pending, the documents attached to it, or any document of a process with a pending communication that has no document id may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
+        description="Read 1-5 documents of a PJe process by id. Each has its status and text, or a failure saying why it was not read; status extracted_unnumbered: the text omits the process number; short_html: a short cover page, text not vouched for. A short cover (a petição typed as only its title) comes with anexos, the documents attached in the same timeline entry (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline days), which hold the client's deadline. save=true stores the original files in the shared documents folder as savedAs, e.g. to attach to a task. Ciência: reading the act of a communication whose ciência is pending, the documents attached to it, or any document of a process with a pending communication that has no document id may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
         + ciencia.AUTHORIZATION
         + ". When the expedientes could not be read in full the read is refused with nothing opened (error starts 'ciência not checked'): retry later, or acknowledgeCiencia=true under the same authorization. settings.toml [pje] ciencia_on_read = 'allow' reads them by default. The ciencia block: estado 'nenhuma' (nothing pending read), 'dada' (a pending communication was read: its ciência may be registered and deadline started; see intimacoes) or 'desconhecida' (read with acknowledgeCiencia, expedientes unchecked), with an aviso: unless 'nenhuma', tell the user and note it in the task.",
         # With acknowledgeCiencia a read may register the ciência and start a deadline, and save=true writes a file.
@@ -374,7 +374,7 @@ def create_server():
         bucket: Annotated[
             str | None,
             Field(
-                description="Bucket index or part of its label (see pje_get_counters). Empty: Pendentes de ciência ou de resposta (Meus Expedientes on TRT/TST). An unknown index errors listing the valid ones."
+                description="Bucket index or part of its label (see pje_get_counters). Empty: the pending bucket (Pendentes de ciência ou de resposta, or Meus Expedientes where the panel names it so). An unknown index errors listing the valid ones."
             ),
         ] = None,
         regions: Annotated[
@@ -444,7 +444,7 @@ def create_server():
     @server.tool(
         name="pje_list_processes",
         title="List the lawyer's PJe processes (Acervo)",
-        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject, parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box; on TRT/TST the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. Not on trf5-legacy. Read-only: opens nothing, takes no ciência.",
+        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject, parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box; on panels without boxes, the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. One call reads up to 60 jurisdictions; the others come in notRead, read with a second call passing them as regions. On a PJe 1.x panel the Acervo's Pendentes de Manifestação and Acervo Geral grids: number, parties and autuação date, first page only, no regions. Read-only: opens nothing, takes no ciência.",
         annotations=READ_ONLY,
     )
     def list_processes(

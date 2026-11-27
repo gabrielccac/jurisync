@@ -169,7 +169,8 @@ def create_server(keys=None):
         title="List the lawyer's e-SAJ processes",
         annotations=READ_ONLY,
         description="First-instance processes found by each of the lawyer's OABs. oabs[] has each search's total "
-        "and complete; complete is true only when all were read in full. TJAM: not_supported. Read-only.",
+        "and complete; complete is true only when all were read in full. A portal without this search answers "
+        "not_supported. Read-only.",
     )
     def esaj_list_processes(
         portal: Annotated[Portal, portal_field] = default,

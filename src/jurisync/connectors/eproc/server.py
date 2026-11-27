@@ -110,8 +110,8 @@ def create_server(keys=None):
         name="eproc_list_processes",
         title="List Eproc lawyer processes",
         description=(
-            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters; TRF6 "
-            "excludes baixados); not a court-wide search. Rows: number, parties, class, subject, last event, dates, "
+            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters, which "
+            "may exclude baixados); not a court-wide search. Rows: number, parties, class, subject, last event, dates, "
             "claim value. pagination.totalItems is the portal's count; pagination.complete=false means rows remain "
             "unread: call again with a larger maxPages. Details and documents: eproc_get_process. Read-only."
         ),
@@ -121,7 +121,7 @@ def create_server(keys=None):
         portal: Portal,
         maxPages: Annotated[
             int,
-            Field(ge=1, le=MAX_REPORT_PAGES, description="Pages to read (50 rows each, 500 on TJSC)."),
+            Field(ge=1, le=MAX_REPORT_PAGES, description="Pages to read (50 rows each, more on some portals)."),
         ] = 1,
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_processes(max_pages=maxPages, **context))
@@ -162,7 +162,7 @@ def create_server(keys=None):
         ] = [],
         save: Annotated[
             bool,
-            Field(description="true returns savedAs file names for advbox_create_task."),
+            Field(description="true returns savedAs file names (shared documents folder)."),
         ] = False,
     ) -> dict[str, Any]:
         return call(
