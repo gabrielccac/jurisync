@@ -94,7 +94,7 @@ def _status(cell):
     """The status as the row prints it ("realizada"), without the modal that names who held the hearing."""
     link = cell.find("a")
     if link is not None:
-        return " ".join(link.find_all(string=True, recursive=False)[0].split()) if link.find(string=True) else None
+        return _clean(link) or None
     return _clean(cell) or None
 
 
@@ -144,7 +144,9 @@ def parse_tab(html):
     soup = BeautifulSoup(html or "", "html.parser")
     table = soup.find(id=TAB_TABLE)
     if table is None:
-        empty = re.search(r"\b0\s+resultados?\s+encontrados?|nenhum(?:a)?\s+(?:registro|audi[eê]ncia)", _clean(soup), re.I)
+        empty = re.search(
+            r"\b0\s+resultados?\s+encontrados?|nenhum(?:a)?\s+(?:registro|audi[eê]ncia)", _clean(soup), re.I
+        )
         return [], bool(empty)
     items = []
     for _, cells in _rows(table, _headers(table, TAB_COLUMNS)):

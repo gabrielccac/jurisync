@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import acervo, jsf, kz, pericias
+from jurisync.connectors.pje import acervo, audiencias, jsf, kz, pericias
 from jurisync.connectors.pje.expedientes import ato_ciencia, ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
@@ -350,6 +350,18 @@ def _read_detail(
             raise
         except RuntimeError as error:
             diagnostics.append({"code": "pericias_unavailable", "message": str(error)[:200]})
+    audiencia_items = None
+    if not ato_expediente and audiencias.has_tab(page["html"]):
+        try:
+            audiencia_items, audiencias_complete = audiencias.fetch_tab(session, page["html"], detail_url)
+            if not audiencias_complete:
+                diagnostics.append(
+                    {"code": "audiencias_incomplete", "message": "the Audiência tab was not read in full"}
+                )
+        except SessionExpired:
+            raise
+        except RuntimeError as error:
+            diagnostics.append({"code": "audiencias_unavailable", "message": str(error)[:200]})
     ato = ciencia = None
     if ato_expediente:
         item = None
@@ -388,6 +400,7 @@ def _read_detail(
         "expedientes": expedientes,
         "expedientes_complete": expedientes_complete,
         "pericias": pericia_items,
+        "audiencias": audiencia_items,
         "ato": ato,
         **({"ciencia": ciencia} if ciencia is not None else {}),
         "diagnostics": diagnostics,
