@@ -28,6 +28,7 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
+from jurisync.connectors.eproc.consulta import MAX_SEARCH_PAGES, search_processes, search_term
 from jurisync.connectors.eproc.filtros import by_process, process_digits
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
@@ -236,6 +237,44 @@ def create_server(keys=None):
             ),
         )
         return enveloped(result, maxPages, wanted)
+
+    @server.tool(
+        name="eproc_search_processes",
+        title="Search Eproc court processes",
+        description=(
+            "Search the court (Consulta Processual) by party name, CPF/CNPJ, OAB or originating process number, with "
+            "exactly one criterion per call. A court-wide public search: it returns other lawyers' and third parties' "
+            "processes, unlike eproc_list_processes (the lawyer's own Relação). Read-only.\n"
+            "Cost: one request for the search page plus one per result page (maxPages); includeClosed adds baixados.\n"
+            "Answer: processes (processNumber, caseClass, parties with pole, subject, court, status, filedAt and the "
+            "portal's other columns in extra), returned, total (the portal's count) and next (the maxPages that reads "
+            "the rest, or null). Details and documents: eproc_get_process."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_search_processes(
+        portal: Portal,
+        partyName: Annotated[
+            str | None, Field(description="Party name, at least name and surname (Nome da Parte).")
+        ] = None,
+        taxId: Annotated[
+            str | None, Field(description="CPF (11 digits) or CNPJ (14), digits with optional . - / punctuation.")
+        ] = None,
+        oab: Annotated[
+            str | None, Field(description="OAB registration: UF and number, e.g. 'SC123456' or '12345/SC'.")
+        ] = None,
+        originNumber: Annotated[
+            str | None, Field(description="Originating or related process number (Originário/Relacionado).")
+        ] = None,
+        includeClosed: Annotated[bool, Field(description="true also shows baixados (Exibir Baixados).")] = False,
+        maxPages: Annotated[int, Field(ge=1, le=MAX_SEARCH_PAGES, description="Result pages to read.")] = 1,
+    ) -> dict[str, Any]:
+        with tool_errors("Eproc"):
+            term = search_term(party_name=partyName, tax_id=taxId, oab=oab, origin_number=originNumber)
+        return call(
+            portal,
+            lambda **context: search_processes(term, include_closed=includeClosed, max_pages=maxPages, **context),
+        )
 
     @server.tool(
         name="eproc_get_process",

@@ -81,6 +81,16 @@ STATE_LINKS = {
 PROCESS_REPORT_ACTION = "relatorio_processo_procurador_listar"
 # The panel's lists of upcoming audiências: hearings, and conciliation hearings.
 HEARING_LISTS = {"audiencia": "audiencia_futura_listar", "conciliacao": "audiencia_futura_conciliacao_listar"}
+# Consulta Processual (eproc_search_processes): its page, and the lookups its Consultar button posts, one per search
+# type (the tipoPesquisa option's data-acaoConsultaAssinada). Court-wide reads, kept out of READ_ACTIONS and
+# AJAX_ACTIONS so that only the search, which names them, reaches them.
+SEARCH_ACTION = "processo_consultar"
+SEARCH_AJAX_ACTIONS = {
+    "processos_consulta_por_nome_parte",
+    "processos_consulta_por_documento_identificacao",
+    "processos_consulta_por_oab",
+    "processos_consulta_por_originario",
+}
 READ_ACTIONS = QUEUE_ACTIONS | {
     PROCESS_REPORT_ACTION,
     "painel_adv_listar",
@@ -96,8 +106,9 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "exame_listar",  # the process' perícias (JFRS)
     *HEARING_LISTS.values(),
 }
-# Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
-NOT_FOUND_ACTION = "processo_consultar"
+# Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); fetch_process never
+# follows it.
+NOT_FOUND_ACTION = SEARCH_ACTION
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado", "listar_painel_advogado"}
 MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit
 # Seconds the pending queues read for one session answer the next process reads; opening a document drops them,
@@ -184,7 +195,8 @@ def _response_error(response, body=""):
 
 def send(session, method, url, *, data=None, ajax=False, portal, headers=None, stream=False):
     """The one guarded request to the portal: allowlisted route, no redirects, shared fingerprint and timeout."""
-    require_route(url, AJAX_ACTIONS if ajax else READ_ACTIONS, ajax=ajax, portal=portal)
+    allowed = AJAX_ACTIONS | SEARCH_AJAX_ACTIONS if ajax else READ_ACTIONS | {SEARCH_ACTION}
+    require_route(url, allowed, ajax=ajax, portal=portal)
     try:
         response = session.request(
             method,
