@@ -1,5 +1,7 @@
 """Eproc MCP server for every configured Eproc portal. Read-only toward the portal, except that opening the document
-of a pending intimação may register its ciência (eproc_get_process always reports it in its ``ciencia`` block).
+of a pending intimação may register its ciência: eproc_get_process refuses that, with nothing opened, unless the
+caller passes acknowledgeCiencia (or the customer set ``[eproc] ciencia_on_read = "allow"``), and always reports
+what it did in its ``ciencia`` block.
 
 Each portal keeps its own session: the Selenium login runs once per portal;
 later calls reuse the authenticated cookies and re-read the panel. A call the portal answers with its login page
@@ -23,7 +25,7 @@ from jurisync.connectors.eproc.client import (
     list_processes,
     request,
 )
-from jurisync.core import certificate
+from jurisync.core import certificate, ciencia
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
     READ_ONLY,
@@ -33,7 +35,7 @@ from jurisync.core.mcp import (
     tool_errors,
 )
 from jurisync.core.session_pool import SessionExpired, SessionPool
-from jurisync.customers import load_env_file
+from jurisync.customers import ciencia_on_read, load_env_file
 from jurisync.portals import PORTAL_HELP, offer_portals
 
 
@@ -69,6 +71,11 @@ def expired(result):
     if "session_expired" in result.get("diagnostics", []):
         raise SessionExpired("eproc session expired")
     return result
+
+
+def _allow_ciencia(requested):
+    """An explicit acknowledgeCiencia wins; otherwise the customer's ``[eproc] ciencia_on_read`` setting decides."""
+    return ciencia_on_read(system="eproc") == "allow" if requested is None else requested
 
 
 def create_server(keys=None):
@@ -131,13 +138,18 @@ def create_server(keys=None):
         title="Get Eproc process context",
         description=(
             "Read an Eproc process: parties, events, document inventory and the texts of documentIds (no document is "
-            "opened without them; with them they always are). Opening a document of a process with a pending "
-            "citação/intimação may register the ciência and start the deadline. The ciencia block, checked against "
-            "the lawyer's pending queues: estado 'nenhuma' (nothing pending involved), 'pendente' (one awaits ciência, "
-            "no document opened), 'dada' (documents opened: the ciência may be registered and the deadline started) "
-            "or 'desconhecida' (opened, queues not checked; motivo says why), with intimacoes and an aviso. Always "
-            "tell the user ciencia.aviso and note it in the task. save=true stores each read document (HTML as PDF) "
-            "in the shared documents folder."
+            "opened without them). Ciência: opening a document of a process with a citação/intimação awaiting "
+            "ciência in the lawyer's pending queues may register the ciência and start the deadline, so documentIds "
+            "are refused with nothing opened (error starts 'ciência pending') without acknowledgeCiencia; when the "
+            "queues could not be read in full they are refused too (error starts 'ciência not checked'): retry later "
+            "or acknowledge. "
+            + ciencia.AUTHORIZATION
+            + ". settings.toml [eproc] ciencia_on_read = 'allow' opens them by default. The ciencia block, checked "
+            "against the pending queues: estado 'nenhuma' (nothing pending involved), 'pendente' (one awaits "
+            "ciência, no document opened), 'dada' (opened with acknowledgeCiencia: the ciência may be registered and "
+            "the deadline started) or 'desconhecida' (opened with acknowledgeCiencia, queues not checked; motivo "
+            "says why), with intimacoes and an aviso: unless 'nenhuma', tell the user and note it in the task. "
+            "save=true stores each read document (HTML as PDF) in the shared documents folder."
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -164,6 +176,10 @@ def create_server(keys=None):
             bool,
             Field(description="true returns savedAs file names for advbox_create_task."),
         ] = False,
+        acknowledgeCiencia: Annotated[
+            bool | None,
+            Field(description=ciencia.ACKNOWLEDGE),
+        ] = None,
     ) -> dict[str, Any]:
         return call(
             portal,
@@ -172,6 +188,7 @@ def create_server(keys=None):
                 scope,
                 documentIds or None,
                 save=save,
+                acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
                 **context,
             ),
         )

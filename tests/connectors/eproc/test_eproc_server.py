@@ -8,8 +8,9 @@ from unittest import mock
 from mcp.client.client import Client
 
 from jurisync import portals
+from jurisync.connectors.eproc import ciencia as eproc_ciencia
 from jurisync.connectors.eproc import server
-from jurisync.core import errors
+from jurisync.core import ciencia, errors
 
 
 class EprocServerTest(unittest.TestCase):
@@ -130,14 +131,14 @@ class EprocServerTest(unittest.TestCase):
         )
         tool = listed["eproc_get_process"]
         self.assertTrue(tool.annotations.destructive_hint)  # a ciência starts a deadline: the same rule in every portal
-        self.assertNotIn("acknowledgeCiencia", tool.input_schema["properties"])
+        self.assertIn("acknowledgeCiencia", tool.input_schema["properties"])
+        self.assertIn(ciencia.AUTHORIZATION, tool.description)
 
     def test_document_ids_and_save_reach_the_client(self):
         seen = []
 
         def fetch(number, scope, document_ids, **kwargs):
-            seen.append((document_ids, kwargs["save"]))
-            self.assertNotIn("acknowledge_ciencia", kwargs)
+            seen.append((document_ids, kwargs["save"], kwargs["acknowledge_ciencia"]))
             return {"success": True, "ciencia": {"estado": "dada", "aviso": "informe o advogado"}}
 
         srv = server.create_server(["trf4-1g-sc"])
@@ -147,10 +148,31 @@ class EprocServerTest(unittest.TestCase):
             mock.patch.object(server, "fetch_process", side_effect=fetch),
         ):
             first = self.call(srv, "eproc_get_process", arguments)
-            self.call(srv, "eproc_get_process", {**arguments, "save": True})
-        self.assertEqual(seen, [(["9"], False), (["9"], True)])
+            self.call(srv, "eproc_get_process", {**arguments, "save": True, "acknowledgeCiencia": True})
+            with mock.patch.object(server, "ciencia_on_read", return_value="allow") as setting:
+                self.call(srv, "eproc_get_process", arguments)
+                self.call(srv, "eproc_get_process", {**arguments, "acknowledgeCiencia": False})
+            setting.assert_called_with(system="eproc")
+        self.assertEqual(
+            seen, [(["9"], False, False), (["9"], True, True), (["9"], False, True), (["9"], False, False)]
+        )
         self.assertFalse(first.is_error)
         self.assertEqual(first.structured_content["ciencia"]["aviso"], "informe o advogado")
+        server.sessions.close()
+
+    def test_a_ciencia_refusal_is_a_tool_error_that_says_how_to_go_on(self):
+        srv = server.create_server(["trf4-1g-sc"])
+        arguments = {"portal": "trf4-1g-sc", "processNumber": "5000001-23.2026.4.04.7207", "documentIds": ["9"]}
+        refusal = eproc_ciencia.CienciaPending(f"ciência pending: nothing was opened. {ciencia.AUTHORIZATION}.")
+        with (
+            mock.patch.object(server.sessions, "_login", return_value=(mock.Mock(), "<html></html>", "https://x")),
+            mock.patch.object(server, "fetch_process", side_effect=refusal),
+        ):
+            result = self.call(srv, "eproc_get_process", arguments)
+        self.assertTrue(result.is_error)
+        text = result.content[0].text
+        self.assertIn("ciência pending", text)
+        self.assertIn("acknowledgeCiencia=true", text)
         server.sessions.close()
 
     def test_refresh_reads_the_panel_of_every_portal_family(self):

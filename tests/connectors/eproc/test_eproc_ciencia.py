@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from jurisync.connectors.eproc import ciencia, client
+from jurisync.core.ciencia import AUTHORIZATION
 from jurisync.core.session_pool import SessionExpired
 
 NUMBER = "5000001-23.2026.4.04.7207"
@@ -151,7 +152,8 @@ class CienciaNoticeTest(unittest.TestCase):
             for _ in range(3):
                 self.assertEqual(read(portal, None)["ciencia"]["estado"], "pendente")
             self.assertEqual(reads(), 1)
-            self.assertEqual(read(portal, ["20"])["ciencia"]["estado"], "dada")  # the memo answers, then is dropped
+            opened = read(portal, ["20"], acknowledge_ciencia=True)
+            self.assertEqual(opened["ciencia"]["estado"], "dada")  # the memo answers, then is dropped
             self.assertEqual(reads(), 1)
             read(portal, None)
             self.assertEqual(reads(), 2)
@@ -173,9 +175,38 @@ class CienciaNoticeTest(unittest.TestCase):
             read(portal, ["10"])
         self.assertEqual(portal.opened, [])
 
-    def test_pending_intimacao_reads_and_tells_the_user(self):
+    def test_pending_intimacao_is_refused_with_nothing_opened(self):
         portal = Portal(citacao_intimacao_pendente_listar=queue(OTHER, NUMBER))
-        result = read(portal, ["20"])
+        with self.assertRaises(ciencia.CienciaPending) as refused:
+            read(portal, ["20"])
+        self.assertNotIsInstance(refused.exception, ciencia.CienciaUnchecked)
+        self.assertEqual(portal.opened, [])
+        message = str(refused.exception)
+        self.assertTrue(message.startswith("ciência pending"))
+        self.assertIn("Intimação - 15 dias, expedida em 03/11/2026 10:00:00", message)
+        self.assertIn(AUTHORIZATION, message)
+        self.assertNotIn(NUMBER, message)
+        # The same read without documents still answers, announcing the pending intimação.
+        self.assertEqual(read(portal, None)["ciencia"]["estado"], "pendente")
+        self.assertEqual(portal.opened, [])
+
+    def test_unreadable_pending_state_is_refused_with_nothing_opened(self):
+        for pages, panel in (
+            ({"citacao_intimacao_pendente_listar": Reply("erro", status=500)}, PANEL),
+            ({"citacao_intimacao_pendente_listar": queue(OTHER, total=40)}, PANEL),
+            ({}, SEARCH),
+        ):
+            with self.subTest(pages=pages, panel=panel):
+                portal = Portal(**pages)
+                with self.assertRaises(ciencia.CienciaUnchecked) as refused:
+                    read(portal, ["10"], panel=panel)
+                self.assertEqual(portal.opened, [])
+                self.assertTrue(str(refused.exception).startswith("ciência not checked"))
+                self.assertIn(AUTHORIZATION, str(refused.exception))
+
+    def test_pending_intimacao_reads_and_tells_the_user_when_acknowledged(self):
+        portal = Portal(citacao_intimacao_pendente_listar=queue(OTHER, NUMBER))
+        result = read(portal, ["20"], acknowledge_ciencia=True)
         self.assertEqual(portal.opened, READ)
         self.assertEqual(result["attachments"][0]["extractionStatus"], "extracted")
         notice = result["ciencia"]
@@ -206,13 +237,13 @@ class CienciaNoticeTest(unittest.TestCase):
         with mock.patch.object(ciencia, "EVENT_LINK_CONFIRMED", True):
             for ids, tied in ((["10"], []), (["20"], ["20"]), (["10", "20"], ["20"])):
                 with self.subTest(ids=ids):
-                    result = read(Portal(**pending), ids)
+                    result = read(Portal(**pending), ids, acknowledge_ciencia=True)
                     self.assertEqual(result["ciencia"]["documentosDaIntimacao"], tied)
                     self.assertEqual(len(result["attachments"]), len(ids))
-            result = read(Portal(**pending, detail=detail(events_url=None)), ["20"])
+            result = read(Portal(**pending, detail=detail(events_url=None)), ["20"], acknowledge_ciencia=True)
             self.assertNotIn("documentosDaIntimacao", result["ciencia"])  # timeline not fully loaded
 
-    def test_unreadable_pending_state_reads_and_says_it_was_not_verified(self):
+    def test_unreadable_pending_state_reads_when_acknowledged_and_says_it_was_not_verified(self):
         cases = {
             "queue answers an error": ({"citacao_intimacao_pendente_listar": Reply("erro", status=500)}, PANEL),
             "queue has more rows than were read": (
@@ -232,7 +263,7 @@ class CienciaNoticeTest(unittest.TestCase):
         for reason, (pages, panel) in cases.items():
             with self.subTest(reason=reason):
                 portal = Portal(**pages)
-                result = read(portal, ["10"], panel=panel)
+                result = read(portal, ["10"], panel=panel, acknowledge_ciencia=True)
                 self.assertEqual(portal.opened, READ)
                 notice = result["ciencia"]
                 self.assertEqual(notice["estado"], "desconhecida")
@@ -245,13 +276,16 @@ class CienciaNoticeTest(unittest.TestCase):
         portal = Portal(
             citacao_intimacao_pendente_listar=queue(), citacao_intimacao_pendente_listar_urgente=queue(NUMBER)
         )
-        self.assertEqual(read(portal, ["10"], panel=panel)["ciencia"]["intimacoes"][0]["queue"], "pending_urgent")
+        result = read(portal, ["10"], panel=panel, acknowledge_ciencia=True)
+        self.assertEqual(result["ciencia"]["intimacoes"][0]["queue"], "pending_urgent")
         # A kind the panel shows but that cannot be read leaves the state unknown.
         portal = Portal(
             citacao_intimacao_pendente_listar=queue(),
             citacao_intimacao_pendente_listar_urgente=Reply("erro", status=500),
         )
-        self.assertEqual(read(portal, ["10"], panel=panel)["ciencia"]["estado"], "desconhecida")
+        self.assertEqual(
+            read(portal, ["10"], panel=panel, acknowledge_ciencia=True)["ciencia"]["estado"], "desconhecida"
+        )
 
     def test_queue_links_of_a_state_panel_are_read_once(self):
         """TJSP-style panels publish the queue links through one ajax state payload instead of static links."""
@@ -270,12 +304,14 @@ class CienciaNoticeTest(unittest.TestCase):
             citacao_intimacao_pendente_listar=queue(),
             citacao_art334_pendente_listar=queue(NUMBER),
         )
-        self.assertEqual(read(portal, ["10"], panel=panel)["ciencia"]["intimacoes"][0]["queue"], "art334")
+        result = read(portal, ["10"], panel=panel, acknowledge_ciencia=True)
+        self.assertEqual(result["ciencia"]["intimacoes"][0]["queue"], "art334")
         self.assertEqual(portal.actions.count("retornar_citacao_intimacao_estado"), 1)
         self.assertNotIn("sair", portal.actions)
         portal = Portal(retornar_citacao_intimacao_estado=Reply("erro", status=500))
         self.assertEqual(
-            read(portal, ["10"], panel=panel)["ciencia"]["motivo"], "the panel did not expose the pending queue"
+            read(portal, ["10"], panel=panel, acknowledge_ciencia=True)["ciencia"]["motivo"],
+            "the panel did not expose the pending queue",
         )
 
 
@@ -326,7 +362,10 @@ class CliTest(unittest.TestCase):
             with mock.patch("sys.argv", argv):
                 client.main()
             self.assertEqual(seen["args"], (NUMBER, "page", ["9"]))
-            self.assertNotIn("acknowledge_ciencia", seen)
+            self.assertIs(seen["acknowledge_ciencia"], False)
+            with mock.patch("sys.argv", [*argv, "--acknowledge-ciencia"]):
+                client.main()
+            self.assertIs(seen["acknowledge_ciencia"], True)
             with (
                 mock.patch.object(client, "list_notices", return_value={"success": True}) as notices,
                 mock.patch("sys.argv", ["eproc", "queue", "--portal", "trf4-1g-sc", "--queue", "hearing_notice"]),

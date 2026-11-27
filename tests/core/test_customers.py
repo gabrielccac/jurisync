@@ -154,6 +154,17 @@ def test_ciencia_on_read_defaults_to_ask_and_follows_settings_toml(root):
         customers.ciencia_on_read()
 
 
+def test_eproc_ciencia_on_read_has_its_own_table(root):
+    (root / "acme" / "settings.toml").write_text('[pje]\nciencia_on_read = "allow"\n', encoding="utf-8")
+    assert customers.ciencia_on_read(system="eproc") == "ask"
+    (root / "acme" / "settings.toml").write_text('[eproc]\nciencia_on_read = "allow"\n', encoding="utf-8")
+    assert customers.ciencia_on_read(system="eproc") == "allow"
+    assert customers.ciencia_on_read() == "ask"
+    (root / "acme" / "settings.toml").write_text('[eproc]\nciencia_on_read = "yes"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\[eproc\] ciencia_on_read"):
+        customers.ciencia_on_read(system="eproc")
+
+
 def test_ciencia_on_read_without_a_customer_is_ask(monkeypatch):
     monkeypatch.delenv("JURISYNC_CUSTOMER", raising=False)
     assert customers.ciencia_on_read() == "ask"
