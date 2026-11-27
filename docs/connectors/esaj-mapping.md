@@ -268,7 +268,7 @@ Tools:
 |---|---|
 | `esaj_get_session` | Validar login, OABs e serviços disponíveis |
 | `esaj_list_messages` | Caixa postal e mensagens |
-| `esaj_list_intimacoes` | Atos recebidos/não recebidos (quando o fluxo for descoberto) |
+| `esaj_list_intimacoes` | Lista "Manifestações / ciência" do painel: processos com prazo aberto (`prazo_correndo`; cartão fechado = `sem_prazo`). Não há lista de intimação aguardando ciência: ela só aparece no documento da movimentação, que o portal abre depois da confirmação de recebimento (`receipt_required`) |
 | `esaj_list_tasks` | Tarefas/prazos via `/tarefas-adv/api` |
 | `esaj_get_process` | Abrir processo por número |
 | `esaj_list_documents` | Documentos do processo |

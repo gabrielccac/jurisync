@@ -639,6 +639,8 @@ def import_main(argv, *, ask_secret, say, stdin=None):
                 output.write(raw)
     write_env(env_file, values)
     os.environ.update(values)
+    # Choices made on this machine before the import (the A3 certificate in PJE_A3_CERT) count for its checks too.
+    os.environ.update({k: v for k, v in read_env(env_file).items() if k not in os.environ})
     say(f"Credenciais instaladas em {env_file} (somente o seu usuário lê esse arquivo).")
     checks = opened["checks"] or [f"eproc:{key}" for key in portals.keys("eproc") if portals.eproc(key).env("USERNAME")]
     return 1 if verify_and_register(checks, args, say, servers=set(opened["servers"]) or None) else 0

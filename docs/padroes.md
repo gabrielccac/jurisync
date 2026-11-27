@@ -62,6 +62,12 @@ Objetos (português para o domínio jurídico, inglês para o resto): `intimacoe
 prazo: caixa, expedientes, comunicações pendentes), `publicacoes` (diário), `comunicacoes` (DJEN), `counters`,
 `processes`, `process`, `documents`, `document`, `tasks`, `customers`, `members`, `files`, `folders`.
 
+Itens de `<sistema>_list_intimacoes`: todos os sistemas devolvem `situacao` e `prazoFinal` de
+`jurisync.core.intimacao` (`aguardando_ciencia`, `aguardando_publicacao`, `prazo_correndo`, `prazo_vencido`,
+`sem_prazo`, `respondido`, `desconhecida`), e sem filtro a lista traz o que pede atenção: aguardando ciência, aguardando
+publicação e prazo correndo. Um expediente do PJe, uma intimação do Eproc, do e-SAJ ou do Projudi é o mesmo item para o
+advogado; o portal muda, a leitura não.
+
 Renomear uma tool mantém o nome antigo como alias em `jurisync.core.names`: aceito em `tools/call` (local e
 hospedado, inclusive na checagem de concessão de escrita), fora do `tools/list`. Remover um alias depende de decisão do
 Gabriel. Skills, plugins e docs são atualizados no mesmo PR da renomeação; relatórios de validação antigos ficam como
@@ -161,8 +167,11 @@ Helpers em `jurisync.core.responses`:
   vários repartem `TEXT_BUDGET`, com uma `note` mandando ler menos documentos por chamada.
   `textTruncated` continua para clientes antigos.
 - **Listas:** `listing(items, key=..., total=..., more=...)` dá `{<key>: [...], returned, total, next}`; `total` é o
-  que o portal informa (ou `null`) e `next` diz como pedir o resto (ou `null`). Conector novo usa o envelope;
-  os antigos migram quando forem tocados, mantendo as chaves que as skills já leem.
+  que o portal informa (ou `null`) e `next` são os argumentos que, repetidos na mesma tool, leem o resto
+  (`{"maxPages": 10}`), ou `null` quando não falta nada. Conector novo usa o envelope; os antigos migram quando
+  forem tocados, mantendo as chaves que as skills já leem.
+- **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
+  vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%
   menor), sem mudar o `structuredContent`.
 - Retorno de tool é um `dict` com `success`; texto vindo de portal leva o `notice` de evidência não confiável;
@@ -215,7 +224,7 @@ Passos para um conector novo:
 | Comprehensions e literais simples | regras `C4`, `PIE`, `ISC` do ruff |
 | Molde de conector válido | `tests/core/test_connector_template.py` |
 | Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |
-| Orçamento, offset e JSON compacto (pior caso do `pje_read_documents`) | `tests/core/test_responses.py` |
+| Orçamento, offset, JSON compacto (pior caso do `pje_read_documents`), envelope de lista e datas ISO | `tests/core/test_responses.py` |
 | Nomes no vocabulário; todo alias aponta para uma tool listada e funciona | `tests/core/test_names.py` |
 | Prefixo de variável = chave do portal (ou exceção listada); nome antigo aceito; `.env.example` gerado passa no `check-customer` | `tests/core/test_env_names.py` |
 | Logs JSON com a chamada, código de erro no fim de cada chamada, sem argumentos | `tests/core/test_logs.py` |

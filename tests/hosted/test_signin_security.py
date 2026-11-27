@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import hashlib
+import importlib.util
 import os
 import secrets
 import sqlite3
@@ -594,7 +595,7 @@ class OldStoreMigrationTest(unittest.TestCase):
                 store.remove_tenant("office-a")
                 store.purge()
 
-    def test_users_stored_before_the_password_change_must_change_it(self):
+    def test_no_stored_or_new_user_is_forced_to_change_the_password(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "store.sqlite"
             store = Store(path)
@@ -603,13 +604,31 @@ class OldStoreMigrationTest(unittest.TestCase):
             old = sqlite3.connect(path)
             old.execute("alter table users drop column must_change")
             old.execute("insert into users values ('u@a.test', 'office-a', 'scrypt$00$00', 0)")
+            old.execute("pragma user_version = 0")
             old.commit()
             old.close()
             store = Store(path)
-            self.assertTrue(store.must_change("u@a.test"))
+            self.assertFalse(store.must_change("u@a.test"))
             store.add_user("new@a.test", "office-a", PASSWORD)
             self.assertFalse(store.must_change("new@a.test"))
             store._db.close()
+
+    def test_users_an_earlier_version_marked_for_a_change_are_released_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "store.sqlite"
+            with Store(path) as store:
+                store.add_tenant("office-a", "A")
+                store.add_user("u@a.test", "office-a", PASSWORD)
+            old = sqlite3.connect(path)
+            old.execute("update users set must_change = 1")
+            old.execute("pragma user_version = 0")
+            old.commit()
+            old.close()
+            with Store(path) as store:
+                self.assertFalse(store.must_change("u@a.test"))
+                store.set_password("u@a.test", PASSWORD, must_change=True)  # only an explicit request marks a user
+            with Store(path) as store:
+                self.assertTrue(store.must_change("u@a.test"))
 
 
 class PasswordChangeTest(SignInCase):
@@ -657,6 +676,37 @@ class PasswordChangeTest(SignInCase):
     def test_without_the_box_a_user_signs_in_directly(self):
         client = TestClient(self.app, base_url=BASE)
         self.assertEqual(self.start(client)[3].status_code, 302)
+
+    def test_the_smoke_test_signs_in_and_reports_a_password_change_page_without_changing_it(self):
+        spec = importlib.util.spec_from_file_location(
+            "smoke_test", Path(__file__).parents[2] / "deploy" / "smoke_test.py"
+        )
+        smoke = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(smoke)
+        client = TestClient(self.app, base_url=BASE, follow_redirects=False)
+        self.assertTrue(smoke.sign_in(client, BASE, self.EMAIL, PASSWORD))
+        self.store.set_password(self.EMAIL, PASSWORD, must_change=True)
+        with self.assertRaisesRegex(RuntimeError, "senha nova para user@office-a.test"):
+            smoke.sign_in(client, BASE, self.EMAIL, PASSWORD)
+        self.assertEqual(self.store.authenticate(self.EMAIL, PASSWORD), "office-a")
+        self.assertTrue(self.store.must_change(self.EMAIL))
+
+    def test_a_password_the_operator_sets_is_not_forced_to_change(self):
+        from jurisync.hosted import cli
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"JURISYNC_HOSTED_DIR": directory}),
+        ):
+            quiet = {"say": lambda _: None, "ask_secret": lambda _: PASSWORD}
+            cli.main(["tenant", "add", "office-a", "--name", "A"], **quiet)
+            cli.main(["user", "add", self.EMAIL, "--tenant", "office-a"], **quiet)
+            with cli.open_store() as store:
+                self.assertFalse(store.must_change(self.EMAIL))
+                store.set_password(self.EMAIL, PASSWORD + "x", must_change=True)
+            cli.main(["user", "password", self.EMAIL], **quiet)
+            with cli.open_store() as store:
+                self.assertFalse(store.must_change(self.EMAIL))
 
     def test_the_new_password_step_needs_the_current_password_first(self):
         client = TestClient(self.app, base_url=BASE)

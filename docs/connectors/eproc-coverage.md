@@ -6,9 +6,12 @@ connector `src/jurisync/connectors/eproc/` (read-only).
 
 ## Cobertura atual
 
-- Tools: `eproc_list_intimacoes` (filas listadas em `QUEUE_KINDS`),
-  `eproc_list_processes` (Relação de Processos do advogado) e
-  `eproc_get_process` (eventos + documentos, até 5 docs, `save` opcional).
+- Tools: `eproc_list_intimacoes` (filas listadas em `QUEUE_KINDS`; sem fila, pendentes e prazos abertos juntos,
+  cada item com `situacao`/`prazoFinal` de `core.intimacao`), `eproc_get_counters` (contadores do painel e de cada
+  instância), `eproc_list_audiencias` (audiências futuras e de conciliação), `eproc_list_processes` (Relação de
+  Processos do advogado; baixados ficam de fora em todo portal salvo `includeArchived`, filtro `prazo`) e
+  `eproc_get_process` (eventos, `prazos` de cada intimação, informações adicionais, audiências e perícias,
+  documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026.
 - Ações no allowlist (`READ_ACTIONS`/`AJAX_ACTIONS`): as 2 filas + `painel_adv_listar`,
   `processo_pesquisa_rapida`, `processo_selecionar`, `processo_consulta_listar`,
   `relatorio_processo_procurador_listar`,

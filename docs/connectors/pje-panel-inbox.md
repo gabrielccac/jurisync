@@ -88,3 +88,10 @@ round. TRF5's PJe 1.x (`trf5-legacy`) is refused.
 
 Live 23/11 (juliana, one login per portal): tjmg-pje-1g 197/197 processes in 53 jurisdictions (boxes up to 30 rows,
 all on one page, so paging is covered only by tests); tjce-1g 19/19 in 6 jurisdictions, 6 s including the login.
+
+## Audiências (`pje_list_audiencias`, `pje_get_process` audiencias)
+
+Observado em 27/11/2026 no trf5-1g e no tjmg-pje-1g: a Pauta de audiência do advogado é
+`ProcessoAudiencia/PautaAudiencia/listView.seam` (um GET, um POST do Pesquisar com o intervalo de data de início e o
+slider de páginas, 15 linhas cada); a aba Audiência do processo é `navbar:linkAbaAudiencia` (tabela
+`processoConsultaAudienciaGridList`). "Gerar PDF" e "Download dos documentos dos processos" nunca são acionados.

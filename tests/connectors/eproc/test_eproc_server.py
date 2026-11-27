@@ -127,7 +127,13 @@ class EprocServerTest(unittest.TestCase):
         # It can store a file and, by opening a document, register a ciência.
         self.assertEqual(
             {name: tool.annotations.read_only_hint for name, tool in listed.items()},
-            {"eproc_list_intimacoes": True, "eproc_list_processes": True, "eproc_get_process": False},
+            {
+                "eproc_list_intimacoes": True,
+                "eproc_get_counters": True,
+                "eproc_list_audiencias": True,
+                "eproc_list_processes": True,
+                "eproc_get_process": False,
+            },
         )
         tool = listed["eproc_get_process"]
         self.assertTrue(tool.annotations.destructive_hint)  # a ciência starts a deadline: the same rule in every portal

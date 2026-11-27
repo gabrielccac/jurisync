@@ -142,6 +142,27 @@ class EprocParserTests(unittest.TestCase):
         self.assertIsNone(unknown["pagination"]["totalItems"])
         self.assertFalse(unknown["pagination"]["complete"])
 
+    def test_queue_row_keeps_the_whole_juizo_and_reads_bold_party_headers(self):
+        # Shape of a TJMG pending row (27/11/2026), names and numbers replaced: the juízo has spaces and the parties
+        # sit under bold role headers, without data-parte.
+        html = """<table class="infraTable"><caption>Lista (1 registro):</caption>
+          <tr><th></th><th>Processo</th><th>Classe</th><th>Assunto</th><th>Evento e Prazo</th>
+          <th>Data envio requisição</th><th>Início Prazo</th><th>Final Prazo</th></tr>
+          <tr class="infraTrClara" data-classe="000029"><td><input class="infraCheckbox" value="11|1"></td>
+          <td><div><a href="controlador.php?acao=processo_selecionar&amp;num_processo=1&amp;hash=h">0000001-23.2026.8.13.0024</a></div>
+          <br/><b>Juízo: </b>BHE 6 V.C. J<br><br/><a href="javascript:exibirSubFrm('x')">Cadastrar Lembrete</a><br><br>
+          <b>Autor</b><br /> <span id="lblAtencao">FULANO DE TAL</span><br />(00000000000)<br/>X<BR />
+          <b>Réu</b><br />BANCO EXEMPLO S.A.<br /> (00000000000100)<br /></td>
+          <td>PROCEDIMENTO COMUM</td><td>Indenização por Dano Moral</td>
+          <td>Expedida/certificada a intimação eletrônica<br/>15 dias</td><td>25/11/2026 17:05:41</td>
+          <td>Aguarda publicação no DJEN</td><td></td></tr></table>"""
+        item = parse_process_list_page(html, "https://eproc1g.tjmg.jus.br/eproc/")["items"][0]
+        self.assertEqual(item["court"], "BHE 6 V.C. J")
+        self.assertEqual(
+            item["parties"], [{"role": "Autor", "name": "FULANO DE TAL"}, {"role": "Réu", "name": "BANCO EXEMPLO S.A."}]
+        )
+        self.assertEqual(item["deadlineStart"], "Aguarda publicação no DJEN")
+
 
 if __name__ == "__main__":
     unittest.main()

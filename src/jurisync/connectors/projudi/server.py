@@ -1,6 +1,7 @@
 """Projudi MCP server for every wired Projudi portal. Read-only toward the portal: processes, documents and the
-lawyer's intimação and process lists (TJGO, TJAM, TJPR), never a filing, signature or change. The one effect a read can have, the
-ciência of a pending intimação, is refused before anything is opened unless the caller passes acknowledgeCiencia.
+lawyer's intimação, process and audiência lists (TJGO, TJAM, TJPR), never a filing, signature or change. The one
+effect a read can have, the ciência of a pending intimação, is refused before anything is opened unless the caller
+passes acknowledgeCiencia.
 
 ``portals.Portal.flavor`` picks the adapter (login flow, routes, parsers); the tools are the same for every portal.
 TJGO (``tjgo-servlet``), TJAM (``legacy-local``) and TJPR (``legacy-keycloak``) have adapters. TJBA (``cnj-servlet``) has one whose login flow
@@ -20,7 +21,7 @@ from pydantic import Field
 from jurisync import customers, portals
 from jurisync.connectors.projudi import base, legacy, tjam, tjba, tjgo, tjpr
 from jurisync.connectors.projudi.base import public_file
-from jurisync.core import ciencia
+from jurisync.core import ciencia, intimacao
 from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.errors import NotSupported
 from jurisync.core.mcp import (
@@ -119,8 +120,11 @@ def _documents(index):
     ]
 
 
-def get_process(adapter, session, portal, process_number, include_documents):
+def get_process(adapter, session, portal, process_number, include_documents, include_intimacoes=True):
     process, index = base.load_process(adapter, session, portal, process_number, documents=include_documents)
+    details = getattr(adapter, "process_details", None)
+    if details is not None:
+        details(session, portal, process, intimations=include_intimacoes)
     result = {"success": True, "portal": portals.projudi(portal).key}
     result.update({key: value for key, value in process.items() if key != "movements"})
     result["movements"] = [_public_movement(movement) for movement in process["movements"]]
@@ -174,7 +178,7 @@ def create_server(keys=None):
     portal_field = Field(description=PORTAL_HELP)
     number_field = Field(
         min_length=1,
-        description="CNJ number with punctuation; TJGO also takes its lists' short number (0000000-00).",
+        description="CNJ number with punctuation; some portals also take their lists' short number (0000000-00).",
     )
 
     @server.tool(
@@ -182,7 +186,12 @@ def create_server(keys=None):
         title="Get Projudi process",
         description=(
             "Read one Projudi process: case data, parties, movements and, with include_documents, each movement's "
-            "file ids. Read-only."
+            "file ids. Desk-list portals: a 2º grau number (origin 0000, or one the 1º grau search does not find) opens the "
+            "recurso (instance '2', with its own intimacoes, sessoes with the judgment and DJEN publicacoes); a 1º "
+            "grau one adds the Dados do Processo tab to fields (valor da causa, situação, trânsito em julgado) and "
+            "additionalData; with include_intimacoes each movement lists its intimacoes (destinatario, prazo, "
+            "dataLeitura, leituraAutomatica, dataDecurso, status, djen), read from the movement's list, which "
+            "registers no reading. Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -190,9 +199,18 @@ def create_server(keys=None):
         process_number: Annotated[str, number_field],
         portal: Annotated[Portal, portal_field] = default,
         include_documents: Annotated[bool, Field(description="Include each movement's files.")] = True,
+        include_intimacoes: Annotated[
+            bool,
+            Field(
+                description="Desk-list portals: each movement's intimações (one request per movement that has them)."
+            ),
+        ] = True,
     ) -> dict[str, Any]:
         return call(
-            portal, lambda adapter, session: get_process(adapter, session, portal, process_number, include_documents)
+            portal,
+            lambda adapter, session: get_process(
+                adapter, session, portal, process_number, include_documents, include_intimacoes
+            ),
         )
 
     @server.tool(
@@ -282,26 +300,37 @@ def create_server(keys=None):
     if listed:
         list_portal = Field(description=PORTAL_HELP)
         Listed = Literal[listed]  # noqa: N806 - a type built from the configured portals
-        desk_pages = Field(ge=1, le=50, description="TJAM, TJPR: pages of 20 rows per list; default 10.")
-        desk_instances = Field(description='TJAM, TJPR: ["1"] (1º grau), ["2"] (2º grau) or both.')
+        desk_pages = Field(
+            ge=1,
+            le=50,
+            description="Desk-list portals: pages read per list (20 rows on menu lists, 100 on the Mesa do advogado, 50 "
+            "on audiências); default 10.",
+        )
+        desk_instances = Field(
+            description='Desk-list portals: ["1"] (1º grau), ["2"] (2º grau) or both; default both, except the intimação '
+            "menu lists of a portal without the Mesa do advogado (1º grau). The Mesa do advogado always has both."
+        )
 
         def desk_only(portal, **options):
             given = {name: value for name, value in options.items() if value is not None}
             if given and portals.projudi(portal).key not in (TJAM, TJPR):
-                raise ValueError(f"{', '.join(given)} apply to {TJAM} and {TJPR} only")
+                raise ValueError(f"{', '.join(given)} do not apply to {portal}: it has no desk lists")
             return given
 
         @server.tool(
             name="projudi_list_intimacoes",
-            title="List Projudi intimações (TJGO, TJAM, TJPR)",
+            title="List Projudi intimações",
             description=(
-                "The lawyer desk's intimações/citações, none opened. TJGO: 'diario' (Diário intimações with dates "
-                "and possible deadline; awaitingPublication while publication is ahead), "
-                "'awaitingPublicationNotOnHome' (unpublished, removed from home), 'portalPending' (awaiting reading: "
-                "reading their documents registers ciência). TJAM, TJPR: 'lists' (desk lists, rows with deadline as shown; "
-                "'novas' rows have cienciaPendente=true: opening registers the reading) and awaitingCiencia "
-                "(processes awaiting ciência). Each list has the portal's total; complete=false: not read in full. "
-                "Read-only."
+                "The lawyer's intimações/citações, none opened. Desk-list portals with the Mesa do advogado "
+                "(default): 'items', both instances (instance 1/2), to the lawyer and to the Sociedade de advogados "
+                "(destino), online citações included: evento, prazo (a duration), dataEnvio, ultimoDia, inicioPrazo, "
+                "finalPrazo, djen; cienciaPendente=true rows await ciência (opening one registers it); 'desk' has "
+                "each list's total, 'omitted' counts what needs no attention. Other desk-list portals, or 'lists': "
+                "menu lists, rows with the 'Prazo' column (a duration, not an end date). Diário portals: 'diario' "
+                "(Diário publications, DJEN-like: the ciência is the publication date; prazoFinal is the portal's "
+                "estimated 'possível data limite'), 'awaitingPublicationNotOnHome', 'portalPending' (reading their "
+                "documents registers ciência). "
+                f"{intimacao.DESCRIPTION} complete=false: not read in full. Read-only."
             ),
             annotations=READ_ONLY,
         )
@@ -309,7 +338,12 @@ def create_server(keys=None):
             portal: Annotated[Listed, list_portal] = listed[0],
             lists: Annotated[
                 list[Literal[tuple(tjam.INTIMATION_LISTS)]] | None,
-                Field(description="TJAM, TJPR: desk lists to read (JSON list); default the pending ones."),
+                Field(
+                    description=(
+                        "Desk-list portals: menu lists to read (JSON list); default the Mesa do advogado (items) "
+                        "where the portal has it, else the pending lists."
+                    )
+                ),
             ] = None,
             instances: Annotated[list[Literal["1", "2"]] | None, desk_instances] = None,
             maxPages: Annotated[int | None, desk_pages] = None,  # noqa: N803 - same name as the other list tools
@@ -325,12 +359,14 @@ def create_server(keys=None):
 
         @server.tool(
             name="projudi_list_processes",
-            title="List Projudi lawyer processes (TJGO, TJAM, TJPR)",
+            title="List Projudi lawyer processes",
             description=(
                 "The lawyer's own processes, in groups with the portal's total (may differ) and complete=false "
-                "when fewer rows came back. TJGO: active ones by serventia type, short number, parties; "
-                "hearingsToday = home hearing counters; portal_timeout: try later. TJAM, TJPR: 'Processos' (1º grau) and "
-                "'Recursos' (2º grau) of one situation; deskCounts per situation. Read-only."
+                "when fewer rows came back: either the ACTIVE processes only (activeOnly=true; no archived list), "
+                "one group per serventia type, 1º and 2º grau in the same list (grau '1'/'2' when the type's label "
+                "tells, else null), short number, parties, with hearingsToday = home hearing counters "
+                "(portal_timeout: try later); or, on desk-list portals, 'Processos' (1º grau) and 'Recursos' "
+                "(2º grau) of one situation, deskCounts per situation. Read-only."
             ),
             annotations=READ_ONLY,
         )
@@ -338,7 +374,7 @@ def create_server(keys=None):
             portal: Annotated[Listed, list_portal] = listed[0],
             situation: Annotated[
                 Literal[tuple(tjam.PROCESS_LISTS)] | None,
-                Field(description="TJAM, TJPR: situation list; default 'ativos'."),
+                Field(description="Desk-list portals: situation list; default 'ativos'."),
             ] = None,
             instances: Annotated[list[Literal["1", "2"]] | None, desk_instances] = None,
             maxPages: Annotated[int | None, desk_pages] = None,  # noqa: N803 - same name as the other list tools
@@ -349,6 +385,35 @@ def create_server(keys=None):
 
             def read(adapter, session):
                 return {"success": True, "portal": portal, **adapter.list_processes(session, portal, **options)}
+
+            return call(portal, read)
+
+        @server.tool(
+            name="projudi_list_audiencias",
+            title="List Projudi audiências",
+            description=(
+                "The lawyer's audiências. Desk-list portals: the Audiências list per instance ('groups', instance 1/2), every "
+                "type and modality: processNumber, partes, local, dataHora, tipo, modalidade, situacao; situation "
+                "'aguardando' (default, still to happen) or 'movimentadas'. The list shows no video link. Other portals: "
+                "supported=false, only hearingsToday (the home page's count of today's hearings). Read-only."
+            ),
+            annotations=READ_ONLY,
+        )
+        def projudi_list_audiencias(
+            portal: Annotated[Listed, list_portal] = listed[0],
+            situation: Annotated[
+                Literal[tuple(tjam.HEARING_SITUATIONS)] | None,
+                Field(description="Desk-list portals: 'aguardando' (default) or 'movimentadas'."),
+            ] = None,
+            instances: Annotated[list[Literal["1", "2"]] | None, desk_instances] = None,
+            maxPages: Annotated[int | None, desk_pages] = None,  # noqa: N803 - same name as the other list tools
+        ) -> dict[str, Any]:
+            options = desk_only(portal, situation=situation, instances=instances, max_pages=maxPages)
+            if "instances" in options:
+                options["instances"] = tuple(dict.fromkeys(options["instances"]))
+
+            def read(adapter, session):
+                return {"success": True, "portal": portal, **adapter.list_hearings(session, portal, **options)}
 
             return call(portal, read)
 

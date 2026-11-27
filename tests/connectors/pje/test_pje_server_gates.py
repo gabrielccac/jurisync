@@ -242,5 +242,26 @@ class WrongCourtBeforeLoginTest(PjeServerCase):
         fetch.assert_called_once()
 
 
+class PautaTest(PjeServerCase):
+    def test_the_pauta_defaults_to_today_and_the_next_90_days(self):
+        answer = {"success": True, "portal": "trf5-1g", "items": [], "complete": True}
+        with (
+            mock.patch.object(server, "read_pauta", return_value=answer) as read,
+            mock.patch.object(server, "date", mock.Mock(wraps=server.date, today=lambda: server.date(2026, 11, 27))),
+        ):
+            result, is_error = call("pje_list_audiencias", {"portal": "trf5-1g"})
+            self.assertFalse(is_error)
+            self.assertEqual(read.call_args.args[1:], ("trf5-1g", "2026-11-27", "2027-02-25"))
+            call("pje_list_audiencias", {"portal": "trf5-1g", "dateFrom": "2026-01-01", "dateTo": "2026-12-31"})
+            self.assertEqual(read.call_args.args[2:], ("2026-01-01", "2026-12-31"))
+        self.assertTrue(result["complete"])
+
+    def test_an_impossible_date_is_an_input_error(self):
+        for arguments in ({"dateFrom": "2026-13-01"}, {"dateFrom": "2026-12-01", "dateTo": "2026-11-01"}):
+            text, is_error = call("pje_list_audiencias", {"portal": "trf5-1g", **arguments})
+            self.assertTrue(is_error, text)
+        self.assertEqual(self.logins, [])
+
+
 if __name__ == "__main__":
     unittest.main()

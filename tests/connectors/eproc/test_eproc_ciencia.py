@@ -142,6 +142,16 @@ class CienciaNoticeTest(unittest.TestCase):
         self.assertIn("Não foi possível verificar", result["ciencia"]["aviso"])
         self.assertTrue(result["ciencia"]["motivo"])
 
+    def test_an_intimacao_awaiting_the_djen_says_so_and_the_read_lists_its_deadlines(self):
+        waiting = queue(NUMBER).replace("<td></td><td></td></tr>", "<td>Aguarda publicação no DJEN</td><td></td></tr>")
+        result = read(Portal(citacao_intimacao_pendente_listar=waiting), None)
+        self.assertEqual(result["ciencia"]["estado"], "pendente")
+        self.assertIn("aguarda a publicação no DJEN", result["ciencia"]["aviso"])
+        self.assertEqual([item["eventId"] for item in result["prazos"]], ["3"])
+        self.assertEqual(result["prazos"][0]["status"], "aguardando_abertura")
+        result = read(Portal(citacao_intimacao_pendente_listar=queue(NUMBER)), None)
+        self.assertNotIn("DJEN", result["ciencia"]["aviso"])
+
     def test_pending_queues_are_read_once_per_session_until_a_document_is_opened(self):
         portal = Portal(citacao_intimacao_pendente_listar=queue(NUMBER))
 
@@ -332,6 +342,95 @@ class CienciaNoticeTest(unittest.TestCase):
         )
 
 
+# The process page's "Informações Adicionais" legend and action buttons (TJMG and JFRS, 27/11/2026).
+EXTRAS = (
+    '<legend id="legInfAdicional" onclick="carregarInformacoesAdicionais(\'controlador.php?acao=processo_montar_'
+    "informacoes_adicionais&num_processo=1&do_log=0&hash=i', {\n    'id_pessoa_entidade': '1,2',\n    'pagina': '',\n"
+    '    \'ia_aberta\': false\n});">Informações Adicionais</legend><div id="fldInformacoesAdicionais_content"></div>'
+    '<a class="infraButton" href="controlador.php?acao=audiencia_listar&amp;num_processo=1&amp;hash=a">Audiência</a>'
+    '<a class="infraButton" href="controlador.php?acao=exame_listar&amp;num_processo=1&amp;hash=x">Perícia</a>'
+)
+INFORMATION = (
+    '<div class="row"><div class="col"><div class="row"><span class="col">Justiça Gratuita:</span>'
+    '<span class="col font-weight-bold"> Deferida</span></div></div><div class="col"><div class="row">'
+    '<span class="col">Valor da Causa:</span><span class="col"> R$ 1.000,00 </span></div></div>'
+    '<div class="col"><div class="row"><span class="col">Chave Processo:</span><span class="col"></span></div></div></div>'
+)
+HEARINGS = (
+    '<table class="infraTable"><caption>Lista de Audiências (1 registro):</caption><tr><th>Sala</th>'
+    "<th>Data/Hora Início</th><th>Data/Hora Fim</th><th>Descrição da Audiência</th><th>Magistrado</th>"
+    '<th>Realizador</th><th>Situação</th></tr><tr class="infraTrClara"><td>Sala 1</td><td>12/05/2027 15:30</td>'
+    '<td>12/05/2027 16:30</td><td><td>JUIZ DE TESTE<td><input type="hidden" value="" /></td><td>DESIGNADA</td></tr>'
+    "</table>"
+)
+EXAMS = (
+    '<table class="infraTable" id="tblExamesProcesso"><tr><th>Periciado</th><th>Data-Hora designada</th><th>Sala</th>'
+    '<th>Perito</th><th>Especialidade</th></tr><tr class="infraTrClara"><td>FULANO</td>'
+    "<td>08/01/2027  08:40 -  09:00</td><td>Sala de Perícias 01</td><td>PERITO TESTE</td><td>Médico</td></tr></table>"
+)
+
+
+class ProcessExtrasTest(unittest.TestCase):
+    def test_additional_information_hearings_and_exams_come_with_the_process(self):
+        portal = Portal(
+            detail=detail() + EXTRAS,
+            citacao_intimacao_pendente_listar=queue(OTHER),
+            processo_montar_informacoes_adicionais=INFORMATION,
+            audiencia_listar=HEARINGS,
+            exame_listar=EXAMS,
+        )
+        result = read(portal, None)
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            result["metadata"]["additionalInformation"],
+            {"Justiça Gratuita": "Deferida", "Valor da Causa": "R$ 1.000,00"},
+        )
+        self.assertEqual(
+            result["audiencias"],
+            [
+                {
+                    "location": "Sala 1",
+                    "start": "12/05/2027 15:30",
+                    "end": "12/05/2027 16:30",
+                    "description": "",
+                    "judge": "JUIZ DE TESTE",
+                    "conductedBy": "",
+                    "status": "DESIGNADA",
+                }
+            ],
+        )
+        self.assertEqual(result["pericias"][0]["scheduledAt"], "08/01/2027 08:40 - 09:00")
+        self.assertEqual(result["pericias"][0]["specialty"], "Médico")
+        self.assertEqual(portal.opened, [])
+        self.assertEqual(result["diagnostics"], [])
+
+    def test_a_process_without_the_buttons_asks_nothing_more(self):
+        portal = Portal(citacao_intimacao_pendente_listar=queue(OTHER))
+        result = read(portal, None)
+        self.assertEqual((result["audiencias"], result["pericias"]), (None, None))
+        self.assertEqual(result["metadata"]["additionalInformation"], {})
+        self.assertNotIn("audiencia_listar", portal.actions)
+
+    def test_a_failing_list_is_a_diagnostic_and_a_login_page_expires_the_session(self):
+        portal = Portal(
+            detail=detail() + EXTRAS,
+            citacao_intimacao_pendente_listar=queue(OTHER),
+            processo_montar_informacoes_adicionais=Reply("erro", status=500),
+            audiencia_listar=HEARINGS,
+            exame_listar=EXAMS,
+        )
+        result = read(portal, None)
+        self.assertEqual(result["diagnostics"], ["additional_information_failed"])
+        self.assertEqual(len(result["audiencias"]), 1)
+        expired = Portal(
+            detail=detail() + EXTRAS,
+            processo_montar_informacoes_adicionais='<input name="username">',
+        )
+        with self.assertRaises(SessionExpired):
+            read(expired, ["20"])
+        self.assertEqual(expired.opened, [])
+
+
 class TimelineMarkerTest(unittest.TestCase):
     def test_awaiting_events_read_status_reference_and_days(self):
         events = [
@@ -348,6 +447,77 @@ class TimelineMarkerTest(unittest.TestCase):
             [{"eventId": "5", "dateTime": "05/11", "label": "", "refersTo": ["3", "4"], "deadlineDays": 5}],
         )
         self.assertEqual(ciencia.awaiting_events(None), [])
+
+    def test_deadlines_read_the_live_event_format_with_its_djen_dates(self):
+        # TJMG and JFRS timelines, 27/11/2026 (names replaced): an open deadline, one closed by its decurso, a perito's
+        # deadline without days ("Status do Prazo"), and the DJEN events that refer to them.
+        events = [
+            {"id": "43", "description": "Publicado no DJEN - no dia 12/11/2026 - Refer. ao Evento: 41"},
+            {"id": "42", "description": "Disponibilizado no DJEN - no dia 11/11/2026 - Refer. ao Evento: 41"},
+            {
+                "id": "41",
+                "classes": ["infraTrClara", "infraEventoPrazoAberto"],
+                "description": "Expedida/certificada a intimação eletrônica Refer. ao Evento 40 ( AUTOR - FULANO DE TAL) "
+                "Prazo: 10 dias Status:ABERTO Data inicial da contagem do prazo: 13/11/2026 00:00:00 "
+                "Data final: 27/11/2026 23:59:59",
+            },
+            {"id": "37", "description": "Decorrido prazo - Refer. aos Eventos: 33 e 34"},
+            {"id": "35", "description": "Disponibilizado no DJEN - no dia 03/09/2026 - Refer. aos Eventos: 33, 34"},
+            {
+                "id": "34",
+                "description": "Expedida/certificada a intimação eletrônica - URGENTE Refer. ao Evento 14 e ao Evento 15 "
+                "( RÉU - EMPRESA X LTDA) Prazo: 15 dias Status:FECHADO ( 37 - Decorrido prazo ) Data inicial da "
+                "contagem do prazo: 08/09/2026 00:00:00 Data final: 28/09/2026 23:59:59",
+            },
+            {
+                "id": "18",
+                "description": "Expedida/certificada a intimação eletrônica - Perito Refer. ( PERITO - BELTRANO) Status "
+                "do Prazo: ABERTO Data inicial da contagem do prazo: 06/11/2026 00:00:00 Data final: 22/01/2027 23:59:59",
+            },
+            {"id": "2", "description": "Despacho"},
+        ]
+        found = ciencia.deadlines(events)
+        self.assertEqual([item["eventId"] for item in found], ["18", "34", "41"])
+        perito, closed, running = found
+        self.assertEqual(
+            {key: running[key] for key in ("refersTo", "party", "days", "status", "closedBy", "start", "end")},
+            {
+                "refersTo": ["40"],
+                "party": "AUTOR",
+                "days": 10,
+                "status": "aberto",
+                "closedBy": None,
+                "start": "2026-11-13",
+                "end": "2026-11-27",
+            },
+        )
+        self.assertEqual((running["djenAvailable"], running["djenPublished"]), ("2026-11-11", "2026-11-12"))
+        self.assertEqual(
+            (
+                closed["refersTo"],
+                closed["status"],
+                closed["closedBy"],
+                closed["djenAvailable"],
+                closed["djenPublished"],
+            ),
+            (["14", "15"], "fechado", "37 - Decorrido prazo", "2026-09-03", None),
+        )
+        self.assertEqual(
+            (perito["party"], perito["days"], perito["status"], perito["end"]), ("PERITO", None, "aberto", "2027-01-22")
+        )
+        self.assertEqual(ciencia.awaiting_events(events), [])  # every deadline was opened already
+
+    def test_a_deadline_neither_open_nor_closed_still_awaits_opening(self):
+        events = [
+            {
+                "id": "9",
+                "description": "Expedida/certificada a intimação eletrônica Refer. ao Evento 8 ( AUTOR - FULANO) Prazo: "
+                "15 dias Status:AGUARDANDO",
+            }
+        ]
+        self.assertEqual(ciencia.deadlines(events)[0]["status"], "aguardando")
+        self.assertEqual([marker["eventId"] for marker in ciencia.awaiting_events(events)], ["9"])
+        self.assertEqual(ciencia.awaiting_events(events)[0]["refersTo"], ["8"])
 
     def test_tied_documents_need_the_confirmed_link(self):
         events = [

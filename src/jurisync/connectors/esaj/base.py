@@ -14,6 +14,7 @@ from jurisync.connectors.esaj.account import (
     account_oabs,
     detail_item,
     list_processes,
+    oab_answer,
     oab_page,
     oab_params,
 )
@@ -81,10 +82,10 @@ from jurisync.connectors.esaj.documents import (
     second_instance_records,
 )
 from jurisync.connectors.esaj.intimacoes import (
-    CIENCIA_GIVEN,
     CIENCIA_UNKNOWN,
+    OPEN_DEADLINE,
     check_ciencia,
-    pending_intimation_numbers,
+    open_deadline_numbers,
 )
 from jurisync.connectors.esaj.process import (
     MAX_MOVEMENT_PAGES,
@@ -152,8 +153,8 @@ __all__ = [
     "dashboard_entry",
     "PROCESS_CODE",
     "dashboard_process",
-    "pending_intimation_numbers",
-    "CIENCIA_GIVEN",
+    "open_deadline_numbers",
+    "OPEN_DEADLINE",
     "CIENCIA_UNKNOWN",
     "check_ciencia",
     "BridgeResponse",
@@ -174,6 +175,7 @@ __all__ = [
     "oab_params",
     "detail_item",
     "oab_page",
+    "oab_answer",
     "list_processes",
     "load_process",
     "MAX_MOVEMENT_PAGES",

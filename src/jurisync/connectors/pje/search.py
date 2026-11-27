@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import acervo, jsf, kz, pericias
+from jurisync.connectors.pje import acervo, audiencias, jsf, kz, pericias
 from jurisync.connectors.pje.expedientes import ato_ciencia, ato_item, fetch_ato, fetch_expedientes
 from jurisync.connectors.pje.parsers import (
     detail_matches_process_number,
@@ -350,6 +350,18 @@ def _read_detail(
             raise
         except RuntimeError as error:
             diagnostics.append({"code": "pericias_unavailable", "message": str(error)[:200]})
+    audiencia_items = None
+    if not ato_expediente and audiencias.has_tab(page["html"]):
+        try:
+            audiencia_items, audiencias_complete = audiencias.fetch_tab(session, page["html"], detail_url)
+            if not audiencias_complete:
+                diagnostics.append(
+                    {"code": "audiencias_incomplete", "message": "the Audiência tab was not read in full"}
+                )
+        except SessionExpired:
+            raise
+        except RuntimeError as error:
+            diagnostics.append({"code": "audiencias_unavailable", "message": str(error)[:200]})
     ato = ciencia = None
     if ato_expediente:
         item = None
@@ -388,6 +400,7 @@ def _read_detail(
         "expedientes": expedientes,
         "expedientes_complete": expedientes_complete,
         "pericias": pericia_items,
+        "audiencias": audiencia_items,
         "ato": ato,
         **({"ciencia": ciencia} if ciencia is not None else {}),
         "diagnostics": diagnostics,
@@ -483,7 +496,7 @@ def fetch_timeline_pages(session, first_html, detail_url, download_pattern, base
     page = 1
     diagnostics = []
     visited_urls = set()
-    repeated_contract = False
+    repeated_contract = exhausted = False
     form = BeautifulSoup(first_html, "html.parser").find("form", id="divTimeLine")
     latest_state = None
     if marker_present and not contract:
@@ -531,16 +544,17 @@ def fetch_timeline_pages(session, first_html, detail_url, download_pattern, base
         next_contract = parse_timeline_contract(incoming_html, detail_url)
         contract = next_contract
         if ajax_page and before == after:
+            # The AJAX timeline answers its last page again once there is nothing older: the timeline ended.
             diagnostics.append({"code": "pagination_no_new_events", "page": page})
             contract = None
-            repeated_contract = True
+            exhausted = True
             break
     capped = bool(contract and page >= max_pages)
     if capped:
         diagnostics.append({"code": "pagination_limit", "maxPages": max_pages})
     parsed = parse_pagination(first_html, timeline)
     more_pages = bool(contract) and not repeated_contract
-    complete = not marker_present and not more_pages and not capped and not repeated_contract
+    complete = exhausted or (not marker_present and not more_pages and not capped and not repeated_contract)
     parsed.update(
         {
             "page": page,
