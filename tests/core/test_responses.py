@@ -60,6 +60,11 @@ class IsoTest(unittest.TestCase):
         self.assertEqual(responses.iso("19 jun. 2025"), "19 jun. 2025")
         self.assertEqual(responses.iso("05/11/2026 às 17h"), "05/11/2026 às 17h")
 
+    def test_a_day_or_time_that_does_not_exist_is_kept_as_text(self):
+        for value in ("31/02/2026", "29/02/2026", "00/11/2026", "05/13/2026", "05/11/2026 24:00", "05/11/2026 23:61"):
+            self.assertEqual(responses.iso(value), value)
+        self.assertEqual(responses.iso("29/02/2028 23:59:59"), "2028-02-29T23:59:59")
+
 
 class CompactTextTest(unittest.TestCase):
     def test_the_text_copy_is_the_structured_content_without_indentation(self):

@@ -8,6 +8,7 @@ Dates go out as ISO 8601 and an empty value as None (``iso``).
 
 import json
 import re
+from datetime import datetime
 
 BUDGET = 60_000
 TEXT_BUDGET = 50_000
@@ -31,8 +32,8 @@ def listing(items, *, key="items", total=None, more=None, **extra):
 def iso(value):
     """A portal date as ISO 8601: ``DD/MM/AAAA`` -> ``AAAA-MM-DD``, with time -> ``AAAA-MM-DDTHH:MM:SS``; empty -> None.
 
-    Text already in ISO, or in a shape this does not know, is returned as is (trimmed), so nothing the portal showed
-    is lost.
+    Text already in ISO, in a shape this does not know, or naming a day or time that does not exist (31/02, 24:61) is
+    returned as is (trimmed), so nothing the portal showed is lost.
     """
     text = " ".join(str(value or "").split())
     if not text:
@@ -41,8 +42,11 @@ def iso(value):
     if not match:
         return text
     day, month, year, hour, minute, second = match.groups()
-    date = f"{year}-{month}-{day}"
-    return date if hour is None else f"{date}T{hour}:{minute}:{second or '00'}"
+    try:
+        moment = datetime(int(year), int(month), int(day), int(hour or 0), int(minute or 0), int(second or 0))
+    except ValueError:
+        return text
+    return moment.date().isoformat() if hour is None else moment.isoformat()
 
 
 def _shares(wanted, budget):
