@@ -88,10 +88,10 @@ def list_intimacoes(session, portal, situacoes=None):
     return listing(chosen, key="items", total=len(chosen), more=None, **extra)
 
 
-def pending_intimation_numbers(session, portal):
-    """Digits of every process with an intimação the panel still shows without ciência.
+def open_deadline_numbers(session, portal):
+    """Digits of every process with an open card in the panel's open-deadline list ("Manifestações / ciência").
 
-    The intimações carry only the process code; the panel resolves codes to numbers the way its own page does
+    The cards carry only the process code; the panel resolves codes to numbers the way its own page does
     (``processos?cdsProcesso=...``). A code the panel does not resolve makes the answer unusable, so it raises.
     """
     items = dashboard.intimations(session, portal)
@@ -102,7 +102,7 @@ def pending_intimation_numbers(session, portal):
         return set()
     if "" in codes:
         raise common.EsajBlocked(
-            "An intimação without ciência has no process code, so it is unknown whether it is of this process",
+            "An open-deadline card of the panel has no process code, so it is unknown whether it is of this process",
             "ciencia_unchecked",
         )
     resolved = {}
@@ -113,54 +113,59 @@ def pending_intimation_numbers(session, portal):
                 resolved[item["cdProcesso"]] = re.sub(r"\D", "", str(item.get("nuProcesso") or ""))
     if set(codes) - set(resolved) or not all(resolved.values()):
         raise common.EsajBlocked(
-            "The panel did not resolve every intimação without ciência to a process, so it is unknown whether one is "
-            "of this process",
+            "The panel did not resolve every open-deadline card to a process, so it is unknown whether one is of this "
+            "process",
             "ciencia_unchecked",
         )
     return set(resolved.values())
 
 
-CIENCIA_GIVEN = (
-    "Este processo tinha intimação sem ciência no painel: abrir os documentos pode ter registrado a ciência e iniciado "
-    "o prazo. Informe o advogado."
+# What a read reports. e-SAJ serves a document of an intimação not yet received only after the receipt is confirmed in
+# the portal (the permission check refuses first: receipt_required), so a read here never registers that ciência.
+OPEN_DEADLINE = (
+    'Este processo tem prazo aberto no painel do advogado (lista "Manifestações / ciência"): a intimação já foi '
+    "recebida e o prazo corre. Esta leitura não registrou ciência; se houver intimação ainda não recebida, o próprio "
+    "portal pede a confirmação de recebimento antes de abrir o documento."
 )
 
 
 CIENCIA_UNKNOWN = (
-    "Não foi possível verificar se o processo tinha intimação sem ciência: se tinha, abrir os documentos pode ter "
-    "registrado a ciência e iniciado o prazo. Informe o advogado."
+    "Não foi possível consultar a lista de prazos abertos do painel antes desta leitura. O e-SAJ pede a confirmação de "
+    "recebimento antes de abrir documento de intimação ainda não recebida, mas confira o processo no painel."
 )
 
 
 def check_ciencia(session, portal, number, acknowledge=False):
     """The ``ciencia`` block of a read of this process, checked before its document viewer opens.
 
-    Unless the caller acknowledges, an intimação without ciência (``intimacao_pending``) or a panel list that does not
-    say (``ciencia_unchecked``, or the list's own failure) refuses with nothing opened.
+    Unless the caller acknowledges, a process with an open-deadline card (``prazo_aberto``) or a panel list that does
+    not say (``ciencia_unchecked``, or the list's own failure) refuses with nothing opened. The card is not a pending
+    ciência (its intimação was received), so an acknowledged read reports ``nenhuma`` with a notice, never ``dada``;
+    an intimação still waiting for its receipt is stopped later by the portal's own receipt check.
     """
     number = common.process_number(number, portal)
     try:
-        pending = re.sub(r"\D", "", number) in pending_intimation_numbers(session, portal)
+        open_deadline = re.sub(r"\D", "", number) in open_deadline_numbers(session, portal)
     except SessionExpired:
         raise
     except common.EsajBlocked as error:
         if acknowledge:
             return ciencia.report(ciencia.UNKNOWN, CIENCIA_UNKNOWN)
         raise common.EsajBlocked(
-            f"ciência not checked: {error}. Nothing was opened. Opening the documents anyway may register a ciência "
-            f"and start the deadline. {ciencia.AUTHORIZATION}.",
+            f"The panel's open-deadline list was not checked: {error}. Nothing was opened. {ciencia.AUTHORIZATION}.",
             error.reason,
         ) from None
     except (RuntimeError, RequestException):
         if acknowledge:
             return ciencia.report(ciencia.UNKNOWN, CIENCIA_UNKNOWN)
         raise
-    if not pending:
+    if not open_deadline:
         return ciencia.report(ciencia.NONE)
     if not acknowledge:
         raise common.EsajBlocked(
-            "This process has an intimação without ciência in the panel. Nothing was opened. Opening its documents "
-            f"may register the ciência and start the deadline. {ciencia.AUTHORIZATION}.",
-            "intimacao_pending",
+            "This process has an open deadline in the panel's 'Manifestações / ciência' list: its intimação was "
+            "received and the deadline runs (this is not a pending ciência). Nothing was opened; reading is held "
+            f"until the user knows. {ciencia.AUTHORIZATION}.",
+            "prazo_aberto",
         )
-    return ciencia.report(ciencia.GIVEN, CIENCIA_GIVEN)
+    return ciencia.report(ciencia.NONE, OPEN_DEADLINE)

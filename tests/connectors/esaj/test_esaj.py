@@ -241,7 +241,8 @@ def test_document_tools_always_report_the_ciencia(monkeypatch):
     pool.run.return_value = {"processNumber": NUMBER, "text": "teor", "ciencia": CLEAR}
     assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == CLEAR
     for reason, state in (
-        ("intimacao_pending", "pendente"),
+        # An open-deadline card is not a pending ciência: refused, but never reported as pendente.
+        ("prazo_aberto", "nenhuma"),
         ("receipt_required", "pendente"),
         ("ciencia_unchecked", "nenhuma"),
     ):

@@ -223,7 +223,7 @@ def intimation(code, ciencia=False):
     return {"id": "1", "titulo": "Intimação", "descricao": "Texto", "cdProcesso": code, "ciencia": ciencia}
 
 
-def test_a_process_with_an_intimacao_without_ciencia_opens_only_when_acknowledged(portal):
+def test_a_process_with_an_open_deadline_card_opens_only_when_acknowledged(portal):
     fake = portal(
         intimations=[intimation("AB0000000001"), intimation("AB0000000002", ciencia=True)],
         by_number=[entry("PG")],
@@ -232,14 +232,19 @@ def test_a_process_with_an_intimacao_without_ciencia_opens_only_when_acknowledge
     for read in (base.list_documents, lambda *a: base.document(*a, "7")):
         with pytest.raises(base.EsajBlocked) as error:
             read(None, "tjsp-esaj", NUMBER)
-        assert error.value.reason == "intimacao_pending"
+        assert error.value.reason == "prazo_aberto"
         assert "acknowledgeCiencia=true" in str(error.value)
+        # The card is an open deadline, not an intimação "without ciência".
+        assert "without ciência" not in str(error.value) and "not a pending ciência" in str(error.value)
     assert not any("abrirPasta" in path or "pastadigital" in path for path in fake.paths())
-    # The codes go to the panel together, as its own page sends them; only those without ciência.
+    # The codes go to the panel together, as its own page sends them; only the open cards.
     lookup = next(kwargs for _m, path, kwargs in fake.seen if kwargs.get("params") and path.endswith("processos"))
     assert lookup["params"] == [("cdsProcesso", "AB0000000001")]
     listed = base.list_documents(None, "tjsp-esaj", NUMBER, acknowledge_ciencia=True)
-    assert listed["items"][0]["documentId"] == "7" and listed["ciencia"]["estado"] == "dada"
+    # Acknowledged, the read says what it did: no ciência registered (the intimação was already received), with the
+    # open deadline in the notice; never "dada".
+    assert listed["items"][0]["documentId"] == "7" and listed["ciencia"]["estado"] == "nenhuma"
+    assert "prazo aberto" in listed["ciencia"]["aviso"]
 
 
 def test_an_intimacao_of_another_process_does_not_close_this_one(portal):
