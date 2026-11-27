@@ -107,6 +107,17 @@ def test_parse_inbox_row_variants_person_notice_no_deadline_and_pending_notice()
     assert rows[2]["ciencia"] is None and rows[2]["cienciaPendente"] is True
 
 
+def test_tjmg_deadline_with_the_weekday_before_the_date_is_read():
+    # TJMG, 27/11/2026: the date comes after the weekday, inside <strong>.
+    tjmg = row("4", limit=False).replace(
+        "<div></div></div>",
+        "<div>Data limite prevista para manifestação: <em></em> <strong>Terça-feira, 01/12/2026 23:59</strong></div></div>",
+        1,
+    )
+    found = inbox.parse_inbox(inbox_page([tjmg], 1))["rows"][0]
+    assert (found["limite"], found["limiteTipo"]) == ("2026-12-01", "manifestação")
+
+
 @pytest.mark.parametrize(
     "kind,control",
     [
