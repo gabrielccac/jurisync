@@ -93,10 +93,14 @@ def process(html, number):
 
         raise EsajParseError("e-SAJ did not return the requested process detail")
     fields = {}
-    for name in ("classeProcesso", "assuntoProcesso", "foroProcesso", "varaProcesso", "juizProcesso"):
+    for name in FIELDS:
         node = page.find(id=name)
         if node:
-            fields[name] = sanitize_diagnostics(node.get_text(" ", strip=True))
+            fields[name] = sanitize_diagnostics(" ".join(node.get_text(" ", strip=True).split()))
+    for label, name in LABELLED_FIELDS.items():
+        value = labelled(page, label)
+        if value:
+            fields[name] = value
     parties = []
     for row in page.select("#tablePartesPrincipais tr, #tablePartesSecundarias tr"):
         cells = row.find_all("td", recursive=False)
@@ -107,14 +111,132 @@ def process(html, number):
                     "name": sanitize_diagnostics(cells[1].get_text(" ", strip=True)),
                 }
             )
-    return {"processNumber": number, "fields": fields, "parties": parties, "movements": movements(html)}
+    result = {"processNumber": number, "fields": fields, "parties": parties, "movements": movements(html)}
+    tags = header_tags(displayed)
+    if tags:
+        result["tags"] = tags
+    for title, rows in sections(page).items():
+        key = next((key for prefix, key in SECTIONS.items() if title.startswith(prefix)), None)
+        if key:
+            result[key] = rows
+    return result
+
+
+# The detail page's fields by element id: first instance (distribution, control number, area, value) and second
+# (section, judging body, rapporteur, situation, volume/appendix). A field the page lacks is left out.
+FIELDS = (
+    "classeProcesso",
+    "assuntoProcesso",
+    "foroProcesso",
+    "varaProcesso",
+    "juizProcesso",
+    "dataHoraDistribuicaoProcesso",
+    "numeroControleProcesso",
+    "areaProcesso",
+    "valorAcaoProcesso",
+    "situacaoProcesso",
+    "secaoProcesso",
+    "orgaoJulgadorProcesso",
+    "relatorProcesso",
+    "volumeApensoProcesso",
+)
+
+
+# Fields the page shows only under a label, without an id of their own.
+LABELLED_FIELDS = {"Outros assuntos": "outrosAssuntos", "Origem": "origemProcesso"}
+
+
+def labelled(page, label):
+    for node in page.select(".unj-label"):
+        if " ".join(node.get_text(" ", strip=True).split()) == label:
+            value = node.find_next_sibling()
+            if value is not None:
+                return sanitize_diagnostics(" ".join(value.get_text(" ", strip=True).split())) or None
+    return None
+
+
+def header_tags(displayed):
+    """The tags next to the process number ("Tramitação prioritária", "Julgado", "Em grau de recurso"...)."""
+    if displayed is None or displayed.parent is None:
+        return []
+    tags = (" ".join(tag.get_text(" ", strip=True).split()) for tag in displayed.parent.select(".unj-tag"))
+    return list(dict.fromkeys(sanitize_diagnostics(tag) for tag in tags if tag))
+
+
+# Section titles of the detail page (first and second instance) and the key each one gets in the result.
+SECTIONS = {
+    "Petições diversas": "peticoesDiversas",
+    "Incidentes, ações incidentais": "incidentes",
+    "Subprocessos e Recursos": "incidentes",
+    "Apensos": "apensos",
+    "Audiências": "audiencias",
+    "Números de 1ª Instância": "numerosPrimeiraInstancia",
+    "Composição do Julgamento": "composicaoJulgamento",
+    "Julgamentos": "julgamentos",
+}
+
+
+def slug(text):
+    """A header as a lowerCamel key: "Situação do julgamento" -> "situacaoDoJulgamento"."""
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[A-Za-z0-9]+", plain)
+    return "".join(word.lower() if i == 0 else word.capitalize() for i, word in enumerate(words)) or "valor"
+
+
+def section_rows(tables):
+    """The rows of one section's tables as dicts keyed by its header row (``tr.label``); a section without one has no
+    rows. A row linking a process carries its ``processNumber`` and ``codigo``."""
+    headers, rows = [], []
+    for table in tables:
+        for tr in table.find_all("tr"):
+            if tr.find_parent("table") is not table:
+                continue
+            nodes = tr.find_all(["th", "td"], recursive=False)
+            cells = [" ".join(node.get_text(" ", strip=True).split()) for node in nodes]
+            heading = "label" in (tr.get("class") or []) or (nodes and all(node.name == "th" for node in nodes))
+            if heading and not headers and any(cells):
+                headers = [slug(cell) for cell in cells]
+                continue
+            # A row that does not fit the header is not data: "Não há ..." or the notes printed under a block.
+            if not any(cells) or len(cells) != len(headers):
+                continue
+            row = {key: sanitize_diagnostics(value) or None for key, value in zip(headers, cells, strict=True)}
+            number = CNJ.search(" ".join(cells))
+            if number:
+                row["processNumber"] = number.group(0)
+            link = tr.select_one('a[href*="show.do"]')
+            code = parse_qs(urlsplit(link["href"]).query).get("processo.codigo", [None])[0] if link else None
+            if code:
+                row["codigo"] = code
+            rows.append(row)
+    return rows
+
+
+def sections(page):
+    """``{title: rows}`` of the detail page's titled blocks (``h2`` headings): the plain tables between one heading and
+    the next. Tables with an id or a class (parties, CDAs, layout, messages) belong to other readers."""
+    result, title, tables = {}, None, []
+    for node in page.find_all(["h2", "table"]):
+        if node.name == "h2":
+            if title and tables:
+                result[title] = section_rows(tables)
+            title, tables = " ".join(node.get_text(" ", strip=True).split()), []
+        elif title and not node.get("id") and not node.get("class"):
+            tables.append(node)
+    if title and tables:
+        result[title] = section_rows(tables)
+    return result
 
 
 def movements(html):
     """Movements of the full table; the "last movements" table repeats its first rows, so it is read only alone."""
     page = soup(html)
     table = page.find(id="tabelaTodasMovimentacoes") or page.find(id="tabelaUltimasMovimentacoes")
-    rows = table.select("tr") if table is not None else page.select("tr.containerMovimentacao")
+    # The second instance names its rows movimentacaoProcesso.
+    selector = "tr.containerMovimentacao, tr.movimentacaoProcesso"
+    rows = table.select("tr") if table is not None else page.select(selector)
     result = []
     for row in rows:
         cells = row.find_all("td", recursive=False)
@@ -138,8 +260,14 @@ RECEIPT_CHECK = re.compile(
 
 
 def link_document_id(target):
-    """``cdDocumento`` of a movement's document URL (``abrirDocumentoVinculadoMovimentacao.do``), or None."""
-    values = parse_qs(urlsplit(target or "").query).get("cdDocumento", [])
+    """``cdDocumento`` of a movement's document URL (``abrirDocumentoVinculadoMovimentacao.do``), or None.
+
+    Only that URL names the document: the second instance's ``#?cdDocumento=N`` links repeat the movement sequence.
+    """
+    parts = urlsplit(target or "")
+    if not parts.path.endswith("/abrirDocumentoVinculadoMovimentacao.do"):
+        return None
+    values = parse_qs(parts.query).get("cdDocumento", [])
     return values[0] if len(values) == 1 and re.fullmatch(r"\d+", values[0]) else None
 
 
@@ -183,7 +311,9 @@ def movement_page(html):
     """``(movements, next_cursor)`` of one ``carregarMovimentacoesAjax.do`` answer.
 
     The first page carries the cursor of the second in ``#cursorMovimentacoesPaginado``; every later page carries the
-    cursor of the next one in the hidden row ``#trCursorMovimentacoes``. No cursor: this was the last page.
+    cursor of the next one in the hidden row ``#trCursorMovimentacoes``. The second instance puts it on its "Mais" link
+    (``#linkMaisRecolherMovimentacoes``, first page) and on ``#metaPaginaMovimentacoes`` when
+    ``data-tem-mais-paginas`` is true. No cursor: this was the last page.
     """
     page = soup(html)
     if page.select_one(".mensagemErroMovimentacoes"):
@@ -195,8 +325,15 @@ def movement_page(html):
     if not cursor:
         row = page.find(id="trCursorMovimentacoes")
         cursor = row.get("data-cursor") if row is not None else None
-    if row := page.find(id="trCursorMovimentacoes"):
-        row.decompose()
+    if not cursor:
+        link = page.find(id="linkMaisRecolherMovimentacoes")
+        cursor = link.get("data-cursor") if link is not None else None
+    meta = page.find(id="metaPaginaMovimentacoes")
+    if not cursor and meta is not None and meta.get("data-tem-mais-paginas") == "true":
+        cursor = meta.get("data-cursor")
+    for node in (page.find(id="trCursorMovimentacoes"), meta):
+        if node is not None:
+            node.decompose()
     return movements(str(page)), cursor or None
 
 

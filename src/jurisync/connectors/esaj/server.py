@@ -219,12 +219,29 @@ def create_server(keys=None):
     @server.tool(
         title="Get e-SAJ process context",
         annotations=READ_ONLY,
-        description="Read process fields, parties and movements. Read-only.",
+        description="Read a process detail page: fields (class, subject, court, judge, distribuição, área, valor da "
+        "ação; in 2g also seção, órgão julgador, relator, situação), tags (e.g. Tramitação prioritária, Julgado), "
+        "parties, every movement, petições diversas, incidentes, apensos, future audiências, and in 2g "
+        "composicaoJulgamento and julgamentos. A movement document's documentId is the viewer's document code (null "
+        "when the link names none; sequence is the movement's). instancia picks the consultation (2g and "
+        "colegio_recursal on TJSP); segundaInstancia on a 1g answer says the case is also there. Several 2g entries "
+        "with one number come as alternatives (pass processCode). Read-only.",
     )
     def esaj_get_process(
-        processNumber: Annotated[str, number_field], portal: Annotated[Portal, portal_field] = default
+        processNumber: Annotated[str, number_field],
+        portal: Annotated[Portal, portal_field] = default,
+        instancia: Annotated[
+            Literal["1g", "2g", "colegio_recursal"], Field(description="Consultation to read the process in.")
+        ] = "1g",
+        processCode: Annotated[
+            str | None,
+            Field(
+                pattern=r"^[A-Za-z0-9]{1,40}$",
+                description="Optional: the consultation's process code (codigo from esaj_list_processes).",
+            ),
+        ] = None,
     ) -> dict[str, Any]:
-        return call(portal, lambda s: process.load_process(s, portal, processNumber))
+        return call(portal, lambda s: process.load_process(s, portal, processNumber, instancia, processCode))
 
     @server.tool(
         title="List e-SAJ process documents",
