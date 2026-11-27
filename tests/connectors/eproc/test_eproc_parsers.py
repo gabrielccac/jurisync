@@ -51,6 +51,23 @@ class EprocParserTests(unittest.TestCase):
         self.assertEqual(parsed["parties"][0]["representatives"], ["ADVOGADO"])
         self.assertEqual(parsed["documents"][0]["id"], "9")
 
+    def test_cover_maps_court_specific_fields_and_keeps_unknown_ones_under_extra(self):
+        html = """<fieldset id="fldCapa" data-classe="1"><span id="txtNumProcesso">5000001-23.2026.4.04.0000</span>
+        <span id="txtOrgaoColegiado">TURMA FICTICIA</span><span id="txtNumRequis">000001</span>
+        <span id="txtMagistradoAtuante">JUIZ FICTICIO</span><span id="txtCampoNovo">valor</span>
+        <span id="txtLocalidade"></span></fieldset>"""
+        self.assertEqual(
+            parse_process_detail(html, BASE)["cover"],
+            {
+                "number": "5000001-23.2026.4.04.0000",
+                "collegiateBody": "TURMA FICTICIA",
+                "paymentRequestNumber": "000001",
+                "actingJudge": "JUIZ FICTICIO",
+                "caseClassCode": "1",
+                "extra": {"CampoNovo": "valor"},
+            },
+        )
+
     def test_party_cpf_is_masked_and_cnpj_kept(self):
         html = """<table id="tblPartesERepresentantes"><tr><th>AUTOR</th><th>RÉU</th></tr><tr>
         <td><span data-parte="AUTOR">Parte Ficticia</span><span id="spnCpfParteAutor0">123.456.789-09</span></td>

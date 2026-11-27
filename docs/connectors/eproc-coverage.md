@@ -27,8 +27,11 @@ autuação e valor da causa. Os números podem ser usados em `eproc_get_process`
 buscar movimentos e textos dos documentos.
 
 O escopo é o relatório do advogado autenticado, com os filtros padrão do portal,
-não uma busca irrestrita de todos os processos do tribunal. No TRF6 observado:
-situação Todos e baixados excluídos. `filters` informa esses valores quando disponíveis.
+não uma busca irrestrita de todos os processos do tribunal. Em todos os portais observados
+(TRF4, TRF6, TJSC e TJRJ, 27/11/2026): situação Todos e baixados excluídos. `filters` informa
+esses valores quando disponíveis. As partes vêm com `pole` (`active` para "Autores Principais",
+`passive` para "Réu(s)"): a relação não mostra o polo processual (Requerente no TRF4, Apelante
+no TRF6), que só aparece em `eproc_get_process` (`parties[].role`).
 Lê somente a página retornada; consultar `pagination.complete` e `totalItems` antes de
 considerar a lista completa. Não percorre páginas nem altera filtros automaticamente.
 

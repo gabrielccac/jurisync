@@ -100,7 +100,12 @@ def create_server(keys=None):
         queue: Annotated[
             Queue,
             Field(
-                description="'open_deadlines': prazo aberto, deadline running; 'pending': citação/intimação awaiting ciência."
+                description=(
+                    "'open_deadlines': prazo aberto, deadline running; 'pending': citação/intimação awaiting ciência; "
+                    "'pending_urgent': urgent ones awaiting ciência; 'pending_agreement': awaiting ciência, acordo; "
+                    "'art334': citação for the art. 334 CPC hearing, awaiting ciência; 'expired_deadline': prazo "
+                    "decorrido (decurso) in the last days; 'hearing_notice': intimação de pauta (session schedule)."
+                )
             ),
         ],
     ) -> dict[str, Any]:
@@ -110,9 +115,9 @@ def create_server(keys=None):
         name="eproc_list_processes",
         title="List Eproc lawyer processes",
         description=(
-            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters; TRF6 "
-            "excludes baixados); not a court-wide search. Rows: number, parties, class, subject, last event, dates, "
-            "claim value. pagination.totalItems is the portal's count; pagination.complete=false means rows remain "
+            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters, which "
+            "exclude baixados on every portal); not a court-wide search. Rows: number, parties (pole active/passive; "
+            "the procedural role is in eproc_get_process), class, subject, last event, dates, claim value. pagination.totalItems is the portal's count; pagination.complete=false means rows remain "
             "unread: call again with a larger maxPages. Details and documents: eproc_get_process. Read-only."
         ),
         annotations=READ_ONLY,

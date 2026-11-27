@@ -296,6 +296,17 @@ class TimelineMarkerTest(unittest.TestCase):
         )
         self.assertEqual(ciencia.awaiting_events(None), [])
 
+    def test_reference_reads_the_event_with_or_without_colon(self):
+        for reference in ("Refer. ao Evento 6 (AUTOR - Parte de teste)", "Refer. ao Evento: 6", "Refer. ao Evento:6"):
+            with self.subTest(reference=reference):
+                events = [
+                    {
+                        "id": "7",
+                        "description": f"Expedida/certificada a intimação eletrônica {reference} Status:AGUARD. ABERTURA",
+                    }
+                ]
+                self.assertEqual(ciencia.awaiting_events(events)[0]["refersTo"], ["6"])
+
     def test_tied_documents_need_the_confirmed_link(self):
         events = [
             {"id": "5", "description": "Refer. ao Evento: 3 Status:AGUARD. ABERTURA", "documents": [{"id": "50"}]},

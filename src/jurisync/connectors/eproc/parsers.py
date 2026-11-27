@@ -250,9 +250,11 @@ def parse_lawyer_process_report(html, base_url):
                 "url": _href(link.get("href"), base_url),
                 "court": text(cells[1]).removeprefix(text(link)).strip(),
                 "caseClass": text(cells[2]),
+                # "Autores Principais" and "Réu(s)" hold the active and passive poles; the procedural role (Autor,
+                # Requerente on TRF4, Apelante on TRF6...) is not on this page, only in the process (parties[].role).
                 "parties": [
-                    {"role": role, "name": name}
-                    for index, role in ((3, "AUTOR"), (4, "REU"))
+                    {"pole": pole, "name": name}
+                    for index, pole in ((3, "active"), (4, "passive"))
                     for name in cells[index].stripped_strings
                 ],
                 "location": text(cells[5]),
@@ -338,7 +340,9 @@ def _document(anchor, base_url):
     }
 
 
-# The portal's cover-page field ids (txtNumProcesso, txtClasse, ...) mapped to the connector's field names.
+# The portal's cover-page field ids (txtNumProcesso, txtClasse, ...) mapped to the connector's field names. On a
+# 2nd-degree court "judge" is the Relator(a). An id not mapped here goes under "extra" with its raw name, so the
+# keys of the cover itself are the same on every court.
 COVER_FIELDS = {
     "NumProcesso": "number",
     "Classe": "caseClass",
@@ -348,19 +352,27 @@ COVER_FIELDS = {
     "OrgaoJulgador": "judgingBody",
     "Magistrado": "judge",
     "Localidade": "location",
+    "MagistradoAtuante": "actingJudge",
+    "OrgaoColegiado": "collegiateBody",
+    "NumRequis": "paymentRequestNumber",
 }
 
 
 def _cover(soup):
-    cover = {}
+    cover, extra = {}, {}
     for node in soup.select("#fldCapa [id^=txt]"):
-        key = node.get("id", "txt")[3:]
-        cover[COVER_FIELDS.get(key, key)] = text(node)
+        key, value = node.get("id", "txt")[3:], text(node)
+        if value:
+            if key in COVER_FIELDS:
+                cover[COVER_FIELDS[key]] = value
+            else:
+                extra[key] = value
     fieldset = soup.select_one("#fldCapa")
     if fieldset:
         cover.setdefault("caseClassCode", fieldset.get("data-classe"))
         cover.setdefault("competenceCode", fieldset.get("data-competencia"))
-    return {key: value for key, value in cover.items() if value not in (None, "")}
+    cover = {key: value for key, value in cover.items() if value not in (None, "")}
+    return {**cover, "extra": extra} if extra else cover
 
 
 def _subjects(soup):

@@ -456,7 +456,8 @@ MAX_REPORT_PAGES = 20
 
 
 def list_processes(*, session=None, panel_html=None, panel_url=None, portal, max_pages=1):
-    """Read Relação de Processos with the portal's default filters, up to ``max_pages`` pages of its pager.
+    """Read Relação de Processos with the portal's default filters (baixados excluded on every portal), up to
+    ``max_pages`` pages of its pager.
 
     The portal shows 50 rows a page (500 on TJSC). Later pages are asked for the way the pager does it: the list form
     is posted again with the same criteria and ``hdnInfraPaginaAtual``. ``pagination.complete`` is true only when

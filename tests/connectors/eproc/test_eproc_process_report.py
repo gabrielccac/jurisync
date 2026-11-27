@@ -59,9 +59,9 @@ class ProcessReportTests(unittest.TestCase):
         self.assertEqual(
             item["parties"],
             [
-                {"role": "AUTOR", "name": "Autora Um"},
-                {"role": "AUTOR", "name": "Autor Dois"},
-                {"role": "REU", "name": "INSS"},
+                {"pole": "active", "name": "Autora Um"},
+                {"pole": "active", "name": "Autor Dois"},
+                {"pole": "passive", "name": "INSS"},
             ],
         )
         self.assertEqual(result["filters"], {"status": "Todos", "includeClosed": False})
