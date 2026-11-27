@@ -28,6 +28,7 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
+from jurisync.connectors.eproc.filtros import by_process, process_digits
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -86,6 +87,10 @@ def create_server(keys=None):
     keys = tuple(keys or portals.keys("eproc"))
     Portal = Annotated[Literal[keys], Field(description=PORTAL_HELP)]  # noqa: N806 - built from the configured portals
     Queue = Literal[tuple(QUEUE_KINDS)]  # noqa: N806 - a type built from the queue kinds
+    Process = Annotated[  # noqa: N806 - an argument type shared by the list tools
+        str | None,
+        Field(description="Only this process (CNJ number, e.g. '5000001-00.2026.4.04.7200'), among the rows read."),
+    ]
     server = JurisyncServer("eproc")
 
     def call(portal, read):
@@ -100,14 +105,17 @@ def create_server(keys=None):
                 ),
             )
 
-    def enveloped(result, max_pages=None):
-        """The common list envelope; ``next`` only when the portal's pager has pages a larger maxPages reaches."""
+    def enveloped(result, max_pages=None, process_number=None):
+        """The common list envelope; ``next`` only when the portal's pager has pages a larger maxPages reaches.
+
+        Every row gets processNumber; with ``process_number`` only that process' rows stay (``filtros.by_process``)."""
+        result, total = by_process(result, process_number)
         pagination = result.get("pagination") or {}
         pages = pagination.get("totalPages") or 0
         more = None
         if max_pages and not pagination.get("complete") and max_pages < min(pages, MAX_REPORT_PAGES):
             more = {"maxPages": min(pages, MAX_REPORT_PAGES)}
-        return {**result, **listing(result.get("items") or [], total=pagination.get("totalItems"), more=more)}
+        return {**result, **listing(result["items"], total=total, more=more)}
 
     @server.tool(
         name="eproc_list_intimacoes",
@@ -119,9 +127,8 @@ def create_server(keys=None):
             + intimacao.DESCRIPTION
             + " Rows also "
             "carry queue, number, court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
-            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
-            + ENVELOPE
-            + " Read-only: opens no intimação."
+            "deadlineEnd as the portal shows them; processNumber is the same as number (its old name, kept for one "
+            "cycle). Counts of every queue: eproc_get_counters. " + ENVELOPE + " Read-only: opens no intimação."
         ),
         annotations=READ_ONLY,
     )
@@ -139,8 +146,11 @@ def create_server(keys=None):
                 )
             ),
         ] = None,
+        processNumber: Process = None,
     ) -> dict[str, Any]:
-        return enveloped(call(portal, lambda **context: list_notices(queue, **context)))
+        with tool_errors("Eproc"):
+            wanted = process_digits(processNumber)
+        return enveloped(call(portal, lambda **context: list_notices(queue, **context)), process_number=wanted)
 
     @server.tool(
         name="eproc_get_counters",
@@ -183,7 +193,8 @@ def create_server(keys=None):
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
             "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
             "movement. Rows: number, parties (pole active/passive; the procedural role is in "
-            "eproc_get_process), class, subject, last event, dates, claim value. pagination.totalItems is "
+            "eproc_get_process), class, subject, last event, dates, claim value; processNumber is the same as number "
+            "(its old name, kept for one cycle). pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread. "
             + ENVELOPE
             + " Details and documents: eproc_get_process. Read-only."
@@ -210,7 +221,10 @@ def create_server(keys=None):
             bool,
             Field(description="true: latest movement first (the panel's Últimas movimentações)."),
         ] = False,
+        processNumber: Process = None,
     ) -> dict[str, Any]:
+        with tool_errors("Eproc"):
+            wanted = process_digits(processNumber)
         result = call(
             portal,
             lambda **context: list_processes(
@@ -221,7 +235,7 @@ def create_server(keys=None):
                 **context,
             ),
         )
-        return enveloped(result, maxPages)
+        return enveloped(result, maxPages, wanted)
 
     @server.tool(
         name="eproc_get_process",
