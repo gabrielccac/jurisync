@@ -144,10 +144,10 @@ def _validate_process(process, expected_number):
 
 
 def _movement_labels(movement):
-    labels = movement.get("movement_texts")
+    labels = movement.get("movementTexts", movement.get("movement_texts"))
     if labels is not None:
         if not isinstance(labels, list) or not all(isinstance(item, str) for item in labels):
-            raise PublicationError("movement_texts must be a list of strings")
+            raise PublicationError("movementTexts must be a list of strings")
         labels = [clean_text(item) for item in labels]
         if labels:
             return labels
