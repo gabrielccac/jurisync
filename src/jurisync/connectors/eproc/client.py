@@ -43,7 +43,7 @@ from jurisync.connectors.eproc.parsers import (
 from jurisync.core import credentials, intimacao
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.redaction import drop_keys
-from jurisync.core.responses import listing
+from jurisync.core.responses import BUDGET, compact, listing
 from jurisync.core.session_pool import MissingLogin, SessionExpired
 from jurisync.customers import load_env_file
 
@@ -881,16 +881,25 @@ def list_processes(
 
 
 def _report_pages(session, body, first, endpoint, *, max_pages, portal):
-    """``first`` plus the following report pages, at most ``max_pages`` in all, with truthful pagination."""
+    """``first`` plus the following report pages, at most ``max_pages`` in all, with truthful pagination.
+
+    The pager's page count is not needed (no portal showed one, 27/11/2026): pages are asked for until the caption's
+    count is read, a page comes back empty, the form has no pager, ``max_pages`` or the answer budget.
+    """
     base_url = portals.eproc(portal).base_url
     items = list(first["items"])
+    seen = {item.get("number") for item in items}
     pagination = dict(first["pagination"])
     total, total_pages = pagination.get("totalItems"), pagination.get("totalPages")
     notes = []
     page = 0
-    while (total is None or len(items) < total) and page + 1 < max_pages and total_pages and page + 1 < total_pages:
-        page += 1
-        following = report_page_request(body, base_url, page)
+    while (
+        (total is None or len(items) < total) and page + 1 < max_pages and (not total_pages or page + 1 < total_pages)
+    ):
+        if len(compact(items)) > BUDGET:
+            notes.append("stopped at the answer budget: narrow the filters to read the rest")
+            break
+        following = report_page_request(body, base_url, page + 1)
         if following is None:
             notes.append("report_pager_unavailable")
             break
@@ -903,22 +912,26 @@ def _report_pages(session, body, first, endpoint, *, max_pages, portal):
             raise SessionExpired("eproc session expired")  # a list read can be repeated
         parsed = {"diagnostics": [error]} if error else parse_lawyer_process_report(body, base_url)
         if parsed["diagnostics"]:
-            notes.append(f"report_page_{page + 1}_failed")
+            notes.append(f"report_page_{page + 2}_failed")
             break
-        if parsed["pagination"].get("page") != page or parsed["pagination"].get("totalItems") != total:
+        numbers = {item.get("number") for item in parsed["items"]}
+        if (
+            parsed["pagination"].get("page") != page + 1
+            or parsed["pagination"].get("totalItems") != total
+            or numbers & seen
+        ):
             # The portal answered another page or a different list: stop rather than mix lists.
-            notes.append(f"report_page_{page + 1}_mismatch")
+            notes.append(f"report_page_{page + 2}_mismatch")
             break
+        if not parsed["items"]:
+            break  # past the last page
+        page += 1
         items.extend(parsed["items"])
-    pagination.update(
-        {
-            "pagesRead": page + 1 - (1 if notes else 0),
-            "itemCount": len(items),
-            "complete": total is not None and len(items) >= total,
-        }
-    )
-    if not pagination["complete"] and not notes and total_pages and total_pages > max_pages:
-        notes.append(f"stopped at maxPages={max_pages} of {total_pages}")
+        seen |= numbers
+    complete = total is not None and len(items) >= total
+    pagination.update({"pagesRead": page + 1, "itemCount": len(items), "complete": complete})
+    if not complete and not notes and page + 1 == max_pages:
+        notes.append(f"stopped at maxPages={max_pages}" + (f" of {total_pages}" if total_pages else ""))
     return {**first, "items": items, "pagination": pagination, "notes": notes}
 
 

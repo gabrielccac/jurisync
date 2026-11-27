@@ -173,5 +173,49 @@ class IntimationDateTests(unittest.TestCase):
         self.assertEqual([item["number"] for item in result["items"]], [FILTERED])
 
 
+class ReportPagerTests(unittest.TestCase):
+    """No portal showed the pager's page count (27/11/2026): the pages are followed by the caption's count."""
+
+    def report(self, number, index, caption="(3 registros - {0} a {0})"):
+        body = page(number).replace("(1 registro)", caption.format(index + 1))
+        return body.replace('name="hdnInfraPaginaAtual" value="3"', f'name="hdnInfraPaginaAtual" value="{index}"')
+
+    def read(self, *bodies, max_pages=5):
+        session = Session(*bodies)
+        result = client.list_processes(
+            session=session, panel_html=PANEL, panel_url=BASE, portal="trf6-1g", max_pages=max_pages
+        )
+        return session, result
+
+    def test_pages_are_followed_without_a_page_count(self):
+        numbers = [FIRST, FILTERED, "5000003-00.2026.4.06.3800"]
+        session, result = self.read(*(self.report(number, i) for i, number in enumerate(numbers)))
+        self.assertIsNone(result["pagination"]["totalPages"])
+        self.assertEqual([item["number"] for item in result["items"]], numbers)
+        self.assertEqual([method for method, *_ in session.calls], ["GET", "POST", "POST"])
+        self.assertEqual(session.calls[2][2]["hdnInfraPaginaAtual"], "2")
+        self.assertEqual((result["pagination"]["pagesRead"], result["pagination"]["complete"]), (3, True))
+
+        session, result = self.read(self.report(FIRST, 0), self.report(FILTERED, 1), max_pages=2)
+        self.assertFalse(result["pagination"]["complete"])
+        self.assertEqual(result["notes"], ["stopped at maxPages=2"])
+        self.assertEqual(filtros.page_count(result["pagination"]), 3)  # estimated from the rows of a page
+
+    def test_an_empty_or_repeated_page_ends_the_read(self):
+        empty = self.report(FIRST, 1).replace('<tr class="infraTrClara">', '<tr class="x">')
+        _, result = self.read(self.report(FIRST, 0), empty)
+        self.assertEqual((result["pagination"]["pagesRead"], result["notes"]), (1, []))
+        self.assertFalse(result["pagination"]["complete"])
+        _, result = self.read(self.report(FIRST, 0), self.report(FIRST, 1))
+        self.assertEqual(result["notes"], ["report_page_2_mismatch"])
+        self.assertEqual(len(result["items"]), 1)
+
+    def test_the_answer_budget_stops_the_read(self):
+        with patch.object(client, "BUDGET", 100):
+            session, result = self.read(self.report(FIRST, 0), self.report(FILTERED, 1))
+        self.assertEqual(len(session.calls), 1)
+        self.assertIn("answer budget", result["notes"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

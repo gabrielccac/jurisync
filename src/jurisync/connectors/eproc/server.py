@@ -29,7 +29,7 @@ from jurisync.connectors.eproc.client import (
     request,
 )
 from jurisync.connectors.eproc.consulta import MAX_SEARCH_PAGES, search_processes, search_term
-from jurisync.connectors.eproc.filtros import by_process, intimation_dates, process_digits
+from jurisync.connectors.eproc.filtros import by_process, intimation_dates, page_count, process_digits
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -107,12 +107,13 @@ def create_server(keys=None):
             )
 
     def enveloped(result, max_pages=None, process_number=None):
-        """The common list envelope; ``next`` only when the portal's pager has pages a larger maxPages reaches.
+        """The common list envelope; ``next`` only when pages remain that a larger maxPages reaches (the pager's count, or
+        one estimated from the rows of a page: ``filtros.page_count``).
 
         Every row gets processNumber; with ``process_number`` only that process' rows stay (``filtros.by_process``)."""
         result, total = by_process(result, process_number)
         pagination = result.get("pagination") or {}
-        pages = pagination.get("totalPages") or 0
+        pages = page_count(pagination) or 0
         more = None
         if max_pages and not pagination.get("complete") and max_pages < min(pages, MAX_REPORT_PAGES):
             more = {"maxPages": min(pages, MAX_REPORT_PAGES)}

@@ -3,6 +3,7 @@
 Pure functions; the requests stay in ``client``.
 """
 
+import math
 import re
 from datetime import date
 
@@ -33,6 +34,15 @@ def intimation_dates(date_from=None, date_to=None):
     if None not in days and days[0] > days[1]:
         raise InputError("intimationDateFrom must not be after intimationDateTo")
     return tuple(day and day.strftime("%d/%m/%Y") for day in days)
+
+
+def page_count(pagination):
+    """The pager's page count, or one estimated from the portal's row count and the rows a page held (no portal showed
+    the pager's count, 27/11/2026); None when neither is known."""
+    if pagination.get("totalPages"):
+        return pagination["totalPages"]
+    total, read, rows = pagination.get("totalItems"), pagination.get("pagesRead"), pagination.get("itemCount")
+    return math.ceil(total / (rows / read)) if total and read and rows else None
 
 
 def by_process(result, process_number=None):
