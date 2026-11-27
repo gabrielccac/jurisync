@@ -2,13 +2,16 @@
 
 An answer stays within ``BUDGET`` characters (about 15k tokens, well under the 25k-token cut of Claude Code), of which
 document texts take at most ``TEXT_BUDGET``. A list carries ``returned``, ``total`` (when the portal says) and
-``next`` (how to get more, or None); a cut text carries ``truncated`` with the offset to continue from.
+``next`` (the arguments that read more, or None); a cut text carries ``truncated`` with the offset to continue from.
+Dates go out as ISO 8601 and an empty value as None (``iso``).
 """
 
 import json
+import re
 
 BUDGET = 60_000
 TEXT_BUDGET = 50_000
+BR_DATE = re.compile(r"(\d{2})/(\d{2})/(\d{4})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?")
 
 
 def compact(value):
@@ -17,8 +20,29 @@ def compact(value):
 
 
 def listing(items, *, key="items", total=None, more=None, **extra):
-    """The common list envelope: ``{key: items, returned, total, next, ...extra}``; ``more`` says how to get the rest."""
+    """The common list envelope: ``{key: items, returned, total, next, ...extra}``.
+
+    ``total`` is the count the portal reports, or None when it does not say. ``more`` is the arguments that read the
+    rest when the same tool is called again with them (``{"maxPages": 10}``), or None when nothing is left.
+    """
     return {key: items, "returned": len(items), "total": total, "next": more, **extra}
+
+
+def iso(value):
+    """A portal date as ISO 8601: ``DD/MM/AAAA`` -> ``AAAA-MM-DD``, with time -> ``AAAA-MM-DDTHH:MM:SS``; empty -> None.
+
+    Text already in ISO, or in a shape this does not know, is returned as is (trimmed), so nothing the portal showed
+    is lost.
+    """
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None
+    match = BR_DATE.fullmatch(text)
+    if not match:
+        return text
+    day, month, year, hour, minute, second = match.groups()
+    date = f"{year}-{month}-{day}"
+    return date if hour is None else f"{date}T{hour}:{minute}:{second or '00'}"
 
 
 def _shares(wanted, budget):

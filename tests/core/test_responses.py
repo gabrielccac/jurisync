@@ -37,9 +37,28 @@ class FitTextsTest(unittest.TestCase):
 
     def test_a_list_has_the_common_envelope(self):
         self.assertEqual(
-            responses.listing([1, 2], key="processes", total=7, more="page=2"),
-            {"processes": [1, 2], "returned": 2, "total": 7, "next": "page=2"},
+            responses.listing([1, 2], key="processes", total=7, more={"maxPages": 10}, complete=False),
+            {"processes": [1, 2], "returned": 2, "total": 7, "next": {"maxPages": 10}, "complete": False},
         )
+
+    def test_a_whole_list_has_no_next_and_an_unknown_total_is_null(self):
+        self.assertEqual(responses.listing([]), {"items": [], "returned": 0, "total": None, "next": None})
+
+
+class IsoTest(unittest.TestCase):
+    def test_portal_dates_become_iso(self):
+        self.assertEqual(responses.iso("05/11/2026"), "2026-11-05")
+        self.assertEqual(responses.iso(" 05/11/2026 17:00:38 "), "2026-11-05T17:00:38")
+        self.assertEqual(responses.iso("05/11/2026 17:00"), "2026-11-05T17:00:00")
+
+    def test_empty_is_null(self):
+        for value in ("", "  ", None):
+            self.assertIsNone(responses.iso(value))
+
+    def test_iso_and_unknown_text_are_kept(self):
+        self.assertEqual(responses.iso("2026-11-05"), "2026-11-05")
+        self.assertEqual(responses.iso("19 jun. 2025"), "19 jun. 2025")
+        self.assertEqual(responses.iso("05/11/2026 às 17h"), "05/11/2026 às 17h")
 
 
 class CompactTextTest(unittest.TestCase):
