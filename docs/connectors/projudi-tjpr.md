@@ -9,6 +9,13 @@ Este documento complementa `projudi-tjgo.md`: o TJGO é a referência de
 arquitetura (core + adapter por flavor), mas **o TJPR não usa as mesmas rotas,
 não usa JSON e não tem login A1/mTLS validado**.
 
+> **27/11/2026 (sessão autenticada, read-only):** `projudi_list_intimacoes` lê a Mesa do advogado (intimações
+> "Aguardando Ciência"/"Aguardando Cumprimento", ao advogado e à sociedade, citações online; 1º e 2º grau juntos, com
+> Início/Final Prazo reais) e a trava de ciência conta essas listas; `projudi_get_process` abre recursos de 2º grau
+> (`processo/recursal/recurso.do`, busca "Processos 2º Grau"), completa a capa pela aba "Dados do Processo" e traz as
+> intimações de cada movimentação (`movimentacao.do`, uma lista sem ação); `projudi_list_audiencias` lê
+> Audiências / Listagem. O link "Ver" das intimações (`intimacao.do`) registra a leitura e nunca é seguido.
+
 ## Resumo
 
 | Capacidade | Situação em 2026-11-05 |

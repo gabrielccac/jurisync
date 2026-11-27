@@ -34,6 +34,7 @@ from curl_cffi.requests.exceptions import RequestException, Timeout
 
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers, tjgo_desk
+from jurisync.core import intimacao
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log
 from jurisync.core.session_pool import LoginRejected
 
@@ -88,10 +89,30 @@ XHR = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json, text/j
 LOGIN_FIELDS = re.compile(r"""name\s*=\s*["']?(?:Senha|Usuario)["']?[\s>/]""", re.I)
 NOT_FOUND = "Nenhum Processo foi localizado"
 ARCHIVED = {"ProcessoStatus": "", "ProcessoStatusCodigo": "1"}
-SERVENTIA_LINK = re.compile(r"^Usuario\?PaginaAtual=7&")
+# A serventia choice is only ever followed with its ``a1`` (see ``require_safe_navigation``).
+SERVENTIA_LINK = re.compile(r"^Usuario\?PaginaAtual=7&(?:[^#]*&)?a1=[^&#]+")
 SERVENTIA_OAB = re.compile(r"(\d+)-[A-Z]-([A-Z]{2})\b")
 SHORT_NUMBER = re.compile(r"(\d{1,7})[-.](\d{1,2})")
 MAX_LIST_PAGES = 10
+
+
+class UnsafeNavigation(RuntimeError):
+    """A request this connector never sends: it ends the portal session."""
+
+
+def require_safe_navigation(url):
+    """Refuse the two requests that ended a live TJGO session (27/11/2026, a read-only exploration): the serventia
+    switch ``Usuario?PaginaAtual=7`` without the ``a1`` that names the serventia (sent with ``LoginPronto=S``), and a
+    bare ``/Usuario`` after it. Every other address passes unchanged."""
+    parts = urllib.parse.urlsplit(url or "")
+    if not parts.path.rstrip("/").endswith("/Usuario"):
+        return url
+    query = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+    if not parts.query:
+        raise UnsafeNavigation("Projudi TJGO: a bare /Usuario request ends the session; never sent")
+    if "7" in query.get("PaginaAtual", []) and not any(query.get("a1", [])):
+        raise UnsafeNavigation("Projudi TJGO: the serventia switch without its a1 ends the session; never sent")
+    return url
 
 
 def serventias(html):
@@ -221,6 +242,7 @@ class TjgoAdapter(base.Adapter):
         if options:
             url = urllib.parse.urljoin(response.url, choose_serventia(config, options))
             base.require_portal_url(config, url, "Projudi serventia")
+            require_safe_navigation(url)
             response = _follow(session, config, _login_get(session, config, url))
             if not is_authenticated_panel(response) or serventias(response.text):
                 raise RuntimeError("Projudi did not open the panel of the chosen serventia")
@@ -260,7 +282,9 @@ class TjgoAdapter(base.Adapter):
 
     def request(self, session, portal, method, path, *, label="request", read_timeout=TIMEOUT, **kwargs):
         """The shared request, with a short connect timeout, a new attempt when the connection failed and a
-        ``portal_timeout`` error when the portal does not answer."""
+        ``portal_timeout`` error when the portal does not answer. ``require_safe_navigation`` refuses the requests that
+        end the session before anything is sent."""
+        require_safe_navigation(portals.projudi(portal).url(path))
         kwargs.setdefault("timeout", (CONNECT_TIMEOUT, read_timeout))
         return send(
             lambda: super(TjgoAdapter, self).request(session, portal, method, path, **kwargs), label, read_timeout
@@ -437,6 +461,9 @@ class TjgoAdapter(base.Adapter):
         return {"items": items, "unchecked": "; ".join(problems) or None}
 
     def list_intimations(self, session, portal):
+        """The home page's Diário table (DJEN-like publications: the ciência is the publication date, the deadline an
+        estimate), the Diário intimações not on the home page that still await publication, and the portal's own
+        pending communications. Diário rows whose estimated deadline has passed are left out (``omitted``)."""
         home = self._home(session, portal)
         upcoming, upcoming_complete = self._awaiting_publication(session, portal)
         dje = home["dje"]
@@ -444,22 +471,43 @@ class TjgoAdapter(base.Adapter):
         hidden = [item for item in upcoming if item["id"] not in shown]
         # No Diário table at all (nothing published) has no footer; otherwise the footer counts the rows.
         dje_complete = dje["declared"] == len(dje["items"]) or (dje["declared"] is None and not dje["items"])
+        now = tjgo_desk.today()
+        diario = [tjgo_desk.public(item) | tjgo_desk.situation(item, now) for item in dje["items"]]
+        expired = [item for item in diario if item["situacao"] not in intimacao.ATTENTION]
         return {
-            "diario": [tjgo_desk.public(item) for item in dje["items"]],
+            "diario": [item for item in diario if item["situacao"] in intimacao.ATTENTION],
+            "omitted": {intimacao.EXPIRED: len(expired)} if expired else {},
             "diarioCount": len(dje["items"]),
             "diarioDeclared": dje["declared"],
-            "awaitingPublicationNotOnHome": [tjgo_desk.public(item) for item in hidden],
-            "portalPending": [tjgo_desk.public(item) for item in home["portal"]["items"]],
+            "awaitingPublicationNotOnHome": [
+                tjgo_desk.public(item) | tjgo_desk.situation(item, now) for item in hidden
+            ],
+            "portalPending": [
+                tjgo_desk.public(item) | intimacao.fields(intimacao.AWAITING_CIENCIA)
+                for item in home["portal"]["items"]
+            ],
             "portalPendingComplete": home["portal"]["complete"],
             "portalPendingText": home["portal"].get("text", ""),
             "complete": dje_complete and home["portal"]["complete"] and upcoming_complete,
         }
 
+    def list_hearings(self, session, portal):
+        """TJGO's home page only counts today's hearings; no hearing list is read here."""
+        return {
+            "supported": False,
+            "hearingsToday": self._home(session, portal)["hearings"],
+            "note": "Projudi TJGO: only the home page's count of today's hearings is read; there is no hearing list.",
+            "complete": False,
+        }
+
     def list_processes(self, session, portal):
+        """The lawyer's active processes, one group per serventia type (the home page's counters): the portal lists
+        only active ones, and its 1º and 2º grau share the list; ``grau`` says which when the type's label tells."""
         groups, complete, hearings = self._own_processes(session, portal)
         for group in groups:
             group["processes"] = [tjgo_desk.public(row) for row in group["processes"]]
-        return {"categories": groups, "hearingsToday": hearings, "complete": complete}
+            group["grau"] = tjgo_desk.grau(group["label"])
+        return {"categories": groups, "hearingsToday": hearings, "activeOnly": True, "complete": complete}
 
     def _own_processes(self, session, portal):
         """``(groups, complete, hearings)``; rows keep ``_id`` (the portal's link to the process) or ``_page``."""

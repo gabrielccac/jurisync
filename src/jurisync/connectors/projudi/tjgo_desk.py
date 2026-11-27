@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.projudi.base import ProjudiParseError
+from jurisync.core import intimacao
 
 HOME = "Usuario?PaginaAtual=-10"
 HOME_MARKER = re.compile(r"Seja\s+bem[\s-]+vindo", re.I)
@@ -263,6 +264,36 @@ def parse_process_list(html):
         opened = PROCESS_ID.search(row.get("onclick") or "")
         rows.append({"number": number, "parties": parties, "distributedAt": dated, "_id": opened and opened.group(1)})
     return rows, int(total.group(1)) if total else None
+
+
+# The home block's serventia types (observed 2026-11-27: "Cível", "UPJ Cível", "Juizado Especial Cível", "Fazenda
+# Pública Mista", "Família - Interior", "Criminal", "Preprocessual", "Câmara Cível", "Seção Cível"): the 2º grau ones
+# name a court body of the Tribunal; a Turma Recursal (the juizados' appeals) is neither.
+SECOND_GRAU = re.compile(
+    r"2º\s*Grau|Segundo Grau|C[âa]mara|Se[çc][ãa]o|[ÓO]rg[ãa]o Especial|Corte Especial|Pleno|Gabinete|Desembargador",
+    re.I,
+)
+NEITHER_GRAU = re.compile(r"Turma Recursal", re.I)
+
+
+def grau(label):
+    """``"2"`` for a type of the Tribunal (TJGO lists both instances in one home block, the 2º grau as one more type),
+    None for a Turma Recursal, else ``"1"``."""
+    if SECOND_GRAU.search(label or ""):
+        return "2"
+    return None if NEITHER_GRAU.search(label or "") or not (label or "").strip() else "1"
+
+
+def situation(item, now=None):
+    """``core.intimacao`` fields of a Diário row: awaiting its publication (which gives the ciência) or published with
+    the deadline running; ``prazoFinal`` is the portal's "possível data limite", an estimate."""
+    now = now or today()
+    deadline = parse_date(item.get("deadline"))
+    end = deadline.isoformat() if deadline else None
+    if item.get("awaitingPublication"):
+        return intimacao.fields(intimacao.AWAITING_PUBLICATION, end, "estimado")
+    expired = deadline is not None and deadline < now
+    return intimacao.fields(intimacao.EXPIRED if expired else intimacao.RUNNING, end, "estimado")
 
 
 def public(item):
