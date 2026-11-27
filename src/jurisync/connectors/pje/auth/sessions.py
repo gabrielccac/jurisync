@@ -18,7 +18,7 @@ from jurisync.paths import user_cache
 def auth_method(portal):
     """How this install logs in to the portal.
 
-    The A3 token when ``<PREFIX>_AUTH=a3`` (or ``PJE_AUTH=a3``) is set; else the method the customer's ``portals.toml``
+    The A3 token when ``<PREFIX>_AUTH=a3`` (or ``PJE_AUTH=a3``) is set or the customer declares ``a3_totp``; else the method the customer's ``portals.toml``
     declares for the portal, whatever the registry says and whichever credentials are present. Without a declaration
     (no customer profile), the registry's method is the default:
 
@@ -36,6 +36,8 @@ def auth_method(portal):
     if (config.env("AUTH") or credentials.env("PJE_AUTH")).strip().lower() == "a3":
         return "a3_totp"
     declared = customers.declared_method(config)
+    if declared == "a3_totp":
+        return declared
     if declared:
         return "certificate_totp" if declared.startswith("certificate") else "password_totp"
     certificate_ready = certificate.is_configured()
