@@ -235,8 +235,9 @@ def create_server(keys=None):
         description="Read a process detail page: fields (class, subject, court, judge, distribuição, área, valor da "
         "ação; in 2g also seção, órgão julgador, relator, situação), tags (e.g. Tramitação prioritária, Julgado), "
         "parties, every movement, petições diversas, incidentes, apensos, future audiências, and in 2g "
-        "composicaoJulgamento and julgamentos. A movement document's documentId is the viewer's document code (null "
-        "when the link names none; sequence is the movement's). instancia picks the consultation (2g and "
+        "composicaoJulgamento and julgamentos. A movement document's documentId is the code in the movement's link "
+        "(null when the link names none; sequence is the movement's); the document viewer numbers documents "
+        "differently, so esaj_read_document takes the ids of esaj_list_documents. instancia picks the consultation (2g and "
         "colegio_recursal on TJSP); segundaInstancia on a 1g answer says the case is also there. Several 2g entries "
         "with one number come as alternatives (pass processCode). Read-only.",
     )

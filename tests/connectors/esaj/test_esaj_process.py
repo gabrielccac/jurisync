@@ -27,8 +27,8 @@ def reply(text, url=f"{HOST}/x", status=200):
 
 
 def test_a_movement_document_is_the_document_code_of_its_link_not_the_movement_sequence():
-    # Live, the receipt check's 64 (the movement's sequence) was returned twice as documentId; the viewer knows the
-    # document by the nine-digit cdDocumento of the link.
+    # Live, the receipt check's 64 (the movement's sequence) was returned twice as documentId; the link names the
+    # document by its nine-digit cdDocumento.
     first, second = parsers.movements(fixture("cpopg_movimentacoes.html"))
     assert first["documents"] == [
         {

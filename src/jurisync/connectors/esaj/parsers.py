@@ -288,11 +288,13 @@ def link_document_id(target):
 
 
 def movement_documents(row):
-    """The documents a movement links, once each: ``documentId`` is the document code of the link's URL (what the
-    document viewer lists), ``sequence`` the movement's sequence from the receipt check, when the row carries it.
+    """The documents a movement links, once each: ``documentId`` is the document code of the link's URL
+    (``cdDocumento``), ``sequence`` the movement's sequence from the receipt check, when the row carries it.
 
     The portal draws each document twice (icon and title) with the same URL. A link that opens only the
     process-password dialog names no document: it is kept with ``documentId`` None so its presence is not lost.
+    The document viewer numbers the same documents differently (live on TJSP, 2026-11-27: none of 8 movement codes
+    was in a 70-document inventory), so these codes identify a movement's document, not a viewer entry.
     """
     found = {}
     for link in row.select("a[href], a[onclick]"):
