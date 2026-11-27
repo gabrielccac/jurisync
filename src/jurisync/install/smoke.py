@@ -8,7 +8,9 @@ in, then the session closed. Nothing else is read, nothing is written and no ci�
     jurisync-smoke --compare before.json after.json
 
 ADVBOX and Juridiq are left out unless asked for (``--services`` or by name in ``--only``): a new ADVBOX login can
-make ADVBOX e-mail the lawyer a device code, and that run then stops, because only the lawyer can answer it.
+make ADVBOX e-mail the lawyer a device code, and that run then stops, because only the lawyer can answer it. Their
+login always starts from an empty session file in a temporary folder: a saved session or token never counts as ok, and
+the file a running server uses is neither read nor overwritten.
 
 Each portal gets one attempt and the run stops at the first refused login or CAPTCHA: the same password or
 authenticator usually serves other portals, and a few refusals lock the account. Consecutive logins wait for a new
@@ -21,7 +23,9 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -32,6 +36,8 @@ from jurisync.core.session_pool import EXPLANATIONS, REFUSALS, login_reason
 TOTP_PERIOD = 30
 STOP_REASONS = (*REFUSALS, "captcha")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+DOCUMENT = re.compile(r"(?<!\d)(?:\d{11}|\d{14}|\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})(?!\d)")
+SESSION_FILES = {"advbox": "ADVBOX_SESSION_FILE", "juridiq": "JURIDIQ_SESSION_FILE"}
 
 
 @dataclass(frozen=True)
@@ -81,21 +87,46 @@ def targets(only=(), services=False):
     return [target for target in found if target.key in only] if only else found
 
 
+@contextmanager
+def scratch_session_file(system):
+    """The service's session file pointed at an empty temporary folder for the block, then restored."""
+    name = SESSION_FILES[system]
+    saved = os.environ.get(name)
+    with tempfile.TemporaryDirectory(prefix="jurisync-smoke-") as folder:
+        path = Path(folder) / f"{system}-session.json"
+        os.environ[name] = str(path)
+        try:
+            yield path
+        finally:
+            if saved is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = saved
+
+
+def login_service(target):
+    """A new ADVBOX or Juridiq login from an empty session file: ok only when the login wrote a new session."""
+    with scratch_session_file(target.system) as path:
+        if target.system == "advbox":
+            from jurisync.connectors.advbox.client import AdvboxClient
+
+            client = AdvboxClient()
+            try:
+                client.ensure_session()
+            finally:
+                client.close()
+        else:
+            from jurisync.connectors.juridiq.api import JuridiqApi
+
+            JuridiqApi().token(force_refresh=True)
+        if not path.is_file():
+            raise RuntimeError(f"{target.system}: no new session was written, so no login was proven")
+
+
 def login(target):
     """One fresh login, the liveness check of its connector, then the session closed. Raises on failure."""
-    if target.system == "advbox":
-        from jurisync.connectors.advbox.client import AdvboxClient
-
-        client = AdvboxClient()
-        try:
-            client.ensure_session()
-        finally:
-            client.close()
-        return
-    if target.system == "juridiq":
-        from jurisync.connectors.juridiq.api import JuridiqApi
-
-        JuridiqApi().token(force_refresh=True)
+    if target.system in SESSION_FILES:
+        login_service(target)
         return
     fresh = None
     if target.system == "pje":
@@ -111,6 +142,16 @@ def wait_for_new_code(say, sleep=time.sleep, clock=time.time):
     pause = TOTP_PERIOD - clock() % TOTP_PERIOD + 1
     say(f"  aguardando {int(pause)} s por um código novo do autenticador...")
     sleep(pause)
+
+
+def masked(text):
+    """``text`` without e-mails, CPFs/CNPJs or the value of any secret variable set in this process."""
+    from jurisync.core.mcp import is_secret_name
+
+    for name, value in os.environ.items():
+        if len(value.strip()) >= 4 and is_secret_name(name):
+            text = text.replace(value.strip(), "[…]")
+    return DOCUMENT.sub("[…]", EMAIL.sub("<e-mail>", text))
 
 
 def needs_person(error):
@@ -138,7 +179,7 @@ def run(found, *, say=print, attempt=login, wait=wait_for_new_code):
             attempt(target)
         except Exception as error:  # noqa: BLE001 - every failure is a result of the smoke test
             reason = login_reason(error)
-            detail = EMAIL.sub("<e-mail>", sanitize_diagnostics(f"{type(error).__name__}: {str(error)[:200]}"))
+            detail = masked(sanitize_diagnostics(f"{type(error).__name__}: {str(error)[:200]}"))
             results.append(
                 Result(target.key, target.method, "falha", reason, round(time.monotonic() - began, 1), detail)
             )

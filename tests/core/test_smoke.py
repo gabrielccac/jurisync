@@ -33,6 +33,17 @@ def test_a_refusal_stops_the_run_and_the_rest_is_not_tried():
     assert "https://" not in results[0].detail
 
 
+def test_the_detail_carries_no_secret_cpf_or_e_mail(monkeypatch):
+    monkeypatch.setenv("TRF1_1G_PASSWORD", "Fict1cia-123")
+
+    def attempt(_target):
+        raise LoginRejected("password Fict1cia-123 user 12345678909 (ficticia@example.com) refused")
+
+    (result,) = smoke.run(targets("trf1-1g"), say=lambda _line: None, attempt=attempt, wait=lambda _say: None)
+    for value in ("Fict1cia-123", "12345678909", "ficticia@example.com"):
+        assert value not in result.detail
+
+
 def test_a_captcha_stops_but_an_unavailable_portal_does_not():
     def attempt(target):
         raise LoginFailed("down", reason="portal_unavailable" if target.key == "trf1-1g" else "captcha")
@@ -97,3 +108,60 @@ def test_a_device_code_stops_the_run_and_no_e_mail_is_shown():
     )
     assert [result.status for result in results] == ["falha", "nao_testado"]
     assert "@" not in results[0].detail
+
+
+class FakeAdvbox:
+    writes = True
+
+    def ensure_session(self):
+        import os
+        from pathlib import Path
+
+        path = Path(os.environ["ADVBOX_SESSION_FILE"])
+        assert not path.exists()  # starts from an empty session, never the server's cache
+        if FakeAdvbox.writes:
+            path.write_text("{}", encoding="utf-8")
+
+    def close(self):
+        pass
+
+
+def test_a_service_logs_in_from_a_scratch_session_file(monkeypatch, tmp_path):
+    from jurisync.connectors.advbox import client
+
+    server_file = tmp_path / "advbox-server.json"
+    server_file.write_text('{"cookies": []}', encoding="utf-8")
+    monkeypatch.setenv("ADVBOX_SESSION_FILE", str(server_file))
+    monkeypatch.setattr(client, "AdvboxClient", FakeAdvbox)
+    FakeAdvbox.writes = True
+    smoke.login(smoke.Target("advbox", "advbox", "password"))
+    assert server_file.read_text(encoding="utf-8") == '{"cookies": []}'
+    assert smoke.os.environ["ADVBOX_SESSION_FILE"] == str(server_file)
+    FakeAdvbox.writes = False  # the check passed on something other than a new login: not ok
+    try:
+        smoke.login(smoke.Target("advbox", "advbox", "password"))
+    except RuntimeError as error:
+        assert "no login was proven" in str(error)
+    else:
+        raise AssertionError("an ADVBOX check without a new session counted as a login")
+
+
+def test_main_runs_the_targets_and_saves_without_values(monkeypatch, tmp_path):
+    loaded = []
+    monkeypatch.setattr(smoke, "load_env", loaded.append)
+    monkeypatch.setattr(smoke, "targets", lambda only, services=False: targets("trf1-1g"))
+    monkeypatch.setattr(smoke, "run", lambda found, say: [smoke.Result("trf1-1g", "password_totp", "ok", seconds=1.0)])
+    saved = tmp_path / "antes.json"
+    assert smoke.main(["victor", "--save", str(saved)], say=lambda _line: None) == 0
+    assert loaded == ["victor"]
+    assert '"status": "ok"' in saved.read_text(encoding="utf-8")
+
+
+def test_load_env_reads_the_shared_file(monkeypatch):
+    from jurisync.core import mcp
+
+    calls = []
+    monkeypatch.setattr(mcp, "load_env_file", lambda: calls.append("loaded"))
+    monkeypatch.delenv("JURISYNC_CUSTOMER", raising=False)
+    smoke.load_env("")
+    assert calls == ["loaded"]
