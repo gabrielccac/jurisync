@@ -169,6 +169,23 @@ class CienciaNoticeTest(unittest.TestCase):
         read(failing, None)
         self.assertEqual(failing.actions.count("citacao_intimacao_pendente_listar"), 2)
 
+    def test_an_unacknowledged_document_read_checks_the_queues_again_instead_of_the_memo(self):
+        portal = Portal(citacao_intimacao_pendente_listar=queue())
+
+        def reads():
+            return portal.actions.count("citacao_intimacao_pendente_listar")
+
+        with mock.patch.object(client, "clock", return_value=1000.0):
+            read(portal, None)
+            read(portal, None)
+            self.assertEqual(reads(), 1)
+            # An intimação arrives within the memo's lifetime: the document read must not trust the old reading.
+            portal.pages["citacao_intimacao_pendente_listar"] = queue(NUMBER)
+            with self.assertRaises(ciencia.CienciaPending):
+                read(portal, ["20"])
+            self.assertEqual(reads(), 2)
+            self.assertEqual(portal.opened, [])
+
     def test_a_queue_answering_the_login_page_expires_the_session_before_anything_opens(self):
         portal = Portal(citacao_intimacao_pendente_listar='<form><input name="username"></form>')
         with self.assertRaises(SessionExpired):

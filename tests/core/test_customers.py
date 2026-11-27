@@ -124,11 +124,15 @@ def test_victor_setup_is_valid(monkeypatch):
 
 def test_validate_reports_what_breaks_a_folder(root):
     (root / "acme" / ".env.example").write_text("ACME_USER=\nACME_2FA_QR=\n", encoding="utf-8")
-    (root / "acme" / "settings.toml").write_text('[hosted]\nmode = "cloud"\n', encoding="utf-8")
+    (root / "acme" / "settings.toml").write_text(
+        '[hosted]\nmode = "cloud"\n[eproc]\nciencia_on_read = "yes"\n', encoding="utf-8"
+    )
     problems = customers.validate("acme")
     assert "acme: .env.example lacks ACME_PASS" in problems
     assert not any("ACME_2FA" in problem for problem in problems)  # one name of an A|B group is enough
     assert any("mode must be one of" in problem for problem in problems)
+    assert any("[eproc] ciencia_on_read must be one of" in problem for problem in problems)
+    assert not any("[pje]" in problem for problem in problems)
     (root / "empty").mkdir()
     assert customers.validate("empty") == [f"customer 'empty' has no portals.toml at {root / 'empty' / 'portals.toml'}"]
     assert customers.names() == ["acme", "empty"]

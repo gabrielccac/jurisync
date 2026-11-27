@@ -723,6 +723,8 @@ def fetch_process(
         internal = {**detail, "events": selected_events, "documents": document_inventory}
         attachments = []
         # Read the pending queues before opening anything: afterwards the intimação may no longer be pending.
+        if document_ids is not None and not acknowledge_ciencia:
+            forget_pending(session)  # only a reading made now may let documents open without the user's agreement
         notices, problem = pending_notices(session, panel, process_number, panel_url=panel_url, portal=portal)
         if document_ids is not None:
             ciencia.check(notices=notices, problem=problem, acknowledge=acknowledge_ciencia)
