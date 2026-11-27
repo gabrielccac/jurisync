@@ -398,3 +398,28 @@ class QueueKindsTest(unittest.TestCase):
     def test_panel_endpoint_without_advertised_action_raises(self):
         with self.assertRaises(RuntimeError):
             client._panel_endpoint({}, "pending_urgent")
+
+
+class ProcessNumberKeyTest(unittest.TestCase):
+    """The ciência check and the attention list match rows by processNumber, never by the old number."""
+
+    NUMBER = "0000001-00.2026.4.04.7200"
+
+    def test_pending_notices_finds_a_row_that_carries_only_process_number(self):
+        queues = [
+            ("pending", [{"processNumber": self.NUMBER}, {"processNumber": "0000002-00.2026.4.04.7200"}], True, None)
+        ]
+        with patch.object(client, "pending_queues", return_value=queues):
+            rows, problem = client.pending_notices(None, {}, self.NUMBER, panel_url=BASE, portal="jfsc")
+        self.assertEqual((rows, problem), ([{"processNumber": self.NUMBER, "queue": "pending"}], None))
+
+    def test_the_attention_list_dedupes_by_process_number(self):
+        row = {"processNumber": self.NUMBER, "deadlineEvent": "Evento 6", "requestedAt": "05/11/2026 17:00:38"}
+        other = {**row, "processNumber": "0000002-00.2026.4.04.7200"}
+        queues = [("pending", [row, other], True, None), ("pending_urgent", [dict(row)], True, None)]
+        with (
+            patch.object(client, "pending_queues", return_value=queues),
+            patch.object(client, "_queue_endpoint", return_value=None),
+        ):
+            result = client._attention(None, {}, panel_url=BASE, portal="jfsc")
+        self.assertEqual([item["processNumber"] for item in result["items"]], [self.NUMBER, other["processNumber"]])

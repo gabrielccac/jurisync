@@ -493,7 +493,7 @@ def _attention(session, panel, *, panel_url, portal):
     # of the open-deadline queue is the process, shared by its intimações: JFRS and TJMG, 27/11/2026).
     items, seen = [], set()
     for queue, rows, _, _ in queues:
-        keys = [(row.get("number"), row.get("deadlineEvent"), row.get("requestedAt")) for row in rows]
+        keys = [(row.get("processNumber"), row.get("deadlineEvent"), row.get("requestedAt")) for row in rows]
         items.extend(row for row, key in zip(_situated(rows, queue), keys, strict=True) if key not in seen)
         seen.update(keys)
     problems = [problem for *_, problem in queues if problem]
@@ -574,7 +574,7 @@ def pending_notices(session, panel, process_number, *, panel_url, portal):
         if error:
             problem = problem or error
             continue
-        found = [item for item in items if re.sub(r"\D", "", item.get("number") or "") == wanted]
+        found = [item for item in items if re.sub(r"\D", "", item.get("processNumber") or "") == wanted]
         rows.extend({**item, "queue": queue} for item in found)
         if not found and not complete:
             problem = problem or f"the {queue} queue was not read to its end"
@@ -1039,11 +1039,13 @@ def fetch_process(
     panel_url=None,
     portal,
     save=False,
+    acknowledge_ciencia=False,
 ):
     """Read one process; with ``document_ids`` also the text of those documents.
 
-    The documents are always read. The result always carries the ``ciencia`` block (``ciencia.notice``), which the
-    caller must relay to the user: opening the documents may have registered the ciência and started the deadline.
+    Documents of a process in the lawyer's pending queues, or read while those queues cannot be read to their end, are
+    opened only with ``acknowledge_ciencia`` (``ciencia.check`` refuses with nothing opened). The result always
+    carries the ``ciencia`` block (``ciencia.notice``), which the caller must relay to the user.
     """
     portal = portals.eproc(portal).key  # aliases in, current key out
     if not isinstance(process_number, str) or not portals.CNJ.fullmatch(process_number):
@@ -1127,7 +1129,11 @@ def fetch_process(
         internal = {**detail, "events": selected_events, "documents": document_inventory}
         attachments = []
         # Read the pending queues before opening anything: afterwards the intimação may no longer be pending.
+        if document_ids is not None and not acknowledge_ciencia:
+            forget_pending(session)  # only a reading made now may let documents open without the user's agreement
         notices, problem = pending_notices(session, panel, process_number, panel_url=panel_url, portal=portal)
+        if document_ids is not None:
+            ciencia.check(notices=notices, problem=problem, acknowledge=acknowledge_ciencia)
         block = ciencia.notice(
             process_number,
             document_ids,
@@ -1195,6 +1201,11 @@ def main():
     process.add_argument("--process-number", required=True)
     process.add_argument("--scope", choices=("latest", "page"), default="page")
     process.add_argument("--document-id", action="append")
+    process.add_argument(
+        "--acknowledge-ciencia",
+        action="store_true",
+        help="open the documents even if the process has an intimação awaiting ciência (may start the deadline)",
+    )
     args = parser.parse_args()
     enable_request_logging()
     load_env_file(".env")
@@ -1215,6 +1226,7 @@ def main():
                 args.scope,
                 args.document_id,
                 portal=args.portal,
+                acknowledge_ciencia=args.acknowledge_ciencia,
             )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result.get("success"):
