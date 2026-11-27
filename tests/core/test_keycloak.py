@@ -144,7 +144,7 @@ def test_the_old_a3_module_keeps_its_names():
 
 class FakeToken:
     closed = 0
-    protected = False
+    cloud = False
 
     def __enter__(self):
         return self

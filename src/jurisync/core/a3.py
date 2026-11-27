@@ -10,11 +10,11 @@ back to the gerid-adapter entry for the same token). It is tried once per login:
 ``PinError`` and is never retried, and a token that already counts a wrong PIN is not touched at all.
 
 A cloud A3 works the same way when its app ships a PKCS#11 module: ``PJE_A3_MODULE=certisign`` loads Certisign's
-desktopID (RemoteID). Such a token has a protected authentication path: the login is authorised in the vendor's app
-(desktopID opens its own window asking the PIN and the app's e-token code, or sends a push to the phone), so no PIN is
-read or sent here; a login or signature not authorised within ``PJE_A3_APPROVAL_TIMEOUT`` seconds (300) gives up and
-releases the token lock. It also carries the holder's
-certificate alone; the issuers come from the system's certificate store.
+desktopID (RemoteID). Only such a configured cloud module changes the flow (a physical token, PIN pad included, keeps
+its PIN login per block): the app authorises (desktopID opens its own window asking the PIN and the app's e-token code
+at the first signature), so no PIN is read or sent here; a call not authorised within ``PJE_A3_APPROVAL_TIMEOUT``
+seconds (300) gives up and releases the token lock. One authorisation then serves every login of the process
+(``held_token``). The token carries the holder's certificate alone; the issuers come from the system's store.
 """
 
 import argparse
@@ -47,7 +47,7 @@ DEFAULT_MODULES = {
 # Cloud A3 apps whose PKCS#11 module PJE_A3_MODULE takes by name; each one authorises the login in the app, never with
 # a PIN. desktopID_Provider.dll is the Windows provider of Certisign's desktopID (RemoteID), a PKCS#11 module as well.
 CLOUD_MODULES = {"certisign": "desktopID_Provider.dll"}
-# Seconds a login on a token with a protected authentication path waits for the person (PJE_A3_APPROVAL_TIMEOUT).
+# Seconds a cloud A3 call (and a wait for the token lock) waits for the person (PJE_A3_APPROVAL_TIMEOUT).
 APPROVAL_TIMEOUT = 300
 
 # DER prefix of DigestInfo for MD5 (RFC 8017 §9.2): the token pads, the caller hashes.
@@ -75,6 +75,14 @@ def module_path():
     return CLOUD_MODULES.get(value.lower(), value) or DEFAULT_MODULES.get(sys.platform, "")
 
 
+def approval_timeout():
+    return float(os.environ.get("PJE_A3_APPROVAL_TIMEOUT") or APPROVAL_TIMEOUT)
+
+
+def _now():
+    return time.monotonic()
+
+
 def lock_path():
     default = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "jurisync"
     return default / "a3.lock"
@@ -86,10 +94,22 @@ def token_lock():
     path = lock_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
-        if sys.platform == "win32":  # msvcrt locks a byte range and blocks while another process holds it.
+        if sys.platform == "win32":
             import msvcrt
 
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            # LK_LOCK gives up after 10 s, but the holder may be waiting for a person (the cloud A3's window): retry
+            # without blocking until the approval timeout.
+            deadline = _now() + approval_timeout()
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if _now() >= deadline:
+                        raise TimeoutError(
+                            "The A3 token stayed busy with another login (waiting for its authorisation?)"
+                        ) from None
+                    time.sleep(0.2)
             try:
                 yield
             finally:
@@ -104,13 +124,16 @@ def token_lock():
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-# A token that authorises by itself (the cloud A3) stays logged in for the process, so one authorisation (PIN and app
-# code in desktopID's window) serves every portal's login: {"token", "opened", "used"}, read and changed under
-# token_lock. It is logged out when idle or too old (PJE_A3_SESSION_IDLE / PJE_A3_SESSION_TTL, minutes), on a PKCS#11
-# or PIN error and when the process exits.
+# The cloud A3 stays logged in for the process, so one authorisation (PIN and app code in desktopID's window) serves
+# every portal's login: {"token", "opened", "used"}, read and changed under token_lock. It is logged out when idle or
+# too old (PJE_A3_SESSION_IDLE / PJE_A3_SESSION_TTL, minutes), when the module ended it, on a PKCS#11 or PIN error and
+# when the process exits.
 SESSION_IDLE = 20
 SESSION_TTL = 120
 _shared = {}
+# {"worker": thread} while a call that timed out is still inside the module: the module is not opened again until it
+# returns, so a second window never stacks on a pending one.
+_pending = {}
 
 
 def _minutes(name, default):
@@ -122,19 +145,24 @@ def drop_shared_token():
     token = _shared.get("token")
     _shared.clear()
     if token is not None:
-        token.close()
+        try:
+            token.close()
+        except token.pkcs11_error:
+            log.info("The cloud A3 session was already closed by its module")
 
 
 def _shared_token():
-    """The process's logged-in cloud A3, or None when there is none or it is idle, too old or abandoned."""
+    """The process's logged-in cloud A3, or None when there is none or it is idle, too old, abandoned or ended by
+    its module (then the caller authorises once more, before any connection)."""
     token = _shared.get("token")
     if token is None:
         return None
-    now = time.monotonic()
+    now = _now()
     if (
         token.abandoned
         or now - _shared["opened"] > _minutes("PJE_A3_SESSION_TTL", SESSION_TTL)
         or now - _shared["used"] > _minutes("PJE_A3_SESSION_IDLE", SESSION_IDLE)
+        or not token.session_logged_in()
     ):
         drop_shared_token()
         return None
@@ -149,34 +177,39 @@ def held_token(signer=None):
     """``signer`` as given (tests, a caller that already holds the token), else the A3 token under ``token_lock`` for
     the whole block, so parallel logins never interleave PIN logins on it.
 
-    A physical token is opened and closed per block. A token that authorises by itself (the cloud A3) is authorised on
-    first use, before any connection (inside a TLS handshake the server gives up while the person types its window),
-    and then shared by the next blocks of this process while it is valid.
+    A physical token is opened and closed per block. The cloud A3 is authorised on first use, before any connection
+    (inside a TLS handshake the server gives up while the person types its window), and then shared by the next blocks
+    of this process while it is valid; an expired one is authorised again here, once, never mid-handshake.
     """
     if signer is not None:
         yield signer
         return
     with token_lock():
+        worker = _pending.get("worker")
+        if worker is not None and worker.is_alive():
+            raise PinError("An earlier A3 authorisation is still open in the certificate's app: answer or cancel it")
+        _pending.clear()
         token = _shared_token()
         if token is None:
             token = A3Signer()
-            if not token.protected:
+            if not token.cloud:
                 with token:
                     yield token
                 return
             try:
                 token.authorise()
             except BaseException:
-                token.close()
+                if not token.abandoned:
+                    token.close()
                 raise
-            _shared.update(token=token, opened=time.monotonic())
-        _shared["used"] = time.monotonic()
+            _shared.update(token=token, opened=_now())
+        _shared["used"] = _now()
         try:
             yield token
         except (PinError, token.pkcs11_error):
             drop_shared_token()
             raise
-        _shared["used"] = time.monotonic()
+        _shared["used"] = _now()
 
 
 def _keyring_pin(serial):
@@ -266,17 +299,21 @@ class A3Signer:
         self.slot = slots[0]
         info = self.lib.getTokenInfo(self.slot)
         self.serial = (info.serialNumber or "").strip()
-        # The token authorises the login itself (PIN pad, or the cloud A3 app's push / OTP): no PIN is sent.
-        self.protected = "CKF_PROTECTED_AUTHENTICATION_PATH" in info.flags2text()
+        # The configured cloud A3 module, whose app authorises (no PIN sent here). A physical token with a PIN pad
+        # also announces a protected path, but keeps its PIN login: only the cloud module changes the flow.
+        cloud_modules = {name.lower() for name in CLOUD_MODULES.values()}
+        self.cloud = (
+            Path(path).name.lower() in cloud_modules and "CKF_PROTECTED_AUTHENTICATION_PATH" in info.flags2text()
+        )
         self.session = self.lib.openSession(self.slot, PyKCS11.CKF_SERIAL_SESSION)
         self.logged_in = False
-        self.abandoned = False  # a protected login still waiting in its thread: the session is not touched again
-        self.reauthorised = False  # a cloud A3 session the module expired is authorised again once, never more
+        self.abandoned = False  # a call still waiting for the person in its thread: the session is not touched again
         self.pkcs11_error = PyKCS11.PyKCS11Error
         self._pin = pin
+        self._waiting = threading.Lock()
         certs = self._certificates()
         self.ident, self.chain = certificate_chain(certs)
-        if len(self.chain) == 1:  # a cloud A3 carries the holder's certificate alone
+        if self.cloud and len(self.chain) == 1:  # the cloud A3 carries the holder's certificate alone
             self.ident, self.chain = certificate_chain(certs, system_issuers())
         self._key = None
 
@@ -306,14 +343,14 @@ class A3Signer:
         problems = self.unsafe_pin_state()
         if problems:
             raise PinError("A3 login cancelled: " + "; ".join(problems) + ". Unlock it in tokenadmin first.")
-        pin = None if self.protected else self._pin or stored_pin(self.serial)
+        pin = None if self.cloud else self._pin or stored_pin(self.serial)
         try:
             self._on_token(lambda: self.session.login(pin, pkcs11.CKU_USER))
         except pkcs11.PyKCS11Error as error:
             if error.value == pkcs11.CKR_USER_ALREADY_LOGGED_IN:
                 self.logged_in = True
                 return
-            if self.protected and error.value in (pkcs11.CKR_FUNCTION_CANCELED, pkcs11.CKR_PIN_INCORRECT):
+            if self.cloud and error.value in (pkcs11.CKR_FUNCTION_CANCELED, pkcs11.CKR_PIN_INCORRECT):
                 raise PinError(
                     f"The A3 authorisation was cancelled or refused ({pkcs11.CKR[error.value]}); not retrying. "
                     "Approve the request in the certificate's app on the next login."
@@ -327,16 +364,17 @@ class A3Signer:
         self.logged_in = True
 
     def _on_token(self, call):
-        """``call()``; on a token that authorises by itself, given up after PJE_A3_APPROVAL_TIMEOUT seconds.
+        """``call()``; on the cloud A3, given up after PJE_A3_APPROVAL_TIMEOUT seconds.
 
-        Such a token (the cloud A3's window asking its PIN and app code, a PIN pad) waits for a person, possibly
-        forever, at the login or the first signature. The PKCS#11 call cannot be interrupted, so it is left in a daemon
-        thread and this signer stops using the session, which releases the token lock for the next login.
+        Its app's window (PIN and app code) waits for a person, possibly forever. The PKCS#11 call cannot be
+        interrupted, so it is left in a daemon thread: this signer stops using the session, the token lock is released,
+        ``held_token`` does not open the module again while the call is pending, and the thread logs out and closes the
+        session itself if the person answers later.
         """
-        if not self.protected:
+        if not self.cloud:
             return call()
-        timeout = float(os.environ.get("PJE_A3_APPROVAL_TIMEOUT") or APPROVAL_TIMEOUT)
-        log.info("A3 waits up to %g s for the authorisation on the token or in its app", timeout)
+        timeout = approval_timeout()
+        log.info("A3 waits up to %g s for the authorisation in the certificate's app", timeout)
         outcome = {}
 
         def run():
@@ -344,12 +382,23 @@ class A3Signer:
                 outcome["value"] = call()
             except Exception as error:  # noqa: BLE001 - re-raised in the caller's thread below
                 outcome["error"] = error
+            with self._waiting:
+                outcome["done"] = True
+                if self.abandoned:
+                    self.abandoned = False
+                    try:
+                        self.close()
+                    except self.pkcs11_error:
+                        log.info("The late A3 session could not be closed")
 
         worker = threading.Thread(target=run, name="a3-approval", daemon=True)
         worker.start()
         worker.join(timeout)
-        if worker.is_alive():
-            self.abandoned = True
+        with self._waiting:
+            if not outcome.get("done"):
+                self.abandoned = True
+                _pending["worker"] = worker
+        if self.abandoned:
             raise PinError(
                 f"The A3 was not authorised within {timeout:g} s (was the certificate app's window answered?); "
                 "not retrying. Answer it on the next login."
@@ -369,31 +418,26 @@ class A3Signer:
             self._key = keys[0]
         return self._key
 
+    def session_logged_in(self):
+        """Whether the module still counts this session as logged in (the cloud A3's may end it on its own)."""
+        pkcs11 = self._pkcs11
+        try:
+            state = self.session.getSessionInfo().state
+        except pkcs11.PyKCS11Error:
+            return False
+        return state in (pkcs11.CKS_RO_USER_FUNCTIONS, pkcs11.CKS_RW_USER_FUNCTIONS)
+
     def sign_digest_info(self, digest_info):
         """RSA PKCS#1 v1.5 over a DigestInfo built by the caller (CKM_RSA_PKCS); used by TLS client auth."""
-        pkcs11 = self._pkcs11
-        expired = (pkcs11.CKR_USER_NOT_LOGGED_IN, pkcs11.CKR_SESSION_HANDLE_INVALID, pkcs11.CKR_SESSION_CLOSED)
-        try:
-            return self._sign(digest_info)
-        except pkcs11.PyKCS11Error as error:
-            if not self.protected or self.reauthorised or error.value not in expired:
-                raise
-        log.warning("The A3 module ended its session; asking for the authorisation once more")
-        self.reauthorised = True
-        self.session = self.lib.openSession(self.slot, pkcs11.CKF_SERIAL_SESSION)
-        self.logged_in, self._key = False, None
-        return self._sign(digest_info)
+        self.login()
+        mechanism = self._pkcs11.Mechanism(self._pkcs11.CKM_RSA_PKCS, None)
+        key = self._private_key()
+        return bytes(self._on_token(lambda: self.session.sign(key, bytes(digest_info), mechanism)))
 
     def authorise(self):
         """Ask the person now: desktopID's C_Login returns at once and its window opens at the first signature (then
         each one takes under a second, idle minutes later too), so one throwaway signature of a fixed local text."""
         self.sign_digest_info(SHA256_DIGEST_INFO + hashlib.sha256(b"jurisync-a3-authorisation").digest())
-
-    def _sign(self, digest_info):
-        self.login()
-        mechanism = self._pkcs11.Mechanism(self._pkcs11.CKM_RSA_PKCS, None)
-        key = self._private_key()
-        return bytes(self._on_token(lambda: self.session.sign(key, bytes(digest_info), mechanism)))
 
     def sign(self, mensagem):
         """MD5withRSA over the challenge, as PJeOffice does."""
@@ -443,7 +487,7 @@ def _check(sign):
         print(f"holder: {leaf.subject.rfc4514_string()}")
         print(f"valid until: {leaf.not_valid_after_utc:%Y-%m-%d}; chain: {len(token.chain)} certificates")
         print(f"unsafe PIN state: {token.unsafe_pin_state() or 'none'}")
-        if token.protected:
+        if token.cloud:
             print("PIN: none here; the token or its app asks for it (desktopID: its window, PIN and e-token, or push)")
         else:
             print(f"PIN stored: {bool(os.environ.get('PJE_A3_PIN') or _keyring_pin(token.serial))}")
