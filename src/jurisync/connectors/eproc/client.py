@@ -492,7 +492,7 @@ def _attention(session, panel, *, panel_url, portal):
     # of the open-deadline queue is the process, shared by its intimações: JFRS and TJMG, 27/11/2026).
     items, seen = [], set()
     for queue, rows, _, _ in queues:
-        keys = [(row.get("number"), row.get("deadlineEvent"), row.get("requestedAt")) for row in rows]
+        keys = [(row.get("processNumber"), row.get("deadlineEvent"), row.get("requestedAt")) for row in rows]
         items.extend(row for row, key in zip(_situated(rows, queue), keys, strict=True) if key not in seen)
         seen.update(keys)
     problems = [problem for *_, problem in queues if problem]
@@ -573,7 +573,7 @@ def pending_notices(session, panel, process_number, *, panel_url, portal):
         if error:
             problem = problem or error
             continue
-        found = [item for item in items if re.sub(r"\D", "", item.get("number") or "") == wanted]
+        found = [item for item in items if re.sub(r"\D", "", item.get("processNumber") or "") == wanted]
         rows.extend({**item, "queue": queue} for item in found)
         if not found and not complete:
             problem = problem or f"the {queue} queue was not read to its end"
