@@ -27,7 +27,9 @@ def get_session(session, portal):
 
 
 def list_messages(session, portal, page=1):
-    from jurisync.connectors.esaj.parsers import messages
+    """One mailbox page (20 messages): each with ``naoLida``, plus ``lastPageShown`` (the pager's last number) and
+    ``next`` (the page to ask for next, None on the last one)."""
+    from jurisync.connectors.esaj.parsers import mailbox_pager, messages
 
     if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 1000:
         raise ValueError("page must be between 1 and 1000")
@@ -39,7 +41,16 @@ def list_messages(session, portal, page=1):
         raise common.EsajParseError(f"e-SAJ mailbox failed (HTTP {response.status_code})")
     # The mailbox is served as ISO-8859-1 behind two conflicting <meta> tags (UTF-8 first): the HTTP header's charset
     # (what ``response.text`` follows) decides, otherwise subjects come out as mojibake ("Eletr˘nico").
-    return {"page": page, "items": messages(response.text)}
+    items = messages(response.text)
+    last, has_next = mailbox_pager(response.text)
+    last = max(last or page, page)
+    return {
+        "page": page,
+        "items": items,
+        "unread": sum(item["naoLida"] for item in items),
+        "lastPageShown": last,
+        "next": page + 1 if has_next or last > page else None,
+    }
 
 
 def list_tasks(session, portal, kind, state="AGUARDANDO_ASSINATURA"):

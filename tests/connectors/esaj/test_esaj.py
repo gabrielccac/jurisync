@@ -69,9 +69,36 @@ def test_mailbox_nonempty_empty_and_unrecognized():
     html = '<input name="pag" value="1"><table><tr><td></td><td>Enviada em</td><td>Assunto</td></tr>'
     assert parsers.messages(html + "</table>") == []
     html += '<tr><td><input name="nuSeqMensagem" value="123"></td><td>05/11/2026</td><td>Protocolo</td></tr></table>'
-    assert parsers.messages(html) == [{"messageId": "123", "sentAt": "05/11/2026", "subject": "Protocolo"}]
+    assert parsers.messages(html) == [
+        {"messageId": "123", "sentAt": "05/11/2026", "subject": "Protocolo", "naoLida": False}
+    ]
     with pytest.raises(base.EsajParseError):
         parsers.messages("<html>login</html>")
+
+
+def mailbox(rows, pager=""):
+    return (
+        f'<input name="pag" value="1"><table><tr><td></td><td>Enviada em</td><td>Assunto</td></tr>{rows}</table>'
+        f'<span class="numPag">{pager}</span>'
+    )
+
+
+def test_mailbox_marks_unread_messages_and_reads_the_pager(monkeypatch):
+    # TJSP 2026-11-27: an unread row is tr.msgNaoLida; the pager links listaPaginada.do?pag=N and "Próxima >>".
+    unread = (
+        '<tr class="msgNaoLida"><td><input name="nuSeqMensagem" value="2"></td><td>06/11/2026</td><td>Novo</td></tr>'
+    )
+    read = '<tr class="msgLida"><td><input name="nuSeqMensagem" value="1"></td><td>05/11/2026</td><td>Lido</td></tr>'
+    pager = "".join(f'<a href="/caixapostal/listaPaginada.do?pag={n}">{n}</a>' for n in range(2, 21))
+    pager += '<a href="/caixapostal/listaPaginada.do?pag=2">Próxima &gt;&gt;</a>'
+    page = SimpleNamespace(text=mailbox(unread + read, pager), status_code=200, url="https://esaj.tjsp.jus.br/x")
+    monkeypatch.setattr(common, "request", lambda *args, **kwargs: page)
+    result = base.list_messages(None, "tjsp-esaj")
+    assert [item["naoLida"] for item in result["items"]] == [True, False]
+    assert (result["unread"], result["lastPageShown"], result["next"]) == (1, 20, 2)
+    page.text = mailbox(read)
+    last = base.list_messages(None, "tjsp-esaj", 20)
+    assert (last["page"], last["lastPageShown"], last["next"]) == (20, 20, None)
 
 
 def test_mailbox_subjects_follow_the_header_charset_not_the_conflicting_meta(monkeypatch):

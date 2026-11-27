@@ -150,10 +150,13 @@ def create_server(keys=None):
     @server.tool(
         title="List e-SAJ messages",
         annotations=READ_ONLY,
-        description="List mailbox subjects and dates; opens nothing, marks nothing read.",
+        description="List one mailbox page (20 messages, newest first): subject, date and naoLida (unread) per "
+        "message; unread counts this page's. lastPageShown is the pager's last number and next the page to ask for "
+        "(null on the last). Opens nothing, marks nothing read.",
     )
     def esaj_list_messages(
-        portal: Annotated[Portal, portal_field] = default, page: Annotated[int, Field(ge=1, le=1000)] = 1
+        portal: Annotated[Portal, portal_field] = default,
+        page: Annotated[int, Field(ge=1, le=1000, description="Mailbox page, from 1.")] = 1,
     ) -> dict[str, Any]:
         return call(portal, lambda s: dashboard.list_messages(s, portal, page))
 

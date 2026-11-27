@@ -59,6 +59,8 @@ def messages(html):
                     "messageId": message_id,
                     "sentAt": cells[1].get_text(" ", strip=True),
                     "subject": sanitize_diagnostics(redact_text(cells[2].get_text(" ", strip=True))),
+                    # The mailbox draws an unread message's row as ``tr.msgNaoLida`` (bold).
+                    "naoLida": "msgNaoLida" in (row.get("class") or []),
                 }
             )
     if not page.find("input", attrs={"name": "pag"}) or "Assunto" not in page.get_text():
@@ -66,6 +68,20 @@ def messages(html):
 
         raise EsajParseError("Unrecognized e-SAJ mailbox")
     return result
+
+
+def mailbox_pager(html):
+    """``(last_page_shown, has_next)`` of the mailbox pager (``listaPaginada.do?pag=N`` links and "Próxima")."""
+    numbers, has_next = [], False
+    for link in soup(html).select('a[href*="listaPaginada.do"]'):
+        values = parse_qs(urlsplit(link["href"]).query).get("pag", [])
+        if len(values) != 1 or not values[0].isdigit():
+            continue
+        if link.get_text(" ", strip=True).isdigit():
+            numbers.append(int(values[0]))
+        else:
+            has_next = has_next or "Próxima" in link.get_text(" ", strip=True)
+    return max(numbers, default=None), has_next
 
 
 def process_links(html, prefix):
