@@ -178,6 +178,11 @@ Helpers em `jurisync.core.responses`:
   descrição).
 - **Número do processo:** todo item que é de um processo traz `processNumber` (CNJ com pontuação). Nas linhas do
   Eproc (filas, Relação de Processos, pautas e audiências) `number` continua por um ciclo como cópia.
+- **Partes:** `parties: [{pole, role, name, taxId?}]`; `pole` é `active`, `passive` ou `other`,
+  `role` o papel processual (ou `null` onde a lista só mostra os dois lados) e `taxId` sai com o CPF mascarado
+  (`core.redaction.mask_cpf`). No PJe, as listas mantêm `partes` (texto do painel) e o `pje_get_process` mantém o
+  dicionário antigo em `partiesByPole` por um ciclo. O Eproc já usa `role`, `name` e `taxId`; `pole` por enquanto só
+  na Relação de Processos.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%
