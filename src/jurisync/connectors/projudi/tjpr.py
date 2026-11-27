@@ -251,6 +251,10 @@ class TjprAdapter(KeycloakAdapter, tjam.TjamAdapter):
             read = self._read_list(session, portal, section, label, instance=instance, max_pages=NOVAS_PAGES)
             numbers.update(row["processNumber"] for row in read["rows"])
             complete = complete and read["complete"]
+        for key in DESK_AWAITING:
+            read = self._read_desk(session, portal, key, max_pages=NOVAS_PAGES)
+            numbers.update(number for row in read["rows"] for number in row["_numbers"])
+            complete = complete and read["complete"]
         return numbers, complete
 
     def list_intimations(self, session, portal, *, lists=None, instances=tuple(tjam.INSTANCES), max_pages=10):

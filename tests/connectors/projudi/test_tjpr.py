@@ -125,6 +125,20 @@ class CienciaTest(unittest.TestCase):
         self.desk = stack.enter_context(mock.patch.object(tjpr.ADAPTER, "_read_desk", side_effect=read_desk))
         return stack
 
+    def test_the_desk_lists_to_the_sociedade_and_online_citacoes_count_too(self):
+        for number in ("0000003-00.2026.8.16.0001", "0000004-00.2026.8.16.0001", "0000005-00.2026.8.16.0000"):
+            with self.subTest(number=number), self.read():
+                with self.assertRaises(base.CienciaPending):
+                    base.check_ciencia(tjpr.ADAPTER, object(), KEY, number)
+                self.assertEqual({call.args[2] for call in self.desk.call_args_list}, set(tjpr.DESK_AWAITING))
+        with self.read(desk_complete=False):
+            self.assertIn("in full", self.pending("0000009-00.2026.8.16.0001")["unchecked"])
+        with (
+            self.read(),
+            mock.patch.object(tjpr.ADAPTER, "_read_desk", side_effect=base.ProjudiParseError("other filter")),
+        ):
+            self.assertIn("could not be read", self.pending("0000009-00.2026.8.16.0001")["unchecked"])
+
     def pending(self, number):
         return tjpr.ADAPTER.pending_ciencia(object(), KEY, number)
 
