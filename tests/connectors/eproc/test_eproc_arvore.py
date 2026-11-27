@@ -19,6 +19,8 @@ from tests.connectors.eproc.test_eproc_ciencia import (
     Portal,
     Reply,
     detail,
+    document,
+    event,
     queue,
 )
 
@@ -253,16 +255,35 @@ class TreeInventoryTest(unittest.TestCase):
         with self.assertRaises(SessionExpired):
             read(portal(tree='<input name="username">'))
 
-    def test_a_long_inventory_is_shown_in_pages(self):
+    def test_a_long_tree_inventory_is_shown_in_pages_and_next_opens_nothing(self):
         tree = "".join(f"<li>{tree_link(1000 + index, 1, f'DOC{index}')}</li>" for index in range(160))
-        result = read(portal(tree=tree))
-        self.assertEqual(
-            result["inventory"], {"returned": 150, "total": 162, "next": {"inventoryOffset": 150, "inventory": "tree"}}
-        )
+        result = read(portal(tree=tree), ["1000"])
         following = result["inventory"]["next"]
-        rest = read(portal(tree=tree), inventory=following["inventory"], inventory_offset=following["inventoryOffset"])
+        self.assertEqual(result["inventory"]["returned"], 150)
+        self.assertEqual(result["inventory"]["total"], 162)
+        self.assertEqual(following, {"inventory": "tree", "inventoryOffset": 150, "documentIds": [], "save": False})
+        fake = portal(tree=tree)
+        rest = read(
+            fake,
+            following["documentIds"] or None,
+            inventory=following["inventory"],
+            inventory_offset=following["inventoryOffset"],
+            save=following["save"],
+        )
+        self.assertEqual(fake.opened, [])
+        self.assertEqual(rest["attachments"], [])
         self.assertEqual(rest["inventory"], {"returned": 12, "total": 162, "next": None})
         self.assertEqual(rest["documentInventory"][-1]["id"], "1159")
+
+    def test_a_timeline_inventory_goes_out_whole_as_before(self):
+        documents = "".join(document(100 + index, 4) for index in range(160))
+        page = detail(events_url="controlador_ajax.php?acao_ajax=montar_tabela_eventos_filtrados&hash=e")
+        events = '<table id="tblEventos">' + event(4, "Juntada", documents=documents) + "</table>"
+        fake = Portal(detail=page, events=events, citacao_intimacao_pendente_listar=queue(OTHER))
+        result = read(fake, inventory_offset=150)
+        self.assertEqual(result["inventorySource"], "timeline")
+        self.assertEqual(len(result["documentInventory"]), 162)
+        self.assertEqual(result["inventory"], {"returned": 162, "total": 162, "next": None})
 
     def test_bad_inventory_arguments_are_refused_before_any_request(self):
         for kwargs in ({"inventory": "all"}, {"inventory_offset": -1}, {"inventory_offset": True}):

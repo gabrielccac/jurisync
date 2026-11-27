@@ -247,7 +247,9 @@ def create_server(keys=None):
             "timeline is read up to 5 event pages; when it was not read to its end, or a documentId is not in it, "
             "the Árvore (the case's full document list, nothing opened) is listed too and inventorySource says "
             "'tree' (else 'timeline'). inventory='tree' always lists it, 'timeline' never (one request less). "
-            "documentInventory shows 150 entries; inventory.next gives the arguments for the rest (inventoryOffset). "
+            "With the Árvore, documentInventory shows 150 entries and inventory.next gives the arguments for the rest "
+            "(inventoryOffset; documentIds empty and save false, so nothing is opened again); a timeline-only "
+            "inventory comes whole. "
             "Documents found in the Árvore are opened under the same ciência rule."
         ),
         annotations=MAY_GIVE_CIENCIA,
@@ -285,7 +287,9 @@ def create_server(keys=None):
         ] = "auto",
         inventoryOffset: Annotated[
             int,
-            Field(ge=0, description="First documentInventory entry to show (inventory.next)."),
+            Field(
+                ge=0, description="First documentInventory entry to show when the Árvore was listed (inventory.next)."
+            ),
         ] = 0,
     ) -> dict[str, Any]:
         return call(

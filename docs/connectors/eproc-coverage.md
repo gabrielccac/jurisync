@@ -53,9 +53,13 @@ lista todos os documentos dos autos sem abrir nenhum, e agora completa o invent�
 - Cada documento achado só pela Árvore traz `id`, `eventId`, `title` (rótulo, ex. INIC1), `description` (dica,
   ex. PETIÇÃO INICIAL) e `date` (ISO; a do próprio nó ou a do evento). Documentos que já estão na linha do tempo
   ficam com a entrada dela.
-- Orçamento: `documentInventory` mostra 150 entradas por resposta; `inventory` traz `returned`, `total` e `next`
-  (os argumentos para ler o resto: `inventoryOffset` e, se for o caso, `inventory: "tree"`). Cada chamada relê o
-  processo inteiro. `documentIds` são procurados no inventário completo, não só na fatia mostrada.
+- Orçamento: quando a Árvore entrou (`inventory: "tree"` na resposta como `inventorySource: "tree"`), `documentInventory`
+  mostra 150 entradas por resposta a partir de `inventoryOffset`; `inventory` traz `returned`, `total` e `next`, os
+  argumentos para ler o resto (`inventory: "tree"`, `inventoryOffset`, `documentIds: []` e `save: false`, para que seguir
+  o `next` nunca reabra nem regrave documentos). Cada chamada relê o processo inteiro. `documentIds` são procurados no
+  inventário completo, não só na fatia mostrada.
+- Compatibilidade por um ciclo: com `inventorySource: "timeline"` o `documentInventory` sai inteiro, como antes da
+  Árvore (`inventoryOffset` não corta nada e `inventory.next` é `null`).
 - Ciência: abrir a Árvore só faz GET em `arvore_documento_listar` (rota própria em `require_route`, nunca
   `acessar_documento`). Um documento achado só na Árvore é lido pelo mesmo `read_selected_documents` e passa pela
   mesma trava (`ciencia.check` antes de abrir; recusa com `ciência pending`/`ciência not checked` sem

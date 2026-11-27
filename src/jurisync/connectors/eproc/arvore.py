@@ -147,10 +147,17 @@ def read_tree(session, detail_html, detail_url, process_number, *, portal):
 
 
 def inventory_page(documents, offset, source):
-    """The slice of the inventory this answer shows, with the list envelope's counts and the arguments for the rest."""
+    """The slice of the inventory this answer shows, with the list envelope's counts and the arguments for the rest.
+
+    A timeline-only inventory goes out whole, as before the Árvore (kept for one cycle, docs/padroes.md); only one that
+    took in the Árvore is cut to INVENTORY_PAGE entries from offset. The next arguments open and save nothing, so
+    following them never reads or stores a document again.
+    """
+    if source != "tree":
+        return documents, {"returned": len(documents), "total": len(documents), "next": None}
     shown = documents[offset : offset + INVENTORY_PAGE]
     end = offset + len(shown)
     more = None
     if end < len(documents):
-        more = {"inventoryOffset": end, **({"inventory": "tree"} if source == "tree" else {})}
+        more = {"inventory": "tree", "inventoryOffset": end, "documentIds": [], "save": False}
     return shown, {"returned": len(shown), "total": len(documents), "next": more}
