@@ -201,7 +201,9 @@ class Office(MCPServer):
         if connector is None:
             raise ToolError(f"Unknown tool: {name}")
         tenant, user = caller.get() or ({"id": "", "connectors": []}, "")
-        started, error, reason = time.monotonic(), "", ""
+        portal = self._portal(connector, name, arguments)
+        calls.annotate(tenant=tenant["id"], tool=name, portal=portal)
+        started, error, reason, code = time.monotonic(), "", "", ""
         try:
             if tenant.get("mode") == "local":
                 raise NotEnabled(
@@ -220,18 +222,20 @@ class Office(MCPServer):
             result = await self.servers[connector].call_tool(name, arguments, context)
             if getattr(result, "is_error", False):
                 error = "ToolResult"
+                content = getattr(result, "content", None) or []
+                code = errors.code_of(getattr(content[0], "text", "") if content else "") or "tool_error"
             return result
         except BaseException as exc:
             cause = exc.__cause__ or exc
             error = type(cause).__name__
             reason = cause.reason if getattr(cause, "reason", None) in REASONS else ""
+            code = errors.code_of(str(exc)) if isinstance(exc, ToolError) else ""
             raise
         finally:
             duration = round((time.monotonic() - started) * 1000)
-            portal = self._portal(connector, name, arguments)
             with anyio.CancelScope(shield=True):
                 await anyio.to_thread.run_sync(
-                    self.store.log_call, tenant["id"], user, connector, name, error, duration, portal, reason
+                    self.store.log_call, tenant["id"], user, connector, name, error, duration, portal, reason, code
                 )
 
     def _portal(self, connector, name, arguments):

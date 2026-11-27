@@ -175,6 +175,14 @@ Helpers em `jurisync.core.responses`:
   (regra `G` do ruff).
 - Nunca logar argumentos ou resultados inteiros de tools, credenciais, CPF ou número de processo (LGPD). URLs só pela
   forma (`core.redaction.url_shape`).
+- Servidores (MCP local, hospedado, `jurisync-serve`) escrevem uma linha JSON por evento no stderr (`core.logs`):
+  `at, level, logger, message` e os campos da chamada em curso, `call, tool, tenant, portal` (`core.calls`, um
+  `ContextVar`; `portal` só com formato de chave; o core não conhece os portais). Cada chamada termina com uma linha `event: "call"`, `ok`,
+  `error_code` (o `[code]` que o agente recebeu, seção 5) e `duration_ms`; um bug traz `exception` e `trace` sob o
+  mesmo `call` do `ref`. CLIs continuam em texto. `JURISYNC_LOG_FORMAT=text|json` força um dos dois.
+- Para ler: `jq 'select(.call == "c-1a2b3c4d")'` junta tudo de uma chamada; `select(.event == "call" and .ok == false)`
+  lista as falhas com o código.
+- No hospedado, a tabela `calls` guarda também `error_code` (e `jurisync-hosted calls` mostra o código).
 
 ## 8. Esqueleto de conector
 
@@ -210,4 +218,5 @@ Passos para um conector novo:
 | Orçamento, offset e JSON compacto (pior caso do `pje_read_documents`) | `tests/core/test_responses.py` |
 | Nomes no vocabulário; todo alias aponta para uma tool listada e funciona | `tests/core/test_names.py` |
 | Prefixo de variável = chave do portal (ou exceção listada); nome antigo aceito; `.env.example` gerado passa no `check-customer` | `tests/core/test_env_names.py` |
+| Logs JSON com a chamada, código de erro no fim de cada chamada, sem argumentos | `tests/core/test_logs.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |
