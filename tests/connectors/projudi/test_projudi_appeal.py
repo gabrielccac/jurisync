@@ -200,5 +200,85 @@ class AppealAndDetailsTest(unittest.TestCase):
         self.assertFalse(any("movimentacao.do" in call[1] for call in quiet.calls))
 
 
+HEARINGS_MENU = f"""<html><script>add_menu("Audi&ecirc;ncias");
+add_menu("Listagem", "/audiencia/busca.do?_tj={TJ}au", "userMainFrame", "");</script></html>"""
+HEARINGS_FORM = """<form name="audienciaForm" id="audienciaForm" method="post" action="/projudi/audiencia/busca.do?actionType=listar">
+<input type="radio" name="idSituacaoAudiencia" value="5" checked="checked"><input type="radio" name="idSituacaoAudiencia" value="6">
+<select name="idTipoAudiencia"><option value="-1" selected="selected">Todos</option><option value="C">Conciliação</option>
+</select><input type="radio" name="codModalidadeAudienciaFiltro" value="-1"><input type="radio" name="codModalidadeAudienciaFiltro" value="3">
+<input type="radio" name="apenasSemLinkAcesso" value="true"><input type="radio" name="apenasSemLinkAcesso" value="false" checked>
+<input type="radio" name="segundaInstancia" value="false" checked><input type="radio" name="segundaInstancia" value="true">
+<input type="button" name="pesquisar" value="Pesquisar"><input type="hidden" name="audienciaPageSize" value="20">
+<input type="hidden" name="audienciaPageNumber" value="1"><input type="hidden" name="audienciaSortColumn" value="ag.dataHoraAudiencia">
+<input type="hidden" name="audienciaSortOrder" value="asc">"""
+HEARINGS_HEADER = """<table class="resultTable"><thead><tr><th>Processo/Recurso</th><th>Partes</th>
+<th>Local da Audiência</th><th>Data</th><th>Tipo da Audiência</th><th>Modalidade</th><th>Situação da Audiência</th></tr>
+</thead><tbody>"""
+
+
+def hearings_page(rows, total):
+    body = (
+        "".join(
+            f"""<tr class="even"><td><a href="/projudi/processo.do?_tj={TJ}h{n}" class="link"><em class="normal">{number}</em>
+<a href="#" onclick="copyToClipboard('{number}');"></a></a></td><td><table class="form"><tr><td><font>Autor:</font></td>
+<td><ul><li>PARTE AUTORA</li></ul></td></tr></table></td><td> CEJUSC Exemplo - Cível </td><td> 07/12/2026 15:40 </td>
+<td> Audiência do art. 334 CPC </td><td> Virtual </td><td> DESIGNADA </td></tr>"""
+            for n, number in rows
+        )
+        or '<tr><td colspan="7">Nenhum registro encontrado</td></tr>'
+    )
+    count = f"{total} registro(s) encontrado(s), exibindo de 1 at&eacute; {len(rows)}" if total else ""
+    return f"<html>{HEARINGS_FORM}{HEARINGS_HEADER}{body}</tbody></table><div>{count}</div></form></html>"
+
+
+class HearingsTest(unittest.TestCase):
+    def setUp(self):
+        wired(self)
+
+    def routes(self, method, url, kwargs):
+        if (method, url) == ("GET", APP + "usuario/postLogon.do?actionType=iniciar"):
+            return response(200, HEARINGS_MENU)
+        if (method, url) == ("GET", APP + f"audiencia/busca.do?_tj={TJ}au"):
+            return response(200, hearings_page([], 0))
+        if (method, url) == ("POST", APP + "audiencia/busca.do?actionType=listar"):
+            data = dict(kwargs["data"])
+            if data["segundaInstancia"] == "true":
+                return response(200, hearings_page([], 0))
+            page = int(data["audienciaPageNumber"])
+            return response(200, hearings_page([(page, NUMBER)], 2))
+        raise AssertionError(f"unexpected {method} {url}")
+
+    def test_both_instances_every_page_with_the_forms_own_fields(self):
+        session = FakeSession(self.routes)
+        result = tjam.ADAPTER.list_hearings(session, KEY)
+        first, second = result["groups"]
+        self.assertEqual((first["instance"], first["total"], first["returned"], first["complete"]), ("1", 2, 2, True))
+        self.assertEqual((second["instance"], second["total"], second["hearings"]), ("2", 0, []))
+        self.assertEqual(
+            first["hearings"][0],
+            {
+                "processNumber": NUMBER,
+                "instance": "1",
+                "partes": [{"role": "Autor", "names": ["PARTE AUTORA"]}],
+                "local": "CEJUSC Exemplo - Cível",
+                "dataHora": "07/12/2026 15:40",
+                "tipo": "Audiência do art. 334 CPC",
+                "modalidade": "Virtual",
+                "situacao": "DESIGNADA",
+            },
+        )
+        sent = dict(session.posts()[0][2]["data"])
+        self.assertEqual(
+            {k: sent[k] for k in ("idSituacaoAudiencia", "idTipoAudiencia", "codModalidadeAudienciaFiltro")},
+            {"idSituacaoAudiencia": "5", "idTipoAudiencia": "-1", "codModalidadeAudienciaFiltro": "-1"},
+        )
+        self.assertNotIn("pesquisar", sent)
+        self.assertNotIn(TJ, str(result))
+        held = tjam.ADAPTER.list_hearings(FakeSession(self.routes), KEY, situation="movimentadas", instances=("1",))
+        self.assertEqual(held["situation"], "movimentadas")
+        with self.assertRaises(ValueError):
+            tjam.ADAPTER.list_hearings(FakeSession(self.routes), KEY, situation="todas")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -485,6 +485,7 @@ class ServerTest(unittest.TestCase):
             [
                 "projudi_download_document",
                 "projudi_get_process",
+                "projudi_list_audiencias",
                 "projudi_list_documents",
                 "projudi_list_intimacoes",
                 "projudi_list_processes",
@@ -522,6 +523,20 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(
             tjam_adapter.list_processes.call_args.kwargs, {"situation": "todos", "instances": ("1",), "max_pages": 3}
         )
+
+    def test_audiencias_options_reach_the_desk_adapter_and_tjgo_says_it_has_no_list(self):
+        self.assertTrue(self.call("projudi_list_audiencias", {"portal": "tjgo-1g", "situation": "aguardando"}).is_error)
+        desk = mock.Mock(flavor="legacy-local")
+        desk.list_hearings.return_value = {"situation": "movimentadas", "groups": [], "complete": True}
+        with mock.patch.dict(server.ADAPTERS, {"legacy-local": desk}):
+            result = self.call(
+                "projudi_list_audiencias", {"portal": "tjam-1g", "situation": "movimentadas", "instances": ["2"]}
+            )
+        self.assertEqual(result.structured_content["situation"], "movimentadas")
+        self.assertEqual(desk.list_hearings.call_args.kwargs, {"situation": "movimentadas", "instances": ("2",)})
+        with mock.patch.object(tjgo.TjgoAdapter, "_home", return_value={"hearings": [{"label": "x", "count": 1}]}):
+            listed = tjgo.ADAPTER.list_hearings(object(), "tjgo-1g")
+        self.assertEqual((listed["supported"], listed["hearingsToday"][0]["count"]), (False, 1))
 
     def test_get_process_hides_hashes_and_attaches_files_to_movements(self):
         result = self.call("projudi_get_process", {"process_number": NUMBER}).structured_content

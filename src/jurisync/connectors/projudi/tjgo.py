@@ -491,6 +491,15 @@ class TjgoAdapter(base.Adapter):
             "complete": dje_complete and home["portal"]["complete"] and upcoming_complete,
         }
 
+    def list_hearings(self, session, portal):
+        """TJGO's home page only counts today's hearings; no hearing list is read here."""
+        return {
+            "supported": False,
+            "hearingsToday": self._home(session, portal)["hearings"],
+            "note": "Projudi TJGO: only the home page's count of today's hearings is read; there is no hearing list.",
+            "complete": False,
+        }
+
     def list_processes(self, session, portal):
         groups, complete, hearings = self._own_processes(session, portal)
         for group in groups:

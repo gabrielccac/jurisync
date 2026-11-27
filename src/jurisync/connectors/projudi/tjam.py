@@ -211,6 +211,21 @@ COLUMNS = {
 DESK_COUNTS = re.compile(
     r"(Ativos|Suspensos|Arquivados provisoriamente|Arquivados sem distribuição|Arquivados em definitivo):\s*(\d+)"
 )
+# Audiências / Listagem (observed on TJPR on 2026-11-27): ``audiencia/busca.do`` with a search form posted to
+# ``?actionType=listar``; the GET shows no rows until the form is posted. Rows: process, parties, place, date and time,
+# type, modality, situation. The list carries no video link.
+HEARINGS_MENU = ("Audiências", "Listagem")
+HEARINGS_PAGE = "audiencia/busca.do"
+HEARING_SITUATIONS = {"aguardando": "5", "movimentadas": "6"}
+HEARINGS_PAGE_SIZE = 50
+HEARING_COLUMNS = {
+    "processorecurso": "processNumber",
+    "localdaaudiência": "local",
+    "data": "dataHora",
+    "tipodaaudiência": "tipo",
+    "modalidade": "modalidade",
+    "situaçãodaaudiência": "situacao",
+}
 
 
 class NotFoundError(ValueError):
@@ -316,6 +331,64 @@ def parse_list_page(html):
             rows.append(item)
     total, first, last = (int(value) if value else None for value in counted.groups())
     return {"total": total, "first": first, "last": last, "rows": rows}
+
+
+def parse_hearings_page(html):
+    """One page of the Audiências list: ``{"total", "rows"}``; rows carry process, instance, parties by role, place,
+    date and time, type, modality and situation, never a link."""
+    page = legacy.soup(html)
+    table = next(
+        (t for t in page.find_all("table", class_="resultTable") if "Local da Audiência" in clean(t.find("tr"))), None
+    )
+    if table is None:
+        raise base.ProjudiParseError("Projudi hearings page has no result table")
+    counted = SHOWING.search(clean(page))
+    if counted is None and "nenhum registro encontrado" not in clean(table).casefold():
+        raise base.ProjudiParseError("Projudi hearings page has no record count")
+    headers = [_key(clean(cell)) for cell in _headers(table)]
+    rows = []
+    for row in (table.find("tbody") or table).find_all("tr", recursive=False):
+        cells = row.find_all("td", recursive=False)
+        if len(cells) != len(headers) or not CNJ.search(clean(cells[0])):
+            continue
+        item = {}
+        for header, cell in zip(headers, cells, strict=True):
+            if header == "partes":
+                item["partes"] = _parties(cell)
+            elif HEARING_COLUMNS.get(header) == "processNumber":
+                link = cell.find("a", href=True)
+                item["processNumber"] = CNJ.search(clean(cell)).group(0)
+                item["instance"] = "2" if link is not None and "/recursal/" in link["href"] else "1"
+            elif header in HEARING_COLUMNS:
+                item[HEARING_COLUMNS[header]] = clean(cell)
+        rows.append(item)
+    return {"total": int(counted.group(1)) if counted else 0, "rows": rows}
+
+
+def hearings_form(html, config):
+    """``(action, fields)`` of the Audiências search form, as a browser posts it (no button)."""
+    form = legacy.soup(html).find("form", attrs={"name": "audienciaForm"})
+    if form is None:
+        raise base.ProjudiParseError("Projudi hearings page has no search form")
+    action = config.url((form.get("action") or "").removeprefix(config.root))
+    split = urllib.parse.urlsplit(action)
+    if split.path.removeprefix(config.root) != HEARINGS_PAGE or "actionType=listar" not in split.query:
+        raise base.ProjudiParseError("Projudi hearings form posts somewhere other than its own list")
+    fields = {}
+    for field in form.find_all(["input", "select"]):
+        name, kind = field.get("name"), (field.get("type") or "").lower()
+        if not name or kind in {"button", "submit", "image", "reset", "checkbox"}:
+            continue
+        if kind == "radio":
+            if field.has_attr("checked"):
+                fields[name] = field.get("value", "")
+            continue
+        if field.name == "select":
+            chosen = field.find_all("option", selected=True) or field.find_all("option")[:1]
+            fields[name] = chosen[-1].get("value", "") if chosen else ""
+        else:
+            fields[name] = field.get("value", "")
+    return action, fields
 
 
 def list_form(html, config):
@@ -772,6 +845,46 @@ class TjamAdapter(legacy.LegacyAdapter):
             "lists": result,
             "awaitingCiencia": {"processNumbers": sorted(numbers), "complete": agenda_complete},
             "complete": all(item["complete"] for item in result) and agenda_complete,
+        }
+
+    def list_hearings(self, session, portal, *, situation="aguardando", instances=("1", "2"), max_pages=10):
+        """The lawyer's hearings (Audiências / Listagem) per instance: every type and modality, ``aguardando``
+        (awaiting) or ``movimentadas`` (held). Only the menu page and its own search form are requested."""
+        if situation not in HEARING_SITUATIONS:
+            raise ValueError(f"unknown hearing situation {situation!r}; valid: {', '.join(HEARING_SITUATIONS)}")
+        config = portals.projudi(portal)
+        path = next((p for s, lbl, p in self._entries(session, portal) if (s, lbl) == HEARINGS_MENU), None)
+        if path is None or urllib.parse.urlsplit(path).path.lstrip("/") != HEARINGS_PAGE:
+            raise base.ProjudiParseError("Projudi menu has no 'Audiências / Listagem' for this session")
+        _url, html = self._get_page(session, portal, config.url(path))
+        action, fields = hearings_form(html, config)
+        groups = []
+        for instance in instances:
+            fields.update(
+                idSituacaoAudiencia=HEARING_SITUATIONS[situation],
+                codModalidadeAudienciaFiltro="-1",
+                apenasSemLinkAcesso="false",
+                segundaInstancia="true" if instance == "2" else "false",
+                audienciaPageSize=str(HEARINGS_PAGE_SIZE),
+            )
+            rows, total = [], 0
+            for number in range(1, max_pages + 1):
+                fields["audienciaPageNumber"] = str(number)
+                page = parse_hearings_page(self._post_list(session, portal, action, list(fields.items())))
+                total = page["total"]
+                rows.extend(page["rows"])
+                if not page["rows"] or len(rows) >= total:
+                    break
+            rows = rows[:total]
+            groups.append(
+                {"instance": instance, "total": total, "returned": len(rows), "complete": len(rows) == total}
+                | {"hearings": rows}
+            )
+        return {
+            "situation": situation,
+            "groups": groups,
+            "complete": all(group["complete"] for group in groups),
+            "note": "The portal's hearing list shows no video link.",
         }
 
     def list_processes(self, session, portal, *, situation="ativos", instances=("1", "2"), max_pages=10):
