@@ -2,6 +2,7 @@
 
 import argparse
 import fnmatch
+import importlib
 import io
 import json
 import logging
@@ -10,6 +11,7 @@ import re
 import secrets
 import sys
 import time
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -59,38 +61,7 @@ def is_machine_name(name):
     return name not in NEVER_SHARED and any(fnmatch.fnmatchcase(name, pattern) for pattern in MACHINE_PATTERNS)
 
 
-def load_env_file(path=None):
-    """Load KEY=VALUE lines like `node --env-file`: existing variables win.
-
-    The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json); without it the
-    user's ``~/.config/jurisync/.env`` is used when it exists. When JURISYNC_CUSTOMER names a customer, its
-    gitignored ``customers/<name>/.env`` is loaded first, so a customer's values
-    take precedence over the shared file. The values its portals.toml ``[env].set`` pins (e.g. ``TRF1_1G_CERT=true``)
-    come next, so a checkout behaves like an installed bundle, which writes them into the customer's file.
-    With a customer selected the shared file then provides machine settings only (``MACHINE_PATTERNS``); without
-    one it is the single account's file and loads whole.
-    """
-    from jurisync.customers import customer_env_path, customer_name, fixed_variables
-    from jurisync.paths import USER_ENV_FILE
-
-    shared = path or os.environ.get("JURISYNC_ENV_FILE") or (USER_ENV_FILE if USER_ENV_FILE.exists() else None)
-    if shared and not customer_name():
-        # A client that registers the server without JURISYNC_CUSTOMER (Claude Desktop) can name it in the shared file.
-        _load_lines(shared, only={"JURISYNC_CUSTOMER"})
-    customer = customer_name()
-    own = customer_env_path()
-    if own:
-        _load_lines(own)
-    if customer:
-        for key, value in fixed_variables(customer).items():
-            os.environ.setdefault(key, value)
-    if shared:
-        # Only a checkout that keeps the office's own customers/<name>/.env treats the shared file as other offices'
-        # secrets. An installed office (plugin or bundle) has no such file: its ~/.config/jurisync/.env is its own.
-        _load_lines(shared, machine_only=bool(own and own.exists()))
-
-
-def _load_lines(path, only=None, machine_only=False):
+def load_env_lines(path, only=None, machine_only=False):
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
@@ -298,38 +269,6 @@ def compact_text(name, result):
     return result.model_copy(update={"content": content})
 
 
-# The ``portal`` field of every tool: the enum holds the keys, and one tool of the server lists them with their hosts.
-PORTAL_HELP = "Portal key; see the enum."
-PORTAL_NOTE = "\nPortals: "
-
-
-def portal_note(keys):
-    """The portals once, with their hosts: the line ``offer_portals`` (local) and ``Office`` (hosted) add to one tool."""
-    from jurisync import portals
-
-    return PORTAL_NOTE + ", ".join(f"{key} ({portals.get(key).host})" for key in keys) + "."
-
-
-def with_portal_note(description, keys):
-    return (description or "").partition(PORTAL_NOTE)[0] + portal_note(keys)
-
-
-def offer_portals(server, keys):
-    """List only ``keys`` as the ``portal`` choices of the server's tools, and the portals once, in its first tool.
-
-    An agent shown every wired portal tries the ones the account has no login for.
-    """
-    keys, noted = list(keys), False
-    for tool in server._tool_manager.list_tools():
-        field = tool.parameters.get("properties", {}).get("portal")
-        if field is None or "const" in field:
-            continue
-        field["enum"] = [key for key in field.get("enum", keys) if key in keys] or keys
-        field["description"] = PORTAL_HELP
-        if not noted:
-            tool.description, noted = with_portal_note(tool.description, keys), True
-
-
 LOOPBACK = ("127.0.0.1", "localhost", "[::1]")
 HTTP_SECRET_VAR = "JURISYNC_HTTP_SECRET"
 
@@ -400,3 +339,27 @@ def serve(server, on_exit=None, argv=None):
     finally:
         if on_exit is not None:
             on_exit()
+
+
+# Names that moved a layer up (F6-4) so the core imports no portal or customer module. The old import keeps working
+# with a DeprecationWarning for scripts outside the repository; it goes away in a future cycle.
+MOVED = {
+    "load_env_file": "jurisync.customers",
+    "PORTAL_HELP": "jurisync.portals",
+    "PORTAL_NOTE": "jurisync.portals",
+    "portal_note": "jurisync.portals",
+    "with_portal_note": "jurisync.portals",
+    "offer_portals": "jurisync.portals",
+}
+
+
+def __getattr__(name):
+    module = MOVED.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    warnings.warn(
+        f"jurisync.core.mcp.{name} moved to {module}.{name}; the old name goes away in a future cycle",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return getattr(importlib.import_module(module), name)

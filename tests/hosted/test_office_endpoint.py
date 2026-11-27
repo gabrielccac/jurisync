@@ -16,12 +16,12 @@ from starlette.testclient import TestClient
 
 from jurisync import portals
 from jurisync.core import credentials
-from jurisync.core.mcp import PORTAL_HELP
 from jurisync.core.session_pool import LoginRejected
 from jurisync.hosted import access, cli
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
 from jurisync.hosted.store import CALLS_KEPT, Store
 from jurisync.hosted.vault import Vault, generate_key, load_key
+from jurisync.portals import PORTAL_HELP
 
 from .test_signin_security import BASE, PASSWORD, SignInCase, ping
 

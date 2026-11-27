@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from jurisync import portals
 from jurisync.connectors.eproc import client
-from jurisync.core.mcp import load_env_file
+from jurisync.customers import load_env_file
 
 
 def main():

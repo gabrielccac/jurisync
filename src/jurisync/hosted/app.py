@@ -47,12 +47,13 @@ from starlette.routing import Mount, Route
 
 from jurisync import registry
 from jurisync.core import calls, credentials, errors, names
-from jurisync.core.mcp import PORTAL_HELP, sanitize_diagnostics, with_portal_note
+from jurisync.core.mcp import sanitize_diagnostics
 from jurisync.core.session_pool import REASONS
 from jurisync.hosted import access
 from jurisync.hosted.monitor import Monitor
 from jurisync.hosted.oauth import REDIRECT_HOSTS_VAR, SCOPE, BrowserBinding, Provider, login_routes, redirect_hosts
 from jurisync.hosted.throttle import IP_MAX_FAILURES, Throttle
+from jurisync.portals import PORTAL_HELP, with_portal_note
 
 log = logging.getLogger(__name__)
 

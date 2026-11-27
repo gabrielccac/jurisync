@@ -4,7 +4,8 @@ from unittest import mock
 
 import pytest
 
-from jurisync.core.mcp import is_machine_name, load_env_file, sanitize_diagnostics
+from jurisync.core.mcp import is_machine_name, sanitize_diagnostics
+from jurisync.customers import load_env_file
 
 
 @pytest.fixture

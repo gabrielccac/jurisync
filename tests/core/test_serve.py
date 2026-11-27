@@ -7,7 +7,7 @@ from unittest import mock
 from mcp.server.mcpserver import MCPServer
 from starlette.testclient import TestClient
 
-from jurisync import registry
+from jurisync import customers, registry
 from jurisync.core import mcp as core_mcp
 from jurisync.install import serve as serve_module
 
@@ -121,7 +121,7 @@ class EnvFileDefaultTest(unittest.TestCase):
                 key: value for key, value in os.environ.items() if key not in ("JURISYNC_ENV_FILE", "JURISYNC_CUSTOMER")
             }
             with mock.patch.dict(os.environ, clean, clear=True), mock.patch("jurisync.paths.USER_ENV_FILE", env):
-                core_mcp.load_env_file()
+                customers.load_env_file()
                 self.assertEqual(os.environ.get("JURISYNC_SERVE_TEST"), "yes")
 
 

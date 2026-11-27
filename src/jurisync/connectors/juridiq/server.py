@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from jurisync.connectors.juridiq.api import JuridiqApi
 from jurisync.core import credentials
-from jurisync.core.mcp import DESTRUCTIVE, READ_ONLY, WRITE, JurisyncServer, load_env_file, serve, tool_errors
+from jurisync.core.mcp import DESTRUCTIVE, READ_ONLY, WRITE, JurisyncServer, serve, tool_errors
+from jurisync.customers import load_env_file
 
 Text = Annotated[str, Field(min_length=1)]
 OneOrMany = Text | Annotated[list[Text], Field(min_length=1)]

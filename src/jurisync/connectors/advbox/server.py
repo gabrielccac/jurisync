@@ -35,12 +35,12 @@ from jurisync.core.mcp import (
     WRITE,
     WRITE_IDEMPOTENT,
     JurisyncServer,
-    load_env_file,
     serve,
     tool_error,
     tool_errors,
 )
 from jurisync.core.tenant_local import TenantLocal
+from jurisync.customers import load_env_file
 from jurisync.registry import CONNECTORS
 
 DESTRUCTIVE = DESTRUCTIVE

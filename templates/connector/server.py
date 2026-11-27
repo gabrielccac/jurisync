@@ -7,9 +7,10 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from jurisync.core.mcp import READ_ONLY, JurisyncServer, load_env_file, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, JurisyncServer, serve, tool_errors
 from jurisync.core.responses import listing
 from jurisync.core.session_pool import SessionPool
+from jurisync.customers import load_env_file
 
 from . import client, parsers
 

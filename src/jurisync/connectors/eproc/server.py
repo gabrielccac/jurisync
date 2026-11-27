@@ -26,16 +26,15 @@ from jurisync.connectors.eproc.client import (
 from jurisync.core import certificate
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
-    PORTAL_HELP,
     READ_ONLY,
     JurisyncServer,
-    load_env_file,
-    offer_portals,
     require_success,
     serve,
     tool_errors,
 )
 from jurisync.core.session_pool import SessionExpired, SessionPool
+from jurisync.customers import load_env_file
+from jurisync.portals import PORTAL_HELP, offer_portals
 
 
 def refresh_panel(portal, value):

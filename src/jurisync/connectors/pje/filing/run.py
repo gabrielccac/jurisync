@@ -13,8 +13,9 @@ from jurisync.connectors.pje.filing.payload import payload_subjects, validate_fi
 from jurisync.connectors.pje.filing.status import run_status
 from jurisync.connectors.pje.filing.timeline import StepTimeline
 from jurisync.core.http import enable_request_logging
-from jurisync.core.mcp import load_env_file, sanitize_diagnostics
+from jurisync.core.mcp import sanitize_diagnostics
 from jurisync.core.session_pool import SessionPool
+from jurisync.customers import load_env_file
 from jurisync.paths import REPO_ROOT
 
 STAGES = (

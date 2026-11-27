@@ -21,9 +21,10 @@ from jurisync.core.ciencia import NONE, report
 from jurisync.core.document_text import extract_document_text
 from jurisync.core.documents import MAX_DOCUMENTS, validate_document_ids
 from jurisync.core.documents_dir import save_document
-from jurisync.core.mcp import READ_ONLY, SAVES_FILE, JurisyncServer, load_env_file, serve, tool_errors
+from jurisync.core.mcp import READ_ONLY, SAVES_FILE, JurisyncServer, serve, tool_errors
 from jurisync.core.responses import fitted
 from jurisync.core.session_pool import SessionPool
+from jurisync.customers import load_env_file
 
 KEY = "stj"
 MAX_TEXT_CHARACTERS = 60_000

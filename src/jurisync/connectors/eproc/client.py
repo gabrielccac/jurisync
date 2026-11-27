@@ -32,9 +32,9 @@ from jurisync.connectors.eproc.parsers import (
 )
 from jurisync.core import credentials
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
-from jurisync.core.mcp import load_env_file
 from jurisync.core.redaction import drop_keys
 from jurisync.core.session_pool import MissingLogin, SessionExpired
+from jurisync.customers import load_env_file
 
 # Read-only citation/intimation queues, keyed by the tool's `queue` argument.
 # The panel advertises which of these a deployment exposes; the extra kinds are

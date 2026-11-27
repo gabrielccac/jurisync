@@ -15,8 +15,9 @@ from pydantic import Field, StringConstraints
 
 from jurisync.core.documents_dir import resolve_saved_folder
 from jurisync.core.errors import InputError
-from jurisync.core.mcp import READ_ONLY, SAVES_FILE, JurisyncServer, load_env_file, run_stdio, tool_error, tool_errors
+from jurisync.core.mcp import READ_ONLY, SAVES_FILE, JurisyncServer, run_stdio, tool_error, tool_errors
 from jurisync.core.runs import run_directory
+from jurisync.customers import load_env_file
 from jurisync.paths import REPO_ROOT
 from jurisync.workflows.filing.prepare import (
     PAYLOAD_FILE,
