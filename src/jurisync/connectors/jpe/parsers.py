@@ -27,6 +27,7 @@ from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
+from jurisync.core import keycloak
 from jurisync.core.keycloak import alert_text
 
 OWN_LOGIN_ACTION = "j_security_check"
@@ -205,7 +206,7 @@ def page_message(html):
 def sso_refusal(html):
     """The PDPJ SSO's error-page message (``#kc-error-message``), else "". Identifiers are masked."""
     soup = soup_of(html)
-    if soup.select_one("#kc-error-message") is None:
+    if soup.select_one(f"#{keycloak.ERROR_MESSAGE}") is None:
         return ""
     return alert_text(soup)
 

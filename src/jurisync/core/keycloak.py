@@ -14,6 +14,9 @@ PDPJ_SSO_HOST = "sso.cloud.pje.jus.br"  # the national SSO of the PDPJ (realm pj
 LOGIN_FORM = "kc-form-login"  # user and password (PDPJ, Eproc, Projudi themes)
 TRF_LOGIN_FORM = "loginForm"  # the TRF-style theme of the PDPJ login
 OTP_FORM = "kc-otp-login-form"  # the authenticator code
+LOGIN_BUTTON = "kc-login"  # the submit button of the login and code forms
+ERROR_MESSAGE = "kc-error-message"  # the error page's message
+FEEDBACK_TEXT = "kc-feedback-text"  # the feedback alert of the pje-v2 theme
 X509_FORM = "kc-x509-login-info"  # "continue with this certificate" after the mutual-TLS handshake
 # Required actions Keycloak may put before the login ends (set up the authenticator, new password, terms, profile):
 # a connector stops there, it never acts on the account.
@@ -78,6 +81,11 @@ FLOW_ERRORS = (
 )
 
 
+def mask(text):
+    """The text with every CPF/CNPJ and e-mail replaced by […]: what the SSO echoes back never leaves in a message."""
+    return IDENTIFIERS.sub("[…]", text)
+
+
 def alert_text(soup):
     """The SSO's own alert on the page (one line, at most 200 characters, identifiers masked), else ""."""
     for selector in ALERT_SELECTORS:
@@ -86,7 +94,7 @@ def alert_text(soup):
                 link.decompose()  # "Voltar para login"
             text = " ".join(" ".join(tag.stripped_strings).split())
             if text:
-                return IDENTIFIERS.sub("[…]", text)[:200]
+                return mask(text)[:200]
     return ""
 
 

@@ -74,21 +74,46 @@ def sources():
         yield path, path.read_text(encoding="utf-8")
 
 
-def test_no_connector_repeats_a_keycloak_form_id():
-    ids = re.compile(r"[\"']kc-[a-z0-9-]+[\"']")
-    copies = [f"{path.relative_to(CONNECTORS)}: {match}" for path, text in sources() for match in ids.findall(text)]
+def code_strings(text):
+    """The string literals of a module that are not docstrings."""
+    tree = ast.parse(text)
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+            yield node.value
+
+
+def test_no_connector_repeats_a_keycloak_id():
+    ids = re.compile(r"\bkc-[a-z0-9-]+")
+    copies = [
+        f"{path.relative_to(CONNECTORS)}: {found}"
+        for path, text in sources()
+        for value in code_strings(text)
+        for found in ids.findall(value)
+    ]
     assert not copies, "use the constants of jurisync.core.keycloak:\n" + "\n".join(copies)
 
 
 def test_the_a3_token_is_only_read_from_core():
-    found = [
-        str(path.relative_to(CONNECTORS))
-        for path, text in sources()
-        for node in ast.walk(ast.parse(text))
-        if isinstance(node, ast.ImportFrom)
-        and (node.module or "").startswith("jurisync.connectors.pje.auth")
-        and ((node.module or "").endswith(".a3") or any(alias.name == "a3" for alias in node.names))
-    ]
+    found = []
+    for path, text in sources():
+        if path.relative_to(CONNECTORS).as_posix() == "pje/auth/a3.py":
+            continue  # the old command and names, kept for installs
+        for node in ast.walk(ast.parse(text)):
+            modules = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module + "." + alias.name for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            if any(module.startswith("jurisync.connectors.pje.auth.a3") for module in modules):
+                found.append(str(path.relative_to(CONNECTORS)))
     assert not found, found
 
 
@@ -96,3 +121,66 @@ def test_the_a3_token_is_only_read_from_core():
 def test_each_keycloak_connector_reads_the_pages_from_core(system):
     text = "\n".join(path.read_text(encoding="utf-8") for path in (CONNECTORS / system).rglob("*.py"))
     assert re.search(r"jurisync\.core\.keycloak|from jurisync\.core import [^\n]*\bkeycloak\b", text)
+
+
+def test_the_eproc_keycloak_message_masks_identifiers():
+    from jurisync.connectors.eproc.a3 import eproc_message
+
+    page = '<span id="input-error">Usuário 000.000.001-91 (ficticia@example.com) sem cadastro</span>'
+    assert eproc_message("https://eproc.example/login", page) == "Usuário […] ([…]) sem cadastro"
+    url = "https://eproc.example/login?msg=CPF+00000000191+bloqueado"
+    assert eproc_message(url, "") == "CPF […] bloqueado"
+    # A maintenance notice in a generic alert box is not a Keycloak message and stays out.
+    assert eproc_message("https://eproc.example/", '<div class="alert">Manutenção às 22h</div>') == ""
+
+
+def test_the_old_a3_module_keeps_its_names():
+    from jurisync.connectors.pje.auth import a3 as old
+    from jurisync.core import a3
+
+    for name in ("A3Signer", "PinError", "token_lock", "stored_pin", "held_token", "main"):
+        assert getattr(old, name) is getattr(a3, name)
+
+
+class FakeToken:
+    closed = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        FakeToken.closed += 1
+
+
+def test_held_token_closes_the_token_and_releases_the_lock_on_error(monkeypatch):
+    from contextlib import contextmanager
+
+    from jurisync.core import a3
+
+    events = []
+
+    @contextmanager
+    def lock():
+        events.append("locked")
+        try:
+            yield
+        finally:
+            events.append("released")
+
+    monkeypatch.setattr(a3, "token_lock", lock)
+    monkeypatch.setattr(a3, "A3Signer", FakeToken)
+    FakeToken.closed = 0
+    with pytest.raises(RuntimeError), a3.held_token() as token:
+        assert isinstance(token, FakeToken)
+        raise RuntimeError("portal down")
+    assert FakeToken.closed == 1
+    assert events == ["locked", "released"]
+
+
+def test_held_token_with_a_signer_takes_no_lock(monkeypatch):
+    from jurisync.core import a3
+
+    monkeypatch.setattr(a3, "token_lock", lambda: (_ for _ in ()).throw(AssertionError("locked")))
+    signer = object()
+    with a3.held_token(signer) as token:
+        assert token is signer
