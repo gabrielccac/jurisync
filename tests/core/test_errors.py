@@ -129,6 +129,17 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(line, f"[unexpected] falha inesperada no servidor (ref={ref})")
         self.assertIn("segredo-interno", "\n".join(logged.output))
 
+    def test_outside_a_call_a_bug_still_gets_one_ref_in_the_line_and_the_log(self):
+        with self.assertLogs("jurisync.core.errors", "ERROR") as logged:
+            line = errors.summary(KeyError("campo"))
+        ref = re.search(r"ref=(c-[0-9a-f]+)\)$", line).group(1)
+        self.assertIn(f"ref={ref}", logged.output[0])
+
+    def test_a_batch_item_message_is_sanitized_like_a_tool_error(self):
+        line = errors.summary(RuntimeError("falhou em https://portal.example/x?token=abc123"))
+        self.assertTrue(line.startswith("[portal_error] "))
+        self.assertNotIn("abc123", line)
+
 
 if __name__ == "__main__":
     unittest.main()
