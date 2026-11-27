@@ -11,15 +11,16 @@ RemoteID) no computador do escritório + TOTP de cada portal (exportação do au
   logins do mesmo processo (`PJE_A3_SESSION_IDLE` = 20 min ociosa, `PJE_A3_SESSION_TTL` = 120 min).
 - `jurisync-smoke barbara` faz todos os portais com uma janela só.
 
-## Validação ao vivo (27/11, uma autorização para a rodada inteira)
+## Validação ao vivo (27/11, duas rodadas, cada uma com uma autorização para todos os portais)
 
 Login completo (certificado, TOTP e sessão): TRF1 1G/2G, TRF3 1G/2G, TRF5 1G/2G e TJMT 1G (PJe, conta PDPJ
 "TRF 1 - 3 e 5" do autenticador), TJRJ Eproc 1G, TJSC 1G/2G, TRF4 2G, TRF6 1G/2G (Eproc, conta Eproc/<tribunal>).
 
 Pendentes:
 
-- TJSP 1G/2G: o certificado é aceito, mas o TOTP da primeira conta Eproc/TJSP foi recusado. O export tem duas contas
-  Eproc/TJSP com o mesmo nome; a segunda ainda não foi testada.
+- TJSP 1G/2G: certificado e TOTP aceitos (a segunda das duas contas Eproc/TJSP de mesmo nome; a primeira é recusada),
+  mas o Eproc para em "Alterar Cadastro": a Barbara precisa atualizar o cadastro dela no portal uma vez. O conector não
+  preenche esse formulário.
 - TJMG 1G e TRF2 2G: Eproc clássico, sem Keycloak X.509. O certificado entra depois de usuário e senha do Eproc
   (`TJMG_1G_USERNAME/PASSWORD`, `TRF2_2G_USERNAME/PASSWORD`), que ainda não temos. O TRF2 também oferece o autenticador
   Certisign (`autenticador.certisign.com.br`), que o conector ainda não implementa.
