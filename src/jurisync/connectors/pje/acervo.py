@@ -23,7 +23,7 @@ from html import unescape
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje import jsf, legacy
 from jurisync.connectors.pje.parsers import parse_process_number, response_html
 
 PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
@@ -424,15 +424,18 @@ def list_processes(session, portal, *, regions=None, max_pages=5, max_nodes=MAX_
         "complete": not skipped and all(j["complete"] for j in jurisdictions),
     }
     if skipped:
+        # One call reads MAX_NODES jurisdictions; the rest come with a second call filtered to them.
         result["notRead"] = skipped
+        result["next"] = "Call pje_list_processes again with regions set to notRead to read these jurisdictions."
     return result
 
 
 def read_acervo(portal, *, session, regions=None, max_pages=5):
-    """``list_processes`` on the classic panel, the Acervo Geral bucket on the PJe-JT (KZ) one."""
+    """``list_processes`` on the classic panel, the Acervo Geral bucket on the PJe-JT (KZ) one, the Acervo sub-tabs'
+    grids on PJe 1.x."""
     config = portals.pje(portal)
     if config.pje1x:
-        raise ValueError(f"{portal} is a PJe 1.x panel; the Acervo listing covers PJe 2.x and the PJe-JT panels")
+        return legacy.list_processes(session, portal, regions=regions, max_pages=max_pages)
     if config.kz:
         from jurisync.connectors.pje import kz
 

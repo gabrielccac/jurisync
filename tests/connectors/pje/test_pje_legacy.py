@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from jurisync.connectors.pje import inbox, jsf, legacy, process, push, search
+from jurisync.connectors.pje import acervo, inbox, jsf, legacy, process, push, search
 
 FIXTURES = Path(__file__).parent / "fixtures" / "trf5_legacy"
 BASE = "https://pje.trf5.jus.br/pje/"
@@ -21,8 +21,10 @@ class FakeSession:
         self.post_pages, self.get_pages, self.posts, self.cookies = post_pages, get_pages, [], None
 
     def _response(self, url, text):
+        # Encoded as the page declares, as the court sends it: the panel pages are ISO-8859-1.
+        encoding = "iso-8859-1" if "charset=ISO-8859-1" in text[:4096] else "utf-8"
         return SimpleNamespace(
-            status_code=200, url=url, headers={}, text=text, content=text.encode("utf-8"), close=lambda: None
+            status_code=200, url=url, headers={}, text=text, content=text.encode(encoding), close=lambda: None
         )
 
     def get(self, url, **kwargs):
@@ -197,6 +199,95 @@ class Pje1xPanel(unittest.TestCase):
         result = inbox.read_inbox("trf5-legacy", bucket="Pauta de Julgamento / Pendentes", session=session)
         self.assertEqual(result["bucket"]["label"], "Intimações de Pauta de Julgamento / Pendentes")
         self.assertTrue([p for p in session.posts if "IntimacaoPendente" in p])
+
+
+GRID_BODY = '<tbody id="formProcessoTrfInicialAdvogado:processoTrfInicialAdvogadoList:tb"></tbody>'
+DETAIL = "openPopUp('p','/pje/Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam?id={id}&ca={ca}')"
+
+
+def acervo_row(number, process_id=None, autuacao="05/03/2024", expediente=False):
+    """A grid row in the column order of the real header (no live page had rows: names and numbers are fake)."""
+    link = f'<a onclick="{DETAIL.format(id=process_id, ca="cd" * 16)}">' if process_id else "<a>"
+    cells = [
+        "<td></td>",
+        f"<td>{link}APELAÇÃO CÍVEL {number}</a></td>",
+        "<td>PARTE AUTORA DE TESTE</td>",
+        "<td>INSTITUTO DE TESTE</td>",
+        f"<td>{autuacao}</td>",
+        *(["<td>Intimação</td>"] if expediente else []),
+        "<td></td>",
+    ]
+    return f"<tr>{''.join(cells)}</tr>"
+
+
+def with_rows(html, rows, total):
+    html = html.replace(GRID_BODY, GRID_BODY.replace("></tbody>", f">{''.join(rows)}</tbody>"), 1)
+    return html.replace("Foram encontrados:  0 resultados", f"Foram encontrados:  {total} resultados")
+
+
+def acervo_session(panel=None, general=None):
+    return FakeSession(
+        [("idCaixa_server_submit", general or page("painel_acervo_geral.html"))],
+        {legacy.PANEL_PATH: panel or page("painel_acervo.html")},
+    )
+
+
+class Pje1xAcervo(unittest.TestCase):
+    def test_empty_acervo_is_complete_and_opens_only_the_two_sub_tabs(self):
+        session = acervo_session()
+        result = acervo.read_acervo("trf5-legacy", session=session)
+        self.assertTrue(result["success"])
+        self.assertEqual((result["total"], result["returned"], result["items"], result["complete"]), (0, 0, [], True))
+        self.assertEqual(
+            [box["label"] for box in result["jurisdictions"]],
+            ["Acervo / Pendentes de Manifestação", "Acervo / Acervo Geral"],
+        )
+        self.assertEqual(len(session.posts), 1)  # Acervo Geral; no Intimações tab, row or Ciente
+        self.assertNotIn("Ciente", session.posts[0])
+
+    def test_grid_rows_become_items_in_the_shared_shape(self):
+        first, second = "0000001-02.2024.4.05.0000", "0000003-04.2023.4.05.8300"
+        general = with_rows(
+            page("painel_acervo_geral.html"), [acervo_row(first, "77"), acervo_row(second, autuacao="")], 2
+        )
+        pending = with_rows(page("painel_acervo.html"), [acervo_row(first, "77", expediente=True)], 1)
+        result = acervo.read_acervo("trf5-legacy", session=acervo_session(pending, general))
+        self.assertEqual((result["total"], result["returned"], result["complete"]), (2, 2, True))
+        item = result["items"][0]
+        self.assertEqual(
+            item,
+            {
+                "processNumber": first,
+                "processId": "77",
+                "classe": "APELAÇÃO CÍVEL",
+                "assunto": None,
+                "partes": "PARTE AUTORA DE TESTE x INSTITUTO DE TESTE",
+                "orgaoJulgador": None,
+                "distribuidoEm": "2024-03-05",
+                "ultimoMovimento": None,
+                "jurisdicao": None,
+                "caixa": "Acervo / Pendentes de Manifestação",
+            },
+        )
+        self.assertEqual((result["items"][1]["processId"], result["items"][1]["distribuidoEm"]), (None, None))
+        self.assertEqual([box["count"] for box in result["jurisdictions"]], [1, 2])
+
+    def test_fewer_rows_than_the_total_or_a_jurisdiction_tree_is_not_complete(self):
+        general = with_rows(page("painel_acervo_geral.html"), [acervo_row("0000001-02.2024.4.05.0000")], 30)
+        result = acervo.read_acervo("trf5-legacy", session=acervo_session(general=general))
+        self.assertFalse(result["complete"])
+        self.assertIn("1 of 30", result["notes"][0])
+        tree = page("painel_acervo_geral.html").replace(
+            '<div id="jurisdicaoForm:j_id317:childs"></div>',
+            '<div id="jurisdicaoForm:j_id317:childs"><table class="rich-tree-node"><tr><td>RECIFE</td></tr></table></div>',
+        )
+        result = acervo.read_acervo("trf5-legacy", session=acervo_session(general=tree))
+        self.assertEqual((result["total"], result["complete"]), (0, False))
+        self.assertIn("jurisdiction tree", result["notes"][0])
+
+    def test_a_page_without_the_grid_is_an_error_not_an_empty_acervo(self):
+        with self.assertRaisesRegex(RuntimeError, "grid was not rendered"):
+            legacy.list_processes(acervo_session(panel="<html><body>sessão expirada</body></html>"), "trf5-legacy")
 
 
 class Pje1xPush(unittest.TestCase):
