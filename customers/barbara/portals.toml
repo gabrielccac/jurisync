@@ -1,70 +1,74 @@
 # Bárbara Sisti: portais do PDF de 27/10 (hosts conferidos no registro). Valores no .env (gitignored).
-# Login via A3 em nuvem (RemoteID) NÃO validado: o eproc/a3.py do main diz que o autenticador Certisign ainda não é suportado.
+# Login com o A3 em nuvem da Certisign (desktopID / RemoteID) aberto no computador do escritório: o módulo PKCS#11 do
+# app assina e a autorização é feita no app (push no celular ou código), sem PIN no .env. Só os TOTPs dos portais.
 
 [tjmg-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJMG_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJMG_1G_2FA_DATA"]
 
 [tjrj-eproc-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJRJ_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJRJ_1G_2FA_DATA"]
 
 [tjsc-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJSC_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJSC_1G_2FA_DATA"]
 
 [tjsc-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJSC_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJSC_2G_2FA_DATA"]
 
 [tjsp-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJSP_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJSP_1G_2FA_DATA"]
 
 [tjsp-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJSP_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJSP_2G_2FA_DATA"]
 
 [trf2-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TRF2_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TRF2_2G_2FA_DATA"]
 
 [trf4-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TRF4_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TRF4_2G_2FA_DATA"]
 
 [trf6-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TRF6_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TRF6_2FA_DATA"]
 
 [trf6-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TRF6_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TRF6_2FA_DATA"]
 
 [trf1-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "PJE_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["PJE_1G_2FA_DATA"]
 
 [trf1-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "PJE_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["PJE_2G_2FA_DATA"]
 
 [trf3-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "PJE_TRF3_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["PJE_TRF3_1G_2FA_DATA"]
 
 [trf3-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "PJE_TRF3_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["PJE_TRF3_2G_2FA_DATA"]
 
 [trf5-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "PJE_TRF5_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["PJE_TRF5_1G_2FA_DATA"]
 
 [trf5-2g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "PJE_TRF5_2G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["PJE_TRF5_2G_2FA_DATA"]
 
 [tjmt-1g]
-method = "certificate_totp"
-secrets = ["PJE_A3_PIN", "TJMT_1G_2FA_DATA"]
+method = "a3_totp"
+secrets = ["TJMT_1G_2FA_DATA"]
+
+[env]
+set = { PJE_A3_MODULE = "certisign" }
