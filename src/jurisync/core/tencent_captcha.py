@@ -348,7 +348,7 @@ def _solve_slider(driver, state, *, attempt, api_key, model, record):
     if (attempt or not confident) and api_key:
         try:
             hint = model_gap(background, size, piece_top, api_key=api_key, model=model)
-        except Exception as error:  # the local answer still goes; the model is only a tie-breaker
+        except Exception as error:  # noqa: BLE001 - the local answer still goes; the model is only a tie-breaker
             log.info("TCaptcha model hint failed: %s", type(error).__name__)
             hint = None
         if hint is not None:

@@ -135,9 +135,9 @@ def analyze_document(content, filename, *, max_text_chars=500_000, ocr=False, oc
             }
         except OcrSkipped as reason:
             skipped = {"ocrSkipped": str(reason)}
-        except Exception:
+        except Exception:  # noqa: BLE001 - OCR runtime or model unavailable; native extraction follows
             pass  # OCR runtime (PDFium/ONNX) or a model unavailable; fall back to native extraction.
     try:
         return {"mimeType": mime_type, **extract_pdf_metadata(content, max_text_chars), **skipped}
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - pypdf raises many types; the text goes back as pdfExtractionError
         return {"mimeType": mime_type, "pdfExtractionError": str(error)}
