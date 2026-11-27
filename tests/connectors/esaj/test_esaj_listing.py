@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jurisync.connectors.esaj import base, parsers
+from jurisync.connectors.esaj import account, base, common, parsers, search
 
 HOST = "https://www2.tjal.jus.br"
 NOT_FOUND = (
@@ -106,11 +106,11 @@ class Portal:
 
 @pytest.fixture
 def portal(monkeypatch):
-    monkeypatch.setattr(base, "LIST_PAUSE", 0)
+    monkeypatch.setattr(account, "LIST_PAUSE", 0)
 
     def install(*args, **kwargs):
         fake = Portal(*args, **kwargs)
-        monkeypatch.setattr(base, "request", fake)
+        monkeypatch.setattr(common, "request", fake)
         return fake
 
     return install
@@ -156,7 +156,7 @@ def test_a_single_match_answered_with_the_detail_page_is_one_item(monkeypatch):
         '<span id="varaProcesso">2ª Vara de Exemplo</span>',
         url=f"{HOST}/cpopg/show.do?processo.codigo=1A0007&processo.foro=2",
     )
-    monkeypatch.setattr(base, "consult", lambda *a, **k: detail)
+    monkeypatch.setattr(search, "consult", lambda *a, **k: detail)
     items, total = base.oab_page(None, "tjal-esaj", base.adapter_for("tjal-esaj"), "000001MG", 1)
     assert total == 1
     assert items[0] == {
@@ -173,14 +173,14 @@ def test_a_single_match_answered_with_the_detail_page_is_one_item(monkeypatch):
 
 def test_a_captcha_portal_searches_with_a_minted_token(monkeypatch):
     sent = []
-    monkeypatch.setattr(base, "request", lambda *a, **k: reply("<form></form>", url="https://esaj.tjms.jus.br/x"))
-    monkeypatch.setattr(base, "token_fields", lambda *a: {"recaptcha_response_token": "t", "uuidCaptcha": "u"})
+    monkeypatch.setattr(common, "request", lambda *a, **k: reply("<form></form>", url="https://esaj.tjms.jus.br/x"))
+    monkeypatch.setattr(search, "token_fields", lambda *a: {"recaptcha_response_token": "t", "uuidCaptcha": "u"})
 
     def consult(session, portal, path, params=None):
         sent.append(params)
         return reply(listing([row(number(1).replace(".02.", ".12."), "1A0001", app="cpopg5")], 1))
 
-    monkeypatch.setattr(base, "consult", consult)
+    monkeypatch.setattr(search, "consult", consult)
     items, total = base.oab_page(None, "tjms-esaj", base.adapter_for("tjms-esaj"), "000001MG", 1)
     assert total == 1 and len(items) == 1
     assert len(sent) == 1 and sent[0]["uuidCaptcha"] == "u"

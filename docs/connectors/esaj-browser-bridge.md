@@ -51,7 +51,7 @@ ESAJ_BRIDGE_MAX_BYTES = 2097152
 
 ## Fluxo
 
-1. `base.load_process` faz a consulta HTTP normal.
+1. `process.load_process` faz a consulta HTTP normal.
 2. Se a resposta contém captcha (`parsers.captcha`) ou o request devolve 403 → tenta o bridge.
 3. `bridge.search(portal, number)`:
    1. resolve um target CDP cujo host seja o do portal;
@@ -95,7 +95,7 @@ com `captchaBridge: {mode, attempted, reason}`, nunca uma exceção nova.
 | Arquivo | Mudança |
 |---|---|
 | `src/jurisync/connectors/esaj/bridge.py` (novo) | `BrowserBridge`: `available()`, `status()`, `search()`; CDP via `websocket-client` (síncrono, combina com o resto do conector) |
-| `base.py` | `load_process` usa o bridge no ramo de captcha; `document_inventory` não muda |
+| `search.py`, `process.py` | `search.consultation_search` e `process.load_process` usam o bridge no ramo de captcha; `documents.document_inventory` não muda |
 | `server.py` | `esaj_get_session` passa a devolver `captchaBridge: {mode, available, host}` |
 | `pyproject.toml` | declarar `websocket-client` como dependência direta (já existe no ambiente via seleniumbase) |
 

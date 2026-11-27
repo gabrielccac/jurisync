@@ -64,7 +64,7 @@ class WriteCase(unittest.TestCase):
         self.client.read_task_form = mock.Mock(return_value=dict(FORM))
         self.client.is_pending = mock.Mock(return_value=True)
         self.client.search_tasks = mock.Mock(return_value={"tasks": [], "hasMore": False})
-        build = mock.patch("jurisync.connectors.advbox.client.build_edit_body", return_value={"editing": "100"})
+        build = mock.patch("jurisync.connectors.advbox.tasks.build_edit_body", return_value={"editing": "100"})
         build.start()
         self.addCleanup(build.stop)
 

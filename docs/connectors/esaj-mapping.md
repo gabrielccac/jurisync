@@ -216,7 +216,15 @@ vazia. O formato exato do parâmetro ainda precisa ser confirmado no código do 
 
 ```text
 src/jurisync/connectors/esaj/
-  base.py       # CAS: hashDesafio, assinatura A1, sessão, limites, erros
+  base.py       # fachada: reexporta os nomes dos módulos abaixo
+  common.py     # erros, guarda de host, request guardado, número do processo
+  cas.py        # CAS: hashDesafio, assinatura A1, login/senha, sessão
+  dashboard.py  # sessão, caixa postal e painel de tarefas
+  intimacoes.py # checagem da ciência
+  search.py     # consulta, limites, captcha e bridge
+  account.py    # processos da conta por OAB
+  process.py    # detalhe do processo e movimentações
+  documents.py  # pasta digital e PDFs
   tjsp.py       # endpoints/particularidades do TJSP
   tjms.py       # endpoints/particularidades do TJMS
   parsers.py    # HTML da caixa postal, intimações, pasta digital e JSON de tarefas
