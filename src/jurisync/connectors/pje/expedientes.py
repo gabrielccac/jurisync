@@ -166,10 +166,22 @@ def tab_complete(html, items):
     return not soup.find(class_=SCROLLER_OTHER_PAGE)
 
 
+def is_open(item, today):
+    """Whether a communication still asks something of the party: not answered, not closed by PJe ("Fechado? SIM"),
+    and its ciência pending, its deadline not passed, or a deadline PJe has not computed yet."""
+    if item.get("respondido") or item.get("fechado") is True:
+        return False
+    if not item.get("ciencia"):
+        return True
+    if item.get("limite"):
+        return item["limite"] >= today
+    return not item.get("semPrazo")
+
+
 def open_deadlines(items, today=None):
-    """Communications with a deadline that has not passed and no response filed."""
+    """Communications still open (``is_open``), in the order PJe lists them."""
     today = (today or date.today()).isoformat()
-    return [item for item in items if item["limite"] and item["limite"] >= today and not item["respondido"]]
+    return [item for item in items if is_open(item, today)]
 
 
 def tab_request(detail_html):

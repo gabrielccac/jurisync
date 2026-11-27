@@ -9,7 +9,7 @@ ROW = """<tr><td id="r{n}a"><span><div>{tipo} ({exp}) - Prioridade: Normal - ID 
 <a href="/pje/x">({doc}) <i></i></a></div><h6>{parte}</h6>{extra}<div>{meio} ({expedido})</div>
 <div>{quem} registrou ciência em {ciencia}</div>Prazo: {prazo}<script>function a(){{ alert(1) }}</script></span></td>
 <td><div class="text-center"><h6>{limite}</h6><h6></h6><h6><span>(para manifestação)</span></h6></div></td>
-<td>Visualizar ato {resposta}</td><td>SIM</td></tr>"""
+<td>Visualizar ato {resposta}</td><td>{fechado}</td></tr>"""
 
 
 def page(*rows):
@@ -21,6 +21,7 @@ def row(**overrides):
         "n": 1, "tipo": "Intimação", "exp": "100", "doc": "900", "parte": "AUTORA TESTE", "extra": "",
         "meio": "Diário Eletrônico", "expedido": "16/09/2026 19:56:06", "quem": "O sistema",
         "ciencia": "18/09/2026 00:00:00", "prazo": "15 dias", "limite": "09/10/2026 23:59:59", "resposta": "",
+        "fechado": "SIM",
     }  # fmt: skip
     return ROW.format(**{**values, **overrides})
 
@@ -54,16 +55,27 @@ def test_sem_prazo_and_response_flag():
     assert items[1]["respondido"] is True
 
 
-def test_open_deadlines_excludes_past_answered_and_no_deadline():
+def test_open_deadlines_excludes_past_answered_closed_and_no_deadline():
     items = expedientes.parse_expedientes(
         page(
-            row(exp="1", limite="09/10/2026 23:59:59"),
-            row(exp="2", limite="08/10/2026 23:59:59"),
-            row(exp="3", limite="20/10/2026 23:59:59", resposta="Resposta"),
-            row(exp="4", prazo="0 sem prazo", limite=""),
+            row(exp="1", limite="09/10/2026 23:59:59", fechado="NÃO"),
+            row(exp="2", limite="08/10/2026 23:59:59", fechado="NÃO"),
+            row(exp="3", limite="20/10/2026 23:59:59", resposta="Resposta", fechado="NÃO"),
+            row(exp="4", prazo="0 sem prazo", limite="", fechado="NÃO"),
+            row(exp="5", limite="20/10/2026 23:59:59", fechado="SIM"),
         )
     )
     assert [i["expedienteId"] for i in expedientes.open_deadlines(items, date(2026, 10, 9))] == ["1"]
+
+
+def test_open_deadlines_keep_a_deadline_pje_has_not_computed_and_a_pending_ciencia():
+    items = expedientes.parse_expedientes(
+        page(
+            row(exp="6", limite="", fechado="NÃO"),
+            row(exp="7", limite="", fechado="NÃO").replace("O sistema registrou ciência em 18/09/2026 00:00:00", ""),
+        )
+    )
+    assert [i["expedienteId"] for i in expedientes.open_deadlines(items, date(2026, 10, 9))] == ["6", "7"]
 
 
 def test_missing_table_is_empty_list():
