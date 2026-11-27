@@ -11,7 +11,8 @@ connector `src/jurisync/connectors/eproc/` (read-only).
   instância), `eproc_list_audiencias` (audiências futuras e de conciliação), `eproc_list_processes` (Relação de
   Processos do advogado; baixados ficam de fora em todo portal salvo `includeArchived`, filtro `prazo`) e
   `eproc_get_process` (eventos, `prazos` de cada intimação, informações adicionais, audiências e perícias,
-  documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026.
+  documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026. Mais as listas
+  read-only da seção "Listas do menu" abaixo.
 - Ações no allowlist (`READ_ACTIONS`/`AJAX_ACTIONS`): as 2 filas + `painel_adv_listar`,
   `processo_pesquisa_rapida`, `processo_selecionar`, `processo_consulta_listar`,
   `relatorio_processo_procurador_listar`,
@@ -63,6 +64,29 @@ Hashes e links assinados não são expostos no resultado. A suíte Eproc contém
 
 `parse_panel()` descobre as ações anunciadas; `require_route` permite somente as rotas
 mapeadas. Novas telas continuam exigindo parser e inclusão explícita no allowlist.
+
+## Listas do menu (JURI-21, item 7; 27/11/2026)
+
+Código em `src/jurisync/connectors/eproc/listas.py`. Cada tool pega o link que o menu do painel autenticado anuncia,
+faz o mesmo GET (ou o POST do filtro da própria lista, como a página faz) e lê a tabela. Nenhuma abre linha, botão ou
+formulário que age; cada ação lida entra explicitamente em `READ_ACTIONS`, e os testes provam que as ações de
+abrir/escrever das mesmas telas continuam bloqueadas. Portal cujo menu não tem a ação responde o erro
+`[not_available]` (o portal não oferece a lista; não é falha da leitura). Todas usam o envelope de lista
+(`returned`, `total`, `next`) e datas ISO.
+
+### Mensagens: `eproc_list_mensagens`
+
+- Ação: `caixa_mensagem_listar` ("Caixa de Mensagens"). `status='unread'` (padrão) é o GET da página, que já abre no
+  filtro "NÃO lidas"; `status='read'` posta o formulário `frmMensagemLista` com `rdoFiltro=lidas`, como o rádio da
+  página faz. O resultado confere que o portal aplicou o filtro pedido.
+- Itens `mensagens`: `sentAt` (ISO), `title`, `text` (o texto como a lista mostra); `total` vem da legenda
+  "(N registros)". Uma lista que não cabe no orçamento de 60k sai cortada, com `next = {status, offset}`.
+- Ciência/estado: a mensagem só é aberta por `caixa_mensagem_vizualizar` (link do título, com `id_mensagem` e
+  `status=naoLidas`), que nunca é requisitado e fica fora do allowlist. A listagem em si não marca como lida: no TRF4
+  2G a visão "NÃO lidas" mostrava 24 mensagens, a mais antiga de 2012, ainda não lidas. É inferência das capturas;
+  confirmar ao vivo que o contador não cai depois de uma leitura da lista.
+- Capturas: TRF4 2G (24 linhas) e TJRJ (1) com tabela; TJSC 1G/2G e TRF6 sem tabela (nenhuma não lida), lido como
+  lista vazia. Não há paginação nas capturas; uma lista paginada pelo portal traria só a primeira página.
 
 ## Features planejadas
 

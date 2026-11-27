@@ -28,6 +28,7 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
+from jurisync.connectors.eproc.listas import MESSAGE_FILTERS, list_messages
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -222,6 +223,27 @@ def create_server(keys=None):
             ),
         )
         return enveloped(result, maxPages)
+
+    @server.tool(
+        name="eproc_list_mensagens",
+        title="List Eproc messages",
+        description=(
+            "Read the lawyer's Caixa de Mensagens (court notices sent through the portal), unread or read. Only the "
+            "list is read: no message is opened, since opening one marks it read. "
+            "status picks the portal's own filter; offset continues a list cut to fit the answer (see next). "
+            "Rows: sentAt (ISO), title, text as the list shows it; total is the portal's count. Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_mensagens(
+        portal: Portal,
+        status: Annotated[
+            Literal[tuple(MESSAGE_FILTERS)],
+            Field(description="'unread': não lidas (the portal's default view); 'read': lidas."),
+        ] = "unread",
+        offset: Annotated[int, Field(ge=0, description="Messages to skip, from next.offset.")] = 0,
+    ) -> dict[str, Any]:
+        return call(portal, lambda **context: list_messages(status, offset, **context))
 
     @server.tool(
         name="eproc_get_process",

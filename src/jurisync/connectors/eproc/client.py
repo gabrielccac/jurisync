@@ -95,6 +95,8 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "audiencia_listar",  # the process' audiências
     "exame_listar",  # the process' perícias (JFRS)
     *HEARING_LISTS.values(),
+    # Lists of eproc/listas.py: the list pages only, never their row links or buttons.
+    "caixa_mensagem_listar",
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
