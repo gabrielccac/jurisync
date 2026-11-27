@@ -32,6 +32,11 @@ class EnvelopeTest(unittest.TestCase):
         answer = self.call("pje_list_intimacoes", result)
         self.assertEqual((answer["returned"], answer["total"], answer["next"]), (0, 15, None))
 
+    def test_the_portal_count_wins_over_the_rows_read_and_is_null_when_unknown(self):
+        result = {"inboxes": [box([{"expedienteId": "1"}], 1, 3, complete=False)], "total": 90, "complete": False}
+        self.assertEqual(self.call("pje_list_intimacoes", result)["total"], 90)
+        self.assertIsNone(self.call("pje_list_intimacoes", {**result, "total": None})["total"])
+
     def test_the_page_cap_leaves_no_next(self):
         result = {"inboxes": [box([{"expedienteId": "1"}], 5000, 125, complete=False)], "complete": False}
         self.assertIsNone(self.call("pje_list_intimacoes", result, maxPages=50)["next"])
@@ -42,6 +47,16 @@ class EnvelopeTest(unittest.TestCase):
         answer = self.call("pje_list_processes", result, maxPages=2)
         self.assertEqual((answer["returned"], answer["total"]), (1, 9))
         self.assertEqual(answer["next"], {"regions": ["Comarca Fictícia"], "maxPages": 2})
+        self.assertNotIn("note", answer)
+
+    def test_unread_jurisdictions_and_pages_left_both_reach_the_agent(self):
+        jurisdiction = {"label": "Vara Fictícia", "count": 120, "complete": False,
+                        "boxes": [box([], 120, 6, complete=False)]}  # fmt: skip
+        result = {"items": [], "total": 130, "jurisdictions": [jurisdiction], "notRead": ["Comarca Fictícia"],
+                  "note": "Call pje_list_processes again with regions set to notRead.", "complete": False}  # fmt: skip
+        answer = self.call("pje_list_processes", result)
+        self.assertEqual(answer["next"], {"regions": ["Comarca Fictícia"], "maxPages": 5})
+        self.assertIn("without regions and with maxPages=6", answer["note"])
 
     def test_the_acervo_asks_for_deeper_pages_of_its_boxes(self):
         jurisdiction = {"label": "Comarca Fictícia", "count": 120, "complete": False,

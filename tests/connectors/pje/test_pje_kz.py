@@ -169,6 +169,13 @@ def test_default_inbox_is_meus_expedientes_with_ciencia_state():
     assert row["ciencia"] == {"por": None, "em": "2026-11-06"} and not row["cienciaPendente"]
     assert row["limite"] == "2026-11-18" and row["respondido"] is False
     assert "AUTOR" not in json.dumps(row)
+    assert result["total"] == 1
+
+
+def test_a_local_filter_or_region_leaves_the_portal_total_unknown():
+    assert inbox.read_inbox("trt7-1g", filters={"from": "2026-11-05"}, session=Session())["total"] is None
+    assert inbox.read_inbox("trt7-1g", regions=["Vara"], session=Session())["total"] is None
+    assert inbox.read_inbox("trt7-1g", filters={"processNumber": NUMBER}, session=Session())["total"] is not None
 
 
 def test_inbox_rows_take_type_recipient_and_days_from_the_process_expedientes():

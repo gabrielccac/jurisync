@@ -361,7 +361,15 @@ def read_inbox(session, portal, *, bucket=None, regions=None, filters=None, max_
         }
         for name, items in groups.items()
     ]
-    return {"success": True, "portal": portal, "bucket": brief, "inboxes": inboxes, "complete": complete}
+    known = not regions and not set(filters) - {"processNumber"}
+    return {
+        "success": True,
+        "portal": portal,
+        "bucket": brief,
+        "inboxes": inboxes,
+        "total": total if known else None,
+        "complete": complete,
+    }
 
 
 ACERVO_BUCKETS = ("acervo", "arquivad")
