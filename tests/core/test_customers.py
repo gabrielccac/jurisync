@@ -3,6 +3,7 @@ import os
 import pytest
 
 from jurisync import customers
+from jurisync.core import credentials
 from jurisync.customers import load_env_file
 
 
@@ -83,6 +84,16 @@ def test_a_pinned_switch_that_contradicts_the_method_fails_loudly(root):
     )
     with pytest.raises(ValueError, match="contradicts"):
         customers.load_setup("acme")
+
+
+def test_one_patch_of_credentials_customers_dir_moves_every_customer_lookup(tmp_path, monkeypatch):
+    monkeypatch.delenv("JURISYNC_CUSTOMERS_DIR", raising=False)
+    (tmp_path / "acme").mkdir()
+    (tmp_path / "_template").mkdir()
+    monkeypatch.setattr(credentials, "customers_dir", lambda: tmp_path)
+    assert customers.customer_dir("acme") == tmp_path / "acme"
+    assert customers.names() == ["acme"]
+    assert customers.customer_env_path("acme") == tmp_path / "acme" / ".env"
 
 
 def test_customer_name_cannot_escape_directory(root):

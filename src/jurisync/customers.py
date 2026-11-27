@@ -22,7 +22,7 @@ import tomllib
 from dataclasses import dataclass
 
 from jurisync import portals
-from jurisync.core.credentials import customer_dir, customer_env_path, customer_name, customers_dir
+from jurisync.core import credentials
 from jurisync.paths import REPO_ROOT
 
 # Methods a customer may declare. Connectors decide how each one logs in.
@@ -32,6 +32,11 @@ METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate
 CERTIFICATE_SYSTEMS = ("pje", "eproc")
 CERTIFICATE_METHODS = ("certificate_totp", "certificate_mtls")
 TRUE = ("1", "true", "yes", "on")
+# The customer folder lives in core.credentials, the one place to patch it; these names stay for callers.
+customers_dir = credentials.customers_dir
+customer_name = credentials.customer_name
+customer_dir = credentials.customer_dir
+customer_env_path = credentials.customer_env_path
 
 
 @dataclass(frozen=True)
@@ -49,7 +54,7 @@ class PortalSetup:
 
 def load_setup(name):
     """Read ``portals.toml`` and validate it against the portal registry."""
-    path = customer_dir(name) / "portals.toml"
+    path = credentials.customer_dir(name) / "portals.toml"
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -99,8 +104,8 @@ def profile_portals(keys):
     """``keys`` narrowed to the portals the current customer's ``portals.toml`` declares (local process or hosted
     office); all of them when there is no profile. Chosen at setup: a login that also opens another portal does not
     offer it."""
-    name = customer_name()
-    if not name or not (customer_dir(name) / "portals.toml").is_file():
+    name = credentials.customer_name()
+    if not name or not (credentials.customer_dir(name) / "portals.toml").is_file():
         return tuple(keys)
     declared = load_setup(name)
     return tuple(key for key in keys if key in declared)
@@ -110,10 +115,10 @@ def declared_method(portal):
     """The login method the current customer's ``portals.toml`` declares for ``portal`` (a ``Portal``); ``None`` when
     there is no customer, no profile, or no entry for it. A declared method decides the login; connectors fall back to
     the registry's ``Portal.auth`` only without one."""
-    name = customer_name()
+    name = credentials.customer_name()
     if not name:
         return None
-    path = customer_dir(name) / "portals.toml"
+    path = credentials.customer_dir(name) / "portals.toml"
     try:
         stat = path.stat()
     except FileNotFoundError:
@@ -128,7 +133,7 @@ def _declared_methods(name, path, mtime, size):
 
 def extra_variables(name):
     """Variables declared in the customer's ``[env]`` table: ``(required, optional)`` name lists."""
-    path = customer_dir(name) / "portals.toml"
+    path = credentials.customer_dir(name) / "portals.toml"
     try:
         table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
     except FileNotFoundError:
@@ -139,7 +144,7 @@ def extra_variables(name):
 def fixed_variables(name):
     """Variables the profile pins to a value: ``<PREFIX>_CERT=true`` of each portal declared with a certificate method,
     then the ``[env].set`` table (e.g. ADVBOX_ALLOW_WRITES = "true")."""
-    path = customer_dir(name) / "portals.toml"
+    path = credentials.customer_dir(name) / "portals.toml"
     try:
         table = tomllib.loads(path.read_text(encoding="utf-8")).get(RESERVED_TABLE, {})
     except FileNotFoundError:
@@ -153,11 +158,11 @@ CIENCIA_POLICIES = ("ask", "allow")
 
 def settings(name=None):
     """The customer's committed ``settings.toml`` (empty when it has none)."""
-    name = name or customer_name()
+    name = name or credentials.customer_name()
     if not name:
         return {}
     try:
-        return tomllib.loads((customer_dir(name) / "settings.toml").read_text(encoding="utf-8"))
+        return tomllib.loads((credentials.customer_dir(name) / "settings.toml").read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
 
@@ -202,11 +207,11 @@ def load_env_file(path=None):
     from jurisync.paths import USER_ENV_FILE
 
     shared = path or os.environ.get("JURISYNC_ENV_FILE") or (USER_ENV_FILE if USER_ENV_FILE.exists() else None)
-    if shared and not customer_name():
+    if shared and not credentials.customer_name():
         # A client that registers the server without JURISYNC_CUSTOMER (Claude Desktop) can name it in the shared file.
         load_env_lines(shared, only={"JURISYNC_CUSTOMER"})
-    customer = customer_name()
-    own = customer_env_path()
+    customer = credentials.customer_name()
+    own = credentials.customer_env_path()
     if own:
         load_env_lines(own)
     if customer:
@@ -220,7 +225,7 @@ def load_env_file(path=None):
 
 def names():
     """Every customer folder (``_template`` and other ``_``/``.`` folders are not customers)."""
-    root = customers_dir()
+    root = credentials.customers_dir()
     if not root.is_dir():
         return []
     return sorted(path.name for path in root.iterdir() if path.is_dir() and not path.name.startswith(("_", ".")))
@@ -228,7 +233,7 @@ def names():
 
 def validate(name):
     """What keeps a customer folder from working, one line each; empty when it is ready. Reads no secret values."""
-    folder = customer_dir(name)
+    folder = credentials.customer_dir(name)
     try:
         setups = load_setup(name)
         required, optional = extra_variables(name)
@@ -259,7 +264,7 @@ def validate(name):
 def env_example(name):
     """The customer's ``.env.example``, made from its portals.toml: one line per declared variable, the alternatives of
     an ``A|B`` group and the optional ones commented out, each variable once. No values."""
-    data = tomllib.loads((customer_dir(name) / "portals.toml").read_text(encoding="utf-8"))
+    data = tomllib.loads((credentials.customer_dir(name) / "portals.toml").read_text(encoding="utf-8"))
     lines, seen = (
         [f"# Gerado de portals.toml por: jurisync-setup env-example {name}. Copie para customers/{name}/.env."],
         set(),
@@ -285,7 +290,7 @@ def check(name):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Check a customer's portal credentials without printing them.")
-    parser.add_argument("name", nargs="?", default=customer_name())
+    parser.add_argument("name", nargs="?", default=credentials.customer_name())
     args = parser.parse_args(argv)
     if not args.name:
         parser.error("pass a customer name or set JURISYNC_CUSTOMER")
