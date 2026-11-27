@@ -35,6 +35,7 @@ from jurisync.core.mcp import (
     serve,
     tool_errors,
 )
+from jurisync.core.responses import ENVELOPE, listing
 from jurisync.core.session_pool import SessionExpired, SessionPool
 from jurisync.customers import load_env_file
 from jurisync.portals import PORTAL_HELP, offer_portals
@@ -92,6 +93,15 @@ def create_server(keys=None):
                 ),
             )
 
+    def enveloped(result, max_pages=None):
+        """The common list envelope; ``next`` only when the portal's pager has pages a larger maxPages reaches."""
+        pagination = result.get("pagination") or {}
+        pages = pagination.get("totalPages") or 0
+        more = None
+        if max_pages and not pagination.get("complete") and max_pages < min(pages, MAX_REPORT_PAGES):
+            more = {"maxPages": min(pages, MAX_REPORT_PAGES)}
+        return {**result, **listing(result.get("items") or [], total=pagination.get("totalItems"), more=more)}
+
     @server.tool(
         name="eproc_list_intimacoes",
         title="List Eproc intimações",
@@ -102,8 +112,9 @@ def create_server(keys=None):
             + intimacao.DESCRIPTION
             + " Rows also "
             "carry queue, number, court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
-            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. Read-only: opens no "
-            "intimação."
+            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
+            + ENVELOPE
+            + " Read-only: opens no intimação."
         ),
         annotations=READ_ONLY,
     )
@@ -122,7 +133,7 @@ def create_server(keys=None):
             ),
         ] = None,
     ) -> dict[str, Any]:
-        return call(portal, lambda **context: list_notices(queue, **context))
+        return enveloped(call(portal, lambda **context: list_notices(queue, **context)))
 
     @server.tool(
         name="eproc_get_counters",
@@ -165,8 +176,9 @@ def create_server(keys=None):
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
             "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
             "movement. Rows: number, parties, class, subject, last event, dates, claim value. pagination.totalItems is "
-            "the portal's count; pagination.complete=false means rows remain unread: call again with a larger "
-            "maxPages. Details and documents: eproc_get_process. Read-only."
+            "the portal's count; pagination.complete=false means rows remain unread. "
+            + ENVELOPE
+            + " Details and documents: eproc_get_process. Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -191,7 +203,7 @@ def create_server(keys=None):
             Field(description="true: latest movement first (the panel's Últimas movimentações)."),
         ] = False,
     ) -> dict[str, Any]:
-        return call(
+        result = call(
             portal,
             lambda **context: list_processes(
                 max_pages=maxPages,
@@ -201,6 +213,7 @@ def create_server(keys=None):
                 **context,
             ),
         )
+        return enveloped(result, maxPages)
 
     @server.tool(
         name="eproc_get_process",

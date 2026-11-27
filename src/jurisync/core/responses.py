@@ -12,6 +12,10 @@ from datetime import datetime
 
 BUDGET = 60_000
 TEXT_BUDGET = 50_000
+ENVELOPE = (
+    "returned counts the items given, total is the portal's count (null when it shows none) and next the arguments "
+    "to call again with to read more (null when this tool can read no more)."
+)
 BR_DATE = re.compile(r"(\d{2})/(\d{2})/(\d{4})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?")
 
 
