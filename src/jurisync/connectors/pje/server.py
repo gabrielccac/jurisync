@@ -41,7 +41,7 @@ from jurisync.core.mcp import (
     tool_error,
     tool_errors,
 )
-from jurisync.core.responses import TEXT_BUDGET, fit_texts
+from jurisync.core.responses import ENVELOPE, TEXT_BUDGET, fit_texts, listing
 from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read, load_env_file
@@ -114,6 +114,52 @@ def _notifications(portal, read, process_number=None):
         if process_number:
             require_own_number(portal, process_number)  # before the session: a wrong court never costs a login
         return require_success("PJe", sessions.run(portal, lambda session: read(portal, session=session)))
+
+
+MAX_LIST_PAGES = 50
+
+
+def _more_pages(boxes, max_pages):
+    """``{"maxPages": n}`` when an incomplete box has pages beyond ``max_pages`` and a larger value can reach them."""
+    wanted = max((box.get("pages") or 0 for box in boxes if not box.get("complete")), default=0)
+    if wanted <= max_pages or max_pages >= MAX_LIST_PAGES:
+        return None
+    return {"maxPages": min(wanted, MAX_LIST_PAGES)}
+
+
+def _inbox_envelope(result, max_pages):
+    """The common list envelope over the rows of every inbox (rows stay inside their inbox). A reader that knows the
+    portal's own count (PJe-JT) sets ``total``; otherwise the inboxes' totals add up, or the bucket's counter when
+    the region tree leads to fewer rows."""
+    boxes = result.get("inboxes") or []
+    if "total" in result:
+        total = result["total"]
+    else:
+        shortfall = (result.get("bucketShortfall") or {}).get("bucketCount") or 0
+        total = max(sum(box.get("total") or 0 for box in boxes), shortfall)
+    return {
+        **result,
+        "returned": sum(len(box.get("rows") or []) for box in boxes),
+        "total": total,
+        "next": _more_pages(boxes, max_pages),
+    }
+
+
+def _acervo_envelope(result, max_pages):
+    """The common list envelope of the Acervo: ``next`` reads the jurisdictions left unread, then deeper pages."""
+    items = result.get("items") or []
+    boxes = [box for node in result.get("jurisdictions") or [] for box in node.get("boxes") or [node]]
+    deeper = _more_pages(boxes, max_pages)
+    if not result.get("notRead"):
+        return {**result, **listing(items, total=result.get("total"), more=deeper)}
+    more = {"regions": result["notRead"], "maxPages": max_pages}
+    if deeper:
+        result = {
+            **result,
+            "note": f"{result.get('note', '')} Boxes already read have pages left: after notRead, call again without "
+            f"regions and with maxPages={deeper['maxPages']}.".strip(),
+        }
+    return {**result, **listing(items, total=result.get("total"), more=more)}
 
 
 def _window(date_from, date_to):
@@ -379,7 +425,9 @@ def create_server():
         title="List PJe Expedientes inbox rows",
         description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. "
         + intimacao.DESCRIPTION
-        + " In PJe the default bucket (0, Pendentes de ciência ou de resposta) is that list: awaiting ciência, ciência given with the deadline running, and no deadline. The others (see pje_get_counters): 1 only awaiting ciência (a Diário/DJEN row there is aguardando_publicacao: PJe shows no Tomar ciência button for it), 2 and 3 ciência given by the recipient or by the system/Diário, deadline running, 4 deadline ended in the last 10 days with no answer (prazo_vencido; outside the default, ask for it), 5 no deadline, 6 answered in the last 10 days. PJe counts as answered only a reply made through Responder: a petition filed through Juntar documentos leaves the expediente pending an answer. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
+        + " In PJe the default bucket (0, Pendentes de ciência ou de resposta) is that list: awaiting ciência, ciência given with the deadline running, and no deadline. The others (see pje_get_counters): 1 only awaiting ciência (a Diário/DJEN row there is aguardando_publicacao: PJe shows no Tomar ciência button for it), 2 and 3 ciência given by the recipient or by the system/Diário, deadline running, 4 deadline ended in the last 10 days with no answer (prazo_vencido; outside the default, ask for it), 5 no deadline, 6 answered in the last 10 days. PJe counts as answered only a reply made through Responder: a petition filed through Juntar documentos leaves the expediente pending an answer. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Rows stay in their inboxes; "
+        + ENVELOPE
+        + " Read-only: never takes ciência, replies or distributes.",
         annotations=READ_ONLY,
     )
     def list_inbox(
@@ -424,13 +472,14 @@ def create_server():
             }.items()
             if value
         }
-        return _notifications(
+        result = _notifications(
             portal,
             lambda name, session: read_inbox(
                 name, bucket=bucket, regions=regions, filters=filters or None, max_pages=maxPages, session=session
             ),
             processNumber,
         )
+        return _inbox_envelope(result, maxPages)
 
     @server.tool(
         name="pje_list_watched_processes",
@@ -457,7 +506,9 @@ def create_server():
     @server.tool(
         name="pje_list_processes",
         title="List the lawyer's PJe processes (Acervo)",
-        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject (assunto; null on panels that do not show it, such as TRF5's), parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box, and arquivado: archived processes (the Arquivados box or bucket) are included and flagged, filter them out with arquivado=false; on panels without boxes, the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. One call reads up to 60 jurisdictions; the others come in notRead, read with a second call passing them as regions. On a PJe 1.x panel the Acervo's Pendentes de Manifestação and Acervo Geral grids: number, parties and autuação date, first page only, no regions. Read-only: opens nothing, takes no ciência.",
+        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject (assunto; null on panels that do not show it, such as TRF5's), parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box, and arquivado: archived processes (the Arquivados box or bucket) are included and flagged, filter them out with arquivado=false; on panels without boxes, the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. One call reads up to 60 jurisdictions; the others come in notRead, and next passes them as regions. "
+        + ENVELOPE
+        + " On a PJe 1.x panel the Acervo's Pendentes de Manifestação and Acervo Geral grids: number, parties and autuação date, first page only, no regions. Read-only: opens nothing, takes no ciência.",
         annotations=READ_ONLY,
     )
     def list_processes(
@@ -470,10 +521,11 @@ def create_server():
         ] = None,
         maxPages: Annotated[int, Field(ge=1, le=50, description="Pages to read per box.")] = 5,
     ) -> dict[str, Any]:
-        return _notifications(
+        result = _notifications(
             portal,
             lambda name, session: read_acervo(name, session=session, regions=regions or None, max_pages=maxPages),
         )
+        return _acervo_envelope(result, maxPages)
 
     @server.tool(
         name="pje_list_audiencias",

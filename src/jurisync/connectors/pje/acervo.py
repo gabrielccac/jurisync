@@ -426,7 +426,7 @@ def list_processes(session, portal, *, regions=None, max_pages=5, max_nodes=MAX_
     if skipped:
         # One call reads MAX_NODES jurisdictions; the rest come with a second call filtered to them.
         result["notRead"] = skipped
-        result["next"] = "Call pje_list_processes again with regions set to notRead to read these jurisdictions."
+        result["note"] = "Call pje_list_processes again with regions set to notRead to read these jurisdictions."
     return result
 
 

@@ -12,6 +12,11 @@ from datetime import datetime
 
 BUDGET = 60_000
 TEXT_BUDGET = 50_000
+ENVELOPE = (
+    "returned counts the items given, total is the portal's count (null when it shows none or a local filter makes it "
+    "unknown) and next the arguments to replace in this same call, keeping every other argument as it was, to read "
+    "more (null when this tool can read no more); the new call reads again from the first page."
+)
 BR_DATE = re.compile(r"(\d{2})/(\d{2})/(\d{4})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?")
 
 
@@ -23,8 +28,8 @@ def compact(value):
 def listing(items, *, key="items", total=None, more=None, **extra):
     """The common list envelope: ``{key: items, returned, total, next, ...extra}``.
 
-    ``total`` is the count the portal reports, or None when it does not say. ``more`` is the arguments that read the
-    rest when the same tool is called again with them (``{"maxPages": 10}``), or None when nothing is left.
+    ``total`` is the count the portal reports, or None when it does not say. ``more`` is the arguments to replace in
+    the same call, every other argument kept, to read the rest (``{"maxPages": 10}``), or None when nothing is left.
     """
     return {key: items, "returned": len(items), "total": total, "next": more, **extra}
 
