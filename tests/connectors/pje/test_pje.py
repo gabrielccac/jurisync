@@ -92,6 +92,27 @@ class PjeChecks(unittest.TestCase):
                 self.assertEqual(actual["portal"], portal)
                 self.assertEqual(len(actual["timeline"]), 1)
 
+    def test_parties_carry_masked_cpfs(self):
+        result = {
+            "success": True,
+            "timeline": [],
+            "parties": {
+                "active": ["PARTE FICTICIA - CPF: 123.456.789-09 (EXEQUENTE)", "ADVOGADO FICTICIO (ADVOGADO)"],
+                "passive": ["EMPRESA FICTICIA - CNPJ: 12.345.678/0001-90 (EXECUTADO)"],
+                "other_interested": ["PERITA FICTICIA - CPF: 98765432100 (PERITO)"],
+            },
+        }
+        with patch.object(client.search, "search_process", return_value=result):
+            actual = client.fetch_process("1024853-70.2023.4.01.3400", portal="trf1-1g", session=Mock())
+        self.assertEqual(
+            actual["parties"],
+            {
+                "active": ["PARTE FICTICIA - CPF: 123.***.***-09 (EXEQUENTE)", "ADVOGADO FICTICIO (ADVOGADO)"],
+                "passive": ["EMPRESA FICTICIA - CNPJ: 12.345.678/0001-90 (EXECUTADO)"],
+                "other_interested": ["PERITA FICTICIA - CPF: 987******00 (PERITO)"],
+            },
+        )
+
     def test_download_pattern_finds_every_viewer_shape(self):
         self.assertTrue(search.DOWNLOAD_PATTERN.search("window.open('/pje/documento/download/TRF5/x/1/'"))
         legacy = "var url = '/1g/seam/resource/rest/pje-legacy/documento/download/-1/1g/7878703/' + idDocumento"

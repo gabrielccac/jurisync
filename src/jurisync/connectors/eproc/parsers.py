@@ -6,6 +6,8 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
+from jurisync.core.redaction import mask_cpf
+
 _PROCESS_NUMBER = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
 
 
@@ -407,7 +409,7 @@ def _parties(soup):
                         "role": party_role,
                         "group": headers[index] if index < len(headers) else role,
                         "name": name,
-                        "taxId": cpf,
+                        "taxId": mask_cpf(cpf),
                         "representatives": representatives,
                     }
                 )
