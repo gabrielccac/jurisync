@@ -1,5 +1,6 @@
 """Parsers shared by the TRF1 PJe 1G and 2G search flows."""
 
+import datetime
 import re
 from html import unescape
 from urllib.parse import urljoin
@@ -12,6 +13,22 @@ SIDES = re.compile(r"\s+[Xx]\s+")
 AND_OTHERS = re.compile(r"\s+e outros(?:\s*\(\d+\))?$", re.IGNORECASE)
 PARTY = re.compile(r"^(?P<name>.*?)(?:\s+-\s+(?:CPF|CNPJ):\s*(?P<taxId>[^()]*?))?(?:\s+\((?P<role>[^()]*)\))?$")
 POLES = {"active": "active", "passive": "passive", "other_interested": "other"}
+
+
+PT_DATE = re.compile(r"(\d{1,2}) (jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.? (\d{4})", re.IGNORECASE)
+PT_MONTHS = ("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez")
+
+
+def iso_pt(value):
+    """``"19 jun. 2025"`` (the PJe process page) as ``"2025-06-19"``; anything else is returned as is."""
+    found = PT_DATE.fullmatch(" ".join(str(value or "").split()))
+    if not found:
+        return value
+    day, month, year = found.groups()
+    try:
+        return datetime.date(int(year), PT_MONTHS.index(month.casefold()) + 1, int(day)).isoformat()
+    except ValueError:
+        return value
 
 
 def parties_of_sides(text):

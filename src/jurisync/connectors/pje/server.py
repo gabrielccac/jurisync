@@ -18,7 +18,7 @@ from jurisync.connectors.pje.acervo import read_acervo
 from jurisync.connectors.pje.audiencias import read_pauta
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
-from jurisync.connectors.pje.parsers import parties_of_sides, party_entries
+from jurisync.connectors.pje.parsers import iso_pt, parties_of_sides, party_entries
 from jurisync.connectors.pje.process import (
     fetch_process,
     login_portal,
@@ -42,7 +42,7 @@ from jurisync.core.mcp import (
     tool_error,
     tool_errors,
 )
-from jurisync.core.responses import ENVELOPE, TEXT_BUDGET, fit_texts, listing
+from jurisync.core.responses import ENVELOPE, TEXT_BUDGET, camel, fit_texts, listing
 from jurisync.core.runs import run_directory
 from jurisync.core.session_pool import SessionPool
 from jurisync.customers import ciencia_on_read, load_env_file
@@ -114,7 +114,25 @@ def _notifications(portal, read, process_number=None):
     with tool_errors("PJe"):
         if process_number:
             require_own_number(portal, process_number)  # before the session: a wrong court never costs a login
-        return require_success("PJe", sessions.run(portal, lambda session: read(portal, session=session)))
+        return _answered(sessions.run(portal, lambda session: read(portal, session=session)))
+
+
+def _answered(result):
+    """A PJe answer: the connector error check, then camelCase keys (``responses.camel``), before any budget is applied."""
+    return camel(require_success("PJe", result))
+
+
+def _process_dates(result):
+    """pje_get_process dates in ISO: the camelCase copies of the cover dates (the snake keys keep the page's text), each
+    timeline day and each movement candidate, whose text stays in dateText for one cycle."""
+    metadata = result.get("metadata") or {}
+    for key in ("filedAt", "lastDistribution"):
+        if key in metadata:
+            metadata[key] = iso_pt(metadata[key])
+    for day in [*(result.get("timeline") or []), *(result.get("movementCandidates") or [])]:
+        if isinstance(day, dict) and iso_pt(day.get("date")) != day.get("date"):
+            day["dateText"], day["date"] = day["date"], iso_pt(day["date"])
+    return result
 
 
 MAX_LIST_PAGES = 50
@@ -288,7 +306,7 @@ def create_server():
         if isinstance(result.get("parties"), dict):
             result["partiesByPole"] = result["parties"]
             result["parties"] = party_entries(result["parties"])
-        return require_success("PJe", result)
+        return _process_dates(_answered(result))
 
     @server.tool(
         name="pje_read_documents",
@@ -339,13 +357,14 @@ def create_server():
                     acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
                 ),
             )
+        result = _answered(result)
         reads = [read for document in result.get("documents", []) for read in (document, *document.get("anexos", []))]
         if fit_texts(reads, offset=offset, limit=textLimit):
             result["note"] = (
                 f"Texts were cut to fit {TEXT_BUDGET} characters per answer: read the rest with the same documentIds "
                 "(or only the cut one) and offset=truncated.nextOffset."
             )
-        return require_success("PJe", result)
+        return result
 
     @server.tool(
         name="pje_read_expediente_ato",
@@ -393,8 +412,7 @@ def create_server():
                 "expedienteId": expedienteId,
                 "error": "the process' expedientes could not be read, so the act was not opened; try again later",
             }
-        return require_success(
-            "PJe",
+        return _answered(
             {k: result[k] for k in ("success", "source", "portal", "processNumber", "ato", "ciencia", "diagnostics")}
             | {
                 "expediente": next(

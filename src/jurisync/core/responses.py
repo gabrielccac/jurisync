@@ -71,6 +71,39 @@ def dated(item, *keys):
     return item
 
 
+SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
+DATA_KEYS = frozenset({"partiesByPole"})
+
+
+def camel(value, *, single=True):
+    """Put the snake_case keys of ``value`` in camelCase, nested dicts and lists included (docs/padroes.md).
+
+    A key of a single object (the answer and the objects in it) keeps its snake_case name for one cycle beside the new
+    one. Items of a list and a key holding a list are only renamed: a repeated collection, such as a timeline, would
+    double the answer. A camelCase key already there wins. Dicts under ``DATA_KEYS``, whose keys are data (the
+    poles of partiesByPole), are left alone.
+    """
+    if isinstance(value, list):
+        for item in value:
+            camel(item, single=False)
+        return value
+    if not isinstance(value, dict):
+        return value
+    renamed = {}
+    for key, item in value.items():
+        if key not in DATA_KEYS:
+            camel(item, single=single and not isinstance(item, list))
+        if key in DATA_KEYS or not SNAKE.fullmatch(key):
+            renamed[key] = item
+            continue
+        if single and not isinstance(item, list):
+            renamed[key] = item
+        renamed.setdefault(re.sub(r"_([a-z0-9])", lambda found: found[1].upper(), key), item)
+    value.clear()
+    value.update(renamed)
+    return value
+
+
 def _shares(wanted, budget):
     """Split ``budget`` among texts wanting ``wanted`` characters: short ones keep all, long ones share the rest."""
     shares, left = [0] * len(wanted), budget
