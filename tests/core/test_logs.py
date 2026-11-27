@@ -9,6 +9,7 @@ import unittest
 from typing import Any
 from unittest import mock
 
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
 from jurisync.core import errors, logs
@@ -100,7 +101,7 @@ class CallLinesTest(unittest.TestCase):
         def run():
             try:
                 asyncio.run(built.call_tool("exemplo_get_document", {}))
-            except Exception as error:
+            except ToolError as error:
                 caught.append(str(error))
 
         lines = captured(run)
