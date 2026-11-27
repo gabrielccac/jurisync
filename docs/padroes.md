@@ -178,6 +178,11 @@ Helpers em `jurisync.core.responses`:
   descrição).
 - **Número do processo:** todo item que é de um processo traz `processNumber` (CNJ com pontuação). Nas linhas do
   Eproc (filas, Relação de Processos, pautas e audiências) `number` continua por um ciclo como cópia.
+- **Partes:** `parties: [{pole, role, name, taxId?}]`; `pole` é `active`, `passive` ou `other`,
+  `role` o papel processual (ou `null` onde a lista só mostra os dois lados) e `taxId` sai com o CPF mascarado
+  (`core.redaction.mask_cpf`). No PJe, as listas mantêm `partes` (texto do painel) e o `pje_get_process` mantém o
+  dicionário antigo em `partiesByPole` por um ciclo. O Eproc já usa `role`, `name` e `taxId`; `pole` por enquanto só
+  na Relação de Processos.
 - **Ciência pendente:** linha de lista de intimações traz `cienciaPendente` (booleano), como no PJe e no Projudi; no
   Eproc é `true` nas filas `pending*` e `art334`. Vale para a linha; a trava de ciência vale para o processo
   inteiro, então uma linha `false` não significa que os documentos do processo podem ser abertos.

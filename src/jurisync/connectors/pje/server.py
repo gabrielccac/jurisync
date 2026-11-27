@@ -18,6 +18,7 @@ from jurisync.connectors.pje.acervo import read_acervo
 from jurisync.connectors.pje.audiencias import read_pauta
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
+from jurisync.connectors.pje.parsers import parties_of_sides, party_entries
 from jurisync.connectors.pje.process import (
     fetch_process,
     login_portal,
@@ -151,7 +152,7 @@ def _inbox_envelope(result, max_pages):
 
 def _acervo_envelope(result, max_pages):
     """The common list envelope of the Acervo: ``next`` reads the jurisdictions left unread, then deeper pages."""
-    items = result.get("items") or []
+    items = [{**item, "parties": parties_of_sides(item.get("partes"))} for item in result.get("items") or []]
     boxes = [box for node in result.get("jurisdictions") or [] for box in node.get("boxes") or [node]]
     deeper = _more_pages(boxes, max_pages)
     if not result.get("notRead"):
@@ -264,7 +265,7 @@ def create_server():
     @server.tool(
         name="pje_get_process",
         title="Get PJe process context",
-        description="Read a PJe process: metadata, parties, timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. audiencias (when the portal has the Audiência tab) lists each hearing: data, hora, tipo, orgaoJulgador, sala, situacao (designada, realizada, cancelada...), acordo, linkSalaVirtual when PJe shows it; the lawyer's hearings across processes come from pje_list_audiencias. expedientes.abertos: not answered, not closed by PJe, and ciência pending or deadline not passed (or not computed yet). pagination.complete is true when every timeline page was read. The timeline is movements, not confirmed publications. Read-only.",
+        description="Read a PJe process: metadata, parties ([{pole active/passive/other, role, name, taxId}], CPF masked; partiesByPole keeps the old texts per pole for one cycle), timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, cienciaDada ({por, em}; ciencia is its old name, kept for one cycle), days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. audiencias (when the portal has the Audiência tab) lists each hearing: data, hora, tipo, orgaoJulgador, sala, situacao (designada, realizada, cancelada...), acordo, linkSalaVirtual when PJe shows it; the lawyer's hearings across processes come from pje_list_audiencias. expedientes.abertos: not answered, not closed by PJe, and ciência pending or deadline not passed (or not computed yet). pagination.complete is true when every timeline page was read. The timeline is movements, not confirmed publications. Read-only.",
         annotations=READ_ONLY,
     )
     def get_process(
@@ -284,6 +285,9 @@ def create_server():
                 portal, lambda session: fetch_process(processNumber, scope, portal=portal, session=session)
             )
         result["movement_candidates"] = movement_candidates(result)
+        if isinstance(result.get("parties"), dict):
+            result["partiesByPole"] = result["parties"]
+            result["parties"] = party_entries(result["parties"])
         return require_success("PJe", result)
 
     @server.tool(
@@ -510,7 +514,7 @@ def create_server():
     @server.tool(
         name="pje_list_processes",
         title="List the lawyer's PJe processes (Acervo)",
-        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject (assunto; null on panels that do not show it, such as TRF5's), parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box, and arquivado: archived processes (the Arquivados box or bucket) are included and flagged, filter them out with arquivado=false; on panels without boxes, the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. One call reads up to 60 jurisdictions; the others come in notRead, and next passes them as regions. "
+        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject (assunto; null on panels that do not show it, such as TRF5's), partes as the panel shows it and parties ([{pole, role: null, name, andOthers}]: the list shows only the two sides, the roles are in pje_get_process), órgão julgador, distribution date, last movement when shown, jurisdiction, box, and arquivado: archived processes (the Arquivados box or bucket) are included and flagged, filter them out with arquivado=false; on panels without boxes, the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. One call reads up to 60 jurisdictions; the others come in notRead, and next passes them as regions. "
         + ENVELOPE
         + " On a PJe 1.x panel the Acervo's Pendentes de Manifestação and Acervo Geral grids: number, parties and autuação date, first page only, no regions. Read-only: opens nothing, takes no ciência.",
         annotations=READ_ONLY,
@@ -534,7 +538,7 @@ def create_server():
     @server.tool(
         name="pje_list_audiencias",
         title="List the lawyer's PJe hearings (Pauta de audiência)",
-        description="List the hearings of the lawyer's processes from the PJe Pauta de audiência page, by start date between dateFrom and dateTo (default: today to 90 days ahead): data, hora, processNumber, classe, partes, orgaoJulgador, tipo, sala and situacao (Designada, Realizada, Cancelada, Redesignada, Não Realizada...), oldest first. complete is true when every row PJe counts was read. The room link of a virtual hearing is in pje_get_process audiencias. Not on PJe-JT or PJe 1.x panels. Read-only: opens no process, downloads nothing.",
+        description="List the hearings of the lawyer's processes from the PJe Pauta de audiência page, by start date between dateFrom and dateTo (default: today to 90 days ahead): data, hora, processNumber, classe, partes (and parties, [{pole, role: null, name}]), orgaoJulgador, tipo, sala and situacao (Designada, Realizada, Cancelada, Redesignada, Não Realizada...), oldest first. complete is true when every row PJe counts was read. The room link of a virtual hearing is in pje_get_process audiencias. Not on PJe-JT or PJe 1.x panels. Read-only: opens no process, downloads nothing.",
         annotations=READ_ONLY,
     )
     def list_audiencias(
@@ -550,7 +554,10 @@ def create_server():
     ) -> dict[str, Any]:
         with tool_errors("PJe"):
             first, last = _window(dateFrom, dateTo)  # a wrong date never costs a login
-        return _notifications(portal, lambda name, session: read_pauta(session, name, first, last))
+        result = _notifications(portal, lambda name, session: read_pauta(session, name, first, last))
+        for item in result.get("items") or []:
+            item["parties"] = parties_of_sides(item.get("partes"))
+        return result
 
     @server.tool(
         name="pje_get_draft",
