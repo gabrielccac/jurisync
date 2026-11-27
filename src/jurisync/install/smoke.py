@@ -18,6 +18,7 @@ authenticator window, because portals refuse a code already used. Results carry 
 """
 
 import argparse
+import fnmatch
 import importlib
 import json
 import os
@@ -37,6 +38,11 @@ TOTP_PERIOD = 30
 STOP_REASONS = (*REFUSALS, "captcha")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 DOCUMENT = re.compile(r"(?<!\d)(?:\d{11}|\d{14}|\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})(?!\d)")
+# Variables whose value identifies or unlocks an account: never shown, even inside a portal's error message.
+SECRET_NAMES = (
+    "*_PASSWORD", "*_SENHA", "*_PIN", "*_2FA_*", "*_TOTP*", "*_SECRET", "*_TOKEN", "*_KEY", "*_EMAIL", "*_USERNAME",
+    "*_LOGIN", "*_CPF", "*_DEVICE_ID",
+)  # fmt: skip
 SESSION_FILES = {"advbox": "ADVBOX_SESSION_FILE", "juridiq": "JURIDIQ_SESSION_FILE"}
 
 
@@ -146,10 +152,8 @@ def wait_for_new_code(say, sleep=time.sleep, clock=time.time):
 
 def masked(text):
     """``text`` without e-mails, CPFs/CNPJs or the value of any secret variable set in this process."""
-    from jurisync.core.mcp import is_secret_name
-
     for name, value in os.environ.items():
-        if len(value.strip()) >= 4 and is_secret_name(name):
+        if len(value.strip()) >= 4 and any(fnmatch.fnmatchcase(name.upper(), pattern) for pattern in SECRET_NAMES):
             text = text.replace(value.strip(), "[…]")
     return DOCUMENT.sub("[…]", EMAIL.sub("<e-mail>", text))
 
