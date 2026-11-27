@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from jurisync.core import certificate
+from jurisync.core.certificate import pkipath_encode
 from jurisync.core.http import IMPERSONATE
 from jurisync.core.session_pool import LoginRejected
 
@@ -19,19 +20,6 @@ def a1_path():
     if not path:
         raise RuntimeError("Set PJE_A1_P12 to the A1 .p12/.pfx file")
     return Path(path.strip().strip('"')).expanduser()
-
-
-def _der_length(n):
-    if n < 128:
-        return bytes([n])
-    raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
-    return bytes([0x80 | len(raw)]) + raw
-
-
-def pkipath_encode(certs_der):
-    """Java CertPath PkiPath: DER SEQUENCE OF Certificate."""
-    body = b"".join(certs_der)
-    return b"\x30" + _der_length(len(body)) + body
 
 
 def sign_mensagem(mensagem, key):

@@ -16,10 +16,11 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.pje.auth import signer as native_signer
-from jurisync.connectors.pje.auth.sso import alert_text, https_pje, require_allowed_url
-from jurisync.core import awswaf, credentials
+from jurisync.connectors.pje.auth.sso import https_pje, require_allowed_url
+from jurisync.core import a3, awswaf, credentials, keycloak
 from jurisync.core.certificate import credential_names, load_configured
 from jurisync.core.http import IMPERSONATE, follow_redirects, log, log_request
+from jurisync.core.keycloak import alert_text
 from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginFailed, LoginRejected, MissingLogin
 from jurisync.core.totp import configured_account, fresh_code, next_code
@@ -236,8 +237,6 @@ def a3_cert_login(portal, session=None, *, signer=None):
     The token is held under a cross-process lock for the whole login, so parallel calls (or another server
     using the same A3) never interleave PIN logins. The TOTP account is read only if the SSO asks for it.
     """
-    from jurisync.connectors.pje.auth import a3
-
     config = portals.pje(portal)
     session = session or requests.Session()
 
@@ -247,9 +246,7 @@ def a3_cert_login(portal, session=None, *, signer=None):
             raise MissingLogin(f"SSO asks for a TOTP code: set {config.env_prefix}_2FA_DATA")
         return found
 
-    if signer is not None:
-        return _login(session, config, account, signer)
-    with a3.token_lock(), a3.A3Signer() as token:
+    with a3.held_token(signer) as token:
         return _login(session, config, account, token)
 
 
@@ -263,7 +260,7 @@ def _page_shape(response):
 
 
 def _otp_form(response):
-    return BeautifulSoup(getattr(response, "text", "") or "", "html.parser").find("form", id="kc-otp-login-form")
+    return keycloak.find_form(getattr(response, "text", ""), keycloak.OTP_FORM)
 
 
 def _answer_otp(session, response, account, config, *, sleep=time.sleep, clock=time.time, follow=None):
@@ -320,7 +317,7 @@ def _submit_certificate(session, page, config, signer, mensagem):
     soup = BeautifulSoup(page.text, "html.parser")
     # TRF5-style pages post the signed challenge to loginForm; JT SSO pages
     # (via authenticateSSO.seam) use kc-form-login with the same pjeoffice fields.
-    form = soup.find("form", id="loginForm") or soup.find("form", id="kc-form-login")
+    form = soup.find("form", id=keycloak.TRF_LOGIN_FORM) or soup.find("form", id=keycloak.LOGIN_FORM)
     if not form or not form.get("action"):
         raise RuntimeError(f"{config.tribunal} login form was not returned")
     action = urllib.parse.urljoin(page.url, form["action"])

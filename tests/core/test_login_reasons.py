@@ -11,9 +11,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from jurisync.connectors.eproc import a3
 from jurisync.connectors.jpe.client import JpeError
 from jurisync.connectors.pje.auth import certificate as pje_certificate
-from jurisync.connectors.pje.auth import sso
 from jurisync.connectors.stj import client as stj
-from jurisync.core import certificate, session_pool, totp
+from jurisync.core import certificate, keycloak, session_pool, totp
 from jurisync.core.mcp import tool_errors
 from jurisync.core.session_pool import (
     EXPLANATIONS,
@@ -126,13 +125,13 @@ def test_the_authenticator_and_the_pin_are_login_missing(monkeypatch):
     ],
 )
 def test_pdpj_sso_refusals_name_their_reason(alert, reason):
-    error = sso.credential_refusal(f'<span id="input-error">{alert}</span>', JpeError)
+    error = keycloak.credential_refusal(f'<span id="input-error">{alert}</span>', JpeError)
     assert isinstance(error, LoginRejected)
     assert error.reason == reason
 
 
 def test_pdpj_sso_waf_page_is_a_captcha_of_the_callers_type():
-    error = sso.credential_refusal("<p>AWS WAF captcha</p>", JpeError)
+    error = keycloak.credential_refusal("<p>AWS WAF captcha</p>", JpeError)
     assert type(error) is JpeError
     assert login_reason(error) == "captcha"
 

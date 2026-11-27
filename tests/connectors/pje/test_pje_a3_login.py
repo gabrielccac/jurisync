@@ -12,9 +12,9 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
 from jurisync import portals
-from jurisync.connectors.pje.auth import a3
 from jurisync.connectors.pje.auth import certificate as cert_login
 from jurisync.connectors.pje.auth.sessions import auth_method, cache_identity
+from jurisync.core import a3
 
 
 def _cert(subject, issuer, key, signing_key, ca):

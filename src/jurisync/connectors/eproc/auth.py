@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from jurisync import portals
+from jurisync.core import keycloak
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code, configured_account
 
@@ -37,9 +38,9 @@ PANEL_READY_ALT = ("#frmPainelAdvogado",)
 LOGIN_FIELDS = {
     "username": ("#username", "#txtUsuario"),
     "password": ("#password", "#pwdSenha"),
-    "submit": ("#kc-login", "#sbmEntrar"),
+    "submit": (f"#{keycloak.LOGIN_BUTTON}", "#sbmEntrar"),
     "otp": ("#otp", "#txtAcessoCodigo"),
-    "otp_submit": ("#kc-login", "#btnValidar"),
+    "otp_submit": (f"#{keycloak.LOGIN_BUTTON}", "#btnValidar"),
 }
 
 
@@ -80,12 +81,12 @@ def has(driver, selector, timeout=0.5):
 
 def page_hint(driver, limit=160):
     """A short single-line excerpt of what the browser shows, for failure messages (never page source)."""
-    for selector in ("#input-error", ".alert-error", "#kc-error-message", ".alert", "body"):
+    for selector in ("#input-error", ".alert-error", f"#{keycloak.ERROR_MESSAGE}", ".alert", "body"):
         try:
             if has(driver, selector, 0.5):
                 text = " ".join((driver.get_text(selector) or "").split())
                 if text:
-                    return text[:limit]
+                    return keycloak.mask(text)[:limit]
         except Exception:  # noqa: BLE001 - best effort diagnostics
             continue
     return ""
@@ -119,7 +120,7 @@ def wait_for_step(driver, timeout=25):
         if "/controlador.php" in url and not is_panel(url) and panel_link(driver.page_source, url):
             return "home"  # logged in, but landed on another page (e.g. TNU's contact-data notice)
         if has(driver, "#username") and any(
-            has(driver, selector) for selector in ("#input-error", ".alert-error", "#kc-error-message")
+            has(driver, selector) for selector in ("#input-error", ".alert-error", f"#{keycloak.ERROR_MESSAGE}")
         ):
             return "login"
         if "externo_controlador.php" in url and "msg=" in url and has(driver, "#txtUsuario"):
@@ -282,12 +283,11 @@ def _classic_cert_login(driver, config):
     """
     from urllib.parse import parse_qsl, urlsplit
 
-    from jurisync.connectors.pje.auth import a3
-    from jurisync.core import mtls
+    from jurisync.core import a3, mtls
 
     cert_url = config.url("priv/login_cert.php?acao_origem=")
     cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
-    with a3.token_lock(), a3.A3Signer() as token:
+    with a3.held_token() as token:
         cert = mtls.fetch(cert_url, signer=token, cookies=cookies)
     if not cert.certificate_sent:
         raise RuntimeError("eproc did not ask for the certificate at login_cert.php")

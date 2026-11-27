@@ -38,13 +38,13 @@ from jurisync.connectors.projudi.legacy import (  # noqa: F401 - re-exported: ca
     strip_path_params,
     visible_text,
 )
+from jurisync.core import keycloak
 from jurisync.core.http import TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
 from jurisync.core.session_pool import LoginRejected
 from jurisync.core.totp import configured_account, fresh_code
 
 USERNAME_PATTERN = re.compile(r"(\d{11}|[A-Z0-9]{12}\d{2})")
 PUBLIC_HOME_MARKER = "acesso ao sistema"
-ACCOUNT_ACTION_FORMS = ("kc-totp-settings-form", "kc-passwd-update-form", "kc-terms-form", "kc-update-profile-form")
 ACCOUNT_ACTION_TEXT = re.compile(
     r"configura[cç][aã]o do autenticador|mobile authenticator setup|atualizar senha|update password|termos de uso",
     re.I,
@@ -104,13 +104,13 @@ def classify_sso_page(html):
     page = soup(html)
     if legacy.has_human_verification(html):
         return "human"
-    if any(page.find("form", id=form_id) for form_id in ACCOUNT_ACTION_FORMS) or ACCOUNT_ACTION_TEXT.search(
+    if any(page.find("form", id=form_id) for form_id in keycloak.ACCOUNT_ACTION_FORMS) or ACCOUNT_ACTION_TEXT.search(
         visible_text(page)
     ):
         return "action"
-    if page.find("form", id="kc-otp-login-form"):
+    if page.find("form", id=keycloak.OTP_FORM):
         return "otp"
-    if page.find("form", id="kc-form-login"):
+    if page.find("form", id=keycloak.LOGIN_FORM):
         return "login"
     return "other"
 
@@ -121,7 +121,7 @@ def is_logged_in_page(html):
     HYPOTHESIS from public pages (every internal link carries ``_tj``); confirm with a real session.
     """
     lowered = html.casefold()
-    return PUBLIC_HOME_MARKER not in lowered and "_tj=" in html and "kc-form-login" not in lowered
+    return PUBLIC_HOME_MARKER not in lowered and "_tj=" in html and keycloak.LOGIN_FORM not in lowered
 
 
 class KeycloakAdapter(legacy.LegacyAdapter):
@@ -188,7 +188,7 @@ class KeycloakAdapter(legacy.LegacyAdapter):
         page = self._follow(session, config, first)
         if self._classify(config, page) != "login":
             raise RuntimeError("Projudi did not open the SSO login form")
-        form = soup(page.text).find("form", id="kc-form-login")
+        form = soup(page.text).find("form", id=keycloak.LOGIN_FORM)
         action = urllib.parse.urljoin(page.url, form.get("action") or "")
         # Browser payload only: hidden fields + user + password (no "remember me", no submit button).
         fields = {**hidden_fields(form), "username": username, "password": password}
@@ -198,7 +198,7 @@ class KeycloakAdapter(legacy.LegacyAdapter):
             raise LoginRejected("Projudi did not accept the login and password")
         if state == "otp":
             account = otp_account(config)
-            form = soup(response.text).find("form", id="kc-otp-login-form")
+            form = soup(response.text).find("form", id=keycloak.OTP_FORM)
             action = urllib.parse.urljoin(response.url, form.get("action") or "")
             # One code is sent: never one about to expire.
             response = self._post(session, config, action, {**hidden_fields(form), "otp": fresh_code(account)})

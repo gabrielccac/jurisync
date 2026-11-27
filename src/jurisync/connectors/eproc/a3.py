@@ -18,7 +18,7 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER, portal_totp_account
-from jurisync.core import mtls
+from jurisync.core import a3, keycloak, mtls
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code
 
@@ -63,13 +63,13 @@ def eproc_message(url, text):
             except UnicodeDecodeError:
                 continue
             if values:
-                return values[0]
+                return keycloak.mask(values[0])
     soup = BeautifulSoup(text, "html.parser")
     # Keycloak's own error slots only: eproc login pages also carry maintenance notices in generic alert boxes.
-    box = soup.find(id=re.compile(r"^(input-error.*|kc-error-message)$")) or soup.find(
-        class_=re.compile(r"(alert-error|kc-feedback-text)")
+    box = soup.find(id=re.compile(rf"^(input-error.*|{keycloak.ERROR_MESSAGE})$")) or soup.find(
+        class_=re.compile(rf"(alert-error|{keycloak.FEEDBACK_TEXT})")
     )
-    return " ".join(box.stripped_strings)[:200] if box else ""
+    return keycloak.mask(" ".join(box.stripped_strings))[:200] if box else ""
 
 
 def _keycloak_x509(session, page, mtls_host, signer):
@@ -81,12 +81,12 @@ def _keycloak_x509(session, page, mtls_host, signer):
     if not response.certificate_sent:
         raise RuntimeError(f"{mtls_host} did not ask for the certificate")
     _store_cookies(session, response, auth.hostname)
-    form = _form(response.text, "kc-x509-login-info")
+    form = _form(response.text, keycloak.X509_FORM)
     if response.status in {301, 302, 303} and response.location:
         return session.get(response.location, impersonate="chrome", timeout=60)
     if form is None or not form.get("action"):
         reason = eproc_message(response.url, response.text)
-        if not reason and _form(response.text, "kc-form-login") is not None:
+        if not reason and _form(response.text, keycloak.LOGIN_FORM) is not None:
             reason = "the certificate was read, but no user of this portal is linked to it (register the CPF first)"
             raise LoginRejected(f"Keycloak did not accept the certificate: {reason}", reason="not_registered")
         raise RuntimeError("Keycloak did not accept the certificate" + (f": {reason}" if reason else ""))
@@ -106,7 +106,7 @@ def _submit_otp(session, response, portal):
     return answer_code(
         response,
         lambda: portal_totp_account(portal),
-        lambda page: _form(page.text, "kc-otp-login-form"),
+        lambda page: _form(page.text, keycloak.OTP_FORM),
         submit,
         label="eproc",
     )
@@ -120,8 +120,6 @@ def _logged_in(response, config):
 
 def login(portal, *, signer=None):
     """Return ``(session, panel_html, panel_url)`` for an eproc portal via the A3 token + its TOTP."""
-    from jurisync.connectors.pje.auth import a3
-
     config = portals.eproc(portal)
     session = requests.Session()
     try:
@@ -134,14 +132,8 @@ def login(portal, *, signer=None):
         if not host:
             raise NoKeycloakCertificate(f"{config.key} login page offers no Keycloak X.509 certificate login")
 
-        def run(token):
-            return _keycloak_x509(session, page, host.group(1), token)
-
-        if signer is not None:
-            response = run(signer)
-        else:
-            with a3.token_lock(), a3.A3Signer() as token:
-                response = run(token)
+        with a3.held_token(signer) as token:
+            response = _keycloak_x509(session, page, host.group(1), token)
         response = _submit_otp(session, response, portal)
         if not _logged_in(response, config):
             reason = eproc_message(response.url, response.text)
