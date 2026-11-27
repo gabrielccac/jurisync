@@ -20,6 +20,15 @@ from jurisync.core import certificate, credentials
 CNJ = re.compile(r"^\d{7}-\d{2}\.\d{4}\.(\d)\.(\d{2})\.(\d{4})$")
 
 
+# The variables of a portal are <PREFIX>_<FIELD>, with PREFIX the key in upper case and "-" as "_" (trf1-1g ->
+# TRF1_1G). Earlier prefixes stay in legacy_env_prefixes and are still read. Exceptions, each with its reason:
+ENV_PREFIX_EXCEPTIONS = {
+    "trf6-1g": "TRF6",  # both Eproc instances share one account
+    "trf6-2g": "TRF6",
+    "tjrj-1g": "TJRJ_PJE_1G",  # TJRJ_1G was the Eproc's prefix, so the PJe keeps its own
+    "tjrj-2g": "TJRJ_PJE_2G",
+}
+
 # Earlier (Portuguese) secret names still accepted; the canonical names match the PJe connector's.
 LEGACY_NAMES = {"USERNAME": ("USUARIO",), "PASSWORD": ("SENHA",), "2FA_DATA": ("EXPORT_DATA",)}
 
@@ -118,15 +127,27 @@ class Portal:
     def env_name(self, name):
         return f"{self.env_prefix}_{name}"
 
+    def variable_names(self, group):
+        """An ``A|B`` group of variable names with each of this portal's names also under its other prefixes, the
+        current one first: a portals.toml that still names ``PJE_1G_USERNAME`` accepts ``TRF1_1G_USERNAME`` too."""
+        prefixes = [prefix for prefix in (self.env_prefix, *self.legacy_env_prefixes) if prefix]
+        names = []
+        for name in (name.strip() for name in group.split("|")):
+            prefix = next((p for p in sorted(prefixes, key=len, reverse=True) if name.startswith(f"{p}_")), None)
+            names += [f"{p}_{name[len(prefix) + 1 :]}" for p in prefixes] if prefix else [name]
+        return "|".join(dict.fromkeys(names))
+
 
 PORTALS = {
     portal.key: portal
     for portal in (
-        Portal("trf1-1g", "pje", "TRF1", "1g", "pje1g.trf1.jus.br", "/pje/", "password_totp", "PJE_1G", region="01"),
-        Portal("trf1-2g", "pje", "TRF1", "2g", "pje2g.trf1.jus.br", "/pje/", "password_totp", "PJE_2G", region="01"),
+        Portal("trf1-1g", "pje", "TRF1", "1g", "pje1g.trf1.jus.br", "/pje/", "password_totp", "TRF1_1G",
+               legacy_env_prefixes=("PJE_1G",), region="01"),
+        Portal("trf1-2g", "pje", "TRF1", "2g", "pje2g.trf1.jus.br", "/pje/", "password_totp", "TRF1_2G",
+               legacy_env_prefixes=("PJE_2G",), region="01"),
         Portal(
-            "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_1G",
-            legacy_env_prefixes=("PJE_TRF5",), region="05",
+            "trf5-1g", "pje", "TRF5", "1g", "pje1g.trf5.jus.br", "/pje/", "certificate_totp", "TRF5_1G",
+            legacy_env_prefixes=("PJE_TRF5_1G", "PJE_TRF5"), region="05",
         ),
         # pje2g.trf5.jus.br is the "Turmas Recursais" PJe (the JEF appeals), NOT the Tribunal: the login page says so.
         # Same Keycloak SSO (client "pje-trf5-2g") and the same A1 certificate + authenticator as the 1G. Its appeals
@@ -134,12 +155,14 @@ PORTALS = {
         # The key stays "trf5-2g" (customers' portals.toml and PJE_TRF5_2G_* secrets use it); the Tribunal's 2nd
         # instance is "trf5-tru" (pjett) and the old PJe 1.x host is "trf5-legacy".
         Portal(
-            "trf5-2g", "pje", "TRF5", "2g", "pje2g.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_2G",
-            legacy_env_prefixes=("PJE_TRF5",), region="05",
+            "trf5-2g", "pje", "TRF5", "2g", "pje2g.trf5.jus.br", "/pje/", "certificate_totp", "TRF5_2G",
+            legacy_env_prefixes=("PJE_TRF5_2G", "PJE_TRF5"), region="05",
         ),
         # TRF3 (SP/MS) serves the same PJe under /pje/; the password flow is the default, the A1 certificate opts in.
-        Portal("trf3-1g", "pje", "TRF3", "1g", "pje1g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_1G", region="03"),
-        Portal("trf3-2g", "pje", "TRF3", "2g", "pje2g.trf3.jus.br", "/pje/", "password_totp", "PJE_TRF3_2G", region="03"),
+        Portal("trf3-1g", "pje", "TRF3", "1g", "pje1g.trf3.jus.br", "/pje/", "password_totp", "TRF3_1G",
+               legacy_env_prefixes=("PJE_TRF3_1G",), region="03"),
+        Portal("trf3-2g", "pje", "TRF3", "2g", "pje2g.trf3.jus.br", "/pje/", "password_totp", "TRF3_2G",
+               legacy_env_prefixes=("PJE_TRF3_2G",), region="03"),
         # TRF6 (MG) keeps its older cases in PJe beside the Eproc (trf6-1g/2g). No SSO: the login page carries
         # ASSINATURA_MENSAGEM, which the A1 signs (certificate._legacy_login), and no code is asked; after it, the
         # panel is the PJe 2.x one. Cases moved from the TRF1 keep its 4.01 numbers, and region 06 is the Eproc's too,
@@ -153,15 +176,15 @@ PORTALS = {
         # compatibility (customers' portals.toml and PJE_TRF5_TRU_* secrets). Its cases keep the JEF number, so only
         # the link host (DJEN) or the panel it appears in points here.
         Portal(
-            "trf5-tru", "pje", "TRF5", "2g", "pjett.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_TRU",
-            legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False,
+            "trf5-tru", "pje", "TRF5", "2g", "pjett.trf5.jus.br", "/pje/", "certificate_totp", "TRF5_TRU",
+            legacy_env_prefixes=("PJE_TRF5_TRU", "PJE_TRF5"), region="05", guess_by_number=False,
         ),
         # pje.trf5.jus.br is the old PJe 1.x of the Tribunal (PJeOffice): no SSO and no TOTP. The login page carries
         # ASSINATURA_MENSAGEM, which the A1 certificate signs (certificate._legacy_login); "certificate_totp" is only the
         # family name, no code is asked. Only the host picks it.
         Portal(
-            "trf5-legacy", "pje", "TRF5", "2g", "pje.trf5.jus.br", "/pje/", "certificate_totp", "PJE_TRF5_LEGACY",
-            legacy_env_prefixes=("PJE_TRF5",), region="05", guess_by_number=False, flavor="pje1x",
+            "trf5-legacy", "pje", "TRF5", "2g", "pje.trf5.jus.br", "/pje/", "certificate_totp", "TRF5_LEGACY",
+            legacy_env_prefixes=("PJE_TRF5_LEGACY", "PJE_TRF5"), region="05", guess_by_number=False, flavor="pje1x",
         ),
         # TJAP is a state court (CNJ J=8, TR=03) served by the PDPJ PJe under /1g/; login goes through the
         # same Keycloak SSO as the federal courts (realm "pje", client "pje-tjap-1g").
@@ -335,12 +358,12 @@ PORTALS = {
         Portal("tjba-eproc-1g", "eproc", "TJBA", "1g", "eproc1g.tjba.jus.br", "/eproc/", "browser_totp", "TJBA_EPROC_1G",
                region="05", justice="8", guess_by_number=False),
         # TJMS also has e-SAJ; a process number alone cannot identify its eproc cases.
-        Portal("tjms-eproc-1g", "eproc", "TJMS", "1g", "eproc1g.tjms.jus.br", "/eproc/", "certificate_totp", "TJMS_1G",
-               region="12", justice="8", guess_by_number=False),
-        Portal("tjrj-eproc-1g", "eproc", "TJRJ", "1g", "eproc1g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_1G",
-               region="19", justice="8"),
-        Portal("tjrj-eproc-2g", "eproc", "TJRJ", "2g", "eproc2g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_2G",
-               region="19", justice="8"),
+        Portal("tjms-eproc-1g", "eproc", "TJMS", "1g", "eproc1g.tjms.jus.br", "/eproc/", "certificate_totp", "TJMS_EPROC_1G",
+               legacy_env_prefixes=("TJMS_1G",), region="12", justice="8", guess_by_number=False),
+        Portal("tjrj-eproc-1g", "eproc", "TJRJ", "1g", "eproc1g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_EPROC_1G",
+               legacy_env_prefixes=("TJRJ_1G",), region="19", justice="8"),
+        Portal("tjrj-eproc-2g", "eproc", "TJRJ", "2g", "eproc2g.tjrj.jus.br", "/eproc/", "browser_totp", "TJRJ_EPROC_2G",
+               legacy_env_prefixes=("TJRJ_2G",), region="19", justice="8"),
         Portal("tjpr-1g", "eproc", "TJPR", "1g", "eproc1g.tjpr.jus.br", "/eproc/", "certificate_totp", "TJPR_1G",
                region="16", justice="8"),
         Portal("tjpr-2g", "eproc", "TJPR", "2g", "eproc2g.tjpr.jus.br", "/eproc/", "certificate_totp", "TJPR_2G",
@@ -481,7 +504,7 @@ PORTALS = {
         # (core/tencent_captcha.py). Login observed live on 2026-11-23, but no account got in (expired / refused
         # passwords), so the desk is unmapped and the portal stays unwired. Not TJBA's PJe (tjba-1g).
         Portal("tjba-projudi-1g", "projudi", "TJBA", "1g", "projudi.tjba.jus.br", "/projudi/", "password",
-               "TJBA_PROJUDI", region="05", justice="8", wired=False, guess_by_number=False, flavor="cnj-servlet",
+               "TJBA_PROJUDI_1G", legacy_env_prefixes=("TJBA_PROJUDI",), region="05", justice="8", wired=False, guess_by_number=False, flavor="cnj-servlet",
                login_path="PaginaPrincipal.jsp"),
         # e-SAJ (Softplan): the CAS (/sajcas) asks the A1 certificate to sign a challenge in the login form, with no
         # mutual TLS and no authenticator. Keys carry "esaj" because TJSP already has an Eproc portal (tjsp-1g).

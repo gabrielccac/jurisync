@@ -90,7 +90,7 @@ class RegistryTest(unittest.TestCase):
         self.assertFalse(portal.wired)
         self.assertEqual(
             (portal.flavor, portal.host, portal.root, portal.auth, portal.env_prefix, portal.region, portal.justice),
-            ("cnj-servlet", "projudi.tjba.jus.br", "/projudi/", "password", "TJBA_PROJUDI", "05", "8"),
+            ("cnj-servlet", "projudi.tjba.jus.br", "/projudi/", "password", "TJBA_PROJUDI_1G", "05", "8"),
         )
         self.assertEqual(portal.login_url, APP + "PaginaPrincipal.jsp")
         self.assertFalse(portal.guess_by_number)

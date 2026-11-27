@@ -26,7 +26,7 @@ class AccessRulesTest(unittest.TestCase):
         values = {"PJE_2G_USERNAME": "outro", "PJE_1G_CERT": "true", "PJE_A1_PIN": "1"}
         uri = access.single_account_uri(access.authenticator_accounts(text=SECRET))
         updated = access.with_portal(values, trf1, access.PASSWORD, username="123", password="s", authenticator=uri)
-        self.assertEqual(updated["PJE_1G_USERNAME"], "123")
+        self.assertEqual(updated["TRF1_1G_USERNAME"], "123")
         self.assertNotIn("PJE_1G_CERT", updated)
         self.assertEqual(updated["PJE_2G_USERNAME"], "outro")
         self.assertEqual(access.portal_state(trf1, updated, {}).method, access.PASSWORD)
@@ -37,11 +37,11 @@ class AccessRulesTest(unittest.TestCase):
         trf1, trf5 = portals.pje("trf1-1g"), portals.pje("trf5-1g")
         values = {"PJE_1G_USERNAME": "123", "PJE_1G_PASSWORD": "s"}
         updated = access.with_portal(values, trf1, access.CERTIFICATE)
-        self.assertEqual(updated, {"PJE_1G_CERT": "true"})
+        self.assertEqual(updated, {"TRF1_1G_CERT": "true"})
         files = {access.A1_FILE: b"x"}
         self.assertEqual(access.portal_state(trf1, updated, files).method, access.CERTIFICATE)
         self.assertEqual(access.portal_state(trf5, {}, files).method, access.CERTIFICATE)
-        self.assertNotIn("PJE_TRF5_1G_CERT", access.with_portal({}, trf5, access.CERTIFICATE))
+        self.assertNotIn("TRF5_1G_CERT", access.with_portal({}, trf5, access.CERTIFICATE))
         self.assertIsNone(access.portal_state(trf1, {}, {}).method)
 
     def test_authenticator_exports_become_one_totp_uri(self):
@@ -119,7 +119,7 @@ class OperatorCommandsTest(unittest.TestCase):
         cli.open_vault().put("office-a", values, {access.A1_FILE: data})
 
         def login(portal):
-            self.assertEqual((credentials.tenant(), credentials.env("PJE_1G_PASSWORD")), ("office-a", "certa"))
+            self.assertEqual((credentials.tenant(), credentials.env("TRF1_1G_PASSWORD")), ("office-a", "certa"))
 
         with mock.patch.object(access, "check_login", side_effect=login):
             self.cli(["portal", "check", "office-a", "trf1-1g"])

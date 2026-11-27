@@ -478,7 +478,7 @@ class PjeChecks(unittest.TestCase):
                 },
                 clear=True,
             ),
-            self.assertRaisesRegex(RuntimeError, "PJE_2G_USERNAME"),
+            self.assertRaisesRegex(RuntimeError, "TRF1_2G_USERNAME"),
         ):
             client.credentials("trf1-2g")
 

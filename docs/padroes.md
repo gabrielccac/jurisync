@@ -77,6 +77,22 @@ que faltavam (`advbox_get_activity`, `advbox_get_lawsuit_report`, `advbox_list_t
 `advbox_list_workflow_tasks`, `advbox_get_session`, `juridiq_search_lawsuits`) e `publicacoes` no lugar de
 `publications`. A tabela completa é `names.ALIASES`.
 
+### Variáveis de ambiente
+
+Variável de portal é `<PREFIXO>_<CAMPO>` (`USERNAME`, `PASSWORD`, `2FA_DATA`, `CERT`, `AUTH`...), com `PREFIXO` = a chave
+do portal em maiúsculas e `-` como `_` (`trf1-1g` -> `TRF1_1G`, `tjms-eproc-1g` -> `TJMS_EPROC_1G`). As exceções ficam em
+`portals.ENV_PREFIX_EXCEPTIONS`, cada uma com o motivo: o TRF6 Eproc divide uma conta entre as instâncias (`TRF6`) e o PJe
+do TJRJ fica com `TJRJ_PJE_*` porque `TJRJ_1G` era do Eproc. Variável que não é de portal leva o nome do serviço
+(`ADVBOX_*`, `JURIDIQ_*`, `PJE_A1_*`, `JURISYNC_*`).
+
+Um prefixo antigo vai para `legacy_env_prefixes` e continua sendo lido; o atual vence quando os dois existem. Um
+`portals.toml` que ainda cita o nome antigo aceita o novo (`Portal.variable_names`), então nenhum escritório precisa
+mexer no `.env`. Na F4 mudaram `PJE_1G/2G` -> `TRF1_1G/2G`, `PJE_TRF3_*` -> `TRF3_*`, `PJE_TRF5_*` -> `TRF5_*`
+(`PJE_TRF5_*`, que serve todos os portais do TRF5, continua valendo), `TJMS_1G` -> `TJMS_EPROC_1G`,
+`TJRJ_1G/2G` -> `TJRJ_EPROC_1G/2G` e `TJBA_PROJUDI` -> `TJBA_PROJUDI_1G`.
+
+O `.env.example` de um escritório sai do `portals.toml`: `jurisync-setup env-example <nome> --write`.
+
 ## 4. Annotations MCP
 
 Toda tool usa um preset de `jurisync.core.mcp`, nunca um `ToolAnnotations` próprio, e tem `title`:
@@ -186,4 +202,5 @@ Passos para um conector novo:
 | Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |
 | Orçamento, offset e JSON compacto (pior caso do `pje_read_documents`) | `tests/core/test_responses.py` |
 | Nomes no vocabulário; todo alias aponta para uma tool listada e funciona | `tests/core/test_names.py` |
+| Prefixo de variável = chave do portal (ou exceção listada); nome antigo aceito; `.env.example` gerado passa no `check-customer` | `tests/core/test_env_names.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |

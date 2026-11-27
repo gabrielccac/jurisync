@@ -64,7 +64,7 @@ def load_env_file(path=None):
     The path comes from JURISYNC_ENV_FILE (set per server in .mcp.json); without it the
     user's ``~/.config/jurisync/.env`` is used when it exists. When JURISYNC_CUSTOMER names a customer, its
     gitignored ``customers/<name>/.env`` is loaded first, so a customer's values
-    take precedence over the shared file. The values its portals.toml ``[env].set`` pins (e.g. ``PJE_1G_CERT=true``)
+    take precedence over the shared file. The values its portals.toml ``[env].set`` pins (e.g. ``TRF1_1G_CERT=true``)
     come next, so a checkout behaves like an installed bundle, which writes them into the customer's file.
     With a customer selected the shared file then provides machine settings only (``MACHINE_PATTERNS``); without
     one it is the single account's file and loads whole.

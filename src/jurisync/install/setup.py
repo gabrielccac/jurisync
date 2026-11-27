@@ -7,6 +7,7 @@ check the logins, and register the servers with Claude.
     jurisync-setup import elisandra.jurisync                              # customer machine: passphrase on a local page
     jurisync-setup skills --customer elisandra                            # install/update the customer's skills from GitHub
     jurisync-setup check-customer [elisandra ...]                         # check customer folders (all by default)
+    jurisync-setup env-example elisandra [--write]                        # .env.example from its portals.toml
 
 Secrets go to one file (``~/.config/jurisync/.env`` unless ``--env-file``), created with owner-only permissions,
 and are never printed. Servers read that file at startup, so Claude Desktop and Claude Code share the same login.
@@ -472,7 +473,7 @@ def declared_names(customer, keys=None):
         if key == customers.RESERVED_TABLE or (keys is not None and key not in keys):
             continue
         for group in entry.get("secrets", []):
-            names += [name.strip() for name in group.split("|")]
+            names += portals.get(key).variable_names(group).split("|")
     required, extra_optional = customers.extra_variables(customer)
     names += required
     optional += extra_optional
@@ -656,6 +657,23 @@ def check_customer_main(argv, *, say):
     return 1 if problems else 0
 
 
+def env_example_main(argv, *, say):
+    parser = argparse.ArgumentParser(
+        prog="jurisync-setup env-example", description="Gera o .env.example do escritório a partir do portals.toml."
+    )
+    parser.add_argument("name", help="escritório em customers/")
+    parser.add_argument("--write", action="store_true", help="grava customers/<nome>/.env.example em vez de mostrar")
+    args = parser.parse_args(argv)
+    text = customers.env_example(args.name)
+    if not args.write:
+        say(text.rstrip("\n"))
+        return 0
+    path = customers.customer_dir(args.name) / ".env.example"
+    path.write_text(text, encoding="utf-8")
+    say(f"Gravado {path}.")
+    return 0
+
+
 def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -665,6 +683,8 @@ def main(argv=None, *, ask=input, ask_secret=getpass.getpass, say=print):
             return import_main(argv[1:], ask_secret=ask_secret, say=say)
         if argv[:1] == ["check-customer"]:
             return check_customer_main(argv[1:], say=say)
+        if argv[:1] == ["env-example"]:
+            return env_example_main(argv[1:], say=say)
         if argv[:1] == ["verificar"]:
             return verify_main(argv[1:], say=say)
         if argv[:1] == ["skills"]:
