@@ -16,6 +16,7 @@ state of the page.
 
 import math
 import re
+from datetime import date
 from html import unescape
 
 from bs4 import BeautifulSoup
@@ -26,6 +27,7 @@ from jurisync.connectors.pje.acervo import PANEL_SUFFIX
 from jurisync.connectors.pje.expedientes import NOTICE, PRAZO
 from jurisync.connectors.pje.parsers import response_html
 from jurisync.connectors.pje.process import login_portal
+from jurisync.core import intimacao
 
 CONTAINER = "conteudoAbaExpedientes"
 BUCKET_ROW = re.compile(r"formAbaExpediente:listaAgrSitExp:(\d+):linhaN1$")
@@ -328,6 +330,82 @@ def parse_inbox(html):
     }
 
 
+# -- situação ------------------------------------------------------------------
+
+# A bucket says more than a row: PJe never renders "Tomar ciência" for a communication sent through the Diário (or
+# DJEN), so its row looks like any other with no notice text. Buckets by what their label says (TRF5 and TJMG print
+# "Ciência dada pelo Judiciário - pendente de resposta", other deployments "Ciência dada pelo destinatário", TJPE
+# "Prazo findo nos últimos 10 dias", TRF5 "Cujo prazo findou ..."). The default bucket, "Pendentes de ciência ou de
+# resposta", is the union of the pending, ciência-given and no-deadline buckets, so its rows are told apart one by one.
+BUCKET_SITUATIONS = (
+    (re.compile(r"ou de resposta|meus expedientes", re.I), None),
+    (re.compile(r"apenas pendentes", re.I), intimacao.AWAITING_CIENCIA),
+    (re.compile(r"ci[eê]ncia (?:dada|pelo)", re.I), intimacao.RUNNING),
+    (re.compile(r"prazo find", re.I), intimacao.EXPIRED),
+    (re.compile(r"sem prazo", re.I), intimacao.NO_DEADLINE),
+    (re.compile(r"respondid", re.I), intimacao.ANSWERED),
+)
+# The Diário (DJEN) gives the ciência by publishing; until then the row waits for it.
+PUBLISHED_CHANNEL = re.compile(r"di[aá]rio|djen", re.I)
+
+
+def bucket_situation(label):
+    """The situação every row of a bucket has, or None when the rows of the bucket differ (or it is not known)."""
+    for pattern, situation in BUCKET_SITUATIONS:
+        if pattern.search(label or ""):
+            return situation
+    return None
+
+
+def _awaiting(row):
+    return (
+        intimacao.AWAITING_PUBLICATION
+        if PUBLISHED_CHANNEL.search(row.get("meio") or "")
+        else intimacao.AWAITING_CIENCIA
+    )
+
+
+def row_situation(row, bucket_label=None, today=None):
+    """The situação of one inbox row (``core.intimacao``): from its bucket when the bucket settles it, else its own."""
+    situation = bucket_situation(bucket_label)
+    if situation == intimacao.AWAITING_CIENCIA:
+        return _awaiting(row)
+    if situation is not None:
+        return situation
+    if "pending" in row:  # PJe 1.x grid rows: only the Pendentes bucket says anything
+        return intimacao.AWAITING_CIENCIA if row["pending"] else intimacao.UNKNOWN
+    if not row.get("expedienteId"):  # a PJe-JT Acervo row is a process, not a communication
+        return intimacao.UNKNOWN
+    if row.get("respondido"):
+        return intimacao.ANSWERED
+    if row.get("cienciaPendente") or not row.get("ciencia"):
+        return _awaiting(row)
+    if row.get("semPrazo"):
+        return intimacao.NO_DEADLINE
+    limit = row.get("limite") if row.get("limiteTipo") != "ciência" else None
+    if row.get("prazoVencido") or (limit and limit < (today or date.today()).isoformat()):
+        return intimacao.EXPIRED
+    return intimacao.RUNNING
+
+
+def with_situation(row, bucket_label=None, today=None):
+    """The row with the shared ``situacao``/``prazoFinal`` fields. ``prazoFinal`` is PJe's own "Data limite prevista
+    para manifestação" (the date for "ciência" is when the tacit ciência happens, not a deadline to answer)."""
+    situation = row_situation(row, bucket_label, today)
+    deadline = row.get("limite") if row.get("limiteTipo") != "ciência" else None
+    shared = intimacao.fields(situation, deadline, "portal")
+    if situation in (intimacao.AWAITING_CIENCIA, intimacao.AWAITING_PUBLICATION) and "cienciaPendente" in row:
+        shared["cienciaPendente"] = True
+    return {**row, **shared}
+
+
+def _add_situations(result, today=None):
+    label = (result.get("bucket") or {}).get("label")
+    for box in result.get("inboxes") or []:
+        box["rows"] = [with_situation(row, label, today) for row in box.get("rows") or []]
+    return result
+
+
 # -- search filters ------------------------------------------------------------
 
 # Filters of the inbox search form. The text boxes are keyed by the stable tail of their
@@ -625,6 +703,10 @@ def read_inbox(portal, *, bucket=None, regions=None, filters=None, max_pages=25,
     the rows read reach the total PJe reports for it; more rows than the total means the inbox
     gained items while its pages were being read (``changedWhileReading``), and they are all kept.
     """
+    return _add_situations(_read_inbox(portal, bucket, regions, filters, max_pages, session))
+
+
+def _read_inbox(portal, bucket, regions, filters, max_pages, session):
     if portals.pje(portal).pje1x:
         return _kz_call(portal, session, lambda s: legacy.read_inbox(s, portal, bucket=bucket, filters=filters))
     if portals.pje(portal).kz:

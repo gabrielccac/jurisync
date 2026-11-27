@@ -24,7 +24,7 @@ from jurisync.connectors.pje.process import (
     require_own_number,
 )
 from jurisync.connectors.pje.push import read_push
-from jurisync.core import certificate, ciencia, credentials
+from jurisync.core import certificate, ciencia, credentials, intimacao
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.errors import InputError, NotFound, WritesDisabled
 from jurisync.core.mcp import (
@@ -366,7 +366,9 @@ def create_server():
     @server.tool(
         name="pje_list_intimacoes",
         title="List PJe Expedientes inbox rows",
-        description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
+        description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. "
+        + intimacao.DESCRIPTION
+        + " In PJe the default bucket (0, Pendentes de ciência ou de resposta) is that list: awaiting ciência, ciência given with the deadline running, and no deadline. The others (see pje_get_counters): 1 only awaiting ciência (a Diário/DJEN row there is aguardando_publicacao: PJe shows no Tomar ciência button for it), 2 and 3 ciência given by the recipient or by the system/Diário, deadline running, 4 deadline ended in the last 10 days with no answer (prazo_vencido; outside the default, ask for it), 5 no deadline, 6 answered in the last 10 days. PJe counts as answered only a reply made through Responder: a petition filed through Juntar documentos leaves the expediente pending an answer. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
         annotations=READ_ONLY,
     )
     def list_inbox(
@@ -374,7 +376,7 @@ def create_server():
         bucket: Annotated[
             str | None,
             Field(
-                description="Bucket index or part of its label (see pje_get_counters). Empty: the pending bucket (Pendentes de ciência ou de resposta, or Meus Expedientes where the panel names it so). An unknown index errors listing the valid ones."
+                description="Bucket index or part of its label (see pje_get_counters). Empty: the pending bucket (Pendentes de ciência ou de resposta, or Meus Expedientes where the panel names it so). '4' lists the deadlines that ended in the last 10 days without an answer. An unknown index errors listing the valid ones."
             ),
         ] = None,
         regions: Annotated[
