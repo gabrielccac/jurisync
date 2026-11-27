@@ -16,6 +16,7 @@ from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
     BUDGET_NOTE,
+    MAX_HEARING_PAGES,
     MAX_REPORT_PAGES,
     PRAZO_FILTER,
     QUEUE_KINDS,
@@ -187,19 +188,57 @@ def create_server(keys=None):
 
     @server.tool(
         name="eproc_list_audiencias",
-        title="List Eproc upcoming audiências",
+        title="List Eproc audiências",
         description=(
-            "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
-            "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
-            "parties, event (what was scheduled), location, start and end, date (the day of start) and observation. "
-            "lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
+            "List the lawyer's audiências in an Eproc portal from the panel's lists: upcoming (default, soonest "
+            "first), held or not held (latest first), each with its conciliation twin. Use it for the hearing "
+            "agenda; nothing is opened, so no ciência is registered. The audiências of one process: "
+            "eproc_get_process. Read-only. "
+            "Cost: one page of each list by default; maxPages reads more of long lists; kind reads only one of the "
+            "two. "
+            "Each item: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
+            "parties, event (what was scheduled), location, start and end, date (the day of start; items without one "
+            "come last) and observation. lists[] says what each list gave (problem when it could not be read). "
             + DATES
-            + " Read-only."
+            + " "
+            + ENVELOPE
         ),
         annotations=READ_ONLY,
     )
-    def eproc_list_audiencias(portal: Portal) -> dict[str, Any]:
-        result = call(portal, lambda **context: list_hearings(**context))
+    def eproc_list_audiencias(
+        portal: Portal,
+        situation: Annotated[
+            Literal["upcoming", "held", "not_held"],
+            Field(
+                description=(
+                    "'upcoming': designada, redesignada, prorrogada, adiada, antecipada; 'held': realizadas; "
+                    "'not_held': canceladas or não realizadas."
+                )
+            ),
+        ] = "upcoming",
+        kind: Annotated[
+            Literal["audiencia", "conciliacao"] | None,
+            Field(description="Only the hearings list or only the conciliation list; both when omitted."),
+        ] = None,
+        processNumber: Annotated[
+            str | None,
+            Field(description="CNJ number with punctuation: keep only this process' audiências."),
+        ] = None,
+        maxPages: Annotated[
+            int,
+            Field(ge=1, le=MAX_HEARING_PAGES, description="Pages of each list to read when the portal pages it."),
+        ] = 1,
+        offset: Annotated[
+            int,
+            Field(ge=0, description="Items to skip, from next when an answer was cut to fit the size budget."),
+        ] = 0,
+    ) -> dict[str, Any]:
+        result = call(
+            portal,
+            lambda **context: list_hearings(
+                situation, kind, processNumber, max_pages=maxPages, offset=offset, **context
+            ),
+        )
         for hearing in result.get("audiencias") or []:
             dated(hearing, "start", "end")
         return result
@@ -330,9 +369,14 @@ def create_server(keys=None):
             "aberto/fechado/aguardando_abertura, closedBy, start and end ISO dates, djenAvailable/djenPublished). "
             "metadata.additionalInformation: the Informações Adicionais (justiça gratuita, sigilo, prevenção, valor "
             "da causa...); audiencias and pericias: the process' lists (null where the portal has no such button). "
-            "save=true stores each read document (HTML as PDF) in the shared documents folder. timeline[].dateTime, "
-            "metadata.cover.filedAt, audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and "
-            "eventos: " + DATES
+            "save=true stores each read document (HTML as PDF) in the shared documents folder. Inventory: the timeline is "
+            "read up to 5 event pages; when it was not read to its end, or a documentId is not in it, the Árvore (the "
+            "case's full document list, nothing opened) is listed too and inventorySource says 'tree' (else 'timeline'). "
+            "inventory='tree' always lists it, 'timeline' never (one request less). With the Árvore, documentInventory "
+            "shows 150 entries and inventory.next gives the arguments for the rest (inventoryOffset; documentIds empty and "
+            "save false, so nothing is opened again); a timeline-only inventory comes whole. Documents found in the Árvore "
+            "are opened under the same ciência rule. timeline[].dateTime, documentInventory[].date, metadata.cover.filedAt, "
+            "audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and eventos: " + DATES
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -363,6 +407,16 @@ def create_server(keys=None):
             bool | None,
             Field(description=ciencia.ACKNOWLEDGE),
         ] = None,
+        inventory: Annotated[
+            Literal["auto", "timeline", "tree"],
+            Field(description="'auto': list the Árvore only when the timeline is incomplete. 'tree' or 'timeline'."),
+        ] = "auto",
+        inventoryOffset: Annotated[
+            int,
+            Field(
+                ge=0, description="First documentInventory entry to show when the Árvore was listed (inventory.next)."
+            ),
+        ] = 0,
     ) -> dict[str, Any]:
         result = call(
             portal,
@@ -372,10 +426,14 @@ def create_server(keys=None):
                 documentIds or None,
                 save=save,
                 acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
+                inventory=inventory,
+                inventory_offset=inventoryOffset,
                 **context,
             ),
         )
         dated((result.get("metadata") or {}).get("cover") or {}, "filedAt")
+        for document in result.get("documentInventory") or []:
+            dated(document, "date")
         for event in result.get("timeline") or []:
             dated(event, "dateTime")
         for hearing in result.get("audiencias") or []:

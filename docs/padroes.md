@@ -186,6 +186,14 @@ Helpers em `jurisync.core.responses`:
 - **Ciência pendente:** linha de lista de intimações traz `cienciaPendente` (booleano), como no PJe e no Projudi; no
   Eproc é `true` nas filas `pending*` e `art334`. Vale para a linha; a trava de ciência vale para o processo
   inteiro, então uma linha `false` não significa que os documentos do processo podem ser abertos.
+- **camelCase:** chave de resposta é camelCase. No PJe, `responses.camel` renomeia as chaves snake_case. Exceção à
+  regra de duplicar por um ciclo: só as chaves do nível de cima e de objetos únicos (`metadata`, `pagination`...)
+  mantêm o nome antigo; dentro de coleções repetidas (`timeline`, `movementCandidates`, documentos) e numa chave
+  que guarda lista há só o nome novo, porque a cópia dobraria a resposta e estouraria o orçamento. Dicts cujas
+  chaves são dados (`partiesByPole`, `responses.DATA_KEYS`) não mudam. O orçamento e o `fit_texts` medem a
+  resposta já em camelCase. No `pje_get_process`, `filedAt`, `lastDistribution` e `timeline[].date`
+  saem em ISO, enquanto `filed_at`, `last_distribution` e `timeline[].dateText` guardam o valor antigo: o texto da
+  página no painel JSF ("19 jun. 2025") e, no PJe-JT (kz), o ISO que `filed_at` já trazia.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **`ciencia`** é só o bloco de estado (`core.ciencia.report`). Quem deu a ciência e quando, por expediente do PJe, é

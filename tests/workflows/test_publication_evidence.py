@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from jurisync.core import responses
 from jurisync.workflows.publications.evidence import PublicationError, prepare_publication, validate_decision
 
 NUMBER = "1024853-70.2023.4.01.3400"
@@ -97,6 +98,12 @@ class PublicationChecks(unittest.TestCase):
         movement_sources = [item for item in bundle["sources"] if item["kind"] == "movement"]
         self.assertEqual(len(movement_sources), 3)
         self.assertEqual(len({item["sourceId"] for item in movement_sources}), 3)
+
+    def test_a_camel_case_process_keeps_every_movement_label(self):
+        bundle = prepare_publication([publication()], "pub-1", process=responses.camel(process()))
+        self.assertEqual(
+            bundle["timeline"][0]["movements"][0]["labels"], ["Juntada de peça", "Disponibilizado no diário"]
+        )
 
     def test_complete_sufficient(self):
         bundle = self.bundle()

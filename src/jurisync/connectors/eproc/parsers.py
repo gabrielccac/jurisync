@@ -426,14 +426,15 @@ def report_filter_request(html, base_url, *, include_archived=None, prazo=None, 
     return _href(form["action"], base_url), fields
 
 
-def report_page_request(html, base_url, page):
-    """``(url, fields)`` that ask Relação de Processos for ``page`` (0-based), as its pager does; ``None`` without one.
+def report_page_request(html, base_url, page, *, form="form#frmProcessoLista[action]"):
+    """``(url, fields)`` that ask Relação de Processos (or the list whose ``form`` is given) for ``page`` (0-based), as
+    its pager does; ``None`` without one.
 
     The pager (``infraAcaoPaginar('=', page, 'Infra')``) sets ``hdnInfraPaginaAtual`` and re-posts the list form with
     the same criteria, so the portal keeps the filters and the ordering of the first page.
     """
     soup = BeautifulSoup(html, "html.parser")
-    form = soup.select_one("form#frmProcessoLista[action]")
+    form = soup.select_one(form)
     if form is None or not form.select_one('input[name="hdnInfraPaginaAtual"]'):
         return None
     fields = [(name, value) for name, value in form_fields(form) if name not in ("hdnInfraPaginaAtual", "hdnExcel")]
@@ -731,10 +732,14 @@ def parse_process_exams(html):
 
 
 def process_links(html, base_url):
-    """The process page's audiência and perícia list links, when its action bar shows them."""
+    """The process page's audiência, perícia and Árvore (document tree) links, when its action bar shows them."""
     soup = BeautifulSoup(html or "", "html.parser")
     links = {}
-    for key, action in (("hearings", "audiencia_listar"), ("exams", "exame_listar")):
+    for key, action in (
+        ("hearings", "audiencia_listar"),
+        ("exams", "exame_listar"),
+        ("tree", "arvore_documento_listar"),
+    ):
         anchor = soup.select_one(f'a[href*="acao={action}&"]')
         if anchor is not None:
             links[key] = _href(anchor.get("href"), base_url)
