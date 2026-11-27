@@ -45,6 +45,22 @@ class FitTextsTest(unittest.TestCase):
         self.assertEqual(responses.listing([]), {"items": [], "returned": 0, "total": None, "next": None})
 
 
+class DatedTest(unittest.TestCase):
+    def test_dates_become_iso_and_the_portal_text_stays_for_a_cycle(self):
+        item = {"requestedAt": "05/11/2026 17:00:38", "deadlineStart": "", "deadlineEnd": "2026-12-02", "name": ""}
+        responses.dated(item, "requestedAt", "deadlineStart", "deadlineEnd", "filedAt")
+        self.assertEqual(
+            item,
+            {
+                "requestedAt": "2026-11-05T17:00:38",
+                "requestedAtText": "05/11/2026 17:00:38",
+                "deadlineStart": None,
+                "deadlineEnd": "2026-12-02",
+                "name": "",
+            },
+        )
+
+
 class IsoTest(unittest.TestCase):
     def test_portal_dates_become_iso(self):
         self.assertEqual(responses.iso("05/11/2026"), "2026-11-05")

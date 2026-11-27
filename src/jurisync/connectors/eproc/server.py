@@ -35,7 +35,7 @@ from jurisync.core.mcp import (
     serve,
     tool_errors,
 )
-from jurisync.core.responses import ENVELOPE, listing
+from jurisync.core.responses import DATES, ENVELOPE, dated, listing
 from jurisync.core.session_pool import SessionExpired, SessionPool
 from jurisync.customers import load_env_file
 from jurisync.portals import PORTAL_HELP, offer_portals
@@ -93,8 +93,11 @@ def create_server(keys=None):
                 ),
             )
 
-    def enveloped(result, max_pages=None):
-        """The common list envelope; ``next`` only when the portal's pager has pages a larger maxPages reaches."""
+    def enveloped(result, dates, max_pages=None):
+        """The common list envelope, the items' ``dates`` in ISO; ``next`` only when the portal's pager has pages a
+        larger maxPages reaches."""
+        for item in result.get("items") or []:
+            dated(item, *dates)
         pagination = result.get("pagination") or {}
         pages = pagination.get("totalPages") or 0
         more = None
@@ -114,7 +117,9 @@ def create_server(keys=None):
             "carry queue, cienciaPendente (true in the pending queues; situacao says whether it awaits the ciência or "
             "the DJEN publication), "
             "processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
-            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
+            "deadlineEnd. Counts of every queue: eproc_get_counters. "
+            + DATES
+            + " "
             + ENVELOPE
             + " Read-only: opens no intimação."
         ),
@@ -135,7 +140,8 @@ def create_server(keys=None):
             ),
         ] = None,
     ) -> dict[str, Any]:
-        return enveloped(call(portal, lambda **context: list_notices(queue, **context)))
+        result = call(portal, lambda **context: list_notices(queue, **context))
+        return enveloped(result, ("requestedAt", "deadlineStart", "deadlineEnd"))
 
     @server.tool(
         name="eproc_get_counters",
@@ -161,14 +167,18 @@ def create_server(keys=None):
         description=(
             "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
             "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
-            "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO) and "
-            "observation. lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
-            "Read-only."
+            "parties, event (what was scheduled), location, start and end, date (the day of start) and observation. "
+            "lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
+            + DATES
+            + " Read-only."
         ),
         annotations=READ_ONLY,
     )
     def eproc_list_audiencias(portal: Portal) -> dict[str, Any]:
-        return call(portal, lambda **context: list_hearings(**context))
+        result = call(portal, lambda **context: list_hearings(**context))
+        for hearing in result.get("audiencias") or []:
+            dated(hearing, "start", "end")
+        return result
 
     @server.tool(
         name="eproc_list_processes",
@@ -179,6 +189,8 @@ def create_server(keys=None):
             "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
             "movement. Rows: processNumber (also number, its old name), parties, class, subject, last event, dates, claim value. pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread. "
+            + DATES
+            + " "
             + ENVELOPE
             + " Details and documents: eproc_get_process. Read-only."
         ),
@@ -215,7 +227,7 @@ def create_server(keys=None):
                 **context,
             ),
         )
-        return enveloped(result, maxPages)
+        return enveloped(result, ("lastEventAt", "filedAt"), maxPages)
 
     @server.tool(
         name="eproc_get_process",
@@ -232,7 +244,7 @@ def create_server(keys=None):
             "dates, djenAvailable/djenPublished). metadata.additionalInformation: the Informações Adicionais "
             "(justiça gratuita, sigilo, prevenção, valor da causa...); audiencias and pericias: the process' lists "
             "(null where the portal has no such button). save=true stores each read document (HTML as PDF) in the "
-            "shared documents folder."
+            "shared documents folder. timeline[].dateTime, metadata.cover.filedAt and audiencias start/end: " + DATES
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -260,7 +272,7 @@ def create_server(keys=None):
             Field(description="true returns savedAs file names (shared documents folder)."),
         ] = False,
     ) -> dict[str, Any]:
-        return call(
+        result = call(
             portal,
             lambda **context: fetch_process(
                 processNumber,
@@ -270,6 +282,12 @@ def create_server(keys=None):
                 **context,
             ),
         )
+        dated((result.get("metadata") or {}).get("cover") or {}, "filedAt")
+        for event in result.get("timeline") or []:
+            dated(event, "dateTime")
+        for hearing in result.get("audiencias") or []:
+            dated(hearing, "start", "end")
+        return result
 
     return server
 
