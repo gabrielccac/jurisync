@@ -33,7 +33,6 @@ OWN_LOGIN_ACTION = "j_security_check"
 RESULTS = re.compile(r"(\d+)\s*resultado\(s\)", re.I)
 NUMBER = re.compile(r"-?\d+")
 CNJ = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
-TJ_NUMBER = re.compile(r"\d\.\d{4}\.\d{2}\.\d{6}-\d/\d{3}")  # "Processo TJ": 1.0000.14.004715-0/000
 
 # Menu entries the connector may follow (visible text, normalized). Nothing else of the menu is ever opened:
 # Cadastro and Peticionamento change things, Sair ends the session.

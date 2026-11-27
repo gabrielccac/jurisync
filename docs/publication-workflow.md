@@ -10,7 +10,7 @@ from jurisync.workflows.publications.pipeline import run_publication_pipeline
 result = run_publication_pipeline(agent=agent, profile=PROFILE, state_file="/abs/private/state.json")
 ```
 
-Customers wrap this; Jean's is `customers.jean.run_publications.run_jean_publications(agent)`.
+Each customer supplies its `PROFILE`; Jean's is `customers/jean/profile.py`.
 
 ## Agent contract
 

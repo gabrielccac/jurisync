@@ -4,8 +4,8 @@
 direct HTTP requests. It stops with the draft in **Não Protocolados**, ready for
 review and manual **Protocolar**. The request captures and implementation
 findings are in [the flow notes](pje-trf5-filing-flow.md).
-Victor's Advbox preparation, document routing, and office defaults belong in
-`customers/victor/workflows/`; this PJe adapter consumes the resulting explicit
+The office defaults live in `customers/victor/filing-profile.json` and the folder preparation and document routing
+in the generic filing tools (`src/jurisync/workflows/filing/`); this PJe adapter consumes the resulting explicit
 payload. See [Victor's workflow guide](../../customers/victor/README.md) for the
 Advbox preparation command, Jev review, and private case-facts format.
 
