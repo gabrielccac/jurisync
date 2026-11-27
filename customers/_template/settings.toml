@@ -4,6 +4,10 @@
 [pje]
 ciencia_on_read = "ask"
 
+# Eproc: a mesma regra para os documentos de um processo com intimação aguardando ciência (ou fila não lida).
+[eproc]
+ciencia_on_read = "ask"
+
 # "hosted" (padrão): o escritório usa o servidor hospedado. "local": fica no computador do escritório (token A3, por
 # exemplo); o servidor só lembra dele, sem credenciais, usuários nem ferramentas.
 [hosted]
