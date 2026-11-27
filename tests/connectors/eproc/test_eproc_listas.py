@@ -54,8 +54,15 @@ def sort_header(label):
     )
 
 
-def messages_page(rows, *, read=False, count=None):
+def messages_page(rows, *, read=False, count=None, page=0, pages=None):
     table = ""
+    pager = ""
+    if pages:
+        options = "".join(f'<option value="{index}">{index + 1}</option>' for index in range(pages))
+        pager = (
+            '<select id="selInfraPaginacaoSuperior" name="selInfraPaginacaoSuperior" '
+            f"onchange=\"infraAcaoPaginar('=',this.value,'Infra');\">{options}</select>"
+        )
     if rows:
         lines = "".join(
             f'<tr class="{"infraTrClara" if index % 2 == 0 else "infraTrEscura"}"><td>{when}</td>'
@@ -81,8 +88,8 @@ def messages_page(rows, *, read=False, count=None):
 <label for="rdoLidas">Mensagem(ns) lida(s)</label></fieldset>
 <input type="hidden" id="hdnInfraNroItens" name="hdnInfraNroItens" value="0"/>
 <input type="hidden" id="hdnInfraCampoOrd" name="hdnInfraCampoOrd" value="DesAssunto"/>
-<input type="hidden" id="hdnInfraPaginaAtual" name="hdnInfraPaginaAtual" value="0"/>
-{table}
+<input type="hidden" id="hdnInfraPaginaAtual" name="hdnInfraPaginaAtual" value="{page}"/>
+{pager}{table}
 </form></div></body></html>"""
 
 
@@ -155,7 +162,7 @@ def prepared_page(form_id, title, button, rows=()):
 <form id="{form_id}" method="post" action="controlador.php?acao=x&amp;hash=f">
 <input type="hidden" id="hdnInfraItensSelecionados" name="hdnInfraItensSelecionados" value=""/>
 <button type="button" id="{button[0]}" onclick="{button[1]}();">{button[2]}</button>
-{table}</form></div></body></html>"""
+<div id="divInfraAreaTabela" class="infraAreaTabela">{table}</div></form></div></body></html>"""
 
 
 INITIAL_EMPTY = prepared_page(
@@ -174,7 +181,7 @@ PREPARED_ROWS = [
 ]
 
 
-def guias_page(action, rows=()):
+def guias_page(action, rows=(), extra=""):
     """A guias list as the infra draws its lists (no capture shows it): its form posts to its own action."""
     table = ""
     if rows:
@@ -191,7 +198,7 @@ def guias_page(action, rows=()):
     return f"""<html><body><div id="divInfraAreaTelaD">
 <form id="frmGuias" method="post" action="controlador.php?acao={action}&amp;acao_origem={action}&amp;hash=g">
 <button type="button" id="btnGerar" onclick="gerarGuia();">Gerar Guia</button>
-{table}</form></div></body></html>"""
+{extra}{table}</form></div></body></html>"""
 
 
 GUIAS = [("5000001-00.2026.4.04.7200", "10/11/2026", "20/11/2026", "R$ 150,00")]
@@ -217,7 +224,10 @@ class MessagesTest(unittest.TestCase):
         )
 
     def test_no_table_is_an_empty_list_and_another_page_is_not_a_list(self):
-        self.assertEqual(listas.parse_messages(messages_page([])), {"filter": "naoLidas", "items": [], "total": 0})
+        self.assertEqual(
+            listas.parse_messages(messages_page([])),
+            {"filter": "naoLidas", "page": 0, "pages": None, "items": [], "total": 0},
+        )
         self.assertIsNone(listas.parse_messages("<html><form id='outra'></form></html>"))
 
     def test_unread_is_one_get_of_the_list_and_never_opens_a_message(self):
@@ -255,13 +265,44 @@ class MessagesTest(unittest.TestCase):
         first = read(listas.list_messages, Session(messages_page(rows)), "caixa_mensagem_listar")
         self.assertLess(len(compact(first)), 60_000)
         self.assertEqual(first["total"], 30)
-        self.assertEqual(first["next"], {"status": "unread", "offset": first["returned"]})
+        self.assertEqual(first["next"], {"status": "unread", "page": 0, "offset": first["returned"]})
         titles, page = [item["title"] for item in first["mensagens"]], first
         while page["next"]:
             page = read(listas.list_messages, Session(messages_page(rows)), "caixa_mensagem_listar", **page["next"])
             self.assertLess(len(compact(page)), 60_000)
             titles += [item["title"] for item in page["mensagens"]]
         self.assertEqual(titles, [f"Aviso {index}" for index in range(30)])
+
+    def test_cpfs_in_titles_and_texts_are_masked(self):
+        rows = [("01/11/2026 09:00:00", "Parte 111.444.777-35", "Procurador CPF 11144477735 cadastrado.")]
+        result = read(listas.list_messages, Session(messages_page(rows)), "caixa_mensagem_listar")
+        self.assertEqual(result["mensagens"][0]["title"], "Parte 111.***.***-35")
+        self.assertEqual(result["mensagens"][0]["text"], "Procurador CPF 111******35 cadastrado.")
+        self.assertNotIn("444", compact(result))
+
+    def test_more_portal_pages_give_a_note_and_next_that_posts_the_pager(self):
+        first = read(listas.list_messages, Session(messages_page(UNREAD, count=4, pages=2)), "caixa_mensagem_listar")
+        self.assertEqual(first["next"], {"status": "unread", "page": 1, "offset": 0})
+        self.assertIn("2 páginas", first["notes"][0])
+        session = Session(messages_page(UNREAD, count=4, pages=2), messages_page(READ, count=4, pages=2, page=1))
+        second = read(listas.list_messages, session, "caixa_mensagem_listar", **first["next"])
+        method, url, kwargs = session.calls[1]
+        self.assertEqual(method, "POST")
+        self.assertIn("acao=caixa_mensagem_listar", url)
+        self.assertIn(("hdnInfraPaginaAtual", "1"), kwargs["data"])
+        self.assertIn(("rdoFiltro", "naoLidas"), kwargs["data"])
+        self.assertEqual((second["page"], second["returned"], second["next"]), (1, 1, None))
+        self.assertNotIn("notes", second)
+
+    def test_a_page_the_portal_did_not_show_is_an_error(self):
+        session = Session(messages_page(UNREAD, count=4, pages=2), messages_page(UNREAD, count=4, pages=2))
+        with self.assertRaisesRegex(PortalError, "did not show page 1"):
+            read(listas.list_messages, session, "caixa_mensagem_listar", page=1)
+
+    def test_a_count_beyond_the_page_without_a_pager_is_noted(self):
+        result = read(listas.list_messages, Session(messages_page(UNREAD, count=60)), "caixa_mensagem_listar")
+        self.assertEqual((result["total"], result["returned"], result["next"]), (60, 2, None))
+        self.assertIn("sem paginador", result["notes"][0])
 
     def test_a_portal_without_the_menu_link_says_not_available(self):
         with self.assertRaises(NotSupported) as raised:
@@ -313,8 +354,35 @@ class ParadasTest(unittest.TestCase):
 class PreparedTest(unittest.TestCase):
     def test_empty_lists_as_captured_are_empty(self):
         for page, form in ((INITIAL_EMPTY, "frmPeticaoInicial"), (MOVEMENT_EMPTY, "frmMovimentacaoFutura")):
-            self.assertEqual(listas.parse_header_table(page, f"form#{form}"), {"items": [], "total": 0})
+            self.assertEqual(
+                listas.parse_header_table(page, f"form#{form}"), {"items": [], "total": 0, "mismatched": 0}
+            )
         self.assertIsNone(listas.parse_header_table(INITIAL_EMPTY, "form#frmMovimentacaoFutura"))
+
+    def test_a_form_without_a_table_that_does_not_say_empty_is_not_an_empty_list(self):
+        for page in (
+            INITIAL_EMPTY.replace('<div id="divInfraAreaTabela" class="infraAreaTabela"></div>', ""),
+            INITIAL_EMPTY.replace('class="infraAreaTabela"></div>', 'class="infraAreaTabela">Carregando...</div>'),
+            INITIAL_EMPTY.replace("<button", '<input type="text" name="dtaInicio" value=""/><button'),
+        ):
+            with self.subTest(page=page[-260:]):
+                self.assertIsNone(listas.parse_header_table(page, "form#frmPeticaoInicial"))
+                with self.assertRaisesRegex(PortalError, "unsupported_peticoes_preparadas_layout"):
+                    read(listas.list_prepared, Session(page), "peticao_inicial_preparada_listar")
+        said = INITIAL_EMPTY.replace("<button", "<p>Nenhum registro encontrado.</p><button").replace(
+            '<div id="divInfraAreaTabela" class="infraAreaTabela"></div>', ""
+        )
+        self.assertEqual(listas.parse_header_table(said, "form#frmPeticaoInicial")["items"], [])
+
+    def test_a_row_whose_cells_do_not_match_the_headers_is_kept_unlabelled_with_a_note(self):
+        page = prepared_page("frmPeticaoInicial", "Petições", ("btnDistribuir", "d", "Distribuir"), PREPARED_ROWS)
+        page = page.replace("<td>JOÃO INVENTADO</td>", '<td colspan="2">JOÃO INVENTADO</td><td>extra</td>')
+        result = read(listas.list_prepared, Session(page), "peticao_inicial_preparada_listar")
+        self.assertEqual(result["peticoes"][1]["columns"], None)
+        self.assertIn("JOÃO INVENTADO", result["peticoes"][1]["cells"])
+        self.assertIsNotNone(result["peticoes"][0]["columns"])
+        self.assertEqual(len(result["notes"]), 2)
+        self.assertIn("1 linha(s)", result["notes"][1])
 
     def test_rows_are_read_by_their_headers_without_the_checkbox_and_actions(self):
         page = prepared_page("frmPeticaoInicial", "Petições", ("btnDistribuir", "d", "Distribuir"), PREPARED_ROWS)
@@ -350,6 +418,7 @@ class PreparedTest(unittest.TestCase):
                 self.assertEqual(
                     (result["kind"], result["peticoes"], result["total"], result["next"]), (kind, [], 0, None)
                 )
+                self.assertEqual(result["notes"], [listas.UNVALIDATED])
 
     def test_another_page_is_an_error_not_an_empty_list(self):
         with self.assertRaises(PortalError):
@@ -385,11 +454,20 @@ class CustasTest(unittest.TestCase):
                 )
                 self.assertNotIn("imprimir", compact(result))
 
-    def test_an_empty_list_and_a_foreign_page(self):
+    def test_empty_only_when_the_page_says_so(self):
         action = "guia_pagamento_custas_gerados_listar"
-        self.assertEqual(read(listas.list_custas, Session(guias_page(action)), action)["guias"], [])
-        with self.assertRaises(PortalError):
-            read(listas.list_custas, Session("<html><body>Erro</body></html>"), action)
+        said = guias_page(action, extra="<p>Nenhum registro encontrado.</p>")
+        result = read(listas.list_custas, Session(said), action)
+        self.assertEqual((result["guias"], result["total"], result["notes"]), ([], 0, [listas.UNVALIDATED]))
+        zero = guias_page(action, extra='<table class="x"><caption>Lista de Guias (0 registros):</caption></table>')
+        self.assertEqual(read(listas.list_custas, Session(zero), action)["guias"], [])
+        for page in (
+            guias_page(action),
+            guias_page(action, extra='<label>Data inicial</label><input type="text" name="dtaInicio" value=""/>'),
+            "<html><body>Erro</body></html>",
+        ):
+            with self.subTest(page=page[-200:]), self.assertRaisesRegex(PortalError, "unsupported_custas_layout"):
+                read(listas.list_custas, Session(page), action)
 
     def test_a_portal_without_the_menu_says_not_available_and_requests_nothing(self):
         session = Session()
@@ -463,6 +541,30 @@ class ServerTest(unittest.TestCase):
         )
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["kind"], "movimentacoes")
+
+    def test_eproc_list_custas_with_rows(self):
+        action = "guia_pagamento_depositos_judiciais_gerados_listar"
+        result = self.call(
+            "eproc_list_custas",
+            {"portal": PORTAL, "kind": "depositos"},
+            Session(guias_page(action, GUIAS)),
+            panel(action),
+        )
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["guias"][0]["processNumber"], "5000001-00.2026.4.04.7200")
+        self.assertEqual(result.structured_content["notes"], [listas.UNVALIDATED])
+
+    def test_a_prepared_page_that_does_not_say_empty_is_a_portal_error(self):
+        page = MOVEMENT_EMPTY.replace('<div id="divInfraAreaTabela" class="infraAreaTabela"></div>', "")
+        result = self.call(
+            "eproc_list_peticoes_preparadas",
+            {"portal": PORTAL, "kind": "movimentacoes"},
+            Session(page),
+            panel("movimentacao_preparada_listar"),
+        )
+        self.assertTrue(result.is_error)
+        self.assertIn("[portal_error]", result.content[0].text)
+        self.assertIn("unsupported_peticoes_preparadas_layout", result.content[0].text)
 
     def test_not_available_is_a_clear_tool_error(self):
         for name in ("eproc_list_mensagens", "eproc_list_custas"):

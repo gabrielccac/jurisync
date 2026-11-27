@@ -114,14 +114,18 @@ ciclo, como no #34; nas colunas por cabeçalho, `<cabeçalho>Text`).
 - Ação: `caixa_mensagem_listar` ("Caixa de Mensagens"). `status='unread'` (padrão) é o GET da página, que já abre no
   filtro "NÃO lidas"; `status='read'` posta o formulário `frmMensagemLista` com `rdoFiltro=lidas`, como o rádio da
   página faz. O resultado confere que o portal aplicou o filtro pedido.
-- Itens `mensagens`: `sentAt` (ISO), `title`, `text` (o texto como a lista mostra); `total` vem da legenda
-  "(N registros)". Uma lista que não cabe no orçamento de 60k sai cortada, com `next = {status, offset}`.
+- Itens `mensagens`: `sentAt` (ISO), `title`, `text` (o texto como a lista mostra, CPF mascarado); `total` vem da
+  legenda "(N registros)". Uma página que não cabe no orçamento de 60k sai cortada, com
+  `next = {status, page, offset}`.
 - Ciência/estado: a mensagem só é aberta por `caixa_mensagem_vizualizar` (link do título, com `id_mensagem` e
   `status=naoLidas`), que nunca é requisitado e fica fora do allowlist. A listagem em si não marca como lida: no TRF4
   2G a visão "NÃO lidas" mostrava 24 mensagens, a mais antiga de 2012, ainda não lidas. É inferência das capturas;
   confirmar ao vivo que o contador não cai depois de uma leitura da lista.
 - Capturas: TRF4 2G (24 linhas) e TJRJ (1) com tabela; TJSC 1G/2G e TRF6 sem tabela (nenhuma não lida), lido como
-  lista vazia. Não há paginação nas capturas; uma lista paginada pelo portal traria só a primeira página.
+  lista vazia. Não há paginação nas capturas. Com paginador (`selInfraPaginacaoSuperior`), `page` lê a página pedida
+  reenviando o formulário com `hdnInfraPaginaAtual`, como o paginador faz, e `next` aponta a próxima página, com uma
+  `note`; o conector confere que o portal mostrou a página pedida. Sem paginador e com a legenda contando mais
+  mensagens do que a página mostrou, a resposta traz uma `note` dizendo que o resto não foi lido.
 
 ### Paradas do sistema e suspensões de prazo: `eproc_list_paradas`
 
@@ -142,7 +146,13 @@ ciclo, como no #34; nas colunas por cabeçalho, `<cabeçalho>Text`).
 - Os botões Distribuir (`peticao_inicial_preparada_distribuir`) e Peticionar (`movimentacao_preparada_peticionar`)
   postam o mesmo formulário com outra ação; nenhum deles entra no allowlist, e os testes provam que ficam bloqueados.
 - Itens `peticoes`: `processNumber` (o primeiro CNJ da linha, ou `null`) e `columns` (cada célula sob o texto do
-  cabeçalho, datas ISO, CPF mascarado), sem as colunas de seleção e de ações.
+  cabeçalho, datas ISO, CPF mascarado), sem as colunas de seleção e de ações. Uma linha com número de células
+  diferente do cabeçalho vai com `columns: null` e as células sem rótulo em `cells`, e `notes` avisa.
+- Lista vazia só quando a página diz: "Nenhum registro encontrado" (ou o mesmo para guia, petição, movimentação),
+  legenda com 0 registros, ou a área da lista (`#divInfraAreaTabela`) desenhada vazia num formulário sem campo de
+  filtro, que é como as cinco capturas vieram. Formulário sem tabela fora disso é `[portal_error]`
+  `unsupported_peticoes_preparadas_layout` (ou `unsupported_custas_layout`). Toda resposta das duas listas traz em
+  `notes` que a lista não foi validada ao vivo com linhas reais.
 - **Falta validar com linhas.** As cinco capturas vieram vazias (formulário sem tabela), então o parser lê por
   `<th>` em vez de colunas fixas; confirmar os cabeçalhos num portal com rascunho e então fixar os campos.
 
@@ -156,7 +166,8 @@ ciclo, como no #34; nas colunas por cabeçalho, `<cabeçalho>Text`).
   (`processo_depositos_judiciais_consultar`): são as telas que geram guia. Ficam fora do allowlist.
 - Itens `guias`: `processNumber` e `columns` por cabeçalho, como nas preparadas.
 - **Inferido, sem captura da página.** O explorador não abriu essas listas; o parser supõe o padrão das listas infra
-  (formulário que posta para a própria ação, `table.infraTable`). Página sem esse formulário é erro, não lista vazia.
+  (formulário que posta para a própria ação, `table.infraTable`). Página sem esse formulário, ou que pede filtro e
+  não mostra tabela, é erro, não lista vazia (regra de vazio das preparadas).
   Validar ao vivo no TRF4/TRF6, inclusive se a lista exige filtro (datas) antes de mostrar linhas.
 
 ## Features planejadas

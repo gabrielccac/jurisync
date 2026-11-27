@@ -31,6 +31,7 @@ from jurisync.connectors.eproc.client import (
 )
 from jurisync.connectors.eproc.listas import (
     CUSTAS,
+    MAX_MESSAGE_PAGES,
     MESSAGE_FILTERS,
     PREPARED,
     list_custas,
@@ -295,8 +296,13 @@ def create_server(keys=None):
         description=(
             "Read the lawyer's Caixa de Mensagens (court notices sent through the portal), unread or read. Only the "
             "list is read: no message is opened, since opening one marks it read. "
-            "status picks the portal's own filter; offset continues a list cut to fit the answer (see next). "
-            "Rows: sentAt (ISO), title, text as the list shows it. " + ENVELOPE + " " + DATES + " Read-only."
+            "status picks the portal's own filter; page is the portal's page (0-based) and offset continues a page cut "
+            "to fit the answer: follow next. notes says when the portal has rows this call could not reach. "
+            "Rows: sentAt (ISO), title, text as the list shows it (CPFs masked). "
+            + ENVELOPE
+            + " "
+            + DATES
+            + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -306,9 +312,12 @@ def create_server(keys=None):
             Literal[tuple(MESSAGE_FILTERS)],
             Field(description="'unread': não lidas (the portal's default view); 'read': lidas."),
         ] = "unread",
-        offset: Annotated[int, Field(ge=0, description="Messages to skip, from next.offset.")] = 0,
+        page: Annotated[
+            int, Field(ge=0, le=MAX_MESSAGE_PAGES - 1, description="Portal page to read (0-based), from next.page.")
+        ] = 0,
+        offset: Annotated[int, Field(ge=0, description="Messages of that page to skip, from next.offset.")] = 0,
     ) -> dict[str, Any]:
-        return call(portal, lambda **context: list_messages(status, offset, **context))
+        return call(portal, lambda **context: list_messages(status, page, offset, **context))
 
     @server.tool(
         name="eproc_list_paradas",
@@ -333,11 +342,9 @@ def create_server(keys=None):
             "distribuição or movimentações pendentes (petições intercorrentes). A draft left here was not filed, so a "
             "deadline may be at risk. Only the list is read; nothing is distributed or filed. "
             "kind picks the list; one page. "
-            "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). "
-            + ENVELOPE
-            + " "
-            + DATES
-            + " Read-only."
+            "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). An empty list is reported only when the page says so; another layout is an error. "
+            "notes flags that this list was not checked against real rows and any row whose cells did not match the "
+            "headers (kept unlabelled in cells). " + ENVELOPE + " " + DATES + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -359,11 +366,9 @@ def create_server(keys=None):
             "List the guias the user already generated in the portal: custas, or depósitos judiciais. A portal whose "
             "menu has no such list answers not_available. Nothing is generated or paid. "
             "kind picks the list; one page. "
-            "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). "
-            + ENVELOPE
-            + " "
-            + DATES
-            + " Read-only."
+            "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). An empty list is reported only when the page says so; another layout is an error. "
+            "notes flags that this list was not checked against real rows and any row whose cells did not match the "
+            "headers (kept unlabelled in cells). " + ENVELOPE + " " + DATES + " Read-only."
         ),
         annotations=READ_ONLY,
     )

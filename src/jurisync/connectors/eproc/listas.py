@@ -75,21 +75,33 @@ def _fit(items, offset):
     return shown, end if end < len(items) else None
 
 
+MAX_MESSAGE_PAGES = 50  # portal pages a call may ask for
+
+
+def _pager_pages(soup):
+    pager = soup.select_one("select#selInfraPaginacaoSuperior, select#selInfraPaginacaoInferior")
+    return len(pager.select("option")) if pager else None
+
+
 def parse_messages(html):
-    """Caixa de Mensagens: ``{"filter", "items", "total"}``, or None when the page is not the message list.
+    """Caixa de Mensagens: ``{"filter", "items", "total", "page", "pages"}``, or None when the page is not that list.
 
     The page lists the unread messages (rdoFiltro=naoLidas) unless its form was posted with "lidas". Without messages
-    it shows the filter and no table. Only the list is read: the title links to caixa_mensagem_vizualizar, which is
-    never followed.
+    it shows the filter and no table. ``page`` is the portal page shown (0-based) and ``pages`` the pager's page count
+    (None without a pager). Only the list is read: the title links to caixa_mensagem_vizualizar, which is never
+    followed. Titles and texts go out with CPFs masked.
     """
     soup = BeautifulSoup(html, "html.parser")
     form = soup.select_one("form#frmMensagemLista")
     if form is None:
         return None
     checked = form.select_one('input[name="rdoFiltro"][checked]')
+    current = form.select_one('input[name="hdnInfraPaginaAtual"]')
+    page = int(current["value"]) if current and str(current.get("value", "")).isdigit() else 0
+    found = {"filter": checked.get("value") if checked else None, "page": page, "pages": _pager_pages(soup)}
     table = soup.select_one("table.infraTable")
     if table is None:
-        return {"filter": checked.get("value") if checked else None, "items": [], "total": 0}
+        return {**found, "items": [], "total": 0}
     if _headers(table) != ["Data/Hora", "Título", "Mensagem"]:
         return None
     items = []
@@ -97,49 +109,77 @@ def parse_messages(html):
         cells = row.find_all("td", recursive=False)
         if len(cells) != 3:
             return None
-        items.append(dated({"sentAt": text(cells[0]), "title": text(cells[1]), "text": text(cells[2])}, "sentAt"))
+        items.append(
+            dated(
+                {"sentAt": text(cells[0]), "title": mask_cpf(text(cells[1])), "text": mask_cpf(text(cells[2]))},
+                "sentAt",
+            )
+        )
     total = _caption_total(table)
-    return {
-        "filter": checked.get("value") if checked else None,
-        "items": items,
-        "total": total if total is not None and total >= len(items) else len(items),
-    }
+    return {**found, "items": items, "total": total if total is not None and total >= len(items) else len(items)}
 
 
-def list_messages(status="unread", offset=0, *, session, panel_html, panel_url, portal):
-    """The lawyer's Caixa de Mensagens, unread (the page's default) or read, without opening any message."""
+def _message_form(body):
+    form = BeautifulSoup(body, "html.parser").select_one("form#frmMensagemLista[action]")
+    if form is None:
+        raise PortalError("unsupported_messages_layout: the message list form is missing")
+    return form
+
+
+def list_messages(status="unread", page=0, offset=0, *, session, panel_html, panel_url, portal):
+    """One page of the lawyer's Caixa de Mensagens, unread (the page's default) or read, without opening any message.
+
+    Page 0 is the GET of the list (plus the read filter); a later page is asked for the way the pager does it, posting
+    the list form again with ``hdnInfraPaginaAtual``. ``next`` gives the offset of the rows cut to fit the answer, or
+    the next portal page.
+    """
     portal = portals.eproc(portal).key
     if status not in MESSAGE_FILTERS:
         raise ValueError(f"status must be one of {', '.join(MESSAGE_FILTERS)}")
-    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
-        raise ValueError("offset must be a non-negative integer")
+    for name, value, top in (("page", page, MAX_MESSAGE_PAGES - 1), ("offset", offset, None)):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0 or (top is not None and value > top):
+            raise ValueError(f"{name} must be an integer from 0" + (f" to {top}" if top is not None else ""))
     url = _link(MESSAGES_ACTION, panel_html=panel_html, panel_url=panel_url, portal=portal, label="Caixa de Mensagens")
     body = _read(session, "GET", url, MESSAGES_ACTION, portal=portal)
     if status == "read":
         # The radio's own onclick posts the list form with rdoFiltro=lidas; the same fields go here.
-        form = BeautifulSoup(body, "html.parser").select_one("form#frmMensagemLista[action]")
-        if form is None:
-            raise PortalError("unsupported message list layout")
+        form = _message_form(body)
         fields = [(name, value) for name, value in form_fields(form) if name != "rdoFiltro"]
         fields.append(("rdoFiltro", MESSAGE_FILTERS["read"]))
         body = _read(session, "POST", urljoin(url, form["action"]), MESSAGES_ACTION, portal=portal, data=fields)
+    if page:
+        # The pager (infraAcaoPaginar) posts the list form again with the page wanted.
+        form = _message_form(body)
+        fields = [(name, value) for name, value in form_fields(form) if name != "hdnInfraPaginaAtual"]
+        fields.append(("hdnInfraPaginaAtual", str(page)))
+        body = _read(session, "POST", urljoin(url, form["action"]), MESSAGES_ACTION, portal=portal, data=fields)
     parsed = parse_messages(body)
     if parsed is None:
-        raise PortalError("unsupported message list layout")
+        raise PortalError("unsupported_messages_layout: the message list does not have the expected columns")
     if parsed["filter"] != MESSAGE_FILTERS[status]:
         raise PortalError(f"the portal did not show the {status} messages")
+    if parsed["page"] != page:
+        raise PortalError(f"the portal did not show page {page} of the messages")
     shown, rest = _fit(parsed["items"], offset)
+    notes, more = [], None
+    if rest is not None:
+        more = {"status": status, "page": page, "offset": rest}
+    elif parsed["pages"] and page + 1 < min(parsed["pages"], MAX_MESSAGE_PAGES):
+        more = {"status": status, "page": page + 1, "offset": 0}
+        notes.append(f"A Caixa de Mensagens tem {parsed['pages']} páginas no portal; next lê a próxima.")
+    elif not parsed["pages"] and parsed["total"] > len(parsed["items"]):
+        notes.append(
+            f"O portal conta {parsed['total']} mensagens e a página mostrou {len(parsed['items'])}, sem paginador "
+            "que o conector reconheça; as demais não foram lidas."
+        )
     return {
         "success": True,
         "source": "eproc",
         "portal": portal,
         "status": status,
-        **listing(
-            shown,
-            key="mensagens",
-            total=parsed["total"],
-            more=None if rest is None else {"status": status, "offset": rest},
-        ),
+        "page": page,
+        **listing(shown, key="mensagens", total=parsed["total"], more=more),
+        **({"notes": notes} if notes else {}),
     }
 
 
@@ -229,32 +269,80 @@ PREPARED = {
 _ACTION_COLUMNS = {"", "ações", "ação"}
 
 
+UNVALIDATED = "Lista não validada ao vivo com linhas reais: as colunas são lidas pelos cabeçalhos da página."
+_FILTER_FIELDS = (
+    "input:not([type=hidden]):not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), "
+    "select, textarea"
+)
+_EMPTY_TEXT = re.compile(
+    r"\bnenhum(?:a)?\s+(?:registro|guia|peti\w+|movimenta\w+)\s+(?:encontrad|cadastrad|localizad)", re.I
+)
+
+
+def _says_empty(soup, form):
+    """Whether the page shows the list is empty: "Nenhum registro encontrado" (or the same for guias, petições...), a
+    caption with 0 records, or the list area drawn empty in a form without filter fields (all five prepared-list
+    captures). A page that asks for a filter, or shows anything else without a table, is not an empty list."""
+    for caption in soup.select("caption"):
+        found = _COUNT.search(text(caption))
+        if found and int(found[1]) == 0:
+            return True
+    for node in soup.select("script, style"):
+        node.decompose()
+    if _EMPTY_TEXT.search(text(soup)):
+        return True
+    area = form.select_one("#divInfraAreaTabela")
+    return area is not None and not text(area) and not area.find(True) and form.select_one(_FILTER_FIELDS) is None
+
+
 def parse_header_table(html, form):
-    """``{"items", "total"}`` of the page's list table read by its headers, or None without the list's ``form`` (CSS).
+    """``{"items", "total", "mismatched"}`` of the page's list table read by its headers, or None when the page is not
+    the list (no ``form``, a CSS selector) or shows no table without saying the list is empty.
 
     For lists whose rows were not seen in any capture: each row keeps its cells under their header text (dates as
     ISO, CPFs masked), without the checkbox and action columns, plus the first CNJ number found as ``processNumber``.
-    A page with the form and no table is an empty list.
+    A row whose cell count differs from the headers keeps its cells unlabelled in ``cells`` (``columns`` null) and is
+    counted in ``mismatched``, rather than being mapped to the wrong header.
     """
     soup = BeautifulSoup(html, "html.parser")
-    if soup.select_one(form) is None:
+    node = soup.select_one(form)
+    if node is None:
         return None
     table = soup.select_one("table.infraTable")
     if table is None:
-        return {"items": [], "total": 0}
+        return {"items": [], "total": 0, "mismatched": 0} if _says_empty(soup, node) else None
     headers = _headers(table)
-    items = []
+    items, mismatched = [], 0
     for row in _rows(table):
-        values = [text(cell) for cell in row.find_all("td", recursive=False)]
+        values = [mask_cpf(text(cell)) for cell in row.find_all("td", recursive=False)]
         found = next((match for value in values if (match := _PROCESS_NUMBER.search(value))), None)
+        item = {"processNumber": found[0] if found else None}
+        if len(values) != len(headers):
+            mismatched += 1
+            items.append({**item, "columns": None, "cells": values})
+            continue
         columns = {
-            header: mask_cpf(value)
-            for header, value in zip(headers, values, strict=False)
+            header: value
+            for header, value in zip(headers, values, strict=True)
             if header.casefold() not in _ACTION_COLUMNS
         }
-        items.append({"processNumber": found[0] if found else None, "columns": dated(columns, *columns)})
+        items.append({**item, "columns": dated(columns, *columns)})
     total = _caption_total(table)
-    return {"items": items, "total": total if total is not None and total >= len(items) else len(items)}
+    return {
+        "items": items,
+        "total": total if total is not None and total >= len(items) else len(items),
+        "mismatched": mismatched,
+    }
+
+
+def _header_listing(parsed, key):
+    notes = [UNVALIDATED]
+    if parsed["mismatched"]:
+        notes.append(
+            f"{parsed['mismatched']} linha(s) com número de células diferente do cabeçalho: as células vão sem rótulo "
+            "em cells (columns null)."
+        )
+    return {**listing(parsed["items"], key=key, total=parsed["total"]), "notes": notes}
 
 
 def list_prepared(kind="iniciais", *, session, panel_html, panel_url, portal):
@@ -266,14 +354,8 @@ def list_prepared(kind="iniciais", *, session, panel_html, panel_url, portal):
     url = _link(action, panel_html=panel_html, panel_url=panel_url, portal=portal, label=label)
     parsed = parse_header_table(_read(session, "GET", url, action, portal=portal), f"form#{form_id}")
     if parsed is None:
-        raise PortalError(f"unsupported {label} layout")
-    return {
-        "success": True,
-        "source": "eproc",
-        "portal": portal,
-        "kind": kind,
-        **listing(parsed["items"], key="peticoes", total=parsed["total"]),
-    }
+        raise PortalError(f"unsupported_peticoes_preparadas_layout: the {label} page is not a list the connector reads")
+    return {"success": True, "source": "eproc", "portal": portal, "kind": kind, **_header_listing(parsed, "peticoes")}
 
 
 # The tool's kind argument -> (list action, what the menu calls it). TRF4 and TRF6 offer both (menus "Custas" and
@@ -298,11 +380,5 @@ def list_custas(kind="custas", *, session, panel_html, panel_url, portal):
     # No capture shows this page: the infra list form posts to its own action.
     parsed = parse_header_table(_read(session, "GET", url, action, portal=portal), f'form[action*="acao={action}"]')
     if parsed is None:
-        raise PortalError(f"unsupported layout of the {label}")
-    return {
-        "success": True,
-        "source": "eproc",
-        "portal": portal,
-        "kind": kind,
-        **listing(parsed["items"], key="guias", total=parsed["total"]),
-    }
+        raise PortalError(f"unsupported_custas_layout: the {label} page is not a list the connector reads")
+    return {"success": True, "source": "eproc", "portal": portal, "kind": kind, **_header_listing(parsed, "guias")}
