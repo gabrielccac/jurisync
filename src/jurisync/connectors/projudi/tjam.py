@@ -61,9 +61,60 @@ DESK = "usuario/mesaAdvogado.do?actionType=listaInicio"
 MENU_ITEM = re.compile(r'add_menu\(\s*"([^"]*)"\s*,\s*"(/[^"]+)"')
 SEARCH_MENU = "Processos 1º Grau"
 SEARCH_FORM = "buscaProcessosQualquerInstanciaForm"
+APPEAL_SEARCH_MENU = "Processos 2º Grau"
+APPEAL_PAGE = "processo/recursal/recurso.do"
+# A 2º grau process (recurso or originária) of a state court has the origin code 0000.
+APPEAL_NUMBER = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.0000$")
 FILES_SCRIPT = re.compile(
     r'"(/projudi/processo/movimentacaoArquivoDocumento\.do\?_tj=[0-9a-fA-F]+)",\s*\{\s*sourceClass:\s*"([\w-]+)"'
 )
+FILES_LINK = re.compile(r"^linkArquivosmovimentacoes(?:Recurso)?\d+$")
+# A movement's intimações (recipient, reading date, decurso, status): the row's "Intimações" expander loads them with a
+# POST of ``tipoLayout=1`` to ``movimentacao.do``. Observed live on 2026-11-27: the answer is a table with no link or
+# action; reading an intimação is ``intimacao.do``, never requested.
+INTIMATIONS_SCRIPT = re.compile(
+    r'"(/projudi/movimentacao\.do\?_tj=[0-9a-fA-F]+)",\s*\{\s*sourceClass:\s*"(linkIntimacoesmovimentacoes(?:Recurso)?\d+)"'
+)
+INTIMATIONS_LINK = re.compile(r"^linkIntimacoesmovimentacoes(?:Recurso)?\d+$")
+MOVEMENT_INTIMATION_COLUMNS = {
+    "nome": "destinatario",
+    "prazo": "prazo",
+    "urgente": "urgente",
+    "intimaçãopessoal": "pessoal",
+    "intimaçãoonline": "online",
+    "datadeleitura": "dataLeitura",
+    "datadecumprimento": "dataCumprimento",
+    "datadecurso": "dataDecurso",
+    "dataderenúnciadeprazo": "dataRenuncia",
+    "status": "status",
+}
+APPEAL_TABLES = {
+    # The recurso's own intimações, its sessions (with the judgment result) and its DJEN publications.
+    "intimacoes": {
+        "datadeleitura": "dataLeitura",
+        "prazo": "prazo",
+        "datacumprimento": "dataCumprimento",
+        "datadecurso": "dataDecurso",
+        "datainterrupção": "dataInterrupcao",
+        "status": "status",
+        "tipo": "tipo",
+    },
+    "sessoes": {
+        "pautadasessão": "pauta",
+        "dataderealização": "dataRealizacao",
+        "situação": "situacao",
+        "motivo": "motivo",
+        "observação": "observacao",
+    },
+    "publicacoes": {
+        "publicação": "publicacao",
+        "tipodedocumento": "tipoDocumento",
+        "datadageração": "dataGeracao",
+        "situação": "situacao",
+    },
+}
+PARTY_SECTIONS = {"informações adicionais", "endereço", "e-mail", "telefones"}
+DJEN_DATE = re.compile(r"veicula[çc][ãa]o no DJEN:\s*(\d{2}/\d{2}/\d{4})", re.I)
 TOKEN = re.compile(r"[0-9a-fA-F]{16,512}")
 FILE_LINK = re.compile(r"arquivo\.do\?_tj=([0-9a-fA-F]{16,512})$")
 FILE_LABEL = re.compile(r"^(\d+)\.(\d+)\s*Arquivo:\s*(.*)$", re.S)
@@ -160,6 +211,12 @@ COLUMNS = {
 DESK_COUNTS = re.compile(
     r"(Ativos|Suspensos|Arquivados provisoriamente|Arquivados sem distribuição|Arquivados em definitivo):\s*(\d+)"
 )
+
+
+class NotFoundError(ValueError):
+    """The search did not find the process (or the session has no such search)."""
+
+
 # Per-session navigation state (menu tokens, the process last opened): Projudi keeps the "current process" on its side.
 _state = weakref.WeakKeyDictionary()
 
@@ -342,7 +399,7 @@ def parse_process_page(html, number):
             continue
         sequence = clean(cells[1])
         moment = clean(cells[2]).split()
-        anchor = row.find("a", class_=re.compile(r"^linkArquivosmovimentacoes\d+$"))
+        anchor = row.find("a", class_=FILES_LINK)
         source = next((c for c in (anchor.get("class") if anchor else []) if c.startswith("linkArquivos")), None)
         if sequence.isdigit() and source in scripts:
             files[sequence] = scripts[source]
@@ -360,6 +417,120 @@ def parse_process_page(html, number):
     if not movements and "registro(s) encontrado(s)" not in clean(page):
         raise base.ProjudiParseError("TJAM process page has no movements table")
     return {"number": number, "fields": fields, "movements": movements}, files
+
+
+def intimation_sources(html):
+    """``{sequence: path}`` of the movements whose row has the "Intimações" expander (``movimentacao.do``)."""
+    scripts = {source: path for path, source in INTIMATIONS_SCRIPT.findall(html)}
+    sources = {}
+    for row in legacy.soup(html).select('tr[id^="mov"]'):
+        cells = row.find_all("td", recursive=False)
+        anchor = row.find("a", class_=INTIMATIONS_LINK)
+        source = next((c for c in (anchor.get("class") if anchor else []) if INTIMATIONS_LINK.match(c)), None)
+        sequence = clean(cells[1]) if len(cells) > 1 else ""
+        if sequence.isdigit() and source in scripts:
+            sources[sequence] = scripts[source]
+    return sources
+
+
+def _key(header):
+    return re.sub(r"[\s./()]", "", header.casefold())
+
+
+def _headers(table):
+    """The ``th`` cells of a table's own header row (a nested table's headers are not its columns)."""
+    head = table.find("thead") or table
+    row = head.find("tr")
+    return row.find_all("th", recursive=False) if row is not None else []
+
+
+def table_rows(table, columns):
+    """``[(tr, item)]`` of a ``resultTable``: each row as a dict of the ``columns`` (normalized header -> key), "-"
+    read as empty; rows with another cell count (details, "Nenhum registro encontrado") are skipped."""
+    headers = [_key(clean(cell)) for cell in _headers(table)]
+    rows = []
+    for row in (table.find("tbody") or table).find_all("tr", recursive=False):
+        cells = row.find_all("td", recursive=False)
+        if len(cells) != len(headers):
+            continue
+        item = {
+            columns[header]: "" if clean(cell) == "-" else clean(cell)
+            for header, cell in zip(headers, cells, strict=True)
+            if header in columns
+        }
+        if any(item.values()):
+            rows.append((row, item))
+    return rows
+
+
+def parse_movement_intimations(html):
+    """A movement's intimações: recipient, deadline, how it was sent, reading date (``leituraAutomatica`` when the
+    system read it), decurso, status and the DJEN date. The reader's name is left out."""
+    table = legacy.soup(html).find("table", class_="resultTable")
+    if table is None:
+        raise base.ProjudiParseError("Projudi movement intimações have no result table")
+    items = []
+    for row, item in table_rows(table, MOVEMENT_INTIMATION_COLUMNS):
+        djen = next((DJEN_DATE.search(img["title"]) for img in row.find_all("img", title=DJEN_DATE)), None)
+        item["djen"] = djen.group(1) if djen else ""
+        item["leituraAutomatica"] = "leitura automática" in clean(row).casefold()
+        items.append(item)
+    return items
+
+
+def tab_fields(html):
+    """``{label: value}`` of the one process tab a tab POST answers (``div#tabprefixN``)."""
+    tab = legacy.soup(html).find(id=re.compile(r"^tabprefix\d+$"))
+    return _labels(tab) if tab is not None else {}
+
+
+def _labels(node):
+    fields = {}
+    for label in node.select("td.label"):
+        value = label.find_next_sibling("td")
+        name = clean(label).rstrip(":").strip()
+        if value is not None and name and clean(value) and name not in fields and len(fields) < 40:
+            fields[name] = clean(value)
+    return fields
+
+
+def parse_appeal_page(html):
+    """What a 2º grau ``recurso.do`` page holds besides its header and movements (every tab is on the page): the
+    general data (dates, origin, value), the parties by role (names and lawyers only), the recurso's own intimações,
+    its sessions (with the judgment result) and its DJEN publications."""
+    page = legacy.soup(html)
+    general = page.find(id="tabprefix0")
+    result = {"fields": _labels(general) if general is not None else {}, "parties": []}
+    tables = [(table, {_key(clean(h)) for h in _headers(table)}) for table in page.find_all("table", "resultTable")]
+    for key, columns in APPEAL_TABLES.items():
+        table = next((table for table, headers in tables if set(columns) <= headers), None)
+        result[key] = [item for _row, item in table_rows(table, columns)] if table is not None else []
+    parties = page.find(id="tabprefix1")
+    for table in parties.find_all("table", class_="resultTable") if parties is not None else []:
+        headers = [clean(cell) for cell in _headers(table)]
+        if "Nome" not in headers or "Advogados" not in headers:
+            continue
+        role = next(
+            (
+                clean(heading)
+                for heading in table.find_all_previous(["legend", "h4"])
+                if clean(heading).casefold() not in PARTY_SECTIONS
+            ),
+            "",
+        )
+        for row in (table.find("tbody") or table).find_all("tr", recursive=False):
+            cells = row.find_all("td", recursive=False)
+            if len(cells) != len(headers) or not clean(cells[headers.index("Nome")]):
+                continue
+            lawyers = clean(cells[headers.index("Advogados")])
+            result["parties"].append(
+                {
+                    "role": role,
+                    "name": clean(cells[headers.index("Nome")]),
+                    "lawyers": "" if lawyers == "Parte sem advogado" else lawyers,
+                }
+            )
+    return result
 
 
 def parse_parties(html):
@@ -627,41 +798,139 @@ class TjamAdapter(legacy.LegacyAdapter):
         }
 
     def open_process(self, session, portal, process_number):
+        """A 1º grau process (``processo.do``) or a 2º grau one (``recurso.do``): a number with the origin 0000 is
+        searched at the 2º grau first, any other at the 1º grau first, and a number one search does not find is looked
+        up in the other (the desk lists name both kinds)."""
+        searches = [self._open_first, self._open_appeal]
+        if APPEAL_NUMBER.fullmatch(process_number):
+            searches.reverse()
+        try:
+            return searches[0](session, portal, process_number)
+        except NotFoundError as missing:
+            try:
+                return searches[1](session, portal, process_number)
+            except NotFoundError:
+                raise missing from None
+
+    def _search(self, session, portal, menu_label, fields):
+        """``(result page, result url)`` of the menu search ``menu_label`` posted with ``fields``."""
         config = portals.projudi(portal)
-        path = self._menu(session, portal).get(SEARCH_MENU)
+        path = self._menu(session, portal).get(menu_label)
         if not path:
-            raise base.ProjudiParseError(f"Projudi menu has no '{SEARCH_MENU}' search for this session")
+            missing = NotFoundError if menu_label == APPEAL_SEARCH_MENU else base.ProjudiParseError
+            raise missing(f"Projudi menu has no '{menu_label}' search for this session")
         url, html = self._get_page(session, portal, config.url(path))
         form = legacy.soup(html).find("form", attrs={"name": SEARCH_FORM})
         if form is None:
-            raise base.ProjudiParseError("TJAM search page has no process search form")
+            raise base.ProjudiParseError("Projudi search page has no process search form")
         action = legacy.strip_path_params(urllib.parse.urljoin(url, form.get("action") or ""))
         base.require_portal_url(config, action)
-        fields = {
-            **legacy.hidden_fields(form),
-            "filtroAdvogado": "qualquerAdvogado",
-            "numeroProcesso": re.sub(r"\D", "", process_number),
-            "flagNumeroProcessoUnico": "true",
-        }
-        response = self.request(session, portal, "POST", action[len(config.base_url) :], data=fields)
+        data = {**legacy.hidden_fields(form), "filtroAdvogado": "qualquerAdvogado", **fields}
+        response = self.request(session, portal, "POST", action[len(config.base_url) :], data=data)
         if response.status_code != 200:
             raise RuntimeError(f"Projudi process search failed (HTTP {response.status_code})")
-        result = parsers.decode(response.content)
+        return parsers.decode(response.content), response.url or action
+
+    def _found(self, portal, result, result_url, process_number, page):
+        """The result's link to ``page`` whose text is the number (a recurso's adds its class, "... AI")."""
+        config = portals.projudi(portal)
         link = next(
             (
                 link
-                for text, link in legacy.page_links(result, response.url or action)
-                if text == process_number and urllib.parse.urlsplit(link).path == f"{config.root}processo.do"
+                for text, link in legacy.page_links(result, result_url)
+                if (text == process_number or text.startswith(process_number + " "))
+                and urllib.parse.urlsplit(link).path == f"{config.root}{page}"
             ),
             None,
         )
         if link is None:
-            raise ValueError("Process not found or not accessible to this account")
-        page_url, page = self._get_page(session, portal, link)
+            raise NotFoundError("Process not found or not accessible to this account")
+        return link
+
+    def _open_first(self, session, portal, process_number):
+        result, url = self._search(
+            session,
+            portal,
+            SEARCH_MENU,
+            {"numeroProcesso": re.sub(r"\D", "", process_number), "flagNumeroProcessoUnico": "true"},
+        )
+        page_url, page = self._get_page(
+            session, portal, self._found(portal, result, url, process_number, "processo.do")
+        )
         process, files = parse_process_page(page, process_number)
+        process["instance"] = "1"
         process["parties"] = self._parties(session, portal, page_url, page)
-        self._state(session)["process"] = {"number": process_number, "files": files}
+        self._state(session)["process"] = {
+            "number": process_number,
+            "files": files,
+            "intimacoes": intimation_sources(page),
+            "page": (page_url, page),
+        }
         return process
+
+    def _open_appeal(self, session, portal, process_number):
+        """A 2º grau process through the "Processos 2º Grau" search: its ``recurso.do`` page has every tab."""
+        result, url = self._search(
+            session,
+            portal,
+            APPEAL_SEARCH_MENU,
+            {"numeroRecurso": re.sub(r"\D", "", process_number), "opcao": "ambos", "tipoCompetencia": ""},
+        )
+        page_url, page = self._get_page(session, portal, self._found(portal, result, url, process_number, APPEAL_PAGE))
+        process, files = parse_process_page(page, process_number)
+        appeal = parse_appeal_page(page)
+        for name, value in appeal.pop("fields").items():
+            process["fields"].setdefault(name, value)
+        process.update(instance="2", **appeal)
+        self._state(session)["process"] = {
+            "number": process_number,
+            "files": files,
+            "intimacoes": intimation_sources(page),
+            "page": None,
+        }
+        return process
+
+    def process_details(self, session, portal, process, *, intimations=True):
+        """What ``projudi_get_process`` adds to the opened process: the 1º grau "Dados do Processo" tab (valor da
+        causa, situação, trânsito em julgado...) into ``fields`` and "Dados Adicionais" as ``additionalData`` (a 2º
+        grau page already has its data), and, with ``intimations``, each movement's intimações. Tabs are best effort."""
+        state = self._process_files(session)
+        if state.get("page"):
+            page_url, page = state["page"]
+            for name, value in self._tab(session, portal, page_url, page, "tabDadosProcesso").items():
+                process["fields"].setdefault(name, value)
+            additional = self._tab(session, portal, page_url, page, "tabDadosAdicionais")
+            if additional:
+                process["additionalData"] = additional
+        if intimations:
+            for movement in process["movements"]:
+                path = state.get("intimacoes", {}).get(movement.get("movementId"))
+                if path:
+                    movement["intimacoes"] = self.movement_intimations(session, portal, path)
+        return process
+
+    def _tab(self, session, portal, page_url, page, tab):
+        """``{label: value}`` of one tab of the process page: its form posted with ``selectedIcon`` (navigation)."""
+        config = portals.projudi(portal)
+        form = legacy.soup(page).find("form", id="processoForm")
+        if form is None:
+            return {}
+        action = legacy.strip_path_params(urllib.parse.urljoin(page_url, form.get("action") or ""))
+        base.require_portal_url(config, action)
+        fields = {**legacy.hidden_fields(form), "selectedIcon": tab}
+        response = self.request(session, portal, "POST", action[len(config.base_url) :], data=fields)
+        return tab_fields(parsers.decode(response.content)) if response.status_code == 200 else {}
+
+    def movement_intimations(self, session, portal, path):
+        """One movement's intimações (``movimentacao.do``, a list with no action; see ``INTIMATIONS_SCRIPT``)."""
+        if urllib.parse.urlsplit(path).path != f"{portals.projudi(portal).root}movimentacao.do":
+            raise base.ProjudiParseError("Projudi movement intimações address is not movimentacao.do")
+        response = self.request(
+            session, portal, "POST", path.removeprefix(portals.projudi(portal).root), data={"tipoLayout": "1"}
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Projudi movement intimações failed (HTTP {response.status_code})")
+        return parse_movement_intimations(parsers.decode(response.content))
 
     def _parties(self, session, portal, page_url, page):
         """The parties tab: the process form posted with ``selectedIcon=tabPartes``. Best effort: [] when it differs."""

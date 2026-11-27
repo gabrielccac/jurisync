@@ -119,8 +119,11 @@ def _documents(index):
     ]
 
 
-def get_process(adapter, session, portal, process_number, include_documents):
+def get_process(adapter, session, portal, process_number, include_documents, include_intimacoes=True):
     process, index = base.load_process(adapter, session, portal, process_number, documents=include_documents)
+    details = getattr(adapter, "process_details", None)
+    if details is not None:
+        details(session, portal, process, intimations=include_intimacoes)
     result = {"success": True, "portal": portals.projudi(portal).key}
     result.update({key: value for key, value in process.items() if key != "movements"})
     result["movements"] = [_public_movement(movement) for movement in process["movements"]]
@@ -182,7 +185,12 @@ def create_server(keys=None):
         title="Get Projudi process",
         description=(
             "Read one Projudi process: case data, parties, movements and, with include_documents, each movement's "
-            "file ids. Read-only."
+            "file ids. TJPR/TJAM: a 2º grau number (origin 0000, or one the 1º grau search does not find) opens the "
+            "recurso (instance '2', with its own intimacoes, sessoes with the judgment and DJEN publicacoes); a 1º "
+            "grau one adds the Dados do Processo tab to fields (valor da causa, situação, trânsito em julgado) and "
+            "additionalData; with include_intimacoes each movement lists its intimacoes (destinatario, prazo, "
+            "dataLeitura, leituraAutomatica, dataDecurso, status, djen), read from the movement's list, which "
+            "registers no reading. Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -190,9 +198,15 @@ def create_server(keys=None):
         process_number: Annotated[str, number_field],
         portal: Annotated[Portal, portal_field] = default,
         include_documents: Annotated[bool, Field(description="Include each movement's files.")] = True,
+        include_intimacoes: Annotated[
+            bool, Field(description="TJPR/TJAM: each movement's intimações (one request per movement that has them).")
+        ] = True,
     ) -> dict[str, Any]:
         return call(
-            portal, lambda adapter, session: get_process(adapter, session, portal, process_number, include_documents)
+            portal,
+            lambda adapter, session: get_process(
+                adapter, session, portal, process_number, include_documents, include_intimacoes
+            ),
         )
 
     @server.tool(
