@@ -189,9 +189,12 @@ def _credentials(portal):
 
 
 def uses_a3(portal):
-    """<PREFIX>_AUTH=a3 for one portal, EPROC_AUTH=a3 for all: log in with the A3 token instead of the password."""
+    """<PREFIX>_AUTH=a3 for one portal, EPROC_AUTH=a3 for all, or ``a3_totp`` declared in the customer's
+    portals.toml: log in with the A3 token instead of the password."""
     config = portals.eproc(portal)
-    return (config.env("AUTH") or credentials.env("EPROC_AUTH")).strip().lower() == "a3"
+    if (config.env("AUTH") or credentials.env("EPROC_AUTH")).strip().lower() == "a3":
+        return True
+    return customers.declared_method(config) == "a3_totp"
 
 
 def auth_method(portal):

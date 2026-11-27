@@ -1,9 +1,29 @@
 # Bárbara Sisti
 
-Portais do PDF "INFORMAÇÕES PARA AUTOMAÇÃO ESCRITÓRIO" (27/10). Certificado A3 em nuvem (RemoteID Certisign) + PIN; QRs do autenticador de 12/11 (14 perfis).
+Portais do PDF "INFORMAÇÕES PARA AUTOMAÇÃO ESCRITÓRIO" (27/10). Certificado A3 em nuvem da Certisign (desktopID /
+RemoteID) no computador do escritório + TOTP de cada portal (exportação do autenticador, 2 QRs).
 
-Não validado: login com RemoteID (o main não suporta o autenticador Certisign no eproc); perfis ambíguos: 2 Eproc/TJSP e 2 PDPJ diferentes (alternativa anotada no .env).
+## Login com o A3 em nuvem
 
-Fora do registro: TJAC, TJMS, TJRO, 2º grau de TJMG/TJRJ/TJMT, SIREA, Projudi TJPR. TRF2/TRF4 1º grau: o PDF só traz o link genérico (seção RJ/ES e SC/RS/PR não informada).
+- O app Certisign desktopID precisa estar instalado e aberto. O `portals.toml` fixa `PJE_A3_MODULE = "certisign"` e os
+  portais usam `method = "a3_totp"`; o `.env` só leva os `*_2FA_DATA` (nenhum PIN).
+- Na primeira assinatura do processo abre a janela do desktopID (PIN + e-token). Essa autorização vale para todos os
+  logins do mesmo processo (`PJE_A3_SESSION_IDLE` = 20 min ociosa, `PJE_A3_SESSION_TTL` = 120 min).
+- `jurisync-smoke barbara` faz todos os portais com uma janela só.
 
-O export também tem perfis GERID e SIREA.
+## Validação ao vivo (27/11, duas rodadas, cada uma com uma autorização para todos os portais)
+
+Login completo (certificado, TOTP e sessão): TRF1 1G/2G, TRF3 1G/2G, TRF5 1G/2G e TJMT 1G (PJe, conta PDPJ
+"TRF 1 - 3 e 5" do autenticador), TJRJ Eproc 1G, TJSC 1G/2G, TRF4 2G, TRF6 1G/2G (Eproc, conta Eproc/<tribunal>).
+
+Pendentes:
+
+- TJSP 1G/2G: certificado e TOTP aceitos (a segunda das duas contas Eproc/TJSP de mesmo nome; a primeira é recusada),
+  mas o Eproc para em "Alterar Cadastro": a Barbara precisa atualizar o cadastro dela no portal uma vez. O conector não
+  preenche esse formulário.
+- TJMG 1G e TRF2 2G: Eproc clássico, sem Keycloak X.509. O certificado entra depois de usuário e senha do Eproc
+  (`TJMG_1G_USERNAME/PASSWORD`, `TRF2_2G_USERNAME/PASSWORD`), que ainda não temos. O TRF2 também oferece o autenticador
+  Certisign (`autenticador.certisign.com.br`), que o conector ainda não implementa.
+
+Fora do registro: TJAC, TJMS, TJRO, 2º grau de TJMG/TJRJ/TJMT, SIREA, Projudi TJPR. TRF2/TRF4 1º grau: o PDF só traz o
+link genérico (seção RJ/ES e SC/RS/PR não informada). O export também tem perfis GERID e SIREA.

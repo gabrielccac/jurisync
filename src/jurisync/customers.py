@@ -20,13 +20,15 @@ import functools
 import os
 import tomllib
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from jurisync import portals
-from jurisync.core import credentials
+from jurisync.core import a3, credentials
 from jurisync.paths import REPO_ROOT
 
-# Methods a customer may declare. Connectors decide how each one logs in.
-METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate_challenge", "browser_totp")
+# Methods a customer may declare. Connectors decide how each one logs in. "a3_totp" is the A3 (a token, or a cloud A3
+# such as Certisign's desktopID through PJE_A3_MODULE) plus the portal's TOTP, on PJe and Eproc.
+METHODS = ("password_totp", "certificate_totp", "certificate_mtls", "certificate_challenge", "browser_totp", "a3_totp")
 # Systems whose portals switch to the A1 login with <PREFIX>_CERT (Portal.uses_certificate), and the methods that mean
 # it. The switch only acts where an A1 is configured: an A3 login (PJE_AUTH/EPROC_AUTH=a3) is chosen before it.
 CERTIFICATE_SYSTEMS = ("pje", "eproc")
@@ -67,6 +69,8 @@ def load_setup(name):
         method = entry.get("method")
         if method not in METHODS:
             raise ValueError(f"{name}/{key}: method must be one of {', '.join(METHODS)}")
+        if method == "a3_totp" and portals.get(key).system not in CERTIFICATE_SYSTEMS:
+            raise ValueError(f"{name}/{key}: a3_totp is a PJe or Eproc login")
         secrets = entry.get("secrets", [])
         if not isinstance(secrets, list) or not all(isinstance(item, str) and item for item in secrets):
             raise ValueError(f"{name}/{key}: secrets must be a list of variable names")
@@ -258,7 +262,35 @@ def validate(name):
         for group in dict.fromkeys(groups):
             if not any(variable.strip() in listed for variable in group.split("|")):
                 problems.append(f"{name}: .env.example lacks {group}")
+    module = fixed_variables(name).get("PJE_A3_MODULE", "").strip()
+    if module and module.lower() not in a3.CLOUD_MODULES and not module_resolves(module):
+        problems.append(
+            f"{name}: [env].set PJE_A3_MODULE must be {', '.join(a3.CLOUD_MODULES)}, a full path or a library found "
+            "in System32 or the PATH"
+        )
+    secrets = {
+        variable.strip() for setup in setups.values() for group in setup.secrets for variable in group.split("|")
+    }
+    if module.lower() in a3.CLOUD_MODULES and "PJE_A3_PIN" in secrets | set(required):
+        problems.append(
+            f"{name}: PJE_A3_PIN is never read with PJE_A3_MODULE={module}: the login is authorised in the "
+            "certificate's app; drop it from secrets"
+        )
     return problems
+
+
+def module_resolves(module):
+    """Whether a PKCS#11 module setting can load: a full path (Windows or POSIX, wherever the check runs) or a bare
+    library name found where Windows looks for it (System32, then the PATH)."""
+    if PureWindowsPath(module).is_absolute() or PurePosixPath(module).is_absolute():
+        return True
+    if PureWindowsPath(module).name != module:
+        return False
+    folders = [
+        Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32",
+        *os.environ.get("PATH", "").split(os.pathsep),
+    ]
+    return any((Path(folder) / module).is_file() for folder in folders if folder)
 
 
 def env_example(name):

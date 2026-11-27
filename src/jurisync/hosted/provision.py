@@ -70,7 +70,9 @@ class OfficePlan:
 
 
 def is_a3(setup):
-    return any(name.strip().endswith("_A3_PIN") for group in setup.secrets for name in group.split("|"))
+    return setup.method == "a3_totp" or any(
+        name.strip().endswith("_A3_PIN") for group in setup.secrets for name in group.split("|")
+    )
 
 
 def a3_switch(config, values):
