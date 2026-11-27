@@ -1,11 +1,16 @@
 """Árvore de documentos: the whole-case inventory of eproc_get_process, over fictitious pages faked by URL."""
 
 import unittest
+from unittest import mock
 
 from jurisync.connectors.eproc import arvore, ciencia, client
 from jurisync.core.session_pool import SessionExpired
 from tests.connectors.eproc.test_eproc_ciencia import (
     BASE,
+    EXAMS,
+    EXTRAS,
+    HEARINGS,
+    INFORMATION,
     NUMBER,
     OTHER,
     PANEL,
@@ -207,6 +212,27 @@ class TreeInventoryTest(unittest.TestCase):
         result = read(acknowledged, ["70"], acknowledge_ciencia=True)
         self.assertEqual(acknowledged.opened, READ)
         self.assertEqual(result["ciencia"]["estado"], "dada")
+
+    def test_the_tree_comes_with_the_process_hearings_exams_and_deadlines(self):
+        fake = portal(processo_montar_informacoes_adicionais=INFORMATION, audiencia_listar=HEARINGS, exame_listar=EXAMS)
+        fake.pages["detail"] += EXTRAS
+        result = read(fake)
+        self.assertEqual(result["inventorySource"], "tree")
+        self.assertEqual(result["audiencias"][0]["status"], "DESIGNADA")
+        self.assertEqual(result["pericias"][0]["specialty"], "Médico")
+        self.assertIn("prazos", result)
+        self.assertEqual(result["diagnostics"], ["event_refresh_unavailable"])
+        self.assertEqual(fake.opened, [])
+
+    def test_a_tree_document_read_checks_the_queues_again_instead_of_the_memo(self):
+        fake = portal()
+        with mock.patch.object(client, "clock", return_value=1000.0):
+            read(fake)
+            fake.pages["citacao_intimacao_pendente_listar"] = queue(NUMBER)
+            with self.assertRaises(ciencia.CienciaPending):
+                read(fake, ["70"])
+        self.assertEqual(fake.actions.count("citacao_intimacao_pendente_listar"), 2)
+        self.assertEqual(fake.opened, [])
 
     def test_a_tree_that_cannot_be_listed_leaves_the_timeline_inventory(self):
         for fake, problem in (
