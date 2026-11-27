@@ -28,7 +28,7 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
-from jurisync.connectors.eproc.listas import MESSAGE_FILTERS, list_messages
+from jurisync.connectors.eproc.listas import MESSAGE_FILTERS, list_messages, list_paradas
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -244,6 +244,21 @@ def create_server(keys=None):
         offset: Annotated[int, Field(ge=0, description="Messages to skip, from next.offset.")] = 0,
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_messages(status, offset, **context))
+
+    @server.tool(
+        name="eproc_list_paradas",
+        title="List Eproc system outages and deadline suspensions",
+        description=(
+            "Read the portal's Relatório de Paradas: system outages, whether each one extended deadlines "
+            "(prorrogação de prazo), and the dates deadlines were suspended. Use it to check whether a deadline's "
+            'final day moved; the portal\'s own "Final Prazo" is what the queues show. One page, no parameters. '
+            "paradas: description, prorrogacao (true/false, null when the portal says neither), start, end (ISO); "
+            "suspensoes: date (ISO), type. Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_paradas(portal: Portal) -> dict[str, Any]:
+        return call(portal, list_paradas)
 
     @server.tool(
         name="eproc_get_process",

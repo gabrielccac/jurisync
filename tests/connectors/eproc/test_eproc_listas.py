@@ -93,6 +93,48 @@ UNREAD = [
 READ = [("02/02/2026 10:00:00", "Aviso antigo", "Mensagem já lida pelo advogado fictício.")]
 
 
+def paradas_page(outages, suspensions):
+    """Relatório de Paradas: outages with a checkbox and an action column, then the suspensions under an h3."""
+    first = ""
+    if outages:
+        lines = "".join(
+            f'<tr class="infraTrClara"><td><input type="checkbox" id="chkInfraItem{index}" name="chkInfraItem{index}" '
+            f'value="9{index}" onclick="infraSelecionarItens(this,\'Infra\');"/></td><td>{reason}</td><td>{extended}</td>'
+            f"<td>{start}</td><td>{end}</td><td>"
+            f'<a href="controlador.php?acao=eprocsysadm_consultar&amp;id=9{index}&amp;hash=c{index}"><img src="consultar.gif"/></a>'
+            f'<a href="controlador.php?acao=eprocsysadm_certidao&amp;id=9{index}&amp;hash=d{index}">certidão</a></td></tr>'
+            for index, (reason, extended, start, end) in enumerate(outages)
+        )
+        first = (
+            '<div id="divInfraAreaTabela" class="infraAreaTabela"><table class="infraTable"><tr>'
+            '<th class="infraTh"><a href="javascript:void(0);"><img src="check.gif"/></a></th>'
+            f"{sort_header('Descrição Motivo Evento')}{sort_header('Houve Prorrogação de Prazo?')}"
+            f'{sort_header("Data Inicio")}{sort_header("Data Fim")}<th class="infraTh">Ações</th></tr>{lines}</table></div>'
+        )
+    second = ""
+    if suspensions:
+        lines = "".join(f'<tr class="infraTrClara"><td>{date}</td><td>{kind}</td></tr>' for date, kind in suspensions)
+        second = (
+            '<h3>Lista de suspensões cadastradas</h3><div class="infraAreaTabela"><table class="infraTable">'
+            f'<tr><th class="infraTh">Data Suspensão.</th><th class="infraTh">Tipo Suspensão.</th></tr>{lines}</table></div>'
+        )
+    return f"""<html><body><div id="divInfraAreaTelaD">
+<div id="divInfraBarraLocalizacao">Relatório de Paradas</div>
+<form id="frmEprocsysadmLista" method="post"
+ action="controlador.php?acao=eprocsysadm_listar&amp;acao_origem=eprocsysadm_listar&amp;hash=p1">
+<button type="button" id="btnImprimir" onclick="infraImprimirTabela();">Imprimir</button>
+<input type="hidden" id="hdnInfraNroItens" name="hdnInfraNroItens" value="{len(outages)}"/>
+{first}{second}
+</form></div></body></html>"""
+
+
+OUTAGES = [
+    ("DIFICULDADE DE ACESSO", "Sim", "21/10/2026 11:00:00", "21/10/2026 16:00:00"),
+    ("PARADA PROGRAMADA", "Não", "12/03/2026 19:10:00", "12/03/2026 19:50:00"),
+]
+SUSPENSIONS = [("24/01/2026", "Fechamento"), ("10/03/2026", "Abertura")]
+
+
 def read(function, session, *actions, **arguments):
     return function(session=session, panel_html=panel(*actions), panel_url=BASE, portal=PORTAL, **arguments)
 
@@ -164,12 +206,48 @@ class MessagesTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, "not_available")
 
 
+class ParadasTest(unittest.TestCase):
+    def test_parse_reads_both_tables_with_iso_dates_and_a_boolean_prorrogacao(self):
+        parsed = listas.parse_paradas(paradas_page(OUTAGES, SUSPENSIONS))
+        self.assertEqual(
+            parsed["paradas"][0],
+            {
+                "description": "DIFICULDADE DE ACESSO",
+                "prorrogacao": True,
+                "start": "2026-10-21T11:00:00",
+                "end": "2026-10-21T16:00:00",
+            },
+        )
+        self.assertFalse(parsed["paradas"][1]["prorrogacao"])
+        self.assertEqual(
+            parsed["suspensoes"],
+            [{"date": "2026-01-24", "type": "Fechamento"}, {"date": "2026-03-10", "type": "Abertura"}],
+        )
+        self.assertEqual(parsed["total"], 2)
+
+    def test_a_portal_without_records_shows_the_form_and_no_table(self):
+        self.assertEqual(listas.parse_paradas(paradas_page([], [])), {"paradas": [], "suspensoes": [], "total": 0})
+
+    def test_unknown_columns_are_not_read_as_paradas(self):
+        page = paradas_page(OUTAGES, []).replace("Houve Prorrogação de Prazo?", "Outra coluna")
+        self.assertIsNone(listas.parse_paradas(page))
+
+    def test_list_is_one_get_and_never_follows_the_row_links(self):
+        session = Session(paradas_page(OUTAGES, SUSPENSIONS))
+        result = read(listas.list_paradas, session, "eprocsysadm_listar")
+        self.assertEqual(len(session.calls), 1)
+        self.assertIn("acao=eprocsysadm_listar", session.calls[0][1])
+        self.assertEqual((result["returned"], result["total"], result["next"]), (2, 2, None))
+        self.assertEqual(len(result["suspensoes"]), 2)
+        self.assertNotIn("certidao", compact(result))
+
+
 class AllowlistTest(unittest.TestCase):
     def test_actions_that_open_or_write_stay_blocked(self):
-        for action in ("caixa_mensagem_vizualizar",):
+        for action in ("caixa_mensagem_vizualizar", "eprocsysadm_consultar", "eprocsysadm_certidao"):
             with self.subTest(action=action), self.assertRaises(RuntimeError):
                 client.require_route(f"{BASE}controlador.php?acao={action}&hash=x", portal=PORTAL)
-        for action in ("caixa_mensagem_listar",):
+        for action in ("caixa_mensagem_listar", "eprocsysadm_listar"):
             client.require_route(f"{BASE}controlador.php?acao={action}&hash=x", portal=PORTAL)
 
 
@@ -191,6 +269,16 @@ class ServerTest(unittest.TestCase):
         )
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["returned"], 2)
+
+    def test_eproc_list_paradas(self):
+        result = self.call(
+            "eproc_list_paradas",
+            {"portal": PORTAL},
+            Session(paradas_page(OUTAGES, SUSPENSIONS)),
+            panel("eprocsysadm_listar"),
+        )
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["paradas"][1]["prorrogacao"], False)
 
     def test_not_available_is_a_clear_tool_error(self):
         result = self.call("eproc_list_mensagens", {"portal": PORTAL}, Session(), panel("painel_adv_listar"))

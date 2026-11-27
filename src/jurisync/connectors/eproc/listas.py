@@ -140,3 +140,73 @@ def list_messages(status="unread", offset=0, *, session, panel_html, panel_url, 
             more=None if rest is None else {"status": status, "offset": rest},
         ),
     }
+
+
+PARADAS_ACTION = "eprocsysadm_listar"
+_PARADA_COLUMNS = ("descrição motivo evento", "houve prorrogação de prazo", "data inicio", "data fim")
+_SUSPENSAO_COLUMNS = ("data suspensão", "tipo suspensão")
+_YES_NO = {"sim": True, "não": False, "nao": False}
+
+
+def _column_index(table, wanted):
+    """The positions of the ``wanted`` headers (lowercase, without the trailing "?" or "."), or None if one is missing."""
+    headers = [header.casefold().rstrip("?.: ") for header in _headers(table)]
+    return [headers.index(name) for name in wanted] if all(name in headers for name in wanted) else None
+
+
+def parse_paradas(html):
+    """Relatório de Paradas: ``{"paradas", "suspensoes", "total"}``, or None when the page is not that report.
+
+    The first table lists the system outages (reason, whether deadlines were extended, start and end); the second,
+    under "Lista de suspensões cadastradas", the dates deadlines were suspended. A portal without records shows the
+    form and no table (TJRJ).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.select_one("form#frmEprocsysadmLista")
+    if form is None:
+        return None
+    paradas, suspensoes = [], []
+    for table in form.select("table.infraTable"):
+        outage = _column_index(table, _PARADA_COLUMNS)
+        suspension = _column_index(table, _SUSPENSAO_COLUMNS)
+        if outage is None and suspension is None:
+            return None
+        for row in _rows(table):
+            cells = [text(cell) for cell in row.find_all("td", recursive=False)]
+            if len(cells) <= max(outage or suspension):
+                return None
+            if outage is not None:
+                reason, extended, start, end = (cells[index] for index in outage)
+                paradas.append(
+                    {
+                        "description": reason,
+                        "prorrogacao": _YES_NO.get(extended.casefold()),
+                        "start": iso(start),
+                        "end": iso(end),
+                    }
+                )
+            else:
+                date, kind = (cells[index] for index in suspension)
+                suspensoes.append({"date": iso(date), "type": kind})
+    counter = form.select_one('input[name="hdnInfraNroItens"]')
+    total = int(counter["value"]) if counter and str(counter.get("value", "")).isdigit() else None
+    return {
+        "paradas": paradas,
+        "suspensoes": suspensoes,
+        "total": total if total and total >= len(paradas) else len(paradas),
+    }
+
+
+def list_paradas(*, session, panel_html, panel_url, portal):
+    """The portal's Relatório de Paradas: outages (with or without prorrogação de prazo) and suspensões de prazo."""
+    portal = portals.eproc(portal).key
+    url = _link(PARADAS_ACTION, panel_html=panel_html, panel_url=panel_url, portal=portal, label="Paradas do Sistema")
+    parsed = parse_paradas(_read(session, "GET", url, PARADAS_ACTION, portal=portal))
+    if parsed is None:
+        raise PortalError("unsupported Relatório de Paradas layout")
+    return {
+        "success": True,
+        "source": "eproc",
+        "portal": portal,
+        **listing(parsed["paradas"], key="paradas", total=parsed["total"], suspensoes=parsed["suspensoes"]),
+    }

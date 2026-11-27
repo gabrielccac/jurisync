@@ -88,6 +88,17 @@ abrir/escrever das mesmas telas continuam bloqueadas. Portal cujo menu não tem 
 - Capturas: TRF4 2G (24 linhas) e TJRJ (1) com tabela; TJSC 1G/2G e TRF6 sem tabela (nenhuma não lida), lido como
   lista vazia. Não há paginação nas capturas; uma lista paginada pelo portal traria só a primeira página.
 
+### Paradas do sistema e suspensões de prazo: `eproc_list_paradas`
+
+- Ação: `eprocsysadm_listar` ("Paradas do Sistema" no menu, "Relatório de Paradas" na página), um GET.
+- `paradas`: `description` (Descrição Motivo Evento), `prorrogacao` (Houve Prorrogação de Prazo?: `true`/`false`,
+  `null` se vier outro texto), `start`/`end` (ISO); `total` é o `hdnInfraNroItens` da página. `suspensoes`
+  (tabela "Lista de suspensões cadastradas"): `date` (ISO) e `type` (Fechamento, Abertura).
+- Os links de cada linha (`eprocsysadm_consultar`, `eprocsysadm_certidao`) não são seguidos e ficam fora do
+  allowlist. Serve para conferir se o termo final de um prazo mudou; o conector não recalcula prazo.
+- Capturas: TRF4 2G, TRF6 2G, TJSC 1G/2G com 19 a 78 paradas e 30 a 44 suspensões, tudo numa página; TJRJ sem
+  tabela (lista vazia). Layout de colunas diferente é erro, não lista vazia.
+
 ## Features planejadas
 
 ### A. Filas/contadores extras (mesmo formato do `list_notices`)
