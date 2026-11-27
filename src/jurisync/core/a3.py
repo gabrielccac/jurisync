@@ -11,8 +11,9 @@ back to the gerid-adapter entry for the same token). It is tried once per login:
 
 A cloud A3 works the same way when its app ships a PKCS#11 module: ``PJE_A3_MODULE=certisign`` loads Certisign's
 desktopID (RemoteID). Such a token has a protected authentication path: the login is authorised in the vendor's app
-(its password plus an OTP or a push to the phone), so no PIN is read or sent here; a login not authorised within
-``PJE_A3_APPROVAL_TIMEOUT`` seconds (120) gives up and releases the token lock. It also carries the holder's
+(desktopID opens its own window asking the PIN and the app's e-token code, or sends a push to the phone), so no PIN is
+read or sent here; a login or signature not authorised within ``PJE_A3_APPROVAL_TIMEOUT`` seconds (300) gives up and
+releases the token lock. It also carries the holder's
 certificate alone; the issuers come from the system's certificate store.
 """
 
@@ -45,7 +46,7 @@ DEFAULT_MODULES = {
 # a PIN. desktopID_Provider.dll is the Windows provider of Certisign's desktopID (RemoteID), a PKCS#11 module as well.
 CLOUD_MODULES = {"certisign": "desktopID_Provider.dll"}
 # Seconds a login on a token with a protected authentication path waits for the person (PJE_A3_APPROVAL_TIMEOUT).
-APPROVAL_TIMEOUT = 120
+APPROVAL_TIMEOUT = 300
 
 # DER prefix of DigestInfo for MD5 (RFC 8017 §9.2): the token pads, the caller hashes.
 MD5_DIGEST_INFO = bytes.fromhex("3020300c06082a864886f70d020505000410")
@@ -237,32 +238,9 @@ class A3Signer:
         if problems:
             raise PinError("A3 login cancelled: " + "; ".join(problems) + ". Unlock it in tokenadmin first.")
         pin = None if self.protected else self._pin or stored_pin(self.serial)
-        failure = []
-
-        def attempt():
-            try:
-                self.session.login(pin, pkcs11.CKU_USER)
-            except pkcs11.PyKCS11Error as error:
-                failure.append(error)
-
-        if self.protected:
-            # The token or its app may wait for a person forever (the cloud A3's app closed, a push never answered):
-            # C_Login cannot be interrupted, so it is left in a daemon thread and this signer stops using the session,
-            # which releases the token lock for the next login.
-            timeout = float(os.environ.get("PJE_A3_APPROVAL_TIMEOUT") or APPROVAL_TIMEOUT)
-            log.info("A3 login waits up to %g s for the authorisation on the token or in its app", timeout)
-            worker = threading.Thread(target=attempt, name="a3-approval", daemon=True)
-            worker.start()
-            worker.join(timeout)
-            if worker.is_alive():
-                self.abandoned = True
-                raise PinError(
-                    f"The A3 login was not authorised within {timeout:g} s (is the certificate's app open and signed "
-                    "in?); not retrying. Approve the request in the app on the next login."
-                )
-        else:
-            attempt()
-        for error in failure:
+        try:
+            self._on_token(lambda: self.session.login(pin, pkcs11.CKU_USER))
+        except pkcs11.PyKCS11Error as error:
             if error.value == pkcs11.CKR_USER_ALREADY_LOGGED_IN:
                 self.logged_in = True
                 return
@@ -279,6 +257,38 @@ class A3Signer:
             raise RuntimeError(f"The A3 token refused the login ({pkcs11.CKR.get(error.value, error.value)})") from None
         self.logged_in = True
 
+    def _on_token(self, call):
+        """``call()``; on a token that authorises by itself, given up after PJE_A3_APPROVAL_TIMEOUT seconds.
+
+        Such a token (the cloud A3's window asking its PIN and app code, a PIN pad) waits for a person, possibly
+        forever, at the login or the first signature. The PKCS#11 call cannot be interrupted, so it is left in a daemon
+        thread and this signer stops using the session, which releases the token lock for the next login.
+        """
+        if not self.protected:
+            return call()
+        timeout = float(os.environ.get("PJE_A3_APPROVAL_TIMEOUT") or APPROVAL_TIMEOUT)
+        log.info("A3 waits up to %g s for the authorisation on the token or in its app", timeout)
+        outcome = {}
+
+        def run():
+            try:
+                outcome["value"] = call()
+            except Exception as error:  # noqa: BLE001 - re-raised in the caller's thread below
+                outcome["error"] = error
+
+        worker = threading.Thread(target=run, name="a3-approval", daemon=True)
+        worker.start()
+        worker.join(timeout)
+        if worker.is_alive():
+            self.abandoned = True
+            raise PinError(
+                f"The A3 was not authorised within {timeout:g} s (was the certificate app's window answered?); "
+                "not retrying. Answer it on the next login."
+            )
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome.get("value")
+
     def _private_key(self):
         pkcs11 = self._pkcs11
         if self._key is None:
@@ -294,7 +304,8 @@ class A3Signer:
         """RSA PKCS#1 v1.5 over a DigestInfo built by the caller (CKM_RSA_PKCS); used by TLS client auth."""
         self.login()
         mechanism = self._pkcs11.Mechanism(self._pkcs11.CKM_RSA_PKCS, None)
-        return bytes(self.session.sign(self._private_key(), bytes(digest_info), mechanism))
+        key = self._private_key()
+        return bytes(self._on_token(lambda: self.session.sign(key, bytes(digest_info), mechanism)))
 
     def sign(self, mensagem):
         """MD5withRSA over the challenge, as PJeOffice does."""
@@ -345,7 +356,7 @@ def _check(sign):
         print(f"valid until: {leaf.not_valid_after_utc:%Y-%m-%d}; chain: {len(token.chain)} certificates")
         print(f"unsafe PIN state: {token.unsafe_pin_state() or 'none'}")
         if token.protected:
-            print("PIN: none here; the login is authorised on the token or in its app (push or code)")
+            print("PIN: none here; the token or its app asks for it (desktopID: its window, PIN and e-token, or push)")
         else:
             print(f"PIN stored: {bool(os.environ.get('PJE_A3_PIN') or _keyring_pin(token.serial))}")
         if sign:

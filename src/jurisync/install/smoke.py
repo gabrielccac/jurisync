@@ -182,7 +182,9 @@ def run(found, *, say=print, attempt=login, wait=wait_for_new_code):
         logged = True
         say(f"{target.key}: login ({target.method})...")
         if target.method.startswith("a3"):
-            say("  A3: se o app do certificado pedir (desktopID: push no celular ou código), aprove agora")
+            say(
+                "  A3: responda a janela do certificado neste computador (desktopID: PIN e e-token) ou o push no celular"
+            )
         began = time.monotonic()
         try:
             attempt(target)
