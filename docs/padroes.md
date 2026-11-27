@@ -178,6 +178,9 @@ Helpers em `jurisync.core.responses`:
   descrição).
 - **Número do processo:** todo item que é de um processo traz `processNumber` (CNJ com pontuação). Nas linhas do
   Eproc (filas, Relação de Processos, pautas e audiências) `number` continua por um ciclo como cópia.
+- **Ciência pendente:** linha de lista de intimações traz `cienciaPendente` (booleano), como no PJe e no Projudi; no
+  Eproc é `true` nas filas `pending*` e `art334`. Vale para a linha; a trava de ciência vale para o processo
+  inteiro, então uma linha `false` não significa que os documentos do processo podem ser abertos.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%
