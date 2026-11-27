@@ -15,6 +15,7 @@ from pydantic import Field
 from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
+    MAX_HEARING_PAGES,
     MAX_REPORT_PAGES,
     PRAZO_FILTER,
     QUEUE_KINDS,
@@ -182,19 +183,57 @@ def create_server(keys=None):
 
     @server.tool(
         name="eproc_list_audiencias",
-        title="List Eproc upcoming audiências",
+        title="List Eproc audiências",
         description=(
-            "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
-            "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
-            "parties, event (what was scheduled), location, start and end, date (the day of start) and observation. "
-            "lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
+            "List the lawyer's audiências in an Eproc portal from the panel's lists: upcoming (default, soonest "
+            "first), held or not held (latest first), each with its conciliation twin. Use it for the hearing "
+            "agenda; nothing is opened, so no ciência is registered. The audiências of one process: "
+            "eproc_get_process. Read-only. "
+            "Cost: one page of each list by default; maxPages reads more of long lists; kind reads only one of the "
+            "two. "
+            "Each item: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
+            "parties, event (what was scheduled), location, start and end, date (the day of start; items without one "
+            "come last) and observation. lists[] says what each list gave (problem when it could not be read). "
             + DATES
-            + " Read-only."
+            + " "
+            + ENVELOPE
         ),
         annotations=READ_ONLY,
     )
-    def eproc_list_audiencias(portal: Portal) -> dict[str, Any]:
-        result = call(portal, lambda **context: list_hearings(**context))
+    def eproc_list_audiencias(
+        portal: Portal,
+        situation: Annotated[
+            Literal["upcoming", "held", "not_held"],
+            Field(
+                description=(
+                    "'upcoming': designada, redesignada, prorrogada, adiada, antecipada; 'held': realizadas; "
+                    "'not_held': canceladas or não realizadas."
+                )
+            ),
+        ] = "upcoming",
+        kind: Annotated[
+            Literal["audiencia", "conciliacao"] | None,
+            Field(description="Only the hearings list or only the conciliation list; both when omitted."),
+        ] = None,
+        processNumber: Annotated[
+            str | None,
+            Field(description="CNJ number with punctuation: keep only this process' audiências."),
+        ] = None,
+        maxPages: Annotated[
+            int,
+            Field(ge=1, le=MAX_HEARING_PAGES, description="Pages of each list to read when the portal pages it."),
+        ] = 1,
+        offset: Annotated[
+            int,
+            Field(ge=0, description="Items to skip, from next when an answer was cut to fit the size budget."),
+        ] = 0,
+    ) -> dict[str, Any]:
+        result = call(
+            portal,
+            lambda **context: list_hearings(
+                situation, kind, processNumber, max_pages=maxPages, offset=offset, **context
+            ),
+        )
         for hearing in result.get("audiencias") or []:
             dated(hearing, "start", "end")
         return result
