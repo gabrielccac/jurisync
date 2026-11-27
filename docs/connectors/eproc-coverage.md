@@ -8,7 +8,8 @@ connector `src/jurisync/connectors/eproc/` (read-only).
 
 - Tools: `eproc_list_intimacoes` (filas listadas em `QUEUE_KINDS`; sem fila, pendentes e prazos abertos juntos,
   cada item com `situacao`/`prazoFinal` de `core.intimacao`), `eproc_get_counters` (contadores do painel e de cada
-  instância), `eproc_list_audiencias` (audiências futuras e de conciliação), `eproc_list_processes` (Relação de
+  instância), `eproc_list_audiencias` (audiências futuras, realizadas e não
+  realizadas, cada uma com a lista de conciliação), `eproc_list_processes` (Relação de
   Processos do advogado; baixados ficam de fora em todo portal salvo `includeArchived`, filtro `prazo`) e
   `eproc_get_process` (eventos, `prazos` de cada intimação, informações adicionais, audiências e perícias,
   documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026.
@@ -77,6 +78,39 @@ geração do arquivo completo dos autos no servidor do tribunal (um job), ou sej
 teste `TreeRouteTest` prova que ela, `download_documentos_evento`, `abrir_em_abas_documentos_evento` e as ações de
 escrita seguem bloqueadas.
 
+## Audiências do advogado (`eproc_list_audiencias`)
+
+As seis listas da seção "Audiências" do painel, lidas pelo link que o próprio painel publica e conferidas por
+`require_route` com a ação de cada lista (`HEARING_SITUATIONS`/`HEARING_ACTIONS` em `client.py`, somadas a
+`READ_ACTIONS`). Nada é aberto e não se dá ciência.
+
+| `situation` | `kind=audiencia` | `kind=conciliacao` | Ordem |
+|---|---|---|---|
+| `upcoming` (padrão, comportamento anterior) | `audiencia_futura_listar` | `audiencia_futura_conciliacao_listar` | mais próxima primeiro |
+| `held` | `audiencia_realizada_listar` | `audiencia_realizada_conciliacao_listar` | mais recente primeiro |
+| `not_held` | `audiencia_nao_realizada_listar` | `audiencia_nao_realizada_conciliacao_listar` | mais recente primeiro |
+
+- Sem `kind`, as duas listas da situação são lidas e juntadas (como antes nas futuras).
+- `processNumber` (opcional) mantém só as linhas desse processo; `total` passa a ser o número achado quando as
+  listas foram lidas até o fim, senão `null`. Sem filtro, `total` é a soma dos contadores do portal.
+- `maxPages` (1 a 10) segue o paginador Infra de cada lista (reposta o formulário com `hdnInfraPaginaAtual`, como a
+  Relação de Processos); resposta acima de `core.responses.BUDGET` é cortada e `next` traz `{"maxPages", "offset"}`.
+- Itens: `processNumber` (com `number`, o nome antigo), `start`/`end` em ISO (`startText`/`endText` com
+  o texto do portal por um ciclo) e `date` (o dia de `start`); sem data, o item vai para o fim em qualquer ordem. `lists[]` diz por
+  lista `count`, `complete` (a legenda "(N registros)" manda: menos linhas lidas que N é incompleto),
+  `totalItems`, `totalPages` e `problem` (fora do painel, erro do portal, layout não reconhecido, página que não
+  bateu).
+- Tela que não traz nem a tabela conhecida nem a área de tabela vazia vira `problem: "layout not recognized"`, para
+  não confundir mudança de layout com agenda vazia.
+
+**Falta validar com linhas reais as listas realizadas e não realizadas.** O layout das futuras foi conferido no TJMG e
+na JFRS (27/11/2026); as outras quatro estavam vazias em todas as capturas do JURI-21 (TJSC 1G/2G, TJRJ, TRF4 2G,
+TRF6 2G), então o parser assume as mesmas colunas (Número Processo, Evento, Local Data/Hora, Observação). A
+paginação também não foi vista ao vivo em nenhuma lista de audiências.
+
+A tabela "Situação | Quantidade de Audiências" do `painel_advogado_listar` (TJSC 1G e TJRJ) fica com a frente de
+contadores.
+
 ## Relação de Processos (implementado em 2026-10-21)
 
 Chamada MCP: `eproc_list_processes({"portal": "trf6-1g"})`.
@@ -114,6 +148,7 @@ mapeadas. Novas telas continuam exigindo parser e inclusão explícita no allowl
 - `intimacao_de_pauta_listar` (intimação de pauta)
 
 ### B. Audiências (agenda cross-processo)
+As seis listas abaixo estão no `eproc_list_audiencias` (seção "Audiências do advogado"); falta `conciliacao_listar`.
 - `audiencia_futura_listar` — "Audiências Futuras (Designada, Redesignada, Prorrogada, Adiada, Antecipada)"
 - `audiencia_futura_conciliacao_listar`
 - `audiencia_realizada_listar`, `audiencia_nao_realizada_listar`
