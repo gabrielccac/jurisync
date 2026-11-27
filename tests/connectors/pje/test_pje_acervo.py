@@ -291,6 +291,17 @@ class AcervoListing(unittest.TestCase):
             self.assertFalse(any("Caixa" in key or "Mover" in key or "j_id1268" in key for key in body))
         self.assertEqual(session.get.call_count, 1)  # the panel only: no process detail page
 
+    def test_archived_processes_are_listed_and_flagged(self):
+        session = self.mg_session(
+            [
+                listing([row("700000001", FIRST), row("700000002", SECOND)], 3, page=1),
+                listing([row("700000003", THIRD)], 3, page=2),
+            ]
+        )
+        result = acervo.read_acervo("tjmg-pje-1g", session=session, max_pages=5)
+        self.assertEqual([i["arquivado"] for i in result["items"]], [True, True, True, False])
+        self.assertFalse(acervo.is_archived({"caixa": "Acervo Geral", "arquivadoEm": "2026-01-02"}))
+
     def test_pages_beyond_max_pages_leave_the_listing_incomplete(self):
         session = self.mg_session([listing([row("700000001", FIRST), row("700000002", SECOND)], 3, page=1)])
         result = acervo.list_processes(session, "tjmg-pje-1g", max_pages=1)

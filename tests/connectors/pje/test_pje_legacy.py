@@ -267,6 +267,7 @@ class Pje1xAcervo(unittest.TestCase):
                 "ultimoMovimento": None,
                 "jurisdicao": None,
                 "caixa": "Acervo / Pendentes de Manifestação",
+                "arquivado": False,
             },
         )
         self.assertEqual((result["items"][1]["processId"], result["items"][1]["distribuidoEm"]), (None, None))

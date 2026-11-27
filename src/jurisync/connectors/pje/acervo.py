@@ -430,14 +430,27 @@ def list_processes(session, portal, *, regions=None, max_pages=5, max_nodes=MAX_
     return result
 
 
+ARCHIVED = re.compile(r"arquivad", re.I)
+
+
+def is_archived(item):
+    """Whether a listed process is archived: it sits in an Arquivados box (or PJe-JT bucket). The PJe-JT archiving date
+    alone does not say so: a process taken out of the archive keeps it."""
+    return bool(ARCHIVED.search(item.get("caixa") or ""))
+
+
 def read_acervo(portal, *, session, regions=None, max_pages=5):
     """``list_processes`` on the classic panel, the Acervo Geral bucket on the PJe-JT (KZ) one, the Acervo sub-tabs'
-    grids on PJe 1.x."""
+    grids on PJe 1.x. Every item says whether the process is ``arquivado``."""
     config = portals.pje(portal)
     if config.pje1x:
-        return legacy.list_processes(session, portal, regions=regions, max_pages=max_pages)
-    if config.kz:
+        result = legacy.list_processes(session, portal, regions=regions, max_pages=max_pages)
+    elif config.kz:
         from jurisync.connectors.pje import kz
 
-        return kz.read_acervo(session, portal, regions=regions, max_pages=max_pages)
-    return list_processes(session, portal, regions=regions, max_pages=max_pages)
+        result = kz.read_acervo(session, portal, regions=regions, max_pages=max_pages)
+    else:
+        result = list_processes(session, portal, regions=regions, max_pages=max_pages)
+    for item in result.get("items") or []:
+        item["arquivado"] = is_archived(item)
+    return result

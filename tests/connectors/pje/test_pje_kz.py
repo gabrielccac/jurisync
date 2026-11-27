@@ -587,9 +587,9 @@ def test_acervo_listing_reads_acervo_geral_and_arquivados_once_per_process():
     item = result["items"][0]
     assert set(item) == {
         "processNumber", "processId", "classe", "partes", "orgaoJulgador", "distribuidoEm", "arquivadoEm",
-        "jurisdicao", "caixa",
+        "jurisdicao", "caixa", "arquivado",
     }  # fmt: skip
-    assert item["caixa"] == "Acervo Geral"
+    assert item["caixa"] == "Acervo Geral" and item["arquivado"] is False
     assert not any("expedientes" in path or "documento" in path for path, _ in session.calls)
 
 
