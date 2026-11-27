@@ -11,6 +11,7 @@ Anything ``describe`` does not recognize is a bug: its text stays in the server 
 ``[unexpected]`` error with the same ref.
 """
 
+import logging
 import urllib.error
 from dataclasses import dataclass
 
@@ -208,3 +209,19 @@ UNEXPECTED = Problem(
     False,
     OPERATOR,
 )
+
+log = logging.getLogger(__name__)
+
+
+def summary(error):
+    """One line for a failure a batch records and moves past: ``[code] message`` (sanitized, as a tool error) when
+    anticipated. A bug becomes ``[unexpected]`` with a ref, the call's or a new one outside a call (a script); its text and
+    trace go only to the log, under the same ref."""
+    from jurisync.core.mcp import sanitize_diagnostics
+
+    problem = describe(error)
+    if problem is not None:
+        return f"[{problem.code}] {sanitize_diagnostics(problem.message) or 'sem detalhes'}"
+    ref = calls.current() or calls.new_id()
+    log.error("unexpected failure in a batch item (ref=%s)", ref, exc_info=error)
+    return f"[{UNEXPECTED.code}] {UNEXPECTED.message} (ref={ref})"

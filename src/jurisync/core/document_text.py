@@ -33,7 +33,7 @@ def _html_status(body):
             token in title for token in ("login", "entrar", "sessão expirada", "sessao expirada")
         ):
             return "session_expired"
-    except Exception:
+    except Exception:  # noqa: BLE001 - a heuristic: unparsable HTML is just not a login page
         pass
     return None
 
@@ -69,7 +69,7 @@ def _pdf_has_images(reader):
             for value in xobjects.values():
                 if value.get_object().get("/Subtype") == "/Image":
                     return True
-        except Exception:
+        except Exception:  # noqa: BLE001 - a heuristic: a broken page has no image to count
             continue
     return False
 
@@ -121,7 +121,7 @@ def extract_document_text(content, content_type="", process_number="", *, allow_
                 try:
                     if not reader.decrypt(""):
                         return "encrypted_pdf", ""
-                except Exception:
+                except Exception:  # noqa: BLE001 - pypdf raises many types for a bad password
                     return "encrypted_pdf", ""
             pages = []
             size = 0
@@ -135,7 +135,7 @@ def extract_document_text(content, content_type="", process_number="", *, allow_
             if text:
                 return "extracted", text
             return _ocr(content, len(reader.pages)) if _pdf_has_images(reader) else ("empty", "")
-        except Exception:
+        except Exception:  # noqa: BLE001 - pypdf raises many types for a broken PDF; the status says so
             return "pdf_parse_error", ""
     if "html" not in content_type.casefold() and not looks_html:
         return "unsupported_content", ""

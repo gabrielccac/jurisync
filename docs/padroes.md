@@ -141,6 +141,12 @@ Como usar num conector:
   erros de rede viram `portal_unavailable`. `KeyError`, `AttributeError`, `TypeError` e afins são bug: o agente
   recebe só `[unexpected] ... ref=...` e o detalhe fica no log.
 - Toda mensagem passa por `sanitize_diagnostics` (sem URL, caminho, cookie, token ou CPF).
+- `except Exception` que não relança só com motivo: `# noqa: BLE001 - <por quê>` (regra `BLE` do ruff). Os casos aceitos são
+  fronteira de CLI ou de job em segundo plano, item de lote que não pode parar os outros, sonda ou limpeza que não pode
+  custar o resultado, e biblioteca que levanta tipos demais (pypdf, OCR, navegador). Se der para registrar, registre com
+  `exc_info=True` em vez do `noqa`.
+- Item de lote que falha guarda `errors.summary(error)`: `[code] mensagem` quando previsto; um bug vira
+  `[unexpected] ... (ref=...)` e o texto e o trace ficam só no log.
 
 ## 6. Respostas
 
@@ -197,6 +203,7 @@ Passos para um conector novo:
 |---|---|
 | Lint e formato | `ruff check`, `ruff format --check` no CI |
 | Logging com `%`-args, sem `print` de depuração | regras `G`, `LOG`, `T10` do ruff |
+| `except Exception` só com motivo (`noqa: BLE001 - ...`) ou registrado | regra `BLE` do ruff |
 | Comprehensions e literais simples | regras `C4`, `PIE`, `ISC` do ruff |
 | Molde de conector válido | `tests/core/test_connector_template.py` |
 | Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |

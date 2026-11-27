@@ -100,7 +100,7 @@ def _keyring_pin(serial):
     for service, account in ((KEYRING_SERVICE, f"a3-pin:{serial}"), (GERID_KEYRING_SERVICE, f"pin:{serial}")):
         try:
             pin = keyring.get_password(service, account)
-        except Exception:
+        except Exception:  # noqa: BLE001 - a locked or missing keyring falls through to the next source
             continue  # A locked or missing keyring falls through to the next source.
         if pin:
             return pin

@@ -62,6 +62,6 @@ def split_pdf(source, destination):
 if __name__ == "__main__":
     try:
         print(json.dumps(split_pdf(sys.argv[1], sys.argv[2])))
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - CLI boundary: the error goes to stderr
         print(str(error), file=sys.stderr)
         sys.exit(1)

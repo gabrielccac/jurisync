@@ -8,7 +8,6 @@ that the portal answered on the expected page with a live session.
 """
 
 import re
-from html import unescape
 from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
@@ -20,7 +19,6 @@ from jurisync.core.session_pool import SessionExpired
 NO_SELECTION = "org.jboss.seam.ui.NoSelectionConverter.noSelectionValue"
 LOGIN_MARKERS = ('id="loginform"', "id='loginform'", "/pje/login.seam")
 LOGIN_LOCATION = re.compile(r"login|/auth/realms/", re.I)  # PJe's own login.seam or the national SSO
-PARTIAL_UPDATE = re.compile(r"<update\b[^>]*\bid=[\"']([^\"']+)[\"'][^>]*>(.*?)</update>", re.I | re.S)
 
 
 # -- A4J submits ---------------------------------------------------------------
@@ -110,30 +108,6 @@ def ajax_ids(element, form_id="fPP"):
         if action:
             ids.append(action.group(1))
     return list(dict.fromkeys(ids))
-
-
-# -- partial responses ---------------------------------------------------------
-
-
-def _text(payload):
-    return payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else str(payload or "")
-
-
-def parse_partial_response(payload):
-    """JSF partial-response updates by component id, plus the refreshed ViewState."""
-    updates = {}
-    for match in PARTIAL_UPDATE.finditer(_text(payload)):
-        content = match.group(2).strip()
-        if content.startswith("<![CDATA[") and content.endswith("]]>"):
-            content = content[9:-3]
-        updates[match.group(1)] = unescape(content)
-    state = None
-    for key, value in updates.items():
-        if key.endswith("ViewState"):
-            element = BeautifulSoup(value, "html.parser").find("input", attrs={"name": "javax.faces.ViewState"})
-            state = element.get("value", "") if element else value.strip()
-            break
-    return {"updates": updates, "view_state": state}
 
 
 # -- requests ------------------------------------------------------------------

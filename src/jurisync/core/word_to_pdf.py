@@ -146,6 +146,6 @@ if __name__ == "__main__":
         parser.add_argument("destination")
         args = parser.parse_args()
         print(json.dumps({"success": True, "path": str(convert_word_to_pdf(args.source, args.destination))}))
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - CLI boundary: the error is the JSON answer
         print(json.dumps({"success": False, "error": str(error)}))
         sys.exit(1)
