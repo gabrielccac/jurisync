@@ -11,6 +11,8 @@ Anything ``describe`` does not recognize is a bug: its text stays in the server 
 ``[unexpected]`` error with the same ref.
 """
 
+import logging
+import re
 import urllib.error
 from dataclasses import dataclass
 
@@ -201,6 +203,13 @@ def render(label, problem, clean):
     return f"[{problem.code}] {label}: {message}\nPróximo passo: {problem.next_step}\n{meta}"
 
 
+def code_of(text):
+    """The code a rendered error starts with (``[portal_unavailable] ...``, also after the SDK prefix
+    "Error executing tool x: "), or "" for any other text."""
+    found = re.match(r"(?:Error executing tool \S+: )?\[([a-z0-9_]+)\]", text or "")
+    return found.group(1) if found else ""
+
+
 UNEXPECTED = Problem(
     "unexpected",
     "falha inesperada no servidor",
@@ -208,3 +217,19 @@ UNEXPECTED = Problem(
     False,
     OPERATOR,
 )
+
+log = logging.getLogger(__name__)
+
+
+def summary(error):
+    """One line for a failure a batch records and moves past: ``[code] message`` (sanitized, as a tool error) when
+    anticipated. A bug becomes ``[unexpected]`` with a ref, the call's or a new one outside a call (a script); its text and
+    trace go only to the log, under the same ref."""
+    from jurisync.core.mcp import sanitize_diagnostics
+
+    problem = describe(error)
+    if problem is not None:
+        return f"[{problem.code}] {sanitize_diagnostics(problem.message) or 'sem detalhes'}"
+    ref = calls.current() or calls.new_id()
+    log.error("unexpected failure in a batch item (ref=%s)", ref, exc_info=error)
+    return f"[{UNEXPECTED.code}] {UNEXPECTED.message} (ref={ref})"

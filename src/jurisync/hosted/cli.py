@@ -365,7 +365,9 @@ def calls(args, say):
 
         for row in store.calls(tenant, args.limit):
             moment = datetime.datetime.fromtimestamp(row["at"]).strftime("%d/%m/%Y %H:%M:%S")
-            result = "ok" if row["ok"] else f"erro {row['error']}"
+            result = (
+                "ok" if row["ok"] else f"erro {row['error']}" + (f" [{row['error_code']}]" if row["error_code"] else "")
+            )
             say(f"{moment}  {row['user'] or '-'}  {row['tool']}  {result}  {row['duration_ms']} ms")
 
 
@@ -395,7 +397,7 @@ def serve(args):
 
     with open_store() as store:
         vault = open_vault()
-        enable_request_logging()
+        enable_request_logging(structured=True)
         lacking = missing_profiles(store)
         if lacking:
             # The profile pins per-portal methods (A1 on a password portal) and the office's settings: without it the

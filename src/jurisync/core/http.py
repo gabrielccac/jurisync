@@ -84,12 +84,15 @@ def same_endpoint(response_url, expected_url):
     return (actual.scheme, actual.netloc, actual.path) == ("https", expected.netloc, expected.path)
 
 
-def enable_request_logging():
-    """Show request progress on stderr (CLIs and MCP servers; stdout stays clean)."""
+def enable_request_logging(structured=False):
+    """Show request progress on stderr (CLIs and MCP servers; stdout stays clean): JSON lines with the call for a server
+    (``structured``), the bare message for a CLI (``core.logs``)."""
     import sys
 
+    from jurisync.core import logs
+
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(logs.formatter(structured))
     logger = logging.getLogger("jurisync")
     if not logger.handlers:
         logger.addHandler(handler)

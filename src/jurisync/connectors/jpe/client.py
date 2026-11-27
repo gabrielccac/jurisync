@@ -38,11 +38,11 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.jpe import parsers
-from jurisync.connectors.pje.auth.sso import SSO_HOST, credential_refusal, credentials_form, login_form_id
 from jurisync.connectors.pje.jsf import a4j_submit
 from jurisync.connectors.pje.parsers import jsf_data, response_html
 from jurisync.core.documents import read_limited
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
+from jurisync.core.keycloak import OTP_FORM, PDPJ_SSO_HOST, credential_refusal, credentials_form, login_form_id
 from jurisync.core.redaction import url_shape
 from jurisync.core.session_pool import LoginRejected, MissingLogin, SessionExpired
 from jurisync.core.totp import configured_account, fresh_code
@@ -168,8 +168,8 @@ def require_jpe(portal, url):
 
 def _login_hop(portal):
     def check(url):
-        if (urlsplit(url).hostname or "").lower() == SSO_HOST:
-            return require_url(url, hosts={SSO_HOST}, path_prefix="/auth/", label="PDPJ SSO")
+        if (urlsplit(url).hostname or "").lower() == PDPJ_SSO_HOST:
+            return require_url(url, hosts={PDPJ_SSO_HOST}, path_prefix="/auth/", label="PDPJ SSO")
         return require_jpe(portal, url)
 
     return check
@@ -452,7 +452,7 @@ def _sso_login(http, portal, html, page_url, username, password, account, *, clo
         if "redirect_uri" in refusal.casefold():
             raise SsoRefused(f'{SSO_REFUSED} (SSO: HTTP {response.status_code} "{refusal}")')
         raise JpeError(f'PDPJ SSO refused to start the JPe login: "{refusal}"')
-    if (urlsplit(response.url).hostname or "") != SSO_HOST:
+    if (urlsplit(response.url).hostname or "") != PDPJ_SSO_HOST:
         raise JpeError(f"JPe PDPJ button did not reach the SSO (landed at {url_shape(response.url)})")
     form_id = login_form_id(sso_html)
     login_form = parsers.soup_of(sso_html).find("form", id=form_id)
@@ -463,7 +463,7 @@ def _sso_login(http, portal, html, page_url, username, password, account, *, clo
         http, portal, "POST", login_url, check=check, referer=response.url,
         data=credentials_form(username, password, form_id),
     )  # fmt: skip
-    otp_form = parsers.soup_of(response_html(response)).find("form", id="kc-otp-login-form")
+    otp_form = parsers.soup_of(response_html(response)).find("form", id=OTP_FORM)
     if otp_form is None or not otp_form.get("action"):
         raise credential_refusal(response_html(response), JpeError)
     otp_url = check(urljoin(response.url, otp_form["action"]))
