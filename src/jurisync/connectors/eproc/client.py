@@ -27,6 +27,7 @@ from jurisync.connectors.eproc.parsers import (
     additional_information_request,
     parse_additional_information,
     parse_event_response,
+    parse_hearing_list,
     parse_lawyer_process_report,
     parse_panel,
     parse_panel_counters,
@@ -40,6 +41,7 @@ from jurisync.connectors.eproc.parsers import (
 from jurisync.core import credentials, intimacao
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.redaction import drop_keys
+from jurisync.core.responses import listing
 from jurisync.core.session_pool import MissingLogin, SessionExpired
 from jurisync.customers import load_env_file
 
@@ -75,6 +77,8 @@ STATE_LINKS = {
     "urgent": "intimacaoAbertoUrgente",
 }
 PROCESS_REPORT_ACTION = "relatorio_processo_procurador_listar"
+# The panel's lists of upcoming audiências: hearings, and conciliation hearings.
+HEARING_LISTS = {"audiencia": "audiencia_futura_listar", "conciliacao": "audiencia_futura_conciliacao_listar"}
 READ_ACTIONS = QUEUE_ACTIONS | {
     PROCESS_REPORT_ACTION,
     "painel_adv_listar",
@@ -88,6 +92,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "processo_montar_informacoes_adicionais",  # the process page's "Informações Adicionais" (do_log=0)
     "audiencia_listar",  # the process' audiências
     "exame_listar",  # the process' perícias (JFRS)
+    *HEARING_LISTS.values(),
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
@@ -729,6 +734,51 @@ def _instance(session, entry, base, *, portal):
         if value.isdigit():
             counters[name] = int(value)
     return {**found, "counters": counters}
+
+
+def list_hearings(*, session=None, panel_html=None, panel_url=None, portal):
+    """The upcoming audiências of the panel's two lists (hearings and conciliation), soonest first."""
+    portal = portals.eproc(portal).key
+    owned = session is None
+    if owned:
+        session, panel_html, panel_url = authenticate(portal)
+    try:
+        base_url = portals.eproc(portal).base_url
+        panel = parse_panel(panel_html, base_url)
+        items, lists, problems = [], [], []
+        for kind, action in HEARING_LISTS.items():
+            endpoint = panel["actions"].get(action)
+            if not endpoint:
+                lists.append({"kind": kind, "count": 0, "complete": False, "problem": "not in the panel"})
+                continue
+            url = urljoin(panel_url or base_url, endpoint)
+            require_route(url, {action}, portal=portal)
+            response, body = request(session, "GET", url, portal=portal)
+            error = _response_error(response, body)
+            if error == "session_expired":
+                raise SessionExpired("eproc session expired")
+            if error:
+                problems.append(f"the {kind} list answered {error}")
+                lists.append({"kind": kind, "count": 0, "complete": False, "problem": error})
+                continue
+            parsed = parse_hearing_list(body, base_url)
+            lists.append({"kind": kind, "count": len(parsed["items"]), "complete": parsed["pagination"]["complete"]})
+            items.extend({"kind": kind, **item, "date": _iso_date(item["start"])} for item in parsed["items"])
+        items.sort(key=lambda item: (item["date"] or "9999", item["start"][11:]))
+        return _redact(
+            listing(
+                items,
+                key="audiencias",
+                success=any("problem" not in entry for entry in lists),
+                source="eproc",
+                portal=portal,
+                lists=lists,
+                diagnostics=problems,
+            )
+        )
+    finally:
+        if owned:
+            session.close()
 
 
 MAX_REPORT_PAGES = 20

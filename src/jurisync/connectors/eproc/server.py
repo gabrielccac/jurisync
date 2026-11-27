@@ -19,6 +19,7 @@ from jurisync.connectors.eproc.client import (
     auth_method,
     authenticate,
     fetch_process,
+    list_hearings,
     list_notices,
     list_processes,
     read_counters,
@@ -139,6 +140,21 @@ def create_server(keys=None):
     )
     def eproc_get_counters(portal: Portal) -> dict[str, Any]:
         return call(portal, lambda **context: read_counters(**context))
+
+    @server.tool(
+        name="eproc_list_audiencias",
+        title="List Eproc upcoming audiências",
+        description=(
+            "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
+            "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), number, court (juízo), "
+            "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO) and "
+            "observation. lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
+            "Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_audiencias(portal: Portal) -> dict[str, Any]:
+        return call(portal, lambda **context: list_hearings(**context))
 
     @server.tool(
         name="eproc_list_processes",

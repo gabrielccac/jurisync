@@ -673,3 +673,51 @@ def parse_panel_counters(body):
     for name, value in re.findall(r"<(\w+)>\s*([^<]*?)\s*</\1>", found.group(2)):
         values[name] = int(value) if value.isdigit() else html_lib.unescape(value)
     return values
+
+
+_HEARING_TIME = r"(\d{2}/\d{2}/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)"
+
+
+def parse_hearing_list(html, base_url):
+    """The panel's audiência lists (``audiencia_futura_listar``, ``audiencia_futura_conciliacao_listar``; TJMG and
+    JFRS, 27/11/2026): Número Processo (number, juízo, parties), Evento, Local Data/Hora (Sala, Início, Previsão
+    Término) and Observação. The portal leaves the last ``<td>`` of a row unclosed."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for table in soup.select("table.infraTable"):
+        headers = [text(th).casefold() for th in table.select("th")]
+        if not any("processo" in header for header in headers) or not any("local" in header for header in headers):
+            continue
+        items = []
+        for row in table.select("tr.infraTrClara, tr.infraTrEscura"):
+            cells = [BeautifulSoup(part, "html.parser") for part in re.split(r"<td\b[^>]*>", str(row), flags=re.I)[1:]]
+            link = cells[0].select_one('a[href*="acao=processo_selecionar"]') if cells else None
+            if link is None or len(cells) < 3:
+                continue
+            lines = [line.strip() for line in cells[0].get_text("\n", strip=True).split("\n") if line.strip()]
+            court = next((line[1:-1] for line in lines[1:2] if line.startswith("(") and line.endswith(")")), "")
+            place = text(cells[2])
+            location = re.search(r"Sala\s*:\s*(.*?)\s*(?:In[íi]cio|$)", place)
+            start = re.search(r"In[íi]cio\s*" + _HEARING_TIME, place)
+            end = re.search(r"T[ée]rmino\s*" + _HEARING_TIME, place)
+            items.append(
+                {
+                    "number": text(link),
+                    "url": _href(link.get("href"), base_url),
+                    "court": court,
+                    "parties": [
+                        {"role": lines[index + 1], "name": line.rstrip(" -").strip()}
+                        for index, line in enumerate(lines[:-1])
+                        if index > 1 and line.endswith("-")
+                    ],
+                    "event": text(cells[1]),
+                    "location": location.group(1) if location else place,
+                    "start": start.group(1) if start else "",
+                    "end": end.group(1) if end else "",
+                    "observation": text(cells[3]) if len(cells) > 3 else "",
+                }
+            )
+        return {"items": items, "pagination": _list_pagination(soup, items)}
+    # An empty list draws an empty table area (JFRS, 27/11/2026); a page without one is not this list.
+    area = soup.select_one("#divInfraAreaTabela")
+    empty = area is not None and not text(area)
+    return {"items": [], "pagination": {"totalItems": 0 if empty else None, "itemCount": 0, "complete": empty}}
