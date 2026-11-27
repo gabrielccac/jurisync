@@ -43,7 +43,7 @@ from jurisync.connectors.eproc.parsers import (
 from jurisync.core import credentials, intimacao
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.redaction import drop_keys
-from jurisync.core.responses import listing
+from jurisync.core.responses import BUDGET, compact, iso, listing
 from jurisync.core.session_pool import MissingLogin, SessionExpired
 from jurisync.customers import load_env_file
 
@@ -81,6 +81,18 @@ STATE_LINKS = {
 PROCESS_REPORT_ACTION = "relatorio_processo_procurador_listar"
 # The panel's lists of upcoming audiências: hearings, and conciliation hearings.
 HEARING_LISTS = {"audiencia": "audiencia_futura_listar", "conciliacao": "audiencia_futura_conciliacao_listar"}
+# The panel's audiência lists by the tool's ``situation``, each with its conciliation twin.
+HEARING_SITUATIONS = {
+    "upcoming": HEARING_LISTS,
+    "held": {"audiencia": "audiencia_realizada_listar", "conciliacao": "audiencia_realizada_conciliacao_listar"},
+    "not_held": {
+        "audiencia": "audiencia_nao_realizada_listar",
+        "conciliacao": "audiencia_nao_realizada_conciliacao_listar",
+    },
+}
+HEARING_ACTIONS = {action for lists in HEARING_SITUATIONS.values() for action in lists.values()}
+MAX_HEARING_PAGES = 10
+HEARING_PAGER = 'form[action]:has(input[name="hdnInfraPaginaAtual"])'
 READ_ACTIONS = QUEUE_ACTIONS | {
     PROCESS_REPORT_ACTION,
     "painel_adv_listar",
@@ -94,7 +106,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "processo_montar_informacoes_adicionais",  # the process page's "Informações Adicionais" (do_log=0)
     "audiencia_listar",  # the process' audiências
     "exame_listar",  # the process' perícias (JFRS)
-    *HEARING_LISTS.values(),
+    *HEARING_ACTIONS,
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
@@ -738,9 +750,87 @@ def _instance(session, entry, base, *, portal):
     return {**found, "counters": counters}
 
 
-def list_hearings(*, session=None, panel_html=None, panel_url=None, portal):
-    """The upcoming audiências of the panel's two lists (hearings and conciliation), soonest first."""
+def _hearing_pages(session, url, action, *, max_pages, portal):
+    """``(items, entry)`` of one audiência list, following its pager up to ``max_pages`` pages; ``entry`` is its
+    ``lists[]`` line (count, complete, totalPages, problem when it could not be read)."""
+    base_url = portals.eproc(portal).base_url
+    require_route(url, {action}, portal=portal)
+    response, body = request(session, "GET", url, portal=portal)
+    error = _response_error(response, body)
+    if error == "session_expired":
+        raise SessionExpired("eproc session expired")
+    if error:
+        return [], {"count": 0, "complete": False, "problem": error}
+    parsed = parse_hearing_list(body, base_url)
+    items, pagination = list(parsed["items"]), parsed["pagination"]
+    if not items and not pagination["complete"]:
+        # Neither rows in the known layout nor the empty table area: another layout, not an empty list.
+        return [], {"count": 0, "complete": False, "problem": "layout not recognized"}
+    total, total_pages = pagination.get("totalItems"), pagination.get("totalPages")
+    page, problem = 0, None
+    while total_pages and page + 1 < min(total_pages, max_pages):
+        page += 1
+        following = report_page_request(body, url, page, form=HEARING_PAGER)
+        if following is None:
+            problem = "pager not found"
+            break
+        page_url, fields = following
+        require_route(page_url, {action}, portal=portal)
+        response, body = request(session, "POST", page_url, data=fields, portal=portal)
+        error = _response_error(response, body)
+        if error == "session_expired":
+            raise SessionExpired("eproc session expired")
+        parsed = None if error else parse_hearing_list(body, base_url)
+        if parsed is None or parsed["pagination"].get("page") != page:
+            problem = f"page {page + 1} {error or 'did not match'}"  # stop rather than mix lists
+            break
+        items.extend(parsed["items"])
+    complete = problem is None and ((total is not None and len(items) >= total) or (total_pages or 1) <= max_pages)
+    entry = {"count": len(items), "complete": complete, "totalItems": total, "totalPages": total_pages}
+    return items, {**entry, "problem": problem} if problem else entry
+
+
+def _fit(items):
+    """The leading items whose JSON fits the answer budget, leaving room for the envelope."""
+    used = 0
+    for count, item in enumerate(items):
+        used += len(compact(item)) + 1
+        if used > BUDGET - 5_000:
+            return items[:count]
+    return items
+
+
+def list_hearings(
+    situation="upcoming",
+    kind=None,
+    process_number=None,
+    *,
+    max_pages=1,
+    offset=0,
+    session=None,
+    panel_html=None,
+    panel_url=None,
+    portal,
+):
+    """The audiências of the panel's lists for ``situation`` (``HEARING_SITUATIONS``: upcoming, soonest first; held
+    and not_held, latest first), both kinds (hearings and conciliation) unless ``kind`` names one.
+
+    ``process_number`` keeps that process' rows. Each list follows its pager up to ``max_pages`` pages; an answer over
+    the budget is cut and ``next`` carries the ``offset`` to read on. Only the panel's links and each list's own pager
+    are requested, checked against that list's action.
+    """
     portal = portals.eproc(portal).key
+    lists_by_kind = HEARING_SITUATIONS.get(situation)
+    if lists_by_kind is None:
+        raise ValueError(f"situation must be one of {', '.join(HEARING_SITUATIONS)}")
+    if kind is not None and kind not in lists_by_kind:
+        raise ValueError(f"kind must be one of {', '.join(lists_by_kind)}")
+    if process_number is not None and not (isinstance(process_number, str) and portals.CNJ.fullmatch(process_number)):
+        raise ValueError("process_number must be a formatted CNJ number")
+    if not isinstance(max_pages, int) or isinstance(max_pages, bool) or not 1 <= max_pages <= MAX_HEARING_PAGES:
+        raise ValueError(f"max_pages must be between 1 and {MAX_HEARING_PAGES}")
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise ValueError("offset must be 0 or more")
     owned = session is None
     if owned:
         session, panel_html, panel_url = authenticate(portal)
@@ -748,32 +838,56 @@ def list_hearings(*, session=None, panel_html=None, panel_url=None, portal):
         base_url = portals.eproc(portal).base_url
         panel = parse_panel(panel_html, base_url)
         items, lists, problems = [], [], []
-        for kind, action in HEARING_LISTS.items():
+        for list_kind, action in lists_by_kind.items():
+            if kind not in (None, list_kind):
+                continue
             endpoint = panel["actions"].get(action)
             if not endpoint:
-                lists.append({"kind": kind, "count": 0, "complete": False, "problem": "not in the panel"})
+                lists.append({"kind": list_kind, "count": 0, "complete": False, "problem": "not in the panel"})
                 continue
-            url = urljoin(panel_url or base_url, endpoint)
-            require_route(url, {action}, portal=portal)
-            response, body = request(session, "GET", url, portal=portal)
-            error = _response_error(response, body)
-            if error == "session_expired":
-                raise SessionExpired("eproc session expired")
-            if error:
-                problems.append(f"the {kind} list answered {error}")
-                lists.append({"kind": kind, "count": 0, "complete": False, "problem": error})
-                continue
-            parsed = parse_hearing_list(body, base_url)
-            lists.append({"kind": kind, "count": len(parsed["items"]), "complete": parsed["pagination"]["complete"]})
-            items.extend({"kind": kind, **item, "date": _iso_date(item["start"])} for item in parsed["items"])
-        items.sort(key=lambda item: (item["date"] or "9999", item["start"][11:]))
+            found, entry = _hearing_pages(
+                session, urljoin(panel_url or base_url, endpoint), action, max_pages=max_pages, portal=portal
+            )
+            lists.append({"kind": list_kind, **entry})
+            if "problem" in entry and entry["problem"] != "not in the panel":
+                problems.append(f"the {list_kind} list: {entry['problem']}")
+            items.extend(
+                {
+                    "kind": list_kind,
+                    **item,
+                    "date": _iso_date(item["start"]),
+                    # Common keys (docs/padroes.md); number, start and end stay for one cycle.
+                    "processNumber": item["number"],
+                    "dateTime": iso(item["start"]),
+                    "endDateTime": iso(item["end"]),
+                }
+                for item in found
+            )
+        items.sort(key=lambda item: (item["date"] or "9999", item["start"][11:]), reverse=situation != "upcoming")
+        complete = all(entry["complete"] for entry in lists)
+        if process_number:
+            items = [item for item in items if item["processNumber"] == process_number]
+            total = len(items) if complete else None
+        else:
+            counts = [entry.get("totalItems") for entry in lists if "problem" not in entry]
+            total = sum(counts) if counts and None not in counts else (len(items) if complete else None)
+        shown = _fit(items[offset:])
+        pages = max((entry.get("totalPages") or 1 for entry in lists), default=1)
+        more = None
+        if offset + len(shown) < len(items):
+            more = {"maxPages": max_pages, "offset": offset + len(shown)}
+        elif not complete and not problems and max_pages < min(pages, MAX_HEARING_PAGES):
+            more = {"maxPages": min(pages, MAX_HEARING_PAGES)}
         return _redact(
             listing(
-                items,
+                shown,
                 key="audiencias",
+                total=total,
+                more=more,
                 success=any("problem" not in entry for entry in lists),
                 source="eproc",
                 portal=portal,
+                situation=situation,
                 lists=lists,
                 diagnostics=problems,
             )

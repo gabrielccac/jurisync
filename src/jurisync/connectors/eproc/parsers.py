@@ -404,14 +404,15 @@ def report_filter_request(html, base_url, *, include_archived=None, prazo=None):
     return _href(form["action"], base_url), fields
 
 
-def report_page_request(html, base_url, page):
-    """``(url, fields)`` that ask Relação de Processos for ``page`` (0-based), as its pager does; ``None`` without one.
+def report_page_request(html, base_url, page, *, form="form#frmProcessoLista[action]"):
+    """``(url, fields)`` that ask Relação de Processos (or the list whose ``form`` is given) for ``page`` (0-based), as
+    its pager does; ``None`` without one.
 
     The pager (``infraAcaoPaginar('=', page, 'Infra')``) sets ``hdnInfraPaginaAtual`` and re-posts the list form with
     the same criteria, so the portal keeps the filters and the ordering of the first page.
     """
     soup = BeautifulSoup(html, "html.parser")
-    form = soup.select_one("form#frmProcessoLista[action]")
+    form = soup.select_one(form)
     if form is None or not form.select_one('input[name="hdnInfraPaginaAtual"]'):
         return None
     fields = [(name, value) for name, value in form_fields(form) if name not in ("hdnInfraPaginaAtual", "hdnExcel")]
