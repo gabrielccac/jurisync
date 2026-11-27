@@ -119,7 +119,8 @@ def create_server(keys=None):
             + intimacao.DESCRIPTION
             + " Rows also "
             "carry queue, cienciaPendente (true in the pending queues; situacao says whether it awaits the ciência or "
-            "the DJEN publication), "
+            "the DJEN publication; it is about this row, while the ciência lock of eproc_get_process covers the "
+            "whole process: a false row does not mean the process' documents may be opened), "
             "processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
             "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
             + ENVELOPE
