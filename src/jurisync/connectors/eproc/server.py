@@ -173,8 +173,8 @@ def create_server(keys=None):
             "two. "
             "Each item: kind (audiencia or conciliacao), processNumber, court (juízo), parties, event (what was "
             "scheduled), location, dateTime and endDateTime (ISO), observation; number, start, end (as the portal "
-            "shows them) and date stay for one cycle. total is the portal's count; lists[] says what each list gave "
-            "(problem when it could not be read); next holds the arguments that read the rest."
+            "shows them) and date stay for one cycle. lists[] says what each list gave (problem when it could not be "
+            "read). " + ENVELOPE
         ),
         annotations=READ_ONLY,
     )
