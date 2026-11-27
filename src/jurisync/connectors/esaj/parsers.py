@@ -120,27 +120,58 @@ def movements(html):
         cells = row.find_all("td", recursive=False)
         if len(cells) < 2:
             continue
-        docs = []
-        for a in row.select("a[onclick]"):
-            match = re.search(
-                r"validarAberturaIntimacaoNaoRecebida\([^,]+,[^,]+,\s*['\"]?\w+['\"]?,\s*['\"]?(\d+)", a["onclick"]
-            )
-            if match:
-                docs.append(
-                    {
-                        "documentId": match[1],
-                        "title": sanitize_diagnostics(a.get_text(" ", strip=True)),
-                        "accessStatus": "flow_required",
-                    }
-                )
         result.append(
             {
                 "date": cells[0].get_text(" ", strip=True),
                 "text": sanitize_diagnostics(cells[-1].get_text(" ", strip=True)),
-                "documents": docs,
+                "documents": movement_documents(row),
             }
         )
     return result
+
+
+# The movement's document link: ``validarAberturaIntimacaoNaoRecebida(event, this, '<process code>', <movement
+# sequence>, '<document URL>' | '#liberarAutoPorSenha')``. The number is the movement's sequence, not a document.
+RECEIPT_CHECK = re.compile(
+    r"validarAberturaIntimacaoNaoRecebida\([^,]+,[^,]+,\s*['\"]?\w+['\"]?,\s*['\"]?(\d+)['\"]?\s*(?:,\s*['\"]([^'\"]*))?"
+)
+
+
+def link_document_id(target):
+    """``cdDocumento`` of a movement's document URL (``abrirDocumentoVinculadoMovimentacao.do``), or None."""
+    values = parse_qs(urlsplit(target or "").query).get("cdDocumento", [])
+    return values[0] if len(values) == 1 and re.fullmatch(r"\d+", values[0]) else None
+
+
+def movement_documents(row):
+    """The documents a movement links, once each: ``documentId`` is the document code of the link's URL (what the
+    document viewer lists), ``sequence`` the movement's sequence from the receipt check, when the row carries it.
+
+    The portal draws each document twice (icon and title) with the same URL. A link that opens only the
+    process-password dialog names no document: it is kept with ``documentId`` None so its presence is not lost.
+    """
+    found = {}
+    for link in row.select("a[href], a[onclick]"):
+        check = RECEIPT_CHECK.search(link.get("onclick", ""))
+        document_id = link_document_id(link.get("href")) or link_document_id(check[2] if check else None)
+        if not document_id and not check:
+            continue
+        key = document_id or f"sequence:{check[1]}"
+        entry = found.setdefault(
+            key,
+            {
+                "documentId": document_id,
+                "sequence": check[1] if check else None,
+                "title": "",
+                "accessStatus": "flow_required",
+            },
+        )
+        title = sanitize_diagnostics(link.get_text(" ", strip=True))
+        if len(title) > len(entry["title"]):
+            entry["title"] = title
+        if entry["sequence"] is None and check:
+            entry["sequence"] = check[1]
+    return list(found.values())
 
 
 def movements_on_demand(html):

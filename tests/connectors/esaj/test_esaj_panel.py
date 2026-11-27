@@ -301,9 +301,10 @@ def test_the_intimacoes_list_waits_longer_and_reports_a_timeout(portal):
 
 
 def movement_row(day, text, doc=None):
+    url = f"/cpopg/abrirDocumentoVinculadoMovimentacao.do?processo.codigo=AB0000000001&amp;cdDocumento={doc}"
     link = (
-        f'<a class="linkMovVincProc" href="#liberarAutoPorSenha" onclick="javascript:jQuery.saj.'
-        f"validarAberturaIntimacaoNaoRecebida(event, this, 'AB0000000001', {doc}, '#liberarAutoPorSenha')\">{text}</a>"
+        f'<a class="linkMovVincProc" href="{url}" onclick="javascript:jQuery.saj.'
+        f"validarAberturaIntimacaoNaoRecebida(event, this, 'AB0000000001', 7, '{url}')\">{text}</a>"
         if doc
         else text
     )

@@ -105,7 +105,10 @@ def test_json_privacy_and_process_parser():
     <a onclick="validarAberturaIntimacaoNaoRecebida(event,this,'ABC',38,'#liberarAutoPorSenha')">Anexo</a></td></tr></table>"""
     result = parsers.process(html, NUMBER)
     assert result["fields"]["classeProcesso"] == "Classe"
-    assert result["movements"][0]["documents"][0]["documentId"] == "38"
+    # A link that opens only the password dialog names no document: the 38 is the movement's sequence.
+    assert result["movements"][0]["documents"] == [
+        {"documentId": None, "sequence": "38", "title": "Anexo", "accessStatus": "flow_required"}
+    ]
     with pytest.raises(base.EsajParseError):
         parsers.process("<html>not found</html>", NUMBER)
 
