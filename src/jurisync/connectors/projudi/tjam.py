@@ -45,8 +45,9 @@ from curl_cffi import requests
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import portals
-from jurisync.connectors.projudi import base, legacy, parsers
+from jurisync.connectors.projudi import base, legacy, parsers, tjgo_desk
 from jurisync.connectors.projudi.legacy import HumanVerificationRequired, MissingCredentials
+from jurisync.core import intimacao
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log_request, require_url
 from jurisync.core.session_pool import LoginRejected, SessionExpired
 
@@ -99,6 +100,27 @@ INTIMATION_LISTS = {
     "citacoesPrazoPerdido90": (CITACOES, "Prazo Perdido (Últimos 90 dias)"),
     "citacoesPrazoPerdido180": (CITACOES, "Prazo Perdido (Últimos 180 dias)"),
 }
+# The situation (core.intimacao) each list stands for. The lists' "Prazo" column is a duration ("15 dias úteis"), not
+# an end date: only "Último Dia Para Cumprimento" says when the deadline ends (today); the desk has the dates.
+LIST_SITUATIONS = {
+    "novas": intimacao.AWAITING_CIENCIA,
+    "ultimoDia": intimacao.RUNNING,
+    "prazoDecorrendo": intimacao.RUNNING,
+    "lidasSemPrazo": intimacao.NO_DEADLINE,
+    "cumpridas": intimacao.ANSWERED,
+    "prazoPerdido30": intimacao.EXPIRED,
+    "prazoPerdido90": intimacao.EXPIRED,
+    "prazoPerdido180": intimacao.EXPIRED,
+    "citacoesPrazoAguardandoInicio": intimacao.RUNNING,
+    "citacoesPrazoDecorrendo": intimacao.RUNNING,
+    "citacoesUltimoDia": intimacao.RUNNING,
+    "citacoesLidasSemPrazo": intimacao.NO_DEADLINE,
+    "citacoesCumpridas": intimacao.ANSWERED,
+    "citacoesPrazoPerdido30": intimacao.EXPIRED,
+    "citacoesPrazoPerdido90": intimacao.EXPIRED,
+    "citacoesPrazoPerdido180": intimacao.EXPIRED,
+}
+LAST_DAY_LISTS = ("ultimoDia", "citacoesUltimoDia")
 DEFAULT_INTIMATION_LISTS = (
     "novas",
     "ultimoDia",
@@ -278,6 +300,14 @@ def desk_counts(html):
         if found:
             counts[instance] = found
     return counts
+
+
+def list_situation(key):
+    """The ``core.intimacao`` fields of a row of the menu list ``key``."""
+    situacao = LIST_SITUATIONS[key]
+    if key in LAST_DAY_LISTS:
+        return intimacao.fields(situacao, tjgo_desk.today().isoformat(), "estimado")
+    return intimacao.fields(situacao)
 
 
 def clean(node):
@@ -564,6 +594,7 @@ class TjamAdapter(legacy.LegacyAdapter):
                 read = self._read_list(session, portal, section, label, instance=instance, max_pages=max_pages)
                 for row in read["rows"]:
                     row["cienciaPendente"] = key == "novas"
+                    row.update(list_situation(key))
                 result.append({"list": key, **read})
         numbers, agenda_complete = self._awaiting(session, portal)
         return {

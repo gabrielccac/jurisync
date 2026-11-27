@@ -34,6 +34,7 @@ from curl_cffi.requests.exceptions import RequestException, Timeout
 
 from jurisync import portals
 from jurisync.connectors.projudi import base, parsers, tjgo_desk
+from jurisync.core import intimacao
 from jurisync.core.http import REDIRECTS, TIMEOUT, follow_redirects, impersonate_for, log
 from jurisync.core.session_pool import LoginRejected
 
@@ -460,6 +461,9 @@ class TjgoAdapter(base.Adapter):
         return {"items": items, "unchecked": "; ".join(problems) or None}
 
     def list_intimations(self, session, portal):
+        """The home page's Diário table (DJEN-like publications: the ciência is the publication date, the deadline an
+        estimate), the Diário intimações not on the home page that still await publication, and the portal's own
+        pending communications. Diário rows whose estimated deadline has passed are left out (``omitted``)."""
         home = self._home(session, portal)
         upcoming, upcoming_complete = self._awaiting_publication(session, portal)
         dje = home["dje"]
@@ -467,12 +471,21 @@ class TjgoAdapter(base.Adapter):
         hidden = [item for item in upcoming if item["id"] not in shown]
         # No Diário table at all (nothing published) has no footer; otherwise the footer counts the rows.
         dje_complete = dje["declared"] == len(dje["items"]) or (dje["declared"] is None and not dje["items"])
+        now = tjgo_desk.today()
+        diario = [tjgo_desk.public(item) | tjgo_desk.situation(item, now) for item in dje["items"]]
+        expired = [item for item in diario if item["situacao"] not in intimacao.ATTENTION]
         return {
-            "diario": [tjgo_desk.public(item) for item in dje["items"]],
+            "diario": [item for item in diario if item["situacao"] in intimacao.ATTENTION],
+            "omitted": {intimacao.EXPIRED: len(expired)} if expired else {},
             "diarioCount": len(dje["items"]),
             "diarioDeclared": dje["declared"],
-            "awaitingPublicationNotOnHome": [tjgo_desk.public(item) for item in hidden],
-            "portalPending": [tjgo_desk.public(item) for item in home["portal"]["items"]],
+            "awaitingPublicationNotOnHome": [
+                tjgo_desk.public(item) | tjgo_desk.situation(item, now) for item in hidden
+            ],
+            "portalPending": [
+                tjgo_desk.public(item) | intimacao.fields(intimacao.AWAITING_CIENCIA)
+                for item in home["portal"]["items"]
+            ],
             "portalPendingComplete": home["portal"]["complete"],
             "portalPendingText": home["portal"].get("text", ""),
             "complete": dje_complete and home["portal"]["complete"] and upcoming_complete,

@@ -20,7 +20,7 @@ from pydantic import Field
 from jurisync import customers, portals
 from jurisync.connectors.projudi import base, legacy, tjam, tjba, tjgo, tjpr
 from jurisync.connectors.projudi.base import public_file
-from jurisync.core import ciencia
+from jurisync.core import ciencia, intimacao
 from jurisync.core.documents import MAX_DOCUMENTS
 from jurisync.core.errors import NotSupported
 from jurisync.core.mcp import (
@@ -283,7 +283,10 @@ def create_server(keys=None):
         list_portal = Field(description=PORTAL_HELP)
         Listed = Literal[listed]  # noqa: N806 - a type built from the configured portals
         desk_pages = Field(ge=1, le=50, description="Desk-list portals: pages of 20 rows per list; default 10.")
-        desk_instances = Field(description='Desk-list portals: ["1"] (1º grau), ["2"] (2º grau) or both.')
+        desk_instances = Field(
+            description='Desk-list portals\' menu lists: ["1"] (1º grau), ["2"] (2º grau) or both; default both on '
+            "TJPR, 1º grau on TJAM (the TJPR Mesa do advogado always has both)."
+        )
 
         def desk_only(portal, **options):
             given = {name: value for name, value in options.items() if value is not None}
@@ -295,13 +298,15 @@ def create_server(keys=None):
             name="projudi_list_intimacoes",
             title="List Projudi intimações",
             description=(
-                "The lawyer desk's intimações/citações, none opened, as the portal groups them: either 'diario' "
-                "(Diário intimações with dates and possible deadline; awaitingPublication while publication is ahead), "
-                "'awaitingPublicationNotOnHome' (unpublished, removed from home), 'portalPending' (awaiting reading: "
-                "reading their documents registers ciência); or, on desk-list portals, 'lists' (desk lists, rows with "
-                "deadline as shown; 'novas' rows have cienciaPendente=true: opening registers the reading) and "
-                "awaitingCiencia (processes awaiting ciência). Each list has the portal's total; complete=false: not "
-                "read in full. Read-only."
+                "The lawyer's intimações/citações, none opened. TJPR (default): 'items' from the Mesa do advogado, "
+                "both instances (instance 1/2), to the lawyer and to the Sociedade de advogados (destino), online "
+                "citações included: evento, prazo (a duration), dataEnvio, ultimoDia, inicioPrazo, finalPrazo, "
+                "djen; cienciaPendente=true rows await ciência (opening one registers it); 'desk' has each list's "
+                "total, 'omitted' counts what needs no attention. TJAM, or TJPR with 'lists': menu lists, rows with "
+                "the 'Prazo' column (a duration, not an end date). TJGO: 'diario' (Diário publications, DJEN-like: "
+                "the ciência is the publication date; prazoFinal is the portal's estimated 'possível data limite'), "
+                "'awaitingPublicationNotOnHome', 'portalPending' (reading their documents registers ciência). "
+                f"{intimacao.DESCRIPTION} complete=false: not read in full. Read-only."
             ),
             annotations=READ_ONLY,
         )
@@ -309,7 +314,12 @@ def create_server(keys=None):
             portal: Annotated[Listed, list_portal] = listed[0],
             lists: Annotated[
                 list[Literal[tuple(tjam.INTIMATION_LISTS)]] | None,
-                Field(description="Desk-list portals: desk lists to read (JSON list); default the pending ones."),
+                Field(
+                    description=(
+                        "Desk-list portals: menu lists to read (JSON list); default on TJPR the Mesa do advogado "
+                        "(items), on TJAM the pending lists."
+                    )
+                ),
             ] = None,
             instances: Annotated[list[Literal["1", "2"]] | None, desk_instances] = None,
             maxPages: Annotated[int | None, desk_pages] = None,  # noqa: N803 - same name as the other list tools

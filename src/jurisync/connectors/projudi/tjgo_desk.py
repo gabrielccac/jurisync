@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 
 from jurisync.connectors.projudi.base import ProjudiParseError
+from jurisync.core import intimacao
 
 HOME = "Usuario?PaginaAtual=-10"
 HOME_MARKER = re.compile(r"Seja\s+bem[\s-]+vindo", re.I)
@@ -263,6 +264,18 @@ def parse_process_list(html):
         opened = PROCESS_ID.search(row.get("onclick") or "")
         rows.append({"number": number, "parties": parties, "distributedAt": dated, "_id": opened and opened.group(1)})
     return rows, int(total.group(1)) if total else None
+
+
+def situation(item, now=None):
+    """``core.intimacao`` fields of a Diário row: awaiting its publication (which gives the ciência) or published with
+    the deadline running; ``prazoFinal`` is the portal's "possível data limite", an estimate."""
+    now = now or today()
+    deadline = parse_date(item.get("deadline"))
+    end = deadline.isoformat() if deadline else None
+    if item.get("awaitingPublication"):
+        return intimacao.fields(intimacao.AWAITING_PUBLICATION, end, "estimado")
+    expired = deadline is not None and deadline < now
+    return intimacao.fields(intimacao.EXPIRED if expired else intimacao.RUNNING, end, "estimado")
 
 
 def public(item):
