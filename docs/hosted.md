@@ -38,7 +38,7 @@ stay for older setups.
 | OAuth | `src/jurisync/hosted/oauth.py` | The SDK's `OAuthAuthorizationServerProvider`: dynamic client registration, PKCE, a sign-in page, rotating refresh tokens. |
 | App | `src/jurisync/hosted/app.py` | OAuth endpoints at the root; `/tribunais/mcp`, `/<connector>/mcp` and the deprecated `/mcp` behind a bearer token; `TenantGate` opens the tenant's credential scope per request; `Office` lists and calls only the office's connectors and records each call. |
 | CLI | `src/jurisync/hosted/cli.py` | `jurisync-hosted`: init, tenants, vault import, users, call log, serve. |
-| Provisioning | `src/jurisync/hosted/provision.py` | `provision export` (our machine: plan + sealed bundle per office from `customers/`), `provision apply` (server: tenants, vault, profiles, users), `provision plugin` (office plugin pointing at `/tribunais/mcp` and one URL per management system). |
+| Provisioning | `src/jurisync/hosted/provision.py` | `provision export` (our machine: plan + sealed bundle per office from `customers/`), `provision apply` (server: tenants, vault, profiles, users). |
 
 ## Request flow
 
