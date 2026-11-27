@@ -55,8 +55,8 @@ ssh <vps> 'sudo shred -u /var/lib/jurisync/rollout.passphrase'
 
 `apply` cria ou atualiza o escritório, troca o conteúdo do cofre pelo do pacote (portais retirados saem; o
 `ADVBOX_DEVICE_ID` renovado no servidor é mantido) e cria os usuários com senha aleatória em
-um arquivo novo por execução, `/var/lib/jurisync/hosted/new-user-passwords-<data>-<id>.txt`. O advogado troca essa
-senha no primeiro login. Nenhum login em portal acontece aqui.
+um arquivo novo por execução, `/var/lib/jurisync/hosted/new-user-passwords-<data>-<id>.txt`. Ninguém é obrigado a
+trocar essa senha; quem quiser marca "Quero trocar minha senha" ao entrar. Nenhum login em portal acontece aqui.
 
 ### A4. Provar os logins no servidor
 

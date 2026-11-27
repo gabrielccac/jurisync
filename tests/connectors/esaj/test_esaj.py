@@ -69,9 +69,36 @@ def test_mailbox_nonempty_empty_and_unrecognized():
     html = '<input name="pag" value="1"><table><tr><td></td><td>Enviada em</td><td>Assunto</td></tr>'
     assert parsers.messages(html + "</table>") == []
     html += '<tr><td><input name="nuSeqMensagem" value="123"></td><td>05/11/2026</td><td>Protocolo</td></tr></table>'
-    assert parsers.messages(html) == [{"messageId": "123", "sentAt": "05/11/2026", "subject": "Protocolo"}]
+    assert parsers.messages(html) == [
+        {"messageId": "123", "sentAt": "05/11/2026", "subject": "Protocolo", "naoLida": False}
+    ]
     with pytest.raises(base.EsajParseError):
         parsers.messages("<html>login</html>")
+
+
+def mailbox(rows, pager=""):
+    return (
+        f'<input name="pag" value="1"><table><tr><td></td><td>Enviada em</td><td>Assunto</td></tr>{rows}</table>'
+        f'<span class="numPag">{pager}</span>'
+    )
+
+
+def test_mailbox_marks_unread_messages_and_reads_the_pager(monkeypatch):
+    # TJSP 2026-11-27: an unread row is tr.msgNaoLida; the pager links listaPaginada.do?pag=N and "Próxima >>".
+    unread = (
+        '<tr class="msgNaoLida"><td><input name="nuSeqMensagem" value="2"></td><td>06/11/2026</td><td>Novo</td></tr>'
+    )
+    read = '<tr class="msgLida"><td><input name="nuSeqMensagem" value="1"></td><td>05/11/2026</td><td>Lido</td></tr>'
+    pager = "".join(f'<a href="/caixapostal/listaPaginada.do?pag={n}">{n}</a>' for n in range(2, 21))
+    pager += '<a href="/caixapostal/listaPaginada.do?pag=2">Próxima &gt;&gt;</a>'
+    page = SimpleNamespace(text=mailbox(unread + read, pager), status_code=200, url="https://esaj.tjsp.jus.br/x")
+    monkeypatch.setattr(common, "request", lambda *args, **kwargs: page)
+    result = base.list_messages(None, "tjsp-esaj")
+    assert [item["naoLida"] for item in result["items"]] == [True, False]
+    assert (result["unread"], result["lastPageShown"], result["next"]) == (1, 20, 2)
+    page.text = mailbox(read)
+    last = base.list_messages(None, "tjsp-esaj", 20)
+    assert (last["page"], last["lastPageShown"], last["next"]) == (20, 20, None)
 
 
 def test_mailbox_subjects_follow_the_header_charset_not_the_conflicting_meta(monkeypatch):
@@ -105,7 +132,10 @@ def test_json_privacy_and_process_parser():
     <a onclick="validarAberturaIntimacaoNaoRecebida(event,this,'ABC',38,'#liberarAutoPorSenha')">Anexo</a></td></tr></table>"""
     result = parsers.process(html, NUMBER)
     assert result["fields"]["classeProcesso"] == "Classe"
-    assert result["movements"][0]["documents"][0]["documentId"] == "38"
+    # A link that opens only the password dialog names no document: the 38 is the movement's sequence.
+    assert result["movements"][0]["documents"] == [
+        {"documentId": None, "sequence": "38", "title": "Anexo", "accessStatus": "flow_required"}
+    ]
     with pytest.raises(base.EsajParseError):
         parsers.process("<html>not found</html>", NUMBER)
 
@@ -160,6 +190,7 @@ async def test_tools_and_registration():
         "esaj_get_session",
         "esaj_list_messages",
         "esaj_list_tasks",
+        "esaj_list_intimacoes",
         "esaj_list_processes",
         "esaj_get_process",
         "esaj_list_documents",
@@ -237,7 +268,8 @@ def test_document_tools_always_report_the_ciencia(monkeypatch):
     pool.run.return_value = {"processNumber": NUMBER, "text": "teor", "ciencia": CLEAR}
     assert server.open_document("tjsp-esaj", lambda s: {})["ciencia"] == CLEAR
     for reason, state in (
-        ("intimacao_pending", "pendente"),
+        # An open-deadline card is not a pending ciência: refused, but never reported as pendente.
+        ("prazo_aberto", "nenhuma"),
         ("receipt_required", "pendente"),
         ("ciencia_unchecked", "nenhuma"),
     ):
@@ -406,9 +438,55 @@ def test_document_oversize_is_not_saved(monkeypatch):
 
 def test_write_routes_refused_before_network():
     session = Mock()
-    with pytest.raises(ValueError):
-        base.request(session, "tjsp-esaj", "POST", "pastadigital/receberIntimacao.do")
+    for method, path in (
+        ("POST", "pastadigital/receberIntimacao.do"),
+        ("POST", "pastadigital/obterHashsParaAssinatura.do"),
+        ("PUT", "tarefas-adv/api/ciencia-intimacao"),
+        ("POST", "tarefas-adv/api/ciencia-intimacao"),
+    ):
+        with pytest.raises(ValueError):
+            base.request(session, "tjsp-esaj", method, path)
     session.request.assert_not_called()
+
+
+def test_concluded_petitions_of_a_period_use_the_panel_filter_in_windows_of_30_days(monkeypatch):
+    posted = []
+
+    def request(session, portal, method, path, **kwargs):
+        posted.append((method, path, kwargs.get("json")))
+        start = kwargs["json"]["dataInicio"][:10]
+        items = [{"nuProtocolo": f"P-{start}", "urlPasta": "https://private"}, {"nuProtocolo": "P-shared"}]
+        return SimpleNamespace(status_code=200, json=lambda: items)
+
+    monkeypatch.setattr(common, "request", request)
+    result = base.list_tasks(None, "tjsp-esaj", "peticoes", "CONCLUIDA", "2026-09-01", "2026-10-30")
+    assert [body for _m, _p, body in posted] == [
+        {"situacao": "CONCLUIDA", "dataInicio": "2026-09-01T00:00:00.000", "dataFim": "2026-09-30T23:59:59.999"},
+        {"situacao": "CONCLUIDA", "dataInicio": "2026-10-01T00:00:00.000", "dataFim": "2026-10-30T23:59:59.999"},
+    ]
+    assert {(method, path) for method, path, _b in posted} == {("POST", "tarefas-adv/api/peticoes-filtro")}
+    assert result["period"] == {"from": "2026-09-01", "to": "2026-10-30", "requests": 2}
+    # Each petition once, without the private URL.
+    assert result["items"] == [
+        {"nuProtocolo": "P-2026-09-01"},
+        {"nuProtocolo": "P-shared"},
+        {"nuProtocolo": "P-2026-10-01"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "date_from", "date_to"),
+    [
+        ("audiencias", "2026-09-01", None),
+        ("peticoes", "2026-10-02", "2026-10-01"),
+        ("peticoes", "2025-01-01", "2026-10-01"),
+        ("peticoes", "01/10/2026", None),
+    ],
+)
+def test_a_period_is_checked_before_any_request(monkeypatch, kind, date_from, date_to):
+    monkeypatch.setattr(common, "request", Mock(side_effect=AssertionError("no request expected")))
+    with pytest.raises(ValueError):
+        base.list_tasks(None, "tjsp-esaj", kind, "CONCLUIDA", date_from, date_to)
 
 
 def test_viewer_accepts_formatted_number_and_redacts_plain_tokens():

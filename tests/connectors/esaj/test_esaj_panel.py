@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import pytest
 from curl_cffi.requests import exceptions
 
-from jurisync.connectors.esaj import base, common, dashboard, documents, parsers, process, search
+from jurisync.connectors.esaj import base, common, dashboard, documents, intimacoes, parsers, process, search
 from jurisync.core.http import UnsafeUrlError
 
 NUMBER = "0000001-00.2026.8.26.0001"
@@ -223,7 +223,7 @@ def intimation(code, ciencia=False):
     return {"id": "1", "titulo": "Intimação", "descricao": "Texto", "cdProcesso": code, "ciencia": ciencia}
 
 
-def test_a_process_with_an_intimacao_without_ciencia_opens_only_when_acknowledged(portal):
+def test_a_process_with_an_open_deadline_card_opens_only_when_acknowledged(portal):
     fake = portal(
         intimations=[intimation("AB0000000001"), intimation("AB0000000002", ciencia=True)],
         by_number=[entry("PG")],
@@ -232,14 +232,19 @@ def test_a_process_with_an_intimacao_without_ciencia_opens_only_when_acknowledge
     for read in (base.list_documents, lambda *a: base.document(*a, "7")):
         with pytest.raises(base.EsajBlocked) as error:
             read(None, "tjsp-esaj", NUMBER)
-        assert error.value.reason == "intimacao_pending"
+        assert error.value.reason == "prazo_aberto"
         assert "acknowledgeCiencia=true" in str(error.value)
+        # The card is an open deadline, not an intimação "without ciência".
+        assert "without ciência" not in str(error.value) and "not a pending ciência" in str(error.value)
     assert not any("abrirPasta" in path or "pastadigital" in path for path in fake.paths())
-    # The codes go to the panel together, as its own page sends them; only those without ciência.
+    # The codes go to the panel together, as its own page sends them; only the open cards.
     lookup = next(kwargs for _m, path, kwargs in fake.seen if kwargs.get("params") and path.endswith("processos"))
     assert lookup["params"] == [("cdsProcesso", "AB0000000001")]
     listed = base.list_documents(None, "tjsp-esaj", NUMBER, acknowledge_ciencia=True)
-    assert listed["items"][0]["documentId"] == "7" and listed["ciencia"]["estado"] == "dada"
+    # Acknowledged, the read says what it did: no ciência registered (the intimação was already received), with the
+    # open deadline in the notice; never "dada".
+    assert listed["items"][0]["documentId"] == "7" and listed["ciencia"]["estado"] == "nenhuma"
+    assert "prazo aberto" in listed["ciencia"]["aviso"]
 
 
 def test_an_intimacao_of_another_process_does_not_close_this_one(portal):
@@ -297,13 +302,58 @@ def test_the_intimacoes_list_waits_longer_and_reports_a_timeout(portal):
     assert [method for method, _p, _k in fake.seen] == ["GET"]
 
 
+# --- esaj_list_intimacoes: the open-deadline list with the shared situacao -------------------------------------------
+
+
+def test_open_cards_are_a_running_deadline_and_closed_ones_have_none(portal):
+    fake = portal(
+        intimations=[
+            intimation("AB0000000001") | {"instancia": "PG", "dataMovimentacao": "2026-11-20T10:00:00"},
+            intimation("AB0000000002", ciencia=True) | {"instancia": "SG"},
+            intimation("AB0000000003"),
+        ],
+        by_code={
+            "AB0000000001": [entry("PG")],
+            "AB0000000002": [entry("SG", number=OTHER, code="AB0000000002")],
+        },
+    )
+    result = intimacoes.list_intimacoes(None, "tjsp-esaj")
+    assert [item["cdProcesso"] for item in result["items"]] == ["AB0000000001", "AB0000000003"]
+    first, unresolved = result["items"]
+    assert first["processNumber"] == NUMBER and first["instancia"] == "1g" and first["cardFechado"] is False
+    assert (first["situacao"], first["prazoFinal"], first["prazoFinalTipo"]) == ("prazo_correndo", None, None)
+    assert unresolved["processNumber"] is None
+    assert result["returned"] == result["total"] == 2 and result["cardsInPanel"] == 3
+    closed = intimacoes.list_intimacoes(None, "tjsp-esaj", ["sem_prazo"])["items"]
+    assert [(item["situacao"], item["instancia"], item["processNumber"]) for item in closed] == [
+        ("sem_prazo", "2g", "0000002-00.2026.8.26.0001")
+    ]
+    # Only reads: the panel list and its own code lookup, never the card's ciência PUT.
+    assert {method for method, _p, _k in fake.seen} == {"GET"}
+    assert not any("ciencia" in path for path in fake.paths())
+    with pytest.raises(ValueError):
+        intimacoes.list_intimacoes(None, "tjsp-esaj", ["lida"])
+
+
+def test_the_list_survives_a_panel_that_does_not_resolve_the_codes(portal, monkeypatch):
+    portal(intimations=[intimation("AB0000000001")])
+
+    def refuse(*a, **k):
+        raise common.EsajBlocked("timeout", "portal_timeout")
+
+    monkeypatch.setattr(dashboard, "dashboard_lookup", refuse)
+    result = intimacoes.list_intimacoes(None, "tjsp-esaj")
+    assert result["items"][0]["processNumber"] is None and "note" in result
+
+
 # --- Bug: TJSP returning only the first 5 movements ------------------------------------------------------------------
 
 
 def movement_row(day, text, doc=None):
+    url = f"/cpopg/abrirDocumentoVinculadoMovimentacao.do?processo.codigo=AB0000000001&amp;cdDocumento={doc}"
     link = (
-        f'<a class="linkMovVincProc" href="#liberarAutoPorSenha" onclick="javascript:jQuery.saj.'
-        f"validarAberturaIntimacaoNaoRecebida(event, this, 'AB0000000001', {doc}, '#liberarAutoPorSenha')\">{text}</a>"
+        f'<a class="linkMovVincProc" href="{url}" onclick="javascript:jQuery.saj.'
+        f"validarAberturaIntimacaoNaoRecebida(event, this, 'AB0000000001', 7, '{url}')\">{text}</a>"
         if doc
         else text
     )

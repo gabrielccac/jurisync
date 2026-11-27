@@ -7,6 +7,7 @@ so consecutive calls skip the password/certificate + TOTP login.
 import contextvars
 import json
 import threading
+from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, StringConstraints
@@ -14,6 +15,7 @@ from pydantic import Field, StringConstraints
 from jurisync import customers, portals
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.acervo import read_acervo
+from jurisync.connectors.pje.audiencias import read_pauta
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import (
@@ -24,7 +26,7 @@ from jurisync.connectors.pje.process import (
     require_own_number,
 )
 from jurisync.connectors.pje.push import read_push
-from jurisync.core import certificate, ciencia, credentials
+from jurisync.core import certificate, ciencia, credentials, intimacao
 from jurisync.core.documents import validate_document_ids
 from jurisync.core.errors import InputError, NotFound, WritesDisabled
 from jurisync.core.mcp import (
@@ -112,6 +114,15 @@ def _notifications(portal, read, process_number=None):
         if process_number:
             require_own_number(portal, process_number)  # before the session: a wrong court never costs a login
         return require_success("PJe", sessions.run(portal, lambda session: read(portal, session=session)))
+
+
+def _window(date_from, date_to):
+    """The pauta's start-date interval: today (or dateFrom) to 90 days after it, unless dateTo says otherwise."""
+    first = date.fromisoformat(date_from) if date_from else date.today()
+    last = date.fromisoformat(date_to) if date_to else first + timedelta(days=90)
+    if last < first:
+        raise InputError("dateTo must not be before dateFrom")
+    return first.isoformat(), last.isoformat()
 
 
 def draft_paths(run_id):
@@ -203,7 +214,7 @@ def create_server():
     @server.tool(
         name="pje_get_process",
         title="Get PJe process context",
-        description="Read a PJe process: metadata, parties, timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. The timeline is movements, not confirmed publications. Read-only.",
+        description="Read a PJe process: metadata, parties, timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. audiencias (when the portal has the Audiência tab) lists each hearing: data, hora, tipo, orgaoJulgador, sala, situacao (designada, realizada, cancelada...), acordo, linkSalaVirtual when PJe shows it; the lawyer's hearings across processes come from pje_list_audiencias. expedientes.abertos: not answered, not closed by PJe, and ciência pending or deadline not passed (or not computed yet). pagination.complete is true when every timeline page was read. The timeline is movements, not confirmed publications. Read-only.",
         annotations=READ_ONLY,
     )
     def get_process(
@@ -228,7 +239,7 @@ def create_server():
     @server.tool(
         name="pje_read_documents",
         title="Read PJe documents",
-        description="Read 1-5 documents of a PJe process by id. Each has its status and text, or a failure saying why it was not read; status extracted_unnumbered: the text omits the process number; short_html: a short cover page, text not vouched for. A short cover (a petição typed as only its title) comes with anexos, the documents attached in the same timeline entry (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline days), which hold the client's deadline. save=true stores the original files in the shared documents folder as savedAs, for advbox_create_task. Ciência: reading the act of a communication whose ciência is pending, the documents attached to it, or any document of a process with a pending communication that has no document id may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
+        description="Read 1-5 documents of a PJe process by id. Each has its status and text, or a failure saying why it was not read; status extracted_unnumbered: the text omits the process number; short_html: a short cover page, text not vouched for. A short cover (a petição typed as only its title) comes with anexos, the documents attached in the same timeline entry (up to 3; anexos_not_read lists the rest). A Certidão de Intimação also returns its parsed expedientes (recipient, medium, deadline days), which hold the client's deadline. save=true stores the original files in the shared documents folder as savedAs, e.g. to attach to a task. Ciência: reading the act of a communication whose ciência is pending, the documents attached to it, or any document of a process with a pending communication that has no document id may register the party's ciência and start the deadline, so it is refused without acknowledgeCiencia. "
         + ciencia.AUTHORIZATION
         + ". When the expedientes could not be read in full the read is refused with nothing opened (error starts 'ciência not checked'): retry later, or acknowledgeCiencia=true under the same authorization. settings.toml [pje] ciencia_on_read = 'allow' reads them by default. The ciencia block: estado 'nenhuma' (nothing pending read), 'dada' (a pending communication was read: its ciência may be registered and deadline started; see intimacoes) or 'desconhecida' (read with acknowledgeCiencia, expedientes unchecked), with an aviso: unless 'nenhuma', tell the user and note it in the task.",
         # With acknowledgeCiencia a read may register the ciência and start a deadline, and save=true writes a file.
@@ -366,7 +377,9 @@ def create_server():
     @server.tool(
         name="pje_list_intimacoes",
         title="List PJe Expedientes inbox rows",
-        description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
+        description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. "
+        + intimacao.DESCRIPTION
+        + " In PJe the default bucket (0, Pendentes de ciência ou de resposta) is that list: awaiting ciência, ciência given with the deadline running, and no deadline. The others (see pje_get_counters): 1 only awaiting ciência (a Diário/DJEN row there is aguardando_publicacao: PJe shows no Tomar ciência button for it), 2 and 3 ciência given by the recipient or by the system/Diário, deadline running, 4 deadline ended in the last 10 days with no answer (prazo_vencido; outside the default, ask for it), 5 no deadline, 6 answered in the last 10 days. PJe counts as answered only a reply made through Responder: a petition filed through Juntar documentos leaves the expediente pending an answer. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Read-only: never takes ciência, replies or distributes.",
         annotations=READ_ONLY,
     )
     def list_inbox(
@@ -374,7 +387,7 @@ def create_server():
         bucket: Annotated[
             str | None,
             Field(
-                description="Bucket index or part of its label (see pje_get_counters). Empty: Pendentes de ciência ou de resposta (Meus Expedientes on TRT/TST). An unknown index errors listing the valid ones."
+                description="Bucket index or part of its label (see pje_get_counters). Empty: the pending bucket (Pendentes de ciência ou de resposta, or Meus Expedientes where the panel names it so). '4' lists the deadlines that ended in the last 10 days without an answer. An unknown index errors listing the valid ones."
             ),
         ] = None,
         regions: Annotated[
@@ -444,7 +457,7 @@ def create_server():
     @server.tool(
         name="pje_list_processes",
         title="List the lawyer's PJe processes (Acervo)",
-        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject, parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box; on TRT/TST the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. Not on trf5-legacy. Read-only: opens nothing, takes no ciência.",
+        description="List the lawyer's processes from the PJe panel's Acervo, per jurisdiction and box (Caixa de entrada, Arquivados, ...), up to maxPages per box. Items: number, class, subject (assunto; null on panels that do not show it, such as TRF5's), parties, órgão julgador, distribution date, last movement when shown, jurisdiction, box, and arquivado: archived processes (the Arquivados box or bucket) are included and flagged, filter them out with arquivado=false; on panels without boxes, the Acervo Geral and Arquivados buckets, with filing and archiving dates and no last movement. complete is true only when every box was read in full and the boxes match each jurisdiction's counter. One call reads up to 60 jurisdictions; the others come in notRead, read with a second call passing them as regions. On a PJe 1.x panel the Acervo's Pendentes de Manifestação and Acervo Geral grids: number, parties and autuação date, first page only, no regions. Read-only: opens nothing, takes no ciência.",
         annotations=READ_ONLY,
     )
     def list_processes(
@@ -461,6 +474,27 @@ def create_server():
             portal,
             lambda name, session: read_acervo(name, session=session, regions=regions or None, max_pages=maxPages),
         )
+
+    @server.tool(
+        name="pje_list_audiencias",
+        title="List the lawyer's PJe hearings (Pauta de audiência)",
+        description="List the hearings of the lawyer's processes from the PJe Pauta de audiência page, by start date between dateFrom and dateTo (default: today to 90 days ahead): data, hora, processNumber, classe, partes, orgaoJulgador, tipo, sala and situacao (Designada, Realizada, Cancelada, Redesignada, Não Realizada...), oldest first. complete is true when every row PJe counts was read. The room link of a virtual hearing is in pje_get_process audiencias. Not on PJe-JT or PJe 1.x panels. Read-only: opens no process, downloads nothing.",
+        annotations=READ_ONLY,
+    )
+    def list_audiencias(
+        portal: Portal,
+        dateFrom: Annotated[
+            Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
+            Field(description="First hearing date, ISO YYYY-MM-DD; default today."),
+        ] = None,
+        dateTo: Annotated[
+            Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
+            Field(description="Last hearing date, ISO YYYY-MM-DD; default 90 days after dateFrom or today."),
+        ] = None,
+    ) -> dict[str, Any]:
+        with tool_errors("PJe"):
+            first, last = _window(dateFrom, dateTo)  # a wrong date never costs a login
+        return _notifications(portal, lambda name, session: read_pauta(session, name, first, last))
 
     @server.tool(
         name="pje_get_draft",

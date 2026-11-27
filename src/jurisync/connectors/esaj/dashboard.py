@@ -1,5 +1,6 @@
 """The account's session API, mailbox and task panel (``tarefas-adv``): lists only, nothing opened."""
 
+import datetime
 import re
 
 from curl_cffi import requests
@@ -27,7 +28,9 @@ def get_session(session, portal):
 
 
 def list_messages(session, portal, page=1):
-    from jurisync.connectors.esaj.parsers import messages
+    """One mailbox page (20 messages): each with ``naoLida``, plus ``lastPageShown`` (the pager's last number) and
+    ``next`` (the page to ask for next, None on the last one)."""
+    from jurisync.connectors.esaj.parsers import mailbox_pager, messages
 
     if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 1000:
         raise ValueError("page must be between 1 and 1000")
@@ -39,20 +42,87 @@ def list_messages(session, portal, page=1):
         raise common.EsajParseError(f"e-SAJ mailbox failed (HTTP {response.status_code})")
     # The mailbox is served as ISO-8859-1 behind two conflicting <meta> tags (UTF-8 first): the HTTP header's charset
     # (what ``response.text`` follows) decides, otherwise subjects come out as mojibake ("Eletr˘nico").
-    return {"page": page, "items": messages(response.text)}
+    items = messages(response.text)
+    last, has_next = mailbox_pager(response.text)
+    last = max(last or page, page)
+    return {
+        "page": page,
+        "items": items,
+        "unread": sum(item["naoLida"] for item in items),
+        "lastPageShown": last,
+        "next": page + 1 if has_next or last > page else None,
+    }
 
 
-def list_tasks(session, portal, kind, state="AGUARDANDO_ASSINATURA"):
+def list_tasks(session, portal, kind, state="AGUARDANDO_ASSINATURA", date_from=None, date_to=None):
+    """One panel list. Petitions with a period (``date_from``/``date_to``, ISO dates) come from the panel's own period
+    filter, which answers the whole period; without one the panel sends only a recent slice (seen live on TJSP: 3
+    concluded petitions where the last 30 days had 6)."""
     from jurisync.connectors.esaj.parsers import public_json
 
     if kind not in ("intimacoes", "audiencias", "peticoes"):
         raise ValueError("kind must be intimacoes, audiencias or peticoes")
     if state not in PETITION_STATES:
         raise ValueError("Invalid petition state")
+    if (date_from or date_to) and kind != "peticoes":
+        raise ValueError("dateFrom and dateTo filter only kind=peticoes")
     if kind == "intimacoes":
         return {"kind": kind, "items": public_json(intimations(session, portal))}
+    if date_from or date_to:
+        first, last = period(date_from, date_to)
+        items, windows = petitions_in_period(session, portal, state, first, last)
+        dates = {"from": first.isoformat(), "to": last.isoformat(), "requests": windows}
+        return {"kind": kind, "items": public_json(items), "period": dates}
     params = {"situacao": state} if kind == "peticoes" else {}
     return {"kind": kind, "items": public_json(common.json_response(panel(session, portal, kind, params=params)))}
+
+
+# The panel's period filter refuses more than 30 days at once ("Período máximo para consulta é de 30 dias"); a longer
+# period is asked in windows of 30 days, up to a year.
+FILTER_DAYS = 30
+MAX_PERIOD_DAYS = 366
+
+
+def period(date_from, date_to):
+    """``(first, last)`` dates of a requested period; a missing end is today, a missing start 30 days before the end."""
+
+    def parse(value, name):
+        try:
+            return datetime.date.fromisoformat(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be an ISO date (YYYY-MM-DD)") from None
+
+    last = parse(date_to, "dateTo") if date_to else datetime.date.today()
+    first = parse(date_from, "dateFrom") if date_from else last - datetime.timedelta(days=FILTER_DAYS - 1)
+    if first > last:
+        raise ValueError("dateFrom must not be after dateTo")
+    if (last - first).days + 1 > MAX_PERIOD_DAYS:
+        raise ValueError(f"The period may span at most {MAX_PERIOD_DAYS} days")
+    return first, last
+
+
+def petitions_in_period(session, portal, state, first, last):
+    """``(items, requests)``: the petitions in ``state`` whose dates fall in the period, as the panel's own filter
+    posts it (``peticoes-filtro``, start and end of day in local time), one window of up to 30 days per request."""
+    items, seen, windows, start = [], set(), 0, first
+    while start <= last:
+        end = min(start + datetime.timedelta(days=FILTER_DAYS - 1), last)
+        body = {
+            "situacao": state,
+            "dataInicio": f"{start.isoformat()}T00:00:00.000",
+            "dataFim": f"{end.isoformat()}T23:59:59.999",
+        }
+        answer = common.json_response(panel(session, portal, "peticoes-filtro", body=body))
+        if not isinstance(answer, list):
+            raise common.EsajParseError("Unexpected petition filter response")
+        for item in answer:
+            key = repr(sorted(item.items())) if isinstance(item, dict) else repr(item)
+            if key not in seen:
+                seen.add(key)
+                items.append(item)
+        windows += 1
+        start = end + datetime.timedelta(days=1)
+    return items, windows
 
 
 # TJSP's panel assembles the account's lists on the first API request of a session, whichever list it is: seen live,
@@ -65,10 +135,12 @@ PANEL_TIMEOUT = 150
 INTIMATIONS_TIMEOUT = PANEL_TIMEOUT
 
 
-def panel(session, portal, name, params=None):
-    """One ``tarefas-adv/api/<name>`` request with the panel's wait; a timeout is ``portal_timeout``."""
+def panel(session, portal, name, params=None, body=None):
+    """One ``tarefas-adv/api/<name>`` request with the panel's wait; a timeout is ``portal_timeout``. A ``body`` is
+    posted as JSON (only the petition filter, a read: ``common.READ_POSTS``)."""
+    method, extra = ("POST", {"json": body}) if body is not None else ("GET", {"params": params})
     try:
-        return common.request(session, portal, "GET", f"tarefas-adv/api/{name}", params=params, timeout=PANEL_TIMEOUT)
+        return common.request(session, portal, method, f"tarefas-adv/api/{name}", timeout=PANEL_TIMEOUT, **extra)
     except requests.exceptions.Timeout:
         raise common.EsajBlocked(
             f"The portal did not finish the panel's {name} list within {PANEL_TIMEOUT} s. The court assembles the "

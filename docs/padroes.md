@@ -62,6 +62,12 @@ Objetos (português para o domínio jurídico, inglês para o resto): `intimacoe
 prazo: caixa, expedientes, comunicações pendentes), `publicacoes` (diário), `comunicacoes` (DJEN), `counters`,
 `processes`, `process`, `documents`, `document`, `tasks`, `customers`, `members`, `files`, `folders`.
 
+Itens de `<sistema>_list_intimacoes`: todos os sistemas devolvem `situacao` e `prazoFinal` de
+`jurisync.core.intimacao` (`aguardando_ciencia`, `aguardando_publicacao`, `prazo_correndo`, `prazo_vencido`,
+`sem_prazo`, `respondido`, `desconhecida`), e sem filtro a lista traz o que pede atenção: aguardando ciência, aguardando
+publicação e prazo correndo. Um expediente do PJe, uma intimação do Eproc, do e-SAJ ou do Projudi é o mesmo item para o
+advogado; o portal muda, a leitura não.
+
 Renomear uma tool mantém o nome antigo como alias em `jurisync.core.names`: aceito em `tools/call` (local e
 hospedado, inclusive na checagem de concessão de escrita), fora do `tools/list`. Remover um alias depende de decisão do
 Gabriel. Skills, plugins e docs são atualizados no mesmo PR da renomeação; relatórios de validação antigos ficam como

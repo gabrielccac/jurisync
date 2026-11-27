@@ -463,8 +463,16 @@ class ListsTest(unittest.TestCase):
                 "dataIntimacao": "30/07/2026",
                 "prazo": "15 dias úteis",
                 "cienciaPendente": True,
+                "situacao": "aguardando_ciencia",
+                "prazoFinal": None,
+                "prazoFinalTipo": None,
             },
         )
+        self.assertEqual(cumpridas["rows"], [])
+        self.assertEqual(tjam.list_situation("cumpridas")["situacao"], "respondido")
+        self.assertEqual(tjam.list_situation("prazoPerdido90")["situacao"], "prazo_vencido")
+        last_day = tjam.list_situation("ultimoDia")
+        self.assertEqual((last_day["situacao"], last_day["prazoFinalTipo"]), ("prazo_correndo", "estimado"))
         self.assertEqual((cumpridas["total"], cumpridas["rows"], citacoes["section"]), (0, [], "Citações"))
         self.assertEqual(result["awaitingCiencia"], {"processNumbers": [NUMBER], "complete": True})
         self.assertTrue(result["complete"])

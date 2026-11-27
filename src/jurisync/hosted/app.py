@@ -9,7 +9,8 @@ the connector logs in with that office's credentials and the session pool keeps 
 
 Each endpoint is an ``Office`` server that delegates to the connector servers: it lists and calls only the tools of the
 connectors enabled for the office, with only the portals the office has a login for, and records every call (no
-arguments, no results) in the store.
+arguments, no results) in the store. The instructions ``/tribunais/mcp`` and ``/mcp`` give at initialize name only the
+calling office's systems.
 """
 
 import contextvars
@@ -155,12 +156,19 @@ def offer(tool, field, offered, note=False):
 
 
 class Office(MCPServer):
-    """Serves the tools of several connector servers, each call checked against the office and recorded."""
+    """Serves the tools of several connector servers, each call checked against the office and recorded.
 
-    def __init__(self, servers, store, **options):
+    With ``label`` the instructions a client reads at initialize are the calling office's own: the systems of this
+    endpoint it has, and never one it lacks.
+    """
+
+    def __init__(self, servers, store, *, label=None, **options):
         super().__init__(**options)
         self.servers = servers
         self.store = store
+        self.label = label
+        if label is not None:
+            self.middleware.append(self._office_instructions)
         self.owner = {}
         for connector, server in servers.items():
             for tool in server._tool_manager.list_tools():
@@ -172,6 +180,38 @@ class Office(MCPServer):
         name = names.canonical(name)
         connector = self.owner.get(name)
         return None if connector is None else self.servers[connector]._tool_input_schema(name)
+
+    async def systems(self):
+        """Labels of this endpoint's systems the calling office has: enabled, and with a login for one of its portals
+        when the system has portals. Empty when the office is unknown."""
+        tenant, _ = caller.get() or ({"connectors": []}, "")
+        if tenant.get("mode", "hosted") != "hosted":
+            return []
+        found = []
+        for connector in self.servers:
+            if connector not in tenant["connectors"]:
+                continue
+            offered = await anyio.to_thread.run_sync(offered_portals, connector)
+            if offered is None or offered:
+                found.append(SYSTEMS.get(connector, connector))
+        return found
+
+    async def instructions_for_caller(self):
+        systems = await self.systems()
+        if not systems:
+            return f"{self.label}. Each tool name starts with its system."
+        return (
+            f"{self.label}: {', '.join(systems)}. Each tool name starts with its system; you see only the systems and "
+            "portals your office has."
+        )
+
+    async def _office_instructions(self, ctx, call_next):
+        """Middleware: the initialize (and discover) result carries the office's instructions instead of a fixed
+        text, which would name every system this endpoint serves to every office."""
+        result = await call_next(ctx)
+        if ctx.method in ("initialize", "server/discover") and isinstance(result, dict):
+            result = {**result, "instructions": await self.instructions_for_caller()}
+        return result
 
     async def list_tools(self):
         tenant, _ = caller.get() or ({"connectors": []}, "")
@@ -445,7 +485,6 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
             closers.append(close)
     monitor = Monitor(store, vault, servers, base_url, offered_portals)
     routes += monitor.routes()
-    systems = ", ".join(SYSTEMS.get(name, name) for name in servers)
     # path name -> (Office, connectors it serves; None: all). Tool names already carry their connector, and Office
     # refuses a name served twice.
     offices = {
@@ -459,28 +498,16 @@ def build_app(base_url, store, vault, connectors=("pje",), *, load=None, open_te
         members = tuple(name for name in members if name in servers)
         if not members:
             continue
-        labels = ", ".join(SYSTEMS.get(name, name) for name in members)
         office = Office(
             {name: servers[name] for name in members},
             store,
+            label=f"Jurisync {GROUP_LABELS.get(group, group)}",
             name=f"jurisync-{group}",
             version="1.0.0",
-            instructions=f"Jurisync {GROUP_LABELS.get(group, group)}: {labels}. Each tool name starts with its "
-            "system; you see the systems and portals your office has.",
         )
         offices[group] = (office, members)
     # Deprecated: every connector at one URL, kept for the offices that added it before /tribunais/mcp.
-    offices[""] = (
-        Office(
-            servers,
-            store,
-            name="jurisync",
-            version="1.0.0",
-            instructions=f"Jurisync: {systems}. Each tool name starts with its system; you see the systems your office "
-            "has.",
-        ),
-        None,
-    )
+    offices[""] = (Office(servers, store, label="Jurisync", name="jurisync", version="1.0.0"), None)
     apps = {}
     security = transport_security(base_url)
     require_resource = flag(REQUIRE_RESOURCE_FLAG)
