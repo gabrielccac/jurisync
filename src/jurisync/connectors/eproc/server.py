@@ -28,7 +28,15 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
-from jurisync.connectors.eproc.listas import MESSAGE_FILTERS, PREPARED, list_messages, list_paradas, list_prepared
+from jurisync.connectors.eproc.listas import (
+    CUSTAS,
+    MESSAGE_FILTERS,
+    PREPARED,
+    list_custas,
+    list_messages,
+    list_paradas,
+    list_prepared,
+)
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -282,6 +290,26 @@ def create_server(keys=None):
         ] = "iniciais",
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_prepared(kind, **context))
+
+    @server.tool(
+        name="eproc_list_custas",
+        title="List Eproc generated payment guias",
+        description=(
+            "List the guias the user already generated in the portal: custas, or depósitos judiciais (TRF4 and TRF6 "
+            "menus). A portal whose menu has no such list answers not_available. Nothing is generated or paid. "
+            "kind picks the list; one page. "
+            "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_custas(
+        portal: Portal,
+        kind: Annotated[
+            Literal[tuple(CUSTAS)],
+            Field(description="'custas': guias de custas; 'depositos': guias de depósito judicial."),
+        ] = "custas",
+    ) -> dict[str, Any]:
+        return call(portal, lambda **context: list_custas(kind, **context))
 
     @server.tool(
         name="eproc_get_process",

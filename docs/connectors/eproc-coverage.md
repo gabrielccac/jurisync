@@ -111,6 +111,19 @@ abrir/escrever das mesmas telas continuam bloqueadas. Portal cujo menu não tem 
 - **Falta validar com linhas.** As cinco capturas vieram vazias (formulário sem tabela), então o parser lê por
   `<th>` em vez de colunas fixas; confirmar os cabeçalhos num portal com rascunho e então fixar os campos.
 
+### Guias de custas e depósitos: `eproc_list_custas`
+
+- Ações: `guia_pagamento_custas_gerados_listar` (`kind='custas'`, menu Custas > "Guias geradas pelo usuário") e
+  `guia_pagamento_depositos_judiciais_gerados_listar` (`kind='depositos'`, menu Depósitos Judiciais > "Guias geradas
+  pelo usuário"), um GET cada. Só TRF4 e TRF6 têm esses itens no menu; nos demais a tool responde `[not_available]`
+  sem requisitar nada. O TJRJ usa sistemas próprios (`tjrj_custas`, `tjrj_bb`, GRERJ), fora desta tool.
+- Não lê "Guias geradas para um processo" (`processo_custas_consultar`) nem "Consultar/gerar guias"
+  (`processo_depositos_judiciais_consultar`): são as telas que geram guia. Ficam fora do allowlist.
+- Itens `guias`: `processNumber` e `columns` por cabeçalho, como nas preparadas.
+- **Inferido, sem captura da página.** O explorador não abriu essas listas; o parser supõe o padrão das listas infra
+  (formulário que posta para a própria ação, `table.infraTable`). Página sem esse formulário é erro, não lista vazia.
+  Validar ao vivo no TRF4/TRF6, inclusive se a lista exige filtro (datas) antes de mostrar linhas.
+
 ## Features planejadas
 
 ### A. Filas/contadores extras (mesmo formato do `list_notices`)

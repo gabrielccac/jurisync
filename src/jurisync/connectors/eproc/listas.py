@@ -225,15 +225,15 @@ PREPARED = {
 _ACTION_COLUMNS = {"", "ações", "ação"}
 
 
-def parse_header_table(html, form_id=None):
-    """``{"items", "total"}`` of the page's list table read by its headers, or None when ``form_id`` is missing.
+def parse_header_table(html, form):
+    """``{"items", "total"}`` of the page's list table read by its headers, or None without the list's ``form`` (CSS).
 
     For lists whose rows were not seen in any capture: each row keeps its cells under their header text (dates as
     ISO, CPFs masked), without the checkbox and action columns, plus the first CNJ number found as ``processNumber``.
     A page with the form and no table is an empty list.
     """
     soup = BeautifulSoup(html, "html.parser")
-    if form_id and soup.select_one(f"form#{form_id}") is None:
+    if soup.select_one(form) is None:
         return None
     table = soup.select_one("table.infraTable")
     if table is None:
@@ -264,7 +264,7 @@ def list_prepared(kind="iniciais", *, session, panel_html, panel_url, portal):
         raise ValueError(f"kind must be one of {', '.join(PREPARED)}")
     action, form_id, label = PREPARED[kind]
     url = _link(action, panel_html=panel_html, panel_url=panel_url, portal=portal, label=label)
-    parsed = parse_header_table(_read(session, "GET", url, action, portal=portal), form_id)
+    parsed = parse_header_table(_read(session, "GET", url, action, portal=portal), f"form#{form_id}")
     if parsed is None:
         raise PortalError(f"unsupported {label} layout")
     return {
@@ -273,4 +273,36 @@ def list_prepared(kind="iniciais", *, session, panel_html, panel_url, portal):
         "portal": portal,
         "kind": kind,
         **listing(parsed["items"], key="peticoes", total=parsed["total"]),
+    }
+
+
+# The tool's kind argument -> (list action, what the menu calls it). TRF4 and TRF6 offer both (menus "Custas" and
+# "Depósitos Judiciais", item "Guias geradas pelo usuário"); "Consultar/gerar guias" and the per-process pages are not
+# read, since they also generate guias.
+CUSTAS = {
+    "custas": ("guia_pagamento_custas_gerados_listar", "guias de custas geradas pelo usuário"),
+    "depositos": (
+        "guia_pagamento_depositos_judiciais_gerados_listar",
+        "guias de depósito judicial geradas pelo usuário",
+    ),
+}
+
+
+def list_custas(kind="custas", *, session, panel_html, panel_url, portal):
+    """Guias de custas or de depósito judicial the user already generated; nothing is generated."""
+    portal = portals.eproc(portal).key
+    if kind not in CUSTAS:
+        raise ValueError(f"kind must be one of {', '.join(CUSTAS)}")
+    action, label = CUSTAS[kind]
+    url = _link(action, panel_html=panel_html, panel_url=panel_url, portal=portal, label=label)
+    # No capture shows this page: the infra list form posts to its own action.
+    parsed = parse_header_table(_read(session, "GET", url, action, portal=portal), f'form[action*="acao={action}"]')
+    if parsed is None:
+        raise PortalError(f"unsupported layout of the {label}")
+    return {
+        "success": True,
+        "source": "eproc",
+        "portal": portal,
+        "kind": kind,
+        **listing(parsed["items"], key="guias", total=parsed["total"]),
     }

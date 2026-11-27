@@ -135,6 +135,7 @@ class EprocServerTest(unittest.TestCase):
                 "eproc_list_mensagens": True,
                 "eproc_list_paradas": True,
                 "eproc_list_peticoes_preparadas": True,
+                "eproc_list_custas": True,
                 "eproc_get_process": False,
             },
         )

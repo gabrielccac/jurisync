@@ -100,6 +100,8 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "eprocsysadm_listar",
     "peticao_inicial_preparada_listar",
     "movimentacao_preparada_listar",
+    "guia_pagamento_custas_gerados_listar",
+    "guia_pagamento_depositos_judiciais_gerados_listar",
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"

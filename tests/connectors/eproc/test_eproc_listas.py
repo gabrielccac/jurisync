@@ -174,6 +174,29 @@ PREPARED_ROWS = [
 ]
 
 
+def guias_page(action, rows=()):
+    """A guias list as the infra draws its lists (no capture shows it): its form posts to its own action."""
+    table = ""
+    if rows:
+        lines = "".join(
+            f'<tr class="infraTrClara"><td>{number}</td><td>{issued}</td><td>{due}</td><td>{value}</td>'
+            f'<td><a href="controlador.php?acao=guia_pagamento_imprimir&amp;hash=g{index}">Imprimir</a></td></tr>'
+            for index, (number, issued, due, value) in enumerate(rows)
+        )
+        table = (
+            f'<table class="infraTable"><caption>Lista de Guias ({len(rows)} registros):</caption><tr>'
+            f"{sort_header('Processo')}{sort_header('Data Emissão')}{sort_header('Vencimento')}{sort_header('Valor')}"
+            f'<th class="infraTh">Ações</th></tr>{lines}</table>'
+        )
+    return f"""<html><body><div id="divInfraAreaTelaD">
+<form id="frmGuias" method="post" action="controlador.php?acao={action}&amp;acao_origem={action}&amp;hash=g">
+<button type="button" id="btnGerar" onclick="gerarGuia();">Gerar Guia</button>
+{table}</form></div></body></html>"""
+
+
+GUIAS = [("5000001-00.2026.4.04.7200", "10/11/2026", "20/11/2026", "R$ 150,00")]
+
+
 def read(function, session, *actions, **arguments):
     return function(session=session, panel_html=panel(*actions), panel_url=BASE, portal=PORTAL, **arguments)
 
@@ -284,12 +307,12 @@ class ParadasTest(unittest.TestCase):
 class PreparedTest(unittest.TestCase):
     def test_empty_lists_as_captured_are_empty(self):
         for page, form in ((INITIAL_EMPTY, "frmPeticaoInicial"), (MOVEMENT_EMPTY, "frmMovimentacaoFutura")):
-            self.assertEqual(listas.parse_header_table(page, form), {"items": [], "total": 0})
-        self.assertIsNone(listas.parse_header_table(INITIAL_EMPTY, "frmMovimentacaoFutura"))
+            self.assertEqual(listas.parse_header_table(page, f"form#{form}"), {"items": [], "total": 0})
+        self.assertIsNone(listas.parse_header_table(INITIAL_EMPTY, "form#frmMovimentacaoFutura"))
 
     def test_rows_are_read_by_their_headers_without_the_checkbox_and_actions(self):
         page = prepared_page("frmPeticaoInicial", "Petições", ("btnDistribuir", "d", "Distribuir"), PREPARED_ROWS)
-        parsed = listas.parse_header_table(page, "frmPeticaoInicial")
+        parsed = listas.parse_header_table(page, "form#frmPeticaoInicial")
         self.assertEqual(parsed["total"], 2)
         self.assertEqual(
             parsed["items"][0],
@@ -326,6 +349,47 @@ class PreparedTest(unittest.TestCase):
             read(listas.list_prepared, Session(MOVEMENT_EMPTY), "peticao_inicial_preparada_listar")
 
 
+class CustasTest(unittest.TestCase):
+    def test_each_kind_reads_its_list_without_generating_a_guia(self):
+        for kind, action in (
+            ("custas", "guia_pagamento_custas_gerados_listar"),
+            ("depositos", "guia_pagamento_depositos_judiciais_gerados_listar"),
+        ):
+            with self.subTest(kind=kind):
+                session = Session(guias_page(action, GUIAS))
+                result = read(listas.list_custas, session, action, kind=kind)
+                self.assertEqual(
+                    [(method, f"acao={action}" in url) for method, url, _ in session.calls], [("GET", True)]
+                )
+                self.assertEqual((result["kind"], result["returned"], result["total"]), (kind, 1, 1))
+                self.assertEqual(
+                    result["guias"][0],
+                    {
+                        "processNumber": "5000001-00.2026.4.04.7200",
+                        "columns": {
+                            "Processo": "5000001-00.2026.4.04.7200",
+                            "Data Emissão": "2026-11-10",
+                            "Vencimento": "2026-11-20",
+                            "Valor": "R$ 150,00",
+                        },
+                    },
+                )
+                self.assertNotIn("imprimir", compact(result))
+
+    def test_an_empty_list_and_a_foreign_page(self):
+        action = "guia_pagamento_custas_gerados_listar"
+        self.assertEqual(read(listas.list_custas, Session(guias_page(action)), action)["guias"], [])
+        with self.assertRaises(PortalError):
+            read(listas.list_custas, Session("<html><body>Erro</body></html>"), action)
+
+    def test_a_portal_without_the_menu_says_not_available_and_requests_nothing(self):
+        session = Session()
+        with self.assertRaises(NotSupported) as raised:
+            read(listas.list_custas, session, "painel_adv_listar", kind="depositos")
+        self.assertEqual(raised.exception.code, "not_available")
+        self.assertEqual(session.calls, [])
+
+
 class AllowlistTest(unittest.TestCase):
     def test_actions_that_open_or_write_stay_blocked(self):
         for action in (
@@ -335,6 +399,9 @@ class AllowlistTest(unittest.TestCase):
             "peticao_inicial_preparada_distribuir",
             "peticao_inicial_preparada_alterar",
             "movimentacao_preparada_peticionar",
+            "processo_custas_consultar",
+            "processo_depositos_judiciais_consultar",
+            "guia_pagamento_imprimir",
         ):
             with self.subTest(action=action), self.assertRaises(RuntimeError):
                 client.require_route(f"{BASE}controlador.php?acao={action}&hash=x", portal=PORTAL)
@@ -343,6 +410,8 @@ class AllowlistTest(unittest.TestCase):
             "eprocsysadm_listar",
             "peticao_inicial_preparada_listar",
             "movimentacao_preparada_listar",
+            "guia_pagamento_custas_gerados_listar",
+            "guia_pagamento_depositos_judiciais_gerados_listar",
         ):
             client.require_route(f"{BASE}controlador.php?acao={action}&hash=x", portal=PORTAL)
 
@@ -387,9 +456,11 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(result.structured_content["kind"], "movimentacoes")
 
     def test_not_available_is_a_clear_tool_error(self):
-        result = self.call("eproc_list_mensagens", {"portal": PORTAL}, Session(), panel("painel_adv_listar"))
-        self.assertTrue(result.is_error)
-        self.assertIn("[not_available]", result.content[0].text)
+        for name in ("eproc_list_mensagens", "eproc_list_custas"):
+            with self.subTest(tool=name):
+                result = self.call(name, {"portal": PORTAL}, Session(), panel("painel_adv_listar"))
+                self.assertTrue(result.is_error)
+                self.assertIn("[not_available]", result.content[0].text)
 
 
 if __name__ == "__main__":
