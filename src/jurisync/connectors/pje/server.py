@@ -7,6 +7,7 @@ so consecutive calls skip the password/certificate + TOTP login.
 import contextvars
 import json
 import threading
+from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, StringConstraints
@@ -14,6 +15,7 @@ from pydantic import Field, StringConstraints
 from jurisync import customers, portals
 from jurisync.connectors.pje import filing
 from jurisync.connectors.pje.acervo import read_acervo
+from jurisync.connectors.pje.audiencias import read_pauta
 from jurisync.connectors.pje.auth.sessions import auth_method, is_authenticated
 from jurisync.connectors.pje.inbox import read_counters, read_inbox
 from jurisync.connectors.pje.process import (
@@ -112,6 +114,15 @@ def _notifications(portal, read, process_number=None):
         if process_number:
             require_own_number(portal, process_number)  # before the session: a wrong court never costs a login
         return require_success("PJe", sessions.run(portal, lambda session: read(portal, session=session)))
+
+
+def _window(date_from, date_to):
+    """The pauta's start-date interval: today (or dateFrom) to 90 days after it, unless dateTo says otherwise."""
+    first = date.fromisoformat(date_from) if date_from else date.today()
+    last = date.fromisoformat(date_to) if date_to else first + timedelta(days=90)
+    if last < first:
+        raise InputError("dateTo must not be before dateFrom")
+    return first.isoformat(), last.isoformat()
 
 
 def draft_paths(run_id):
@@ -463,6 +474,27 @@ def create_server():
             portal,
             lambda name, session: read_acervo(name, session=session, regions=regions or None, max_pages=maxPages),
         )
+
+    @server.tool(
+        name="pje_list_audiencias",
+        title="List the lawyer's PJe hearings (Pauta de audiência)",
+        description="List the hearings of the lawyer's processes from the PJe Pauta de audiência page, by start date between dateFrom and dateTo (default: today to 90 days ahead): data, hora, processNumber, classe, partes, orgaoJulgador, tipo, sala and situacao (Designada, Realizada, Cancelada, Redesignada, Não Realizada...), oldest first. complete is true when every row PJe counts was read. The room link of a virtual hearing is in pje_get_process audiencias. Not on PJe-JT or PJe 1.x panels. Read-only: opens no process, downloads nothing.",
+        annotations=READ_ONLY,
+    )
+    def list_audiencias(
+        portal: Portal,
+        dateFrom: Annotated[
+            Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
+            Field(description="First hearing date, ISO YYYY-MM-DD; default today."),
+        ] = None,
+        dateTo: Annotated[
+            Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None,
+            Field(description="Last hearing date, ISO YYYY-MM-DD; default 90 days after dateFrom or today."),
+        ] = None,
+    ) -> dict[str, Any]:
+        with tool_errors("PJe"):
+            first, last = _window(dateFrom, dateTo)  # a wrong date never costs a login
+        return _notifications(portal, lambda name, session: read_pauta(session, name, first, last))
 
     @server.tool(
         name="pje_get_draft",

@@ -290,6 +290,7 @@ class BackgroundFillTests(unittest.TestCase):
             "pje_get_counters",
             "pje_list_watched_processes",
             "pje_list_processes",
+            "pje_list_audiencias",
         ):
             self.assertTrue(tools[name].read_only_hint, name)
         self.assertFalse(tools["pje_read_documents"].read_only_hint)
