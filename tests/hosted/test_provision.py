@@ -15,7 +15,7 @@ from jurisync.hosted import cli, provision
 from jurisync.hosted.app import REQUIRE_RESOURCE_FLAG, build_app
 from jurisync.hosted.store import Store
 from jurisync.hosted.vault import Vault, generate_key, load_key
-from tests.portability import NO_SYMLINKS, SYMLINKS, assert_mode
+from tests.portability import assert_mode
 
 from .test_hosted import make_p12_bytes
 from .test_office_endpoint import OfficeCase
@@ -542,44 +542,3 @@ class JuridiqWritesTest(unittest.TestCase):
             self.assertTrue(app.granted("juridiq", "juridiq_list_tasks"))
         with credentials.scope("office-b", {"JURIDIQ_ALLOW_WRITES": "true"}):
             self.assertTrue(app.granted("juridiq", "juridiq_create_task"))
-
-
-class RemotePluginTest(unittest.TestCase):
-    @unittest.skipUnless(SYMLINKS, NO_SYMLINKS)
-    def test_the_plugin_points_at_the_server_and_flags_local_only_skills(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            skills = root / "customers" / "x" / "skills"
-            for name, text in (
-                ("triagem", "Use pje_list_intimacoes."),
-                ("protocolo", "Use filing_prepare e pje_fill_draft."),
-            ):
-                (skills / name).mkdir(parents=True)
-                (skills / name / "SKILL.md").write_text(text, encoding="utf-8")
-            plugin = root / "plugins" / "x"
-            (plugin / ".claude-plugin").mkdir(parents=True)
-            (plugin / "skills").mkdir()
-            for name in ("triagem", "protocolo"):
-                (plugin / "skills" / name).symlink_to(skills / name)
-            local = {name: {"command": f"jurisync-{name}"} for name in ("pje", "djen", "advbox", "filing")}
-            manifest = {"name": "x", "skills": ["./skills/triagem", "./skills/protocolo"], "mcpServers": local}
-            (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
-            out = root / "remote"
-            local_only = provision.remote_plugin(plugin, "https://mcp.exemplo.com.br/mcp", out, say=lambda _: None)
-            written = json.loads((out / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-            self.assertEqual(
-                written["mcpServers"],
-                {
-                    "tribunais": {"type": "http", "url": "https://mcp.exemplo.com.br/tribunais/mcp"},
-                    "advbox": {"type": "http", "url": "https://mcp.exemplo.com.br/advbox/mcp"},
-                },
-            )
-            provision.remote_plugin(plugin, "https://mcp.exemplo.com.br", out, say=lambda _: None)  # base address
-            self.assertEqual(
-                json.loads((out / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["mcpServers"],
-                written["mcpServers"],
-            )
-            self.assertFalse((out / "skills" / "triagem").is_symlink())
-            self.assertEqual(local_only, {"protocolo": ["filing_prepare", "pje_fill_draft"]})
-            with self.assertRaises(SystemExit):
-                provision.remote_plugin(plugin, "http://127.0.0.1:8080/mcp", out, say=lambda _: None)

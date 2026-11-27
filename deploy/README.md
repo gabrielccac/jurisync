@@ -111,17 +111,6 @@ Tribunais" at `https://<host>/tribunais/mcp` and, for an office with ADVBOX or J
 `plan.json`); the sign-in page asks for the user's e-mail and password, once per connector. After Claude and ChatGPT have both
 signed in once, set `JURISYNC_REQUIRE_TOKEN_RESOURCE=1` in `/etc/jurisync/jurisync.env` and restart.
 
-Office plugins (skills) for Claude Code / Cowork pointing at the server:
-
-```bash
-uv run jurisync-hosted provision plugin plugins/victor --url https://<host> --out dist/victor-remote
-```
-
-The copy has one server `tribunais` (`/tribunais/mcp`) for the plugin's court systems and DJEN and one per management
-system it uses (`advbox` → `/advbox/mcp`).
-
-Skills that use filing or PJe draft writes (`victor-pje-filing`) are flagged: those stay on the local install.
-
 ## Restore
 
 ```bash

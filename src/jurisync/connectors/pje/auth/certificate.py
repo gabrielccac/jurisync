@@ -328,16 +328,6 @@ def _submit_certificate(session, page, config, signer, mensagem):
     return _submit_code(session, action, token)
 
 
-def sso_login(session, config, page, account, signer, *, follow, sleep=time.sleep, clock=time.time):
-    """The certificate and code steps of another system's login (JPe) on the SSO ``page`` it opened.
-
-    ``follow(response)`` follows the caller's redirects; the page they end on is returned.
-    """
-    _, mensagem = _challenge(page.text, config)
-    response = follow(_submit_certificate(session, page, config, signer, mensagem))
-    return _answer_otp(session, response, account, config, sleep=sleep, clock=clock, follow=follow)
-
-
 def _login(session, config, account, signer, *, sleep=time.sleep, clock=time.time):
     """``account`` is the TOTP account (None when not configured), or a callable read only if the SSO asks."""
     page = _follow(session, session.get(config.login_url, impersonate=IMPERSONATE, allow_redirects=False, timeout=30))

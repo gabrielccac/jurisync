@@ -1,0 +1,6 @@
+# Buscas salvas do DJEN (djen_search_saved). A UF é obrigatória.
+[[djen.searches]]
+label = "stj-diario"
+numeroOab = "61216"
+ufOab = "RS"
+tribunal = "STJ"
