@@ -110,7 +110,7 @@ def create_server(keys=None):
         """The common list envelope; ``next`` only when pages remain that a larger maxPages reaches (the pager's count, or
         one estimated from the rows of a page: ``filtros.page_count``).
 
-        Every row gets processNumber; with ``process_number`` only that process' rows stay (``filtros.by_process``)."""
+        With ``process_number`` only that process' rows stay (``filtros.by_process``)."""
         result, total = by_process(result, process_number)
         pagination = result.get("pagination") or {}
         pages = page_count(pagination) or 0
@@ -128,9 +128,10 @@ def create_server(keys=None):
             "(queues[] says what each queue gave). With queue: that queue only. "
             + intimacao.DESCRIPTION
             + " Rows also "
-            "carry queue, number, court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
-            "deadlineEnd as the portal shows them; processNumber is the same as number (its old name, kept for one "
-            "cycle). Counts of every queue: eproc_get_counters. " + ENVELOPE + " Read-only: opens no intimação."
+            "carry queue, processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
+            + ENVELOPE
+            + " Read-only: opens no intimação."
         ),
         annotations=READ_ONLY,
     )
@@ -177,7 +178,7 @@ def create_server(keys=None):
         title="List Eproc upcoming audiências",
         description=(
             "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
-            "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), number, court (juízo), "
+            "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
             "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO) and "
             "observation. lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
             "Read-only."
@@ -195,9 +196,9 @@ def create_server(keys=None):
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
             "(aguardando_abertura, aberto, vencido, fechado, sem_prazo) and intimationDateFrom/To by the intimation date "
             "(each filter costs one more request); latestMovementFirst orders by the latest "
-            "movement. Rows: number, parties (pole active/passive; the procedural role is in "
-            "eproc_get_process), class, subject, last event, dates, claim value; processNumber is the same as number "
-            "(its old name, kept for one cycle). pagination.totalItems is "
+            "movement. Rows: processNumber (also number, its old name), parties (pole active/passive; the "
+            "procedural role is in eproc_get_process), class, subject, last event, dates, claim value. "
+            "pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread. "
             + ENVELOPE
             + " Details and documents: eproc_get_process. Read-only."

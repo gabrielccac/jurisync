@@ -46,14 +46,13 @@ def page_count(pagination):
 
 
 def by_process(result, process_number=None):
-    """``result`` with ``processNumber`` beside ``number`` in every item (kept for one cycle) and, with ``process_number``
-    (``process_digits``), only that process' rows; the second item is the list total: the portal's count, or with the
-    filter the rows found when every row was read, else None."""
-    items = [{**item, "processNumber": item.get("number")} for item in result.get("items") or []]
+    """``result`` with, given ``process_number`` (``process_digits``), only that process' rows; the second item is the list
+    total: the portal's count, or with the filter the rows found when every row was read, else None."""
+    items = list(result.get("items") or [])
     pagination = result.get("pagination") or {}
     if not process_number:
         return {**result, "items": items}, pagination.get("totalItems")
-    items = [item for item in items if re.sub(r"\D", "", item["processNumber"] or "") == process_number]
+    items = [item for item in items if re.sub(r"\D", "", item.get("processNumber") or "") == process_number]
     complete = bool(pagination.get("complete"))
     note = "processNumber was filtered here over the rows read (the portal's list has no number filter)"
     if not complete:

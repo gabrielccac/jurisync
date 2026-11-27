@@ -176,6 +176,8 @@ Helpers em `jurisync.core.responses`:
   quando forem tocados, mantendo as chaves que as skills já leem. Já migradas: `pje_list_intimacoes`,
   `pje_list_processes`, `eproc_list_intimacoes` e `eproc_list_processes` (`responses.ENVELOPE` é a frase da
   descrição).
+- **Número do processo:** todo item que é de um processo traz `processNumber` (CNJ com pontuação). Nas linhas do
+  Eproc (filas, Relação de Processos, pautas e audiências) `number` continua por um ciclo como cópia.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%

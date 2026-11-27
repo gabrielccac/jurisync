@@ -72,16 +72,14 @@ class ProcessNumberTests(unittest.TestCase):
     def result(self, numbers, **pagination):
         return {
             "success": True,
-            "items": [{"number": number} for number in numbers],
+            "items": [{"processNumber": number, "number": number} for number in numbers],
             "pagination": {"totalItems": len(numbers), "complete": True, **pagination},
             "diagnostics": [],
         }
 
-    def test_every_row_gets_process_number_and_the_filter_keeps_that_process(self):
+    def test_the_filter_keeps_only_that_process(self):
         result, total = filtros.by_process(self.result([FIRST, FILTERED]))
-        self.assertEqual([item["processNumber"] for item in result["items"]], [FIRST, FILTERED])
-        self.assertEqual([item["number"] for item in result["items"]], [FIRST, FILTERED])  # old name, one cycle
-        self.assertEqual(total, 2)
+        self.assertEqual(([item["processNumber"] for item in result["items"]], total), ([FIRST, FILTERED], 2))
         wanted = filtros.process_digits(FILTERED)
         self.assertEqual(wanted, filtros.process_digits("50000020020264063800"))
         result, total = filtros.by_process(self.result([FIRST, FILTERED]), wanted)

@@ -143,6 +143,7 @@ class AttentionListTest(unittest.TestCase):
         self.assertEqual(
             [(item["situacao"], item["prazoFinal"]) for item in result["items"]], [("prazo_vencido", "2026-10-07")]
         )
+        self.assertEqual([item["processNumber"] for item in result["items"]], ["0000004-75.2026.8.13.0024"])
 
 
 if __name__ == "__main__":
