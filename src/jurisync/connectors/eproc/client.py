@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync import customers, portals
-from jurisync.connectors.eproc import ciencia
+from jurisync.connectors.eproc import arvore, ciencia
 from jurisync.connectors.eproc.auth import login, portal_totp_account
 from jurisync.connectors.eproc.certificate import cert_login
 from jurisync.connectors.eproc.documents import read_selected_documents
@@ -95,6 +95,7 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "audiencia_listar",  # the process' audiências
     "exame_listar",  # the process' perícias (JFRS)
     *HEARING_LISTS.values(),
+    arvore.TREE_ACTION,  # lists the documents only; "Download Completo" schedules a job and stays out
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
@@ -1039,18 +1040,25 @@ def fetch_process(
     portal,
     save=False,
     acknowledge_ciencia=False,
+    inventory="auto",
+    inventory_offset=0,
 ):
     """Read one process; with ``document_ids`` also the text of those documents.
 
     Documents of a process in the lawyer's pending queues, or read while those queues cannot be read to their end, are
     opened only with ``acknowledge_ciencia`` (``ciencia.check`` refuses with nothing opened). The result always
     carries the ``ciencia`` block (``ciencia.notice``), which the caller must relay to the user.
+
+    ``inventory`` says whether the document inventory also lists the Árvore (``arvore``): ``auto`` when the timeline
+    was not read to its end or a requested id is not in it, ``tree`` always, ``timeline`` never. The answer shows
+    ``arvore.INVENTORY_PAGE`` entries from ``inventory_offset``; ``documentIds`` are looked up in all of it.
     """
     portal = portals.eproc(portal).key  # aliases in, current key out
     if not isinstance(process_number, str) or not portals.CNJ.fullmatch(process_number):
         raise ValueError("process_number must be a formatted CNJ number")
     if scope not in ("latest", "page"):
         raise ValueError("scope must be latest or page")
+    arvore.check(inventory, inventory_offset)
     owned = session is None
     if owned:
         session, panel_html, panel_url = authenticate(portal)
@@ -1124,7 +1132,19 @@ def fetch_process(
             for document in event.get("documents", []):
                 if document.get("id"):
                     documents[document["id"]] = document
+        inventory_source = "timeline"
+        diagnostics = list(event_diagnostics)
+        timeline_complete = bool(pagination.get("complete")) and not event_diagnostics
+        if arvore.wanted(inventory, timeline_complete=timeline_complete, known=documents, document_ids=document_ids):
+            tree, tree_problem = arvore.read_tree(session, detail_body, detail_url, process_number, portal=portal)
+            if tree_problem:
+                diagnostics.append(tree_problem)
+            else:
+                inventory_source = "tree"
+                for document in tree:
+                    documents.setdefault(document["id"], document)
         document_inventory = list(documents.values())
+        shown, inventory_counts = arvore.inventory_page(document_inventory, inventory_offset, inventory_source)
         internal = {**detail, "events": selected_events, "documents": document_inventory}
         attachments = []
         # Read the pending queues before opening anything: afterwards the intimação may no longer be pending.
@@ -1139,7 +1159,7 @@ def fetch_process(
             notices=notices,
             problem=problem,
             events=events,
-            events_complete=bool(pagination.get("complete")) and not event_diagnostics,
+            events_complete=timeline_complete,
         )
         if document_ids is not None:
             try:
@@ -1168,10 +1188,12 @@ def fetch_process(
             },
             "parties": detail.get("parties", []),
             "timeline": selected_events,
-            "documentInventory": document_inventory,
+            "documentInventory": shown,
+            "inventorySource": inventory_source,
+            "inventory": inventory_counts,
             "attachments": attachments,
             "pagination": pagination,
-            "diagnostics": event_diagnostics + extra_diagnostics,
+            "diagnostics": diagnostics + extra_diagnostics,
             "prazos": ciencia.deadlines(events),
             "audiencias": hearings,
             "pericias": exams,
@@ -1200,6 +1222,7 @@ def main():
     process.add_argument("--process-number", required=True)
     process.add_argument("--scope", choices=("latest", "page"), default="page")
     process.add_argument("--document-id", action="append")
+    process.add_argument("--inventory", choices=arvore.INVENTORY_MODES, default="auto")
     process.add_argument(
         "--acknowledge-ciencia",
         action="store_true",
@@ -1226,6 +1249,7 @@ def main():
                 args.document_id,
                 portal=args.portal,
                 acknowledge_ciencia=args.acknowledge_ciencia,
+                inventory=args.inventory,
             )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result.get("success"):
