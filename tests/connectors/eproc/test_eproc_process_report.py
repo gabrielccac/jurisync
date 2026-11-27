@@ -52,6 +52,7 @@ class ProcessReportTests(unittest.TestCase):
         result = parse_lawyer_process_report(REPORT, BASE)
         item = result["items"][0]
         self.assertEqual(item["number"], "0000001-23.2026.4.06.3800")
+        self.assertEqual(item["processNumber"], item["number"])
         self.assertEqual(item["court"], "JUÍZO1")
         self.assertEqual(item["subject"], "Pessoa com deficiência")
         self.assertEqual(item["lastEventAt"], "13/10/2026 17:40:13")

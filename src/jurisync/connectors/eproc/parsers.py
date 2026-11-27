@@ -168,6 +168,7 @@ def _hearing_row(row, cells, base_url):
     event_lines = [line.strip() for line in cells[2].get_text("\n", strip=True).split("\n") if line.strip()]
     return {
         "id": None,
+        "processNumber": text(link),
         "number": text(link),
         "url": _href(link.get("href"), base_url),
         "court": _court(process_cell),
@@ -208,6 +209,7 @@ def _process_row(row, base_url):
             parties.append({"role": part.get("data-parte", "").strip(), "name": name})
     return {
         "id": (row.select_one("input.infraCheckbox[value]") or {}).get("value"),
+        "processNumber": text(link),
         "number": text(link),
         "url": _href(link.get("href"), base_url),
         "court": _court(process_cell),
@@ -309,6 +311,7 @@ def parse_lawyer_process_report(html, base_url):
             return {"items": [], "pagination": {}, "diagnostics": ["invalid_process_report_row"]}
         items.append(
             {
+                "processNumber": text(link),
                 "number": text(link),
                 "url": _href(link.get("href"), base_url),
                 "court": text(cells[1]).removeprefix(text(link)).strip(),
@@ -737,6 +740,7 @@ def parse_hearing_list(html, base_url):
             end = re.search(r"T[ée]rmino\s*" + _HEARING_TIME, place)
             items.append(
                 {
+                    "processNumber": text(link),
                     "number": text(link),
                     "url": _href(link.get("href"), base_url),
                     "court": court,
