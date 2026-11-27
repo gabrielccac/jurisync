@@ -46,7 +46,7 @@ src/jurisync/
   install/              setup, credential bundles, skills sync, local HTTP serving
 customers/
   jean/                 Juridiq publication triage: profile, runner, skill, notes
-  victor/               DJEN → ADVBOX routing skill, TRF5 filing prep, TRF1 watcher
+  victor/               DJEN → ADVBOX routing skill, TRF5 filing prep
   elisandra/            DJEN → eproc intimações skill (TRF4 SC/RS, TJRS), task drafts for approval
   wesley/               PJe (TRF1, TRF3, TRF5) and Eproc (TRF4) access on the A1 certificate
 cli/                    Diagnostics: juridiq_read, eproc_portal_smoke
@@ -174,8 +174,7 @@ Shared code never imports from `customers/`.
 - **Jean** — `customers.jean.run_publications.run_jean_publications(agent)` runs
   the publication pipeline with Jean's template mapping.
 - **Victor** — DJEN → ADVBOX task routing skill; TRF5 initial-filing preparation
-  (`python -m jurisync.workflows.filing --help`, profile `victor`); TRF1
-  spreadsheet watcher (`python -m customers.victor.workflows.pje1g_watch --help`).
+  (`python -m jurisync.workflows.filing --help`, profile `victor`).
 
 Add a customer by copying `customers/_template/` to `customers/<name>/` and following its README: `portals.toml`
 (login method and variable names per portal; the declared `method` is the login the connectors use, whatever else the

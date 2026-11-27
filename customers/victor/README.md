@@ -44,9 +44,6 @@ conditional periods and missing periods require separate handling.
 `skills/victor-pje-filing/SKILL.md` guides the preparation and PJe MCP stages for
 Claude. It does not submit **Protocolar**. See "Installing the skills" below.
 
-The existing TRF1 spreadsheet watcher runs from the repository root with
-`python -m customers.victor.workflows.pje1g_watch --help`.
-
 `filing-profile.json` holds the office defaults the generic filing tools
 (`src/jurisync/workflows/filing`) use to prepare a TRF5 draft payload from a folder of documents. For Victor
 the folder is the customer's ADVBOX `00-PROTOCOLAR`, pulled first with `advbox_save_folder` (the filing tools do not
