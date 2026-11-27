@@ -15,10 +15,11 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.eproc import client
+from jurisync.connectors.eproc.filtros import page_count
 from jurisync.connectors.eproc.parsers import _href, _list_pagination, form_fields, parse_panel, text
 from jurisync.core.errors import InputError, PortalError
 from jurisync.core.redaction import mask_cpf
-from jurisync.core.responses import dated, listing
+from jurisync.core.responses import BUDGET, compact, dated, listing
 from jurisync.core.session_pool import SessionExpired
 
 MAX_SEARCH_PAGES = 5
@@ -268,7 +269,7 @@ def search_processes(term, *, session=None, panel_html=None, panel_url=None, por
             raise RuntimeError("Authenticated panel did not expose Consulta Processual")
         page_url = urljoin(panel_url or base_url, page_url)
         client.require_route(page_url, {client.SEARCH_ACTION}, portal=portal)
-        response, body = client.request(session, "GET", page_url, portal=portal)
+        response, body = client.request(session, "GET", page_url, portal=portal, actions={client.SEARCH_ACTION})
         error = client._response_error(response, body)
         parsed = _failed(error) if error else _search(session, body, page_url, term, include_closed, max_pages, portal)
         return {
@@ -292,39 +293,51 @@ def search_processes(term, *, session=None, panel_html=None, panel_url=None, por
 
 def _search(session, body, page_url, term, include_closed, max_pages, portal):
     """The lookup's answer, then its following pages as the pager asks for them (the answer's own infra fields and
-    ``hdnInfraPaginaAtual``), at most ``max_pages`` in all, with truthful pagination."""
+    ``hdnInfraPaginaAtual``), with truthful pagination. The pager's page count is not needed: pages are asked for until
+    the portal's count is read, a page comes back empty, repeated or of another list, ``max_pages`` or the answer budget.
+    """
     url, fields = search_request(body, portals.eproc(portal).base_url, *term, include_closed=include_closed)
     url = urljoin(page_url, url)
-    client.require_route(url, {CRITERIA[term[0]][2]}, ajax=True, portal=portal)
-    response, answer = client.request(session, "POST", url, data=fields, ajax=True, portal=portal)
+    lookup = {CRITERIA[term[0]][2]}
+    client.require_route(url, lookup, ajax=True, portal=portal)
+    response, answer = client.request(session, "POST", url, data=fields, ajax=True, portal=portal, actions=lookup)
     error = client._response_error(response, answer)
     first = _failed(error) if error else parse_search_results(answer)
     if first["diagnostics"]:
         return first
     items, hidden, notes, page = list(first["items"]), first["hidden"], [], 0
+    seen = {item["processNumber"] for item in items}
     pagination = dict(first["pagination"])
     total, pages = pagination.get("totalItems"), pagination.get("totalPages")
-    while (total is None or len(items) < total) and pages and page + 1 < min(pages, max_pages):
-        page += 1
-        data = [*fields, *hidden, ("hdnInfraPaginaAtual", str(page))]
-        response, answer = client.request(session, "POST", url, data=data, ajax=True, portal=portal)
+    while (total is None or len(items) < total) and page + 1 < max_pages and (not pages or page + 1 < pages):
+        if len(compact(items)) > BUDGET:
+            notes.append(client.BUDGET_NOTE)
+            break
+        data = [*fields, *hidden, ("hdnInfraPaginaAtual", str(page + 1))]
+        response, answer = client.request(session, "POST", url, data=data, ajax=True, portal=portal, actions=lookup)
         error = client._response_error(response, answer)
         if error == "session_expired":
             raise SessionExpired("eproc session expired")  # a search can be repeated
         parsed = _failed(error) if error else parse_search_results(answer)
-        if parsed["diagnostics"] or (parsed["pagination"].get("page"), parsed["pagination"].get("totalItems")) != (
-            page,
-            total,
-        ):
-            notes.append(f"search_page_{page + 1}_failed")  # another page or list came back: not mixed in
+        if parsed["diagnostics"]:
+            notes.append(f"search_page_{page + 2}_failed")
             break
+        numbers = {item["processNumber"] for item in parsed["items"]}
+        if (parsed["pagination"].get("page"), parsed["pagination"].get("totalItems")) != (page + 1, total) or (
+            numbers & seen
+        ):
+            notes.append(f"search_page_{page + 2}_mismatch")  # another page or list came back: not mixed in
+            break
+        if not parsed["items"]:
+            break  # past the last page
+        page += 1
         items.extend(parsed["items"])
-        hidden = parsed["hidden"]
-    read = page + 1 - (1 if notes else 0)
+        hidden, seen = parsed["hidden"], seen | numbers
     complete = total is not None and len(items) >= total
-    pagination.update({"pagesRead": read, "itemCount": len(items), "complete": complete})
+    pagination.update({"pagesRead": page + 1, "itemCount": len(items), "complete": complete})
     more = None
-    if not complete and not notes and pages and pages > max_pages:
-        notes.append(f"stopped at maxPages={max_pages} of {pages}")
-        more = {"maxPages": min(pages, MAX_SEARCH_PAGES)} if max_pages < MAX_SEARCH_PAGES else None
+    if not complete and not notes and page + 1 == max_pages:
+        notes.append(f"stopped at maxPages={max_pages}" + (f" of {pages}" if pages else ""))
+        if max_pages < MAX_SEARCH_PAGES:
+            more = {"maxPages": min(page_count(pagination) or MAX_SEARCH_PAGES, MAX_SEARCH_PAGES)}
     return {"items": items, "pagination": pagination, "diagnostics": [], "notes": notes, "more": more}

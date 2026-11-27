@@ -15,6 +15,7 @@ from pydantic import Field
 from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
+    BUDGET_NOTE,
     MAX_REPORT_PAGES,
     PRAZO_FILTER,
     QUEUE_KINDS,
@@ -119,7 +120,8 @@ def create_server(keys=None):
         pagination = result.get("pagination") or {}
         pages = page_count(pagination) or 0
         more = None
-        if max_pages and not pagination.get("complete") and max_pages < min(pages, MAX_REPORT_PAGES):
+        budget = BUDGET_NOTE in result.get("notes", [])
+        if max_pages and not pagination.get("complete") and not budget and max_pages < min(pages, MAX_REPORT_PAGES):
             more = {"maxPages": min(pages, MAX_REPORT_PAGES)}
         return {**result, **listing(result["items"], total=total, more=more)}
 
@@ -280,8 +282,7 @@ def create_server(keys=None):
             "processes, unlike eproc_list_processes (the lawyer's own Relação). Read-only.\n"
             "Cost: one request for the search page plus one per result page (maxPages); includeClosed adds baixados.\n"
             "Answer: processes (processNumber, caseClass, parties with pole, subject, court, status, filedAt and the "
-            "portal's other columns in extra), returned, total (the portal's count) and next (the maxPages that reads "
-            "the rest, or null). Details and documents: eproc_get_process. " + DATES
+            "portal's other columns in extra). " + ENVELOPE + " " + DATES + " Details and documents: eproc_get_process."
         ),
         annotations=READ_ONLY,
     )

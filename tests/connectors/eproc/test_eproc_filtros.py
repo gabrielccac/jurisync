@@ -212,7 +212,30 @@ class ReportPagerTests(unittest.TestCase):
         with patch.object(client, "BUDGET", 100):
             session, result = self.read(self.report(FIRST, 0), self.report(FILTERED, 1))
         self.assertEqual(len(session.calls), 1)
-        self.assertIn("answer budget", result["notes"][0])
+        self.assertEqual(result["notes"], [client.BUDGET_NOTE])
+
+    def test_the_tool_offers_no_next_when_the_budget_cut_the_read(self):
+        def listed(notes):
+            pagination = {"totalItems": 3, "totalPages": None, "pagesRead": 1, "itemCount": 1, "complete": False}
+            result = {"items": [{"processNumber": FIRST}], "pagination": pagination, "diagnostics": [], "notes": notes}
+
+            async def run():
+                async with Client(server.create_server(["trf6-1g"])) as mcp:
+                    answer = await mcp.call_tool("eproc_list_processes", {"portal": "trf6-1g", "maxPages": 1})
+                    return answer.structured_content
+
+            server.sessions.close()
+            try:
+                with (
+                    patch.object(server.sessions, "_login", return_value=(Session(page()), PANEL, BASE)),
+                    patch.object(server, "list_processes", return_value=result),
+                ):
+                    return asyncio.run(run())
+            finally:
+                server.sessions.close()
+
+        self.assertEqual(listed(["stopped at maxPages=1"])["next"], {"maxPages": 3})
+        self.assertIsNone(listed([client.BUDGET_NOTE])["next"])
 
 
 if __name__ == "__main__":

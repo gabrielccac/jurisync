@@ -244,7 +244,60 @@ class SearchResultTests(unittest.TestCase):
             ("oab", "SC012345"), session=session, panel_html=PANEL, panel_url=BASE, portal="trf6-1g", max_pages=2
         )
         self.assertEqual(result["returned"], 1)
-        self.assertEqual(result["notes"], ["search_page_2_failed"])
+        self.assertEqual(result["notes"], ["search_page_2_mismatch"])
+
+    def test_pages_are_followed_without_a_page_count(self):
+        def search(*bodies, max_pages):
+            session = Session(page(), *bodies)
+            result = consulta.search_processes(
+                ("oab", "SC012345"),
+                session=session,
+                panel_html=PANEL,
+                panel_url=BASE,
+                portal="trf6-1g",
+                max_pages=max_pages,
+            )
+            return session, result
+
+        third = "5000003-00.2026.4.04.7200"
+        bodies = [
+            answer(number, i, pages=0, total=3).replace('<select id="selInfraPaginacaoSuperior"></select>', "")
+            for i, number in enumerate((FIRST, SECOND, third))
+        ]
+        session, result = search(*bodies, max_pages=5)
+        self.assertIsNone(result["pagination"]["totalPages"] or None)
+        self.assertEqual([item["processNumber"] for item in result["processes"]], [FIRST, SECOND, third])
+        self.assertEqual(dict(session.calls[3][2])["hdnInfraPaginaAtual"], "2")
+        self.assertEqual((result["pagination"]["complete"], result["next"], result["notes"]), (True, None, []))
+
+        # maxPages stops the read: next asks for the pages the portal's count still needs, with a note.
+        _, result = search(*bodies[:2], max_pages=2)
+        self.assertFalse(result["pagination"]["complete"])
+        self.assertEqual((result["next"], result["notes"]), ({"maxPages": 3}, ["stopped at maxPages=2"]))
+
+        # An empty page is the end; a repeated one is not mixed in.
+        row = bodies[1][bodies[1].index('<tr class="infraTrClara">') : bodies[1].index("</table>")]
+        _, result = search(bodies[0], bodies[1].replace(row, ""), max_pages=5)
+        self.assertEqual((result["returned"], result["pagination"]["pagesRead"], result["notes"]), (1, 1, []))
+        self.assertFalse(result["pagination"]["complete"])
+        _, result = search(bodies[0], bodies[0].replace('value="0"', 'value="1"'), max_pages=5)
+        self.assertEqual((result["returned"], result["notes"]), (1, ["search_page_2_mismatch"]))
+
+        # The answer budget stops the read without a next: a larger maxPages would stop at the same place.
+        with patch.object(consulta, "BUDGET", 10):
+            session, result = search(*bodies, max_pages=5)
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual((result["next"], result["notes"]), (None, [client.BUDGET_NOTE]))
+
+    def test_other_reads_never_reach_the_search_routes(self):
+        for url, ajax in (
+            (BASE + "controlador.php?acao=processo_consultar&hash=x", False),
+            (BASE + "controlador_ajax.php?acao_ajax=processos_consulta_por_oab&hash=x", True),
+        ):
+            with self.assertRaises(RuntimeError):
+                client.request(Session(), "GET", url, ajax=ajax, portal="trf6-1g")
+            actions = {client.SEARCH_ACTION} if not ajax else client.SEARCH_AJAX_ACTIONS
+            client.request(Session("ok"), "GET", url, ajax=ajax, portal="trf6-1g", actions=actions)
 
     def test_tool_checks_the_criterion_before_login_and_says_it_is_court_wide(self):
         async def run():

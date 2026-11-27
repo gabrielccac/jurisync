@@ -61,7 +61,8 @@ Com `maxPages` maior que 1 as páginas seguintes são pedidas como o pager faz (
 `hdnInfraPaginaAtual`). Nenhum portal mostrou a contagem de páginas do pager (`totalPages` nulo), então a leitura
 segue o total da legenda ("(843 registros - 1 a 500)") e para quando ele é atingido, quando uma página volta vazia,
 repetida ou de outra lista, em `maxPages` ou no orçamento de 60k caracteres.
-`next` traz o `maxPages` que lê o resto, estimado pelo tamanho da página quando o pager não diz.
+`next` traz o `maxPages` que lê o resto, estimado pelo tamanho da página quando o pager não diz; quando a leitura
+parou no orçamento não há `next` (um `maxPages` maior pararia no mesmo lugar), só a nota pedindo filtros mais estreitos.
 Consultar `pagination.complete` e `totalItems` antes de considerar a lista completa.
 
 **Data da intimação.** `intimationDateFrom`/`intimationDateTo` (`AAAA-MM-DD`) vão para "Data Início"/"Data Fim"
@@ -93,6 +94,12 @@ no portal é `invalid_input`. Essas rotas ficam fora de `READ_ACTIONS`/`AJAX_ACT
 chega nelas, e um teste prova que rotas de escrita (movimentar, peticionar, distribuir, confirmar pauta) continuam
 bloqueadas. O resultado é lido pelos `<th>` da tabela (número, classe, partes com polo, assunto, órgão, situação,
 autuação em ISO; o resto em `extra`), com CPF mascarado; nada do que foi buscado vai para log ou erro.
+
+A paginação da busca segue a da Relação sem depender de `totalPages`: com `maxPages` maior que 1 as páginas seguintes
+são pedidas até o total da legenda, uma página vazia, uma página repetida ou de outra lista (nota
+`search_page_N_mismatch`, nada misturado), o `maxPages` (nota e `next` estimado por `page_count`) ou o orçamento de 60k
+caracteres (nota, sem `next`). `send` só aceita as rotas da Consulta quando quem chama as nomeia (`actions`); as
+outras leituras continuam presas a `READ_ACTIONS`/`AJAX_ACTIONS`, e um teste prova que não chegam à busca.
 
 **Precisa de validação ao vivo.** Não há captura de resposta da busca: o formato (HTML ou JSON com HTML), a
 paginação (`hdnInfraPaginaAtual` com os campos `hdnInfra*` da resposta) e os cabeçalhos são inferidos da estrutura

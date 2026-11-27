@@ -193,10 +193,14 @@ def _response_error(response, body=""):
     return None
 
 
-def send(session, method, url, *, data=None, ajax=False, portal, headers=None, stream=False):
-    """The one guarded request to the portal: allowlisted route, no redirects, shared fingerprint and timeout."""
-    allowed = AJAX_ACTIONS | SEARCH_AJAX_ACTIONS if ajax else READ_ACTIONS | {SEARCH_ACTION}
-    require_route(url, allowed, ajax=ajax, portal=portal)
+def send(session, method, url, *, data=None, ajax=False, portal, headers=None, stream=False, actions=None):
+    """The one guarded request to the portal: allowlisted route, no redirects, shared fingerprint and timeout.
+
+    The route must be one of ``actions`` when the caller names them (the Consulta Processual search does, and only it
+    reaches SEARCH_ACTION and SEARCH_AJAX_ACTIONS), else of READ_ACTIONS or AJAX_ACTIONS."""
+    if actions is None:
+        actions = AJAX_ACTIONS if ajax else READ_ACTIONS
+    require_route(url, actions, ajax=ajax, portal=portal)
     try:
         response = session.request(
             method,
@@ -214,8 +218,8 @@ def send(session, method, url, *, data=None, ajax=False, portal, headers=None, s
     return response
 
 
-def request(session, method, url, *, data=None, ajax=False, portal):
-    response = send(session, method, url, data=data, ajax=ajax, portal=portal)
+def request(session, method, url, *, data=None, ajax=False, portal, actions=None):
+    response = send(session, method, url, data=data, ajax=ajax, portal=portal, actions=actions)
     return response, _decode(response)
 
 
@@ -797,6 +801,8 @@ def list_hearings(*, session=None, panel_html=None, panel_url=None, portal):
 
 
 MAX_REPORT_PAGES = 20
+# A list read cut by the answer budget: a larger maxPages would stop at the same place, so no next is offered.
+BUDGET_NOTE = "stopped at the answer budget: narrow the filters to read the rest"
 
 
 def list_processes(
@@ -898,7 +904,7 @@ def _report_pages(session, body, first, endpoint, *, max_pages, portal):
         (total is None or len(items) < total) and page + 1 < max_pages and (not total_pages or page + 1 < total_pages)
     ):
         if len(compact(items)) > BUDGET:
-            notes.append("stopped at the answer budget: narrow the filters to read the rest")
+            notes.append(BUDGET_NOTE)
             break
         following = report_page_request(body, base_url, page + 1)
         if following is None:
