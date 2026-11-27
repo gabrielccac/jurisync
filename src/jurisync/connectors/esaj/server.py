@@ -187,7 +187,9 @@ def create_server(keys=None):
         annotations=READ_ONLY,
         description="List the panel's raw task lists: intimacoes (open-deadline cards; esaj_list_intimacoes reads the "
         "same list with situacao and process numbers; ciencia there is only the card's closed flag), audiencias or "
-        "peticoes by state. Read-only.",
+        "peticoes by state. Without dateFrom/dateTo the panel sends peticoes CONCLUIDA only as a recent slice; with them "
+        "it uses the panel's own period filter (30 days a request, up to a year) and returns the whole period. "
+        "Read-only.",
     )
     def esaj_list_tasks(
         portal: Annotated[Portal, portal_field] = default,
@@ -195,8 +197,16 @@ def create_server(keys=None):
         state: Literal[
             "AGUARDANDO_ASSINATURA", "AGUARDANDO_DISTRIBUICAO", "AGUARDANDO_JUNTADA", "CONCLUIDA"
         ] = "AGUARDANDO_ASSINATURA",
+        dateFrom: Annotated[
+            str | None,
+            Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="peticoes only: first day (YYYY-MM-DD)."),
+        ] = None,
+        dateTo: Annotated[
+            str | None,
+            Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="peticoes only: last day (YYYY-MM-DD); empty: today."),
+        ] = None,
     ) -> dict[str, Any]:
-        return call(portal, lambda s: dashboard.list_tasks(s, portal, kind, state))
+        return call(portal, lambda s: dashboard.list_tasks(s, portal, kind, state, dateFrom, dateTo))
 
     @server.tool(
         title="List the lawyer's e-SAJ processes",

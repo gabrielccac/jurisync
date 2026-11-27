@@ -438,9 +438,55 @@ def test_document_oversize_is_not_saved(monkeypatch):
 
 def test_write_routes_refused_before_network():
     session = Mock()
-    with pytest.raises(ValueError):
-        base.request(session, "tjsp-esaj", "POST", "pastadigital/receberIntimacao.do")
+    for method, path in (
+        ("POST", "pastadigital/receberIntimacao.do"),
+        ("POST", "pastadigital/obterHashsParaAssinatura.do"),
+        ("PUT", "tarefas-adv/api/ciencia-intimacao"),
+        ("POST", "tarefas-adv/api/ciencia-intimacao"),
+    ):
+        with pytest.raises(ValueError):
+            base.request(session, "tjsp-esaj", method, path)
     session.request.assert_not_called()
+
+
+def test_concluded_petitions_of_a_period_use_the_panel_filter_in_windows_of_30_days(monkeypatch):
+    posted = []
+
+    def request(session, portal, method, path, **kwargs):
+        posted.append((method, path, kwargs.get("json")))
+        start = kwargs["json"]["dataInicio"][:10]
+        items = [{"nuProtocolo": f"P-{start}", "urlPasta": "https://private"}, {"nuProtocolo": "P-shared"}]
+        return SimpleNamespace(status_code=200, json=lambda: items)
+
+    monkeypatch.setattr(common, "request", request)
+    result = base.list_tasks(None, "tjsp-esaj", "peticoes", "CONCLUIDA", "2026-09-01", "2026-10-30")
+    assert [body for _m, _p, body in posted] == [
+        {"situacao": "CONCLUIDA", "dataInicio": "2026-09-01T00:00:00.000", "dataFim": "2026-09-30T23:59:59.999"},
+        {"situacao": "CONCLUIDA", "dataInicio": "2026-10-01T00:00:00.000", "dataFim": "2026-10-30T23:59:59.999"},
+    ]
+    assert {(method, path) for method, path, _b in posted} == {("POST", "tarefas-adv/api/peticoes-filtro")}
+    assert result["period"] == {"from": "2026-09-01", "to": "2026-10-30", "requests": 2}
+    # Each petition once, without the private URL.
+    assert result["items"] == [
+        {"nuProtocolo": "P-2026-09-01"},
+        {"nuProtocolo": "P-shared"},
+        {"nuProtocolo": "P-2026-10-01"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "date_from", "date_to"),
+    [
+        ("audiencias", "2026-09-01", None),
+        ("peticoes", "2026-10-02", "2026-10-01"),
+        ("peticoes", "2025-01-01", "2026-10-01"),
+        ("peticoes", "01/10/2026", None),
+    ],
+)
+def test_a_period_is_checked_before_any_request(monkeypatch, kind, date_from, date_to):
+    monkeypatch.setattr(common, "request", Mock(side_effect=AssertionError("no request expected")))
+    with pytest.raises(ValueError):
+        base.list_tasks(None, "tjsp-esaj", kind, "CONCLUIDA", date_from, date_to)
 
 
 def test_viewer_accepts_formatted_number_and_redacts_plain_tokens():
