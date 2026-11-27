@@ -3,12 +3,13 @@
 import re
 from urllib.parse import urlsplit
 
-# A CPF keeps its first three and last two digits (docs/padroes.md, section 5): formatted, after a "CPF" label, or as
-# a whole value of bare digits (a taxId field). A CNPJ is a company's and stays whole.
+# A CPF keeps its first three and last two digits (docs/padroes.md, section 5): formatted in free text, after a "CPF"
+# label, or as a whole value (a taxId field); the last two take any of the dots and the dash. A CNPJ is a company's and
+# stays whole; process numbers and OABs never match (other lengths, or a CPF label would be needed).
 CPF_PATTERNS = (
     (re.compile(r"(?<![\d.])(\d{3})\.\d{3}\.\d{3}-(\d{2})(?!\d)"), r"\1.***.***-\2"),
-    (re.compile(r"(\bCPF\W{0,3})(\d{3})\d{6}(\d{2})(?!\d)", re.I), r"\1\2******\3"),
-    (re.compile(r"^\s*(\d{3})\d{6}(\d{2})\s*$"), r"\1******\2"),
+    (re.compile(r"(\bCPF\W{0,3})(\d{3})\.?\d{3}\.?\d{3}-?(\d{2})(?!\d)", re.I), r"\1\2******\3"),
+    (re.compile(r"^\s*(\d{3})\.?\d{3}\.?\d{3}-?(\d{2})\s*$"), r"\1.***.***-\2"),
 )
 
 

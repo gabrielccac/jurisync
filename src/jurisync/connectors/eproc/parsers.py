@@ -342,9 +342,10 @@ def _document(anchor, base_url):
 
 
 # The portal's cover-page field ids (txtNumProcesso, txtClasse, ...) mapped to the connector's field names. On a
-# 2nd-degree court "judge" is the Relator(a). An id not mapped here goes under "extra" with its raw name, so the
-# keys of the cover itself are the same on every court. LEGACY_COVER_KEYS repeats a renamed field under its old raw
-# key for one cycle (docs/padroes.md).
+# 2nd-degree court "judge" is the Relator(a). An id not mapped here goes under "extra" with its raw name. For one cycle
+# (docs/padroes.md) every raw key that used to sit at the top still does: the renamed LEGACY_COVER_KEYS and any
+# unmapped id. In the captures of TJSC 1G, TRF4 2G, TRF6 2G and TJRJ 1G (27/11/2026) these three were the only ids
+# outside the original eight.
 COVER_FIELDS = {
     "NumProcesso": "number",
     "Classe": "caseClass",
@@ -368,10 +369,10 @@ def _cover(soup):
         if value:
             if key in COVER_FIELDS:
                 cover[COVER_FIELDS[key]] = value
-                if key in LEGACY_COVER_KEYS:
-                    cover[key] = value
             else:
                 extra[key] = value
+            if key in LEGACY_COVER_KEYS or key not in COVER_FIELDS:
+                cover[key] = value
     fieldset = soup.select_one("#fldCapa")
     if fieldset:
         cover.setdefault("caseClassCode", fieldset.get("data-classe"))

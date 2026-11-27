@@ -142,7 +142,8 @@ Como usar num conector:
   recebe só `[unexpected] ... ref=...` e o detalhe fica no log.
 - Toda mensagem passa por `sanitize_diagnostics` (sem URL, caminho, cookie, token ou CPF).
 - CPF em dado de resultado (partes, `taxId`) sai como `123.***.***-45` por `redaction.mask_cpf`, a mesma regra;
-  CNPJ fica inteiro.
+  CNPJ fica inteiro. O texto de documentos, atos e linha do tempo não é mascarado, de propósito: é o conteúdo que o
+  advogado precisa ler como está no processo.
 - `except Exception` que não relança só com motivo: `# noqa: BLE001 - <por quê>` (regra `BLE` do ruff). Os casos aceitos são
   fronteira de CLI ou de job em segundo plano, item de lote que não pode parar os outros, sonda ou limpeza que não pode
   custar o resultado, e biblioteca que levanta tipos demais (pypdf, OCR, navegador). Se der para registrar, registre com

@@ -66,6 +66,7 @@ class EprocParserTests(unittest.TestCase):
                 "OrgaoColegiado": "TURMA FICTICIA",
                 "NumRequis": "000001",
                 "MagistradoAtuante": "JUIZ FICTICIO",
+                "CampoNovo": "valor",
                 "caseClassCode": "1",
                 "extra": {"CampoNovo": "valor"},
             },
@@ -75,9 +76,22 @@ class EprocParserTests(unittest.TestCase):
         html = """<table id="tblPartesERepresentantes"><tr><th>AUTOR</th><th>RÉU</th></tr><tr>
         <td><span data-parte="AUTOR">Parte Ficticia</span><span id="spnCpfParteAutor0">123.456.789-09</span></td>
         <td><span data-parte="REU">Empresa Ficticia</span><span id="spnCpfParteReu0">12.345.678/0001-90</span></td></tr>
-        <tr><td><span data-parte="AUTOR">Outra Parte</span><span id="spnCpfParteAutor1">98765432100</span></td></tr></table>"""
+        <tr><td><span data-parte="AUTOR">Outra Parte</span><span id="spnCpfParteAutor1">98765432100</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Terceira Parte</span><span id="spnCpfParteAutor2">111222333-44</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Quarta Parte</span><span id="spnCpfParteAutor3">555.666.77788</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Empresa Dois</span><span id="spnCpfParteAutor4">12345678000190</span></td></tr></table>"""
         parties = parse_process_detail(html, BASE)["parties"]
-        self.assertEqual([party["taxId"] for party in parties], ["123.***.***-09", "12.345.678/0001-90", "987******00"])
+        self.assertEqual(
+            [party["taxId"] for party in parties],
+            [
+                "123.***.***-09",
+                "12.345.678/0001-90",
+                "987.***.***-00",
+                "111.***.***-44",
+                "555.***.***-88",
+                "12345678000190",
+            ],
+        )
 
     def test_detail_discovers_event_filter_request_and_all_co_parties(self):
         html = """<script>url: 'controlador_ajax.php?acao_ajax=montar_tabela_eventos_filtrados&amp;num_processo=123&amp;hash=h'</script>
