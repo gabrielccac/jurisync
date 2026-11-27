@@ -49,9 +49,9 @@ senha do login próprio fica numa variável separada (`_LOGIN_PASSWORD`) de prop
 ao formulário do JPe por engano. Um USERNAME que não é CPF é erro de configuração (o Login do JPe vai em `_LOGIN`).
 
 No PDPJ o fluxo é o do PJe: formulário `loginForm` ou `kc-form-login` (neste o CPF vai só com dígitos,
-`pje.auth.sso.sso_username`), depois `kc-otp-login-form` com o TOTP (espera a próxima janela se faltarem menos de
+`core.keycloak.sso_username`), depois `kc-otp-login-form` com o TOTP (espera a próxima janela se faltarem menos de
 8 s), depois o callback do JPe. Recusa de senha, senha expirada ou conta bloqueada viram `LoginRejected` com a
-mensagem do SSO (`credential_failure`).
+mensagem do SSO (`core.keycloak.credential_failure`).
 
 ## Ferramentas
 

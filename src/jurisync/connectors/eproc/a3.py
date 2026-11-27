@@ -63,13 +63,13 @@ def eproc_message(url, text):
             except UnicodeDecodeError:
                 continue
             if values:
-                return values[0]
+                return keycloak.mask(values[0])
     soup = BeautifulSoup(text, "html.parser")
     # Keycloak's own error slots only: eproc login pages also carry maintenance notices in generic alert boxes.
-    box = soup.find(id=re.compile(r"^(input-error.*|kc-error-message)$")) or soup.find(
-        class_=re.compile(r"(alert-error|kc-feedback-text)")
+    box = soup.find(id=re.compile(rf"^(input-error.*|{keycloak.ERROR_MESSAGE})$")) or soup.find(
+        class_=re.compile(rf"(alert-error|{keycloak.FEEDBACK_TEXT})")
     )
-    return " ".join(box.stripped_strings)[:200] if box else ""
+    return keycloak.mask(" ".join(box.stripped_strings))[:200] if box else ""
 
 
 def _keycloak_x509(session, page, mtls_host, signer):
