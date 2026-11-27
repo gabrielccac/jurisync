@@ -111,7 +111,9 @@ def create_server(keys=None):
             "(queues[] says what each queue gave). With queue: that queue only. "
             + intimacao.DESCRIPTION
             + " Rows also "
-            "carry queue, processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "carry queue, cienciaPendente (true in the pending queues; situacao says whether it awaits the ciência or "
+            "the DJEN publication), "
+            "processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
             "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
             + ENVELOPE
             + " Read-only: opens no intimação."
