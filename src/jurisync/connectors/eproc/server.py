@@ -100,6 +100,8 @@ def create_server(keys=None):
                 ),
             )
 
+    QUEUE_DATES = ("requestedAt", "deadlineStart", "deadlineEnd", "sessionStart", "sessionEnd")
+
     def enveloped(result, dates, max_pages=None):
         """The common list envelope, the items' ``dates`` in ISO; ``next`` only when the portal's pager has pages a
         larger maxPages reaches."""
@@ -149,7 +151,7 @@ def create_server(keys=None):
         ] = None,
     ) -> dict[str, Any]:
         result = call(portal, lambda **context: list_notices(queue, **context))
-        return enveloped(result, ("requestedAt", "deadlineStart", "deadlineEnd"))
+        return enveloped(result, QUEUE_DATES)
 
     @server.tool(
         name="eproc_get_counters",
@@ -260,7 +262,8 @@ def create_server(keys=None):
             "metadata.additionalInformation: the Informações Adicionais (justiça gratuita, sigilo, prevenção, valor "
             "da causa...); audiencias and pericias: the process' lists (null where the portal has no such button). "
             "save=true stores each read document (HTML as PDF) in the shared documents folder. timeline[].dateTime, "
-            "metadata.cover.filedAt and audiencias start/end: " + DATES
+            "metadata.cover.filedAt, audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and "
+            "eventos: " + DATES
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -308,6 +311,13 @@ def create_server(keys=None):
             dated(event, "dateTime")
         for hearing in result.get("audiencias") or []:
             dated(hearing, "start", "end")
+        for prazo in result.get("prazos") or []:
+            dated(prazo, "dateTime")
+        block = result.get("ciencia") or {}
+        for row in block.get("intimacoes") or []:
+            dated(row, *QUEUE_DATES)
+        for marker in block.get("eventos") or []:
+            dated(marker, "dateTime")
         return result
 
     return server

@@ -54,12 +54,28 @@ class DatesTest(unittest.TestCase):
             "metadata": {"cover": {"filedAt": "16/07/2026 15:54:12"}},
             "timeline": [{"dateTime": "21/09/2026 12:19:13"}],
             "audiencias": [{"start": "12/05/2027 15:30:00", "end": "12/05/2027 16:30:00"}],
+            "prazos": [{"dateTime": "06/11/2026 10:00:00", "start": "2026-11-07"}],
+            "ciencia": {
+                "estado": "pendente",
+                "intimacoes": [{"requestedAt": "05/11/2026 17:00:38", "deadlineStart": "", "deadlineEnd": ""}],
+                "eventos": [{"eventId": "6", "dateTime": "05/11/2026 17:00:38"}],
+            },
         }
         answer = self.call("eproc_get_process", "fetch_process", result, processNumber="0000001-00.2026.4.04.7200")
         self.assertEqual(answer["metadata"]["cover"]["filedAt"], "2026-07-16T15:54:12")
         self.assertEqual(answer["timeline"][0]["dateTime"], "2026-09-21T12:19:13")
         self.assertEqual(answer["timeline"][0]["dateTimeText"], "21/09/2026 12:19:13")
         self.assertEqual(answer["audiencias"][0]["end"], "2027-05-12T16:30:00")
+        self.assertEqual(answer["prazos"][0]["dateTime"], "2026-11-06T10:00:00")
+        (row,) = answer["ciencia"]["intimacoes"]
+        self.assertEqual((row["requestedAt"], row["requestedAtText"], row["deadlineEnd"]), (
+            "2026-11-05T17:00:38", "05/11/2026 17:00:38", None))  # fmt: skip
+        self.assertEqual(answer["ciencia"]["eventos"][0]["dateTime"], "2026-11-05T17:00:38")
+
+    def test_hearing_notice_rows_carry_session_dates(self):
+        row = {"sessionStart": "12/11/2026 00:00:00", "sessionEnd": "19/11/2026 23:59:00"}
+        (item,) = self.call("eproc_list_intimacoes", "list_notices", {"items": [row]}, queue="hearing_notice")["items"]
+        self.assertEqual((item["sessionStart"], item["sessionEnd"]), ("2026-11-12T00:00:00", "2026-11-19T23:59:00"))
 
 
 if __name__ == "__main__":
