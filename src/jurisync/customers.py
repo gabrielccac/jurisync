@@ -9,7 +9,7 @@ A customer is a directory under ``customers/``. Two files describe its access:
 * ``.env`` (gitignored, the secrets): the values of those variables.
 
 An optional ``settings.toml`` (committed) holds the customer's choices, e.g.
-``[pje] ciencia_on_read = "allow"`` to read pending communications without asking.
+``[pje] ciencia_on_read = "allow"`` (or ``[eproc]``) to read pending communications without asking.
 
 ``JURISYNC_CUSTOMER`` selects the customer for a server process. Its ``.env`` is loaded
 before the shared one, and variables already in the environment always win.
@@ -171,12 +171,15 @@ def settings(name=None):
         return {}
 
 
-def ciencia_on_read(name=None):
-    """PJe: ``ask`` (default) refuses to read a communication whose ciência is pending until the user agrees;
-    ``allow`` reads it and reports that the ciência may have been registered."""
-    value = settings(name).get("pje", {}).get("ciencia_on_read", "ask")
+CIENCIA_SYSTEMS = ("pje", "eproc")
+
+
+def ciencia_on_read(name=None, system="pje"):
+    """``[pje]`` or ``[eproc]`` ``ciencia_on_read``: ``ask`` (default) refuses to read a communication whose ciência
+    is pending until the user agrees; ``allow`` reads it and reports that the ciência may have been registered."""
+    value = settings(name).get(system, {}).get("ciencia_on_read", "ask")
     if value not in CIENCIA_POLICIES:
-        raise ValueError(f"settings.toml [pje] ciencia_on_read must be one of {', '.join(CIENCIA_POLICIES)}")
+        raise ValueError(f"settings.toml [{system}] ciencia_on_read must be one of {', '.join(CIENCIA_POLICIES)}")
     return value
 
 
@@ -246,7 +249,8 @@ def validate(name):
     problems = []
     if not setups and not required:
         problems.append(f"{name}: portals.toml declares no portal and no [env] secrets")
-    for read in (ciencia_on_read, hosted_mode):
+    checks = [functools.partial(ciencia_on_read, system=system) for system in CIENCIA_SYSTEMS]
+    for read in (*checks, hosted_mode):
         try:
             read(name)
         except (ValueError, tomllib.TOMLDecodeError) as error:

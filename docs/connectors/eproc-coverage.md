@@ -19,6 +19,24 @@ connector `src/jurisync/connectors/eproc/` (read-only).
   `retornar_citacao_intimacao_estado`.
 - Login: SSO Keycloak via browser headless (SeleniumBase) + TOTP.
 
+## Ciência ao ler documentos (trava desde 2026-11-27)
+
+`eproc_get_process` lê capa, partes, eventos e inventário sem abrir documento. Com `documentIds`, antes de abrir
+qualquer coisa, o conector lê as filas de pendentes do advogado (`pending`, `pending_urgent`, `pending_agreement`,
+`art334`) e procura o processo nelas:
+
+- processo em fila pendente: recusa com `ciência pending`, nada aberto;
+- filas que não puderam ser lidas até o fim: recusa com `ciência not checked`, nada aberto;
+- em ambos os casos a leitura só acontece com `acknowledgeCiencia=true` (autorização do usuário, agora ou antecipada)
+  ou com `[eproc] ciencia_on_read = "allow"` no `settings.toml` do escritório, e o bloco `ciencia` informa `dada` ou
+  `desconhecida`.
+
+É a mesma regra do PJe e usa o mesmo texto de autorização (`core.ciencia.AUTHORIZATION`).
+
+**Mudança de decisão.** Em 09/11/2026 ficou decidido que os documentos do Eproc eram sempre abertos, com o aviso
+`dada` depois da leitura. A exploração ao vivo do JURI-21 mostrou que o aviso chega depois de um fato irreversível
+(a ciência inicia o prazo), e em 27/11/2026 a regra passou a ser a do PJe, a pedido do Gabriel.
+
 ## Relação de Processos (implementado em 2026-10-21)
 
 Chamada MCP: `eproc_list_processes({"portal": "trf6-1g"})`.
