@@ -252,9 +252,10 @@ def parse_lawyer_process_report(html, base_url):
                 "caseClass": text(cells[2]),
                 # "Autores Principais" and "Réu(s)" hold the active and passive poles; the procedural role (Autor,
                 # Requerente on TRF4, Apelante on TRF6...) is not on this page, only in the process (parties[].role).
+                # role (AUTOR/REU) is the old name of pole, kept for one cycle (docs/padroes.md).
                 "parties": [
-                    {"pole": pole, "name": name}
-                    for index, pole in ((3, "active"), (4, "passive"))
+                    {"pole": pole, "role": role, "name": name}
+                    for index, pole, role in ((3, "active", "AUTOR"), (4, "passive", "REU"))
                     for name in cells[index].stripped_strings
                 ],
                 "location": text(cells[5]),
@@ -342,7 +343,8 @@ def _document(anchor, base_url):
 
 # The portal's cover-page field ids (txtNumProcesso, txtClasse, ...) mapped to the connector's field names. On a
 # 2nd-degree court "judge" is the Relator(a). An id not mapped here goes under "extra" with its raw name, so the
-# keys of the cover itself are the same on every court.
+# keys of the cover itself are the same on every court. LEGACY_COVER_KEYS repeats a renamed field under its old raw
+# key for one cycle (docs/padroes.md).
 COVER_FIELDS = {
     "NumProcesso": "number",
     "Classe": "caseClass",
@@ -356,6 +358,7 @@ COVER_FIELDS = {
     "OrgaoColegiado": "collegiateBody",
     "NumRequis": "paymentRequestNumber",
 }
+LEGACY_COVER_KEYS = ("MagistradoAtuante", "OrgaoColegiado", "NumRequis")
 
 
 def _cover(soup):
@@ -365,6 +368,8 @@ def _cover(soup):
         if value:
             if key in COVER_FIELDS:
                 cover[COVER_FIELDS[key]] = value
+                if key in LEGACY_COVER_KEYS:
+                    cover[key] = value
             else:
                 extra[key] = value
     fieldset = soup.select_one("#fldCapa")

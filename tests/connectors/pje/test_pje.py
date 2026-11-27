@@ -112,6 +112,9 @@ class PjeChecks(unittest.TestCase):
                 "other_interested": ["PERITA FICTICIA - CPF: 987******00 (PERITO)"],
             },
         )
+        with patch.object(client.search, "search_process", return_value={"success": True, "timeline": []}):
+            empty = client.fetch_process("1024853-70.2023.4.01.3400", portal="trf1-1g", session=Mock())
+        self.assertEqual(empty["parties"], [])
 
     def test_download_pattern_finds_every_viewer_shape(self):
         self.assertTrue(search.DOWNLOAD_PATTERN.search("window.open('/pje/documento/download/TRF5/x/1/'"))
