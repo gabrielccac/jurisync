@@ -488,13 +488,13 @@ def _attention(session, panel, *, panel_url, portal):
             parsed = parse_process_list_page(body, base_url)
             complete = bool((parsed.get("pagination") or {}).get("complete"))
             queues.append(("open_deadlines", parsed.get("items", []), complete, None))
+    # A row an earlier queue already listed is the same intimação; rows of one queue are all kept (the checkbox value
+    # of the open-deadline queue is the process, shared by its intimações: JFRS and TJMG, 27/11/2026).
     items, seen = [], set()
     for queue, rows, _, _ in queues:
-        for row in _situated(rows, queue):
-            key = row.get("id") or (row.get("number"), row.get("deadlineEvent"), row.get("requestedAt"))
-            if key not in seen:
-                seen.add(key)
-                items.append(row)
+        keys = [(row.get("number"), row.get("deadlineEvent"), row.get("requestedAt")) for row in rows]
+        items.extend(row for row, key in zip(_situated(rows, queue), keys, strict=True) if key not in seen)
+        seen.update(keys)
     problems = [problem for *_, problem in queues if problem]
     return {
         "success": any(not problem for *_, problem in queues),

@@ -111,6 +111,15 @@ class AttentionListTest(unittest.TestCase):
         self.assertEqual(len(result["items"]), 2)
         self.assertEqual(result["items"][0]["queue"], "pending")
 
+    def test_intimacoes_of_one_process_sharing_its_checkbox_value_are_all_kept(self):
+        # The open-deadline checkbox holds the process id: two intimações of one process share it.
+        same = queue(
+            row("0000002-08.2026.8.13.0024", "77", "13/11/2026 00:00:00", "27/11/2026 23:59:59"),
+            row("0000002-08.2026.8.13.0024", "77", "13/11/2026 00:00:00", "27/11/2026 23:59:59"),
+        )
+        result, _ = listing(q=queue(), o=same)
+        self.assertEqual(len(result["items"]), 2)
+
     def test_an_unreadable_open_deadline_page_is_not_complete(self):
         result, _ = listing(q=PENDING, o="<html>erro</html>")
         self.assertTrue(result["success"])  # the open-deadline page had no table: zero rows, not complete
