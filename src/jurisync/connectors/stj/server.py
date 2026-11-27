@@ -14,8 +14,7 @@ from curl_cffi.requests.exceptions import RequestException
 from pydantic import Field
 
 from jurisync import customers, portals
-from jurisync.connectors.djen import client as djen
-from jurisync.connectors.djen.normalize import normalize_item
+from jurisync.connectors import djen
 from jurisync.connectors.stj import client, parsers
 from jurisync.core import certificate
 from jurisync.core.ciencia import NONE, report
@@ -271,7 +270,7 @@ def list_inbox(session, days, include_text):
     window = djen.fetch_page(number, uf, (end - timedelta(days=days)).isoformat(), end.isoformat(), "STJ")
     notices = []
     for raw in window["items"]:
-        item = normalize_item(raw)
+        item = djen.normalize_item(raw)
         notice = {
             key: item[key]
             for key in ("id", "numero_processo_mascara", "tipo_comunicacao", "tipo_documento", "data_disponibilizacao")
