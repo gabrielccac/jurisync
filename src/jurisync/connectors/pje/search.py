@@ -483,7 +483,7 @@ def fetch_timeline_pages(session, first_html, detail_url, download_pattern, base
     page = 1
     diagnostics = []
     visited_urls = set()
-    repeated_contract = False
+    repeated_contract = exhausted = False
     form = BeautifulSoup(first_html, "html.parser").find("form", id="divTimeLine")
     latest_state = None
     if marker_present and not contract:
@@ -531,16 +531,17 @@ def fetch_timeline_pages(session, first_html, detail_url, download_pattern, base
         next_contract = parse_timeline_contract(incoming_html, detail_url)
         contract = next_contract
         if ajax_page and before == after:
+            # The AJAX timeline answers its last page again once there is nothing older: the timeline ended.
             diagnostics.append({"code": "pagination_no_new_events", "page": page})
             contract = None
-            repeated_contract = True
+            exhausted = True
             break
     capped = bool(contract and page >= max_pages)
     if capped:
         diagnostics.append({"code": "pagination_limit", "maxPages": max_pages})
     parsed = parse_pagination(first_html, timeline)
     more_pages = bool(contract) and not repeated_contract
-    complete = not marker_present and not more_pages and not capped and not repeated_contract
+    complete = exhausted or (not marker_present and not more_pages and not capped and not repeated_contract)
     parsed.update(
         {
             "page": page,
