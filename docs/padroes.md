@@ -167,8 +167,9 @@ Helpers em `jurisync.core.responses`:
   vários repartem `TEXT_BUDGET`, com uma `note` mandando ler menos documentos por chamada.
   `textTruncated` continua para clientes antigos.
 - **Listas:** `listing(items, key=..., total=..., more=...)` dá `{<key>: [...], returned, total, next}`; `total` é o
-  que o portal informa (ou `null`) e `next` são os argumentos que, repetidos na mesma tool, leem o resto
-  (`{"maxPages": 10}`), ou `null` quando esta tool não lê mais. Conector novo usa o envelope; os antigos migram
+  que o portal informa (ou `null`, também quando um filtro local o torna desconhecido) e `next` são os argumentos a
+  trocar na mesma chamada, mantendo todos os outros como estavam, para ler o resto (`{"maxPages": 10}`), ou `null`
+  quando esta tool não lê mais. A chamada nova lê de novo desde a primeira página. Conector novo usa o envelope; os antigos migram
   quando forem tocados, mantendo as chaves que as skills já leem. Já migradas: `pje_list_intimacoes`,
   `pje_list_processes`, `eproc_list_intimacoes` e `eproc_list_processes` (`responses.ENVELOPE` é a frase da
   descrição).

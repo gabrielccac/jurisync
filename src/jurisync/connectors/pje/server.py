@@ -128,14 +128,19 @@ def _more_pages(boxes, max_pages):
 
 
 def _inbox_envelope(result, max_pages):
-    """The common list envelope over the rows of every inbox (rows stay inside their inbox)."""
+    """The common list envelope over the rows of every inbox (rows stay inside their inbox). A reader that knows the
+    portal's own count (PJe-JT) sets ``total``; otherwise the inboxes' totals add up, or the bucket's counter when
+    the region tree leads to fewer rows."""
     boxes = result.get("inboxes") or []
-    total = sum(box.get("total") or 0 for box in boxes)
-    shortfall = (result.get("bucketShortfall") or {}).get("bucketCount") or 0
+    if "total" in result:
+        total = result["total"]
+    else:
+        shortfall = (result.get("bucketShortfall") or {}).get("bucketCount") or 0
+        total = max(sum(box.get("total") or 0 for box in boxes), shortfall)
     return {
         **result,
         "returned": sum(len(box.get("rows") or []) for box in boxes),
-        "total": max(total, shortfall),
+        "total": total,
         "next": _more_pages(boxes, max_pages),
     }
 
@@ -143,11 +148,17 @@ def _inbox_envelope(result, max_pages):
 def _acervo_envelope(result, max_pages):
     """The common list envelope of the Acervo: ``next`` reads the jurisdictions left unread, then deeper pages."""
     items = result.get("items") or []
-    if result.get("notRead"):
-        more = {"regions": result["notRead"], "maxPages": max_pages}
-    else:
-        boxes = [box for node in result.get("jurisdictions") or [] for box in node.get("boxes") or [node]]
-        more = _more_pages(boxes, max_pages)
+    boxes = [box for node in result.get("jurisdictions") or [] for box in node.get("boxes") or [node]]
+    deeper = _more_pages(boxes, max_pages)
+    if not result.get("notRead"):
+        return {**result, **listing(items, total=result.get("total"), more=deeper)}
+    more = {"regions": result["notRead"], "maxPages": max_pages}
+    if deeper:
+        result = {
+            **result,
+            "note": f"{result.get('note', '')} Boxes already read have pages left: after notRead, call again without "
+            f"regions and with maxPages={deeper['maxPages']}.".strip(),
+        }
     return {**result, **listing(items, total=result.get("total"), more=more)}
 
 
