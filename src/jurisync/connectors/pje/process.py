@@ -322,7 +322,11 @@ def _expedientes(items, limit=30, *, complete=True):
     if items is None:
         return None
     items = [
-        {**{k: v for k, v in item.items() if k not in ("atoPath", "respostaPath")}, "temAto": bool(item["atoPath"])}
+        {
+            **{k: v for k, v in item.items() if k not in ("atoPath", "respostaPath")},
+            "temAto": bool(item["atoPath"]),
+            **({"cienciaDada": item["ciencia"]} if "ciencia" in item else {}),
+        }
         for item in items
     ]
     return {
