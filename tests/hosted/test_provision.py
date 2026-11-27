@@ -276,7 +276,7 @@ class ApplyTest(ProvisionCase):
         [passwords] = Path(self.server()["JURISYNC_HOSTED_DIR"]).glob("new-user-passwords-*.txt")
         email, tenant, password = passwords.read_text(encoding="utf-8").splitlines()[0].split("\t")
         self.assertEqual(store.authenticate(email, password), tenant)
-        self.assertTrue(store.must_change(email))
+        self.assertFalse(store.must_change(email))  # nobody is forced to change the password
         assert_mode(self, passwords, 0o600)
         text = "\n".join(self.said)
         for value in [*VALUES, password]:
