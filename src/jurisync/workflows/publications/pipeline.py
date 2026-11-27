@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from jurisync.connectors.juridiq.api import JuridiqApi, payload_data
+from jurisync.core.errors import summary
 from jurisync.core.file_lock import locked
 
 ASSESSMENT_STATUSES = ("sufficient", "no_action", "needs_context", "review")
@@ -555,9 +556,10 @@ class PublicationPipeline:
             batch = ids[start : start + READ_BATCH]
             try:
                 self.api.mark_publications_read(batch)
-            except Exception as error:  # Record and continue: unread publications are retried next run.
-                self.result["readPending"] += [{"publicationId": item, "reason": str(error)} for item in batch]
-                self.result["errors"].append({"publicationIds": batch, "stage": "mark_read", "error": str(error)})
+            except Exception as error:  # noqa: BLE001 - Record and continue: unread publications are retried next run.
+                reason = summary(error)
+                self.result["readPending"] += [{"publicationId": item, "reason": reason} for item in batch]
+                self.result["errors"].append({"publicationIds": batch, "stage": "mark_read", "error": reason})
             else:
                 for item in batch:
                     self.state.publications[item] = {
@@ -607,16 +609,17 @@ class PublicationPipeline:
                 continue
             try:
                 self._process(group, by_id[primary_id], templates, event_keys)
-            except Exception as error:  # One publication's failure must not stop the batch.
-                self._mark([primary_id], status="error", error=str(error))
+            except Exception as error:  # noqa: BLE001 - One publication's failure must not stop the batch.
+                reason = summary(error)
+                self._mark([primary_id], status="error", error=reason)
                 for duplicate_id in group["duplicatePublicationIds"]:
                     self._mark(
                         [duplicate_id],
                         status="error",
-                        error=f"primary publication failed: {error}",
+                        error=f"primary publication failed: {reason}",
                         primaryPublicationId=primary_id,
                     )
-                result["errors"].append({"publicationId": primary_id, "error": str(error)})
+                result["errors"].append({"publicationId": primary_id, "error": reason})
             self.state.save()
         self._mark_read()
         return result

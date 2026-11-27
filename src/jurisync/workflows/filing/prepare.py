@@ -233,7 +233,7 @@ def _petition_candidates(path):
 def _safe_classify(name, text, jev_options=None, rules=None):
     try:
         return classify_document(name, text, rules=rules, **(jev_options or {}))
-    except Exception as error:  # Classification problems become review items, not crashes.
+    except Exception as error:  # noqa: BLE001 - Classification problems become review items, not crashes.
         return {
             "role": "supporting",
             "type": None,
@@ -319,7 +319,7 @@ def _prepare_row(entry, index, directory, unlabeled_petition, seen_hashes, profi
         if path.suffix.lower() in (".doc", ".docx"):
             try:
                 row["path"] = str(convert_word_to_pdf(path, directory / "converted" / sha256 / f"{path.stem}.pdf"))
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - becomes a review item (_failure keeps it safe)
                 row["review"] = f"PDF conversion failed: {_failure(error)}"
         else:
             row["review"] = "Document is not a PDF or convertible Word file"
@@ -339,7 +339,7 @@ def _prepare_row(entry, index, directory, unlabeled_petition, seen_hashes, profi
                     row["review"] = "; ".join(
                         filter(None, [row.get("review"), "Confirm split PDF page ranges before upload"])
                     )
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - becomes a review item (_failure keeps it safe)
                     row["review"] = f"PDF splitting needs review: {_failure(error)}"
         row["path"] = _stage_upload(row["path"], directory)
         for part in row.get("parts") or []:

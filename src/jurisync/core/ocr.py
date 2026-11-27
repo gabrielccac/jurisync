@@ -97,7 +97,7 @@ def ocr_pdf(content, page_count, *, max_pages=None, seconds=None, clock=time.mon
         pages = wanted[start : start + PAGES_PER_CALL]
         try:
             result = pdf_inspector.process_pdf_with_ocr_bytes(content, page_numbers=pages, offline=True)
-        except Exception as error:  # the PDFium/ONNX runtime or a model is missing, or the PDF is unreadable
+        except Exception as error:  # noqa: BLE001 - the PDFium/ONNX runtime or a model is missing, or the PDF is unreadable
             log.info("OCR unavailable: %s", type(error).__name__)
             if not parts:
                 return None

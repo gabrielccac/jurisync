@@ -237,7 +237,7 @@ def each_variant(read, variants=OAB_VARIANTS):
     def attempt(variant):
         try:
             return read(variant)
-        except Exception as error:  # reported per variant; the caller decides whether a partial result is usable
+        except Exception as error:  # noqa: BLE001 - reported per variant; the caller decides whether a partial result is usable
             return error
 
     with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_VARIANTS, len(variants))) as pool:

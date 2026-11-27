@@ -53,15 +53,15 @@ def dismiss_alert(driver):
     """Accept a blocking JS alert and return its text (some portals confirm new devices this way)."""
     try:
         alert = driver.switch_to.alert
-    except Exception:
+    except Exception:  # noqa: BLE001 - no alert open (or the driver went away)
         return ""
     try:
         text = alert.text
-    except Exception:
+    except Exception:  # noqa: BLE001 - the alert closed itself
         text = ""
     try:
         alert.accept()
-    except Exception:
+    except Exception:  # noqa: BLE001 - the alert closed itself
         pass
     return text
 
@@ -73,9 +73,9 @@ def has(driver, selector, timeout=0.5):
         dismiss_alert(driver)
         try:
             return driver.wait_for_element(selector, timeout=timeout) is not None
-        except Exception:
+        except Exception:  # noqa: BLE001 - a probe: any driver failure means not there
             return False
-    except Exception:
+    except Exception:  # noqa: BLE001 - a probe: any driver failure means not there
         return False
 
 
@@ -157,10 +157,10 @@ def submit_captcha(driver):
         except _selenium_errors().UnexpectedAlertPresentException:
             try:
                 driver.switch_to.alert.accept()
-            except Exception:
+            except Exception:  # noqa: BLE001 - the alert closed itself
                 pass
             time.sleep(1.5)
-        except Exception:
+        except Exception:  # noqa: BLE001 - retried; the last attempt raises
             if attempt == 4:
                 raise RuntimeError("Could not submit the eproc CAPTCHA") from None
 

@@ -10,9 +10,8 @@ Portal access is in `portals.toml` (no values). Values are in the gitignored
 JURISYNC_CUSTOMER=elisandra uv run python -m jurisync.customers elisandra
 ```
 
-DJEN: `djen-searches.json` holds her search payload (OAB 61216/RS, nomeAdvogado
-"ELISANDRA BECKER", tribunal STJ, meio D); pass it to `djen_search_comunicacoes` with a
-date window. A 03/09 to 03/10/2026 run returned 4 STJ communications for one REsp.
+DJEN: `settings.toml` `[[djen.searches]]` holds her saved search (`stj-diario`: OAB 61216/RS, tribunal STJ);
+`djen_search_saved` runs it for a date window (pass `meio='D'` for the Diário only). A 03/09 to 03/10/2026 run returned 4 STJ communications for one REsp.
 
 Planned: Tramitação Inteligente (native MCP) and a customer skill for the DJEN intimações
 (her own payload), with manual task creation via chat. DJEN is still down, so that
