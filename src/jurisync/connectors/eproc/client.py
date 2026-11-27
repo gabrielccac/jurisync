@@ -108,6 +108,13 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "exame_listar",  # the process' perícias (JFRS)
     *HEARING_ACTIONS,
     arvore.TREE_ACTION,  # lists the documents only; "Download Completo" schedules a job and stays out
+    # Lists of eproc/listas.py: the list pages only, never their row links or buttons.
+    "caixa_mensagem_listar",
+    "eprocsysadm_listar",
+    "peticao_inicial_preparada_listar",
+    "movimentacao_preparada_listar",
+    "guia_pagamento_custas_gerados_listar",
+    "guia_pagamento_depositos_judiciais_gerados_listar",
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"

@@ -12,7 +12,8 @@ connector `src/jurisync/connectors/eproc/` (read-only).
   realizadas, cada uma com a lista de conciliação), `eproc_list_processes` (Relação de
   Processos do advogado; baixados ficam de fora em todo portal salvo `includeArchived`, filtro `prazo`) e
   `eproc_get_process` (eventos, `prazos` de cada intimação, informações adicionais, audiências e perícias,
-  documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026.
+  documentos até 5, `save` opcional). Formatos conferidos no TJMG e na JFRS em 27/11/2026. Mais as listas
+  read-only da seção "Listas do menu" abaixo.
 - Ações no allowlist (`READ_ACTIONS`/`AJAX_ACTIONS`): as 2 filas + `painel_adv_listar`,
   `processo_pesquisa_rapida`, `processo_selecionar`, `processo_consulta_listar`,
   `relatorio_processo_procurador_listar`, `arvore_documento_listar`,
@@ -137,6 +138,77 @@ Hashes e links assinados não são expostos no resultado. A suíte Eproc contém
 
 `parse_panel()` descobre as ações anunciadas; `require_route` permite somente as rotas
 mapeadas. Novas telas continuam exigindo parser e inclusão explícita no allowlist.
+
+## Listas do menu (JURI-21, item 7; 27/11/2026)
+
+Código em `src/jurisync/connectors/eproc/listas.py`. Cada tool pega o link que o menu do painel autenticado anuncia,
+faz o mesmo GET (ou o POST do filtro da própria lista, como a página faz) e lê a tabela. Nenhuma abre linha, botão ou
+formulário que age; cada ação lida entra explicitamente em `READ_ACTIONS`, e os testes provam que as ações de
+abrir/escrever das mesmas telas continuam bloqueadas. Portal cujo menu não tem a ação responde o erro
+`[not_available]` (o portal não oferece a lista; não é falha da leitura). Todas usam o envelope de lista
+(`returned`, `total`, `next`) e datas ISO por `responses.dated` (o texto do portal em `<campo>Text` por um
+ciclo, como no #34; nas colunas por cabeçalho, `<cabeçalho>Text`).
+
+### Mensagens: `eproc_list_mensagens`
+
+- Ação: `caixa_mensagem_listar` ("Caixa de Mensagens"). `status='unread'` (padrão) é o GET da página, que já abre no
+  filtro "NÃO lidas"; `status='read'` posta o formulário `frmMensagemLista` com `rdoFiltro=lidas`, como o rádio da
+  página faz. O resultado confere que o portal aplicou o filtro pedido.
+- Itens `mensagens`: `sentAt` (ISO), `title`, `text` (o texto como a lista mostra, CPF mascarado); `total` vem da
+  legenda "(N registros)". Uma página que não cabe no orçamento de 60k sai cortada, com
+  `next = {status, page, offset}`.
+- Ciência/estado: a mensagem só é aberta por `caixa_mensagem_vizualizar` (link do título, com `id_mensagem` e
+  `status=naoLidas`), que nunca é requisitado e fica fora do allowlist. A listagem em si não marca como lida: no TRF4
+  2G a visão "NÃO lidas" mostrava 24 mensagens, a mais antiga de 2012, ainda não lidas. É inferência das capturas;
+  confirmar ao vivo que o contador não cai depois de uma leitura da lista.
+- Capturas: TRF4 2G (24 linhas) e TJRJ (1) com tabela; TJSC 1G/2G e TRF6 sem tabela (nenhuma não lida), lido como
+  lista vazia. Não há paginação nas capturas. Com paginador (`selInfraPaginacaoSuperior`), `page` lê a página pedida
+  reenviando o formulário com `hdnInfraPaginaAtual`, como o paginador faz, e `next` aponta a próxima página, com uma
+  `note`; o conector confere que o portal mostrou a página pedida. Sem paginador e com a legenda contando mais
+  mensagens do que a página mostrou, a resposta traz uma `note` dizendo que o resto não foi lido.
+
+### Paradas do sistema e suspensões de prazo: `eproc_list_paradas`
+
+- Ação: `eprocsysadm_listar` ("Paradas do Sistema" no menu, "Relatório de Paradas" na página), um GET.
+- `paradas`: `description` (Descrição Motivo Evento), `prorrogacao` (Houve Prorrogação de Prazo?: `true`/`false`,
+  `null` se vier outro texto), `start`/`end` (ISO); `total` é o `hdnInfraNroItens` da página. `suspensoes`
+  (tabela "Lista de suspensões cadastradas"): `date` (ISO) e `type` (Fechamento, Abertura).
+- Os links de cada linha (`eprocsysadm_consultar`, `eprocsysadm_certidao`) não são seguidos e ficam fora do
+  allowlist. Serve para conferir se o termo final de um prazo mudou; o conector não recalcula prazo.
+- Capturas: TRF4 2G, TRF6 2G, TJSC 1G/2G com 19 a 78 paradas e 30 a 44 suspensões, tudo numa página; TJRJ sem
+  tabela (lista vazia). Layout de colunas diferente é erro, não lista vazia.
+
+### Petições preparadas: `eproc_list_peticoes_preparadas`
+
+- Ações: `peticao_inicial_preparada_listar` (`kind='iniciais'`, "Petições Iniciais pendentes de distribuição",
+  formulário `frmPeticaoInicial`) e `movimentacao_preparada_listar` (`kind='movimentacoes'`, "Movimentações
+  pendentes", `frmMovimentacaoFutura`), um GET cada.
+- Os botões Distribuir (`peticao_inicial_preparada_distribuir`) e Peticionar (`movimentacao_preparada_peticionar`)
+  postam o mesmo formulário com outra ação; nenhum deles entra no allowlist, e os testes provam que ficam bloqueados.
+- Itens `peticoes`: `processNumber` (o primeiro CNJ da linha, ou `null`) e `columns` (cada célula sob o texto do
+  cabeçalho, datas ISO, CPF mascarado), sem as colunas de seleção e de ações. Uma linha com número de células
+  diferente do cabeçalho vai com `columns: null` e as células sem rótulo em `cells`, e `notes` avisa.
+- Lista vazia só quando a página diz: "Nenhum registro encontrado" (ou o mesmo para guia, petição, movimentação),
+  legenda com 0 registros, ou a área da lista (`#divInfraAreaTabela`) desenhada vazia num formulário sem campo de
+  filtro, que é como as cinco capturas vieram. Formulário sem tabela fora disso é `[portal_error]`
+  `unsupported_peticoes_preparadas_layout` (ou `unsupported_custas_layout`). Toda resposta das duas listas traz em
+  `notes` que a lista não foi validada ao vivo com linhas reais.
+- **Falta validar com linhas.** As cinco capturas vieram vazias (formulário sem tabela), então o parser lê por
+  `<th>` em vez de colunas fixas; confirmar os cabeçalhos num portal com rascunho e então fixar os campos.
+
+### Guias de custas e depósitos: `eproc_list_custas`
+
+- Ações: `guia_pagamento_custas_gerados_listar` (`kind='custas'`, menu Custas > "Guias geradas pelo usuário") e
+  `guia_pagamento_depositos_judiciais_gerados_listar` (`kind='depositos'`, menu Depósitos Judiciais > "Guias geradas
+  pelo usuário"), um GET cada. Só TRF4 e TRF6 têm esses itens no menu; nos demais a tool responde `[not_available]`
+  sem requisitar nada. O TJRJ usa sistemas próprios (`tjrj_custas`, `tjrj_bb`, GRERJ), fora desta tool.
+- Não lê "Guias geradas para um processo" (`processo_custas_consultar`) nem "Consultar/gerar guias"
+  (`processo_depositos_judiciais_consultar`): são as telas que geram guia. Ficam fora do allowlist.
+- Itens `guias`: `processNumber` e `columns` por cabeçalho, como nas preparadas.
+- **Inferido, sem captura da página.** O explorador não abriu essas listas; o parser supõe o padrão das listas infra
+  (formulário que posta para a própria ação, `table.infraTable`). Página sem esse formulário, ou que pede filtro e
+  não mostra tabela, é erro, não lista vazia (regra de vazio das preparadas).
+  Validar ao vivo no TRF4/TRF6, inclusive se a lista exige filtro (datas) antes de mostrar linhas.
 
 ## Features planejadas
 

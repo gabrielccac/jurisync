@@ -29,6 +29,16 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
+from jurisync.connectors.eproc.listas import (
+    CUSTAS,
+    MAX_MESSAGE_PAGES,
+    MESSAGE_FILTERS,
+    PREPARED,
+    list_custas,
+    list_messages,
+    list_paradas,
+    list_prepared,
+)
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -279,6 +289,97 @@ def create_server(keys=None):
             ),
         )
         return enveloped(result, ("lastEventAt", "filedAt"), maxPages)
+
+    @server.tool(
+        name="eproc_list_mensagens",
+        title="List Eproc messages",
+        description=(
+            "Read the lawyer's Caixa de Mensagens (court notices sent through the portal), unread or read. Only the "
+            "list is read: no message is opened, since opening one marks it read. "
+            "status picks the portal's own filter; page is the portal's page (0-based) and offset continues a page cut "
+            "to fit the answer: follow next. notes says when the portal has rows this call could not reach. "
+            "Rows: sentAt (ISO), title, text as the list shows it (CPFs masked). "
+            + ENVELOPE
+            + " "
+            + DATES
+            + " Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_mensagens(
+        portal: Portal,
+        status: Annotated[
+            Literal[tuple(MESSAGE_FILTERS)],
+            Field(description="'unread': não lidas (the portal's default view); 'read': lidas."),
+        ] = "unread",
+        page: Annotated[
+            int, Field(ge=0, le=MAX_MESSAGE_PAGES - 1, description="Portal page to read (0-based), from next.page.")
+        ] = 0,
+        offset: Annotated[int, Field(ge=0, description="Messages of that page to skip, from next.offset.")] = 0,
+    ) -> dict[str, Any]:
+        return call(portal, lambda **context: list_messages(status, page, offset, **context))
+
+    @server.tool(
+        name="eproc_list_paradas",
+        title="List Eproc system outages and deadline suspensions",
+        description=(
+            "Read the portal's Relatório de Paradas: system outages, whether each one extended deadlines "
+            "(prorrogação de prazo), and the dates deadlines were suspended. Use it to check whether a deadline's "
+            'final day moved; the portal\'s own "Final Prazo" is what the queues show. One page, no parameters. '
+            "paradas: description, prorrogacao (true/false, null when the portal says neither), start, end (ISO); "
+            "suspensoes: date (ISO), type. " + ENVELOPE + " " + DATES + " Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_paradas(portal: Portal) -> dict[str, Any]:
+        return call(portal, list_paradas)
+
+    @server.tool(
+        name="eproc_list_peticoes_preparadas",
+        title="List Eproc prepared filings",
+        description=(
+            "List what the lawyer prepared in the portal and has not filed yet: petições iniciais pendentes de "
+            "distribuição or movimentações pendentes (petições intercorrentes). A draft left here was not filed, so a "
+            "deadline may be at risk. Only the list is read; nothing is distributed or filed. "
+            "kind picks the list; one page. "
+            "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). An empty list is reported only when the page says so; another layout is an error. "
+            "notes flags that this list was not checked against real rows and any row whose cells did not match the "
+            "headers (kept unlabelled in cells). " + ENVELOPE + " " + DATES + " Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_peticoes_preparadas(
+        portal: Portal,
+        kind: Annotated[
+            Literal[tuple(PREPARED)],
+            Field(
+                description="'iniciais': petições iniciais pendentes de distribuição; 'movimentacoes': movimentações pendentes."
+            ),
+        ] = "iniciais",
+    ) -> dict[str, Any]:
+        return call(portal, lambda **context: list_prepared(kind, **context))
+
+    @server.tool(
+        name="eproc_list_custas",
+        title="List Eproc generated payment guias",
+        description=(
+            "List the guias the user already generated in the portal: custas, or depósitos judiciais. A portal whose "
+            "menu has no such list answers not_available. Nothing is generated or paid. "
+            "kind picks the list; one page. "
+            "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). An empty list is reported only when the page says so; another layout is an error. "
+            "notes flags that this list was not checked against real rows and any row whose cells did not match the "
+            "headers (kept unlabelled in cells). " + ENVELOPE + " " + DATES + " Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_custas(
+        portal: Portal,
+        kind: Annotated[
+            Literal[tuple(CUSTAS)],
+            Field(description="'custas': guias de custas; 'depositos': guias de depósito judicial."),
+        ] = "custas",
+    ) -> dict[str, Any]:
+        return call(portal, lambda **context: list_custas(kind, **context))
 
     @server.tool(
         name="eproc_get_process",
