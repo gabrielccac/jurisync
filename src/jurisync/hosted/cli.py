@@ -504,11 +504,6 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
     apply_parser.add_argument("--user-passwords", help="arquivo 0600 das senhas iniciais (padrão: na pasta de dados)")
     apply_parser.add_argument("--replace-renewed", action="store_true", help=REPLACE_RENEWED_HELP)
 
-    plugin_parser = provision.add_parser("plugin", help="cópia de um plugin do escritório apontando para o servidor")
-    plugin_parser.add_argument("source", help="pasta do plugin, ex. plugins/victor")
-    plugin_parser.add_argument("--url", required=True, help="https://<host>: /tribunais/mcp e um por sistema de gestão")
-    plugin_parser.add_argument("--out", required=True)
-
     run = commands.add_parser("serve")
     run.add_argument("--base-url", required=True, help="endereço público, ex. https://mcp.exemplo.com.br")
     run.add_argument("--host", default="127.0.0.1")
@@ -620,10 +615,6 @@ def main(argv=None, *, say=print, ask_secret=getpass.getpass):
             replace_renewed=args.replace_renewed,
             say=say,
         )
-    elif args.command == "provision" and args.action == "plugin":
-        from jurisync.hosted import provision as provisioning
-
-        provisioning.remote_plugin(args.source, args.url, args.out, say=say)
     elif args.command == "serve":
         serve(args)
     return 0

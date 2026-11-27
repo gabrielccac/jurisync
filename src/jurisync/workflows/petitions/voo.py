@@ -7,7 +7,6 @@ usually some weeks after the month ends. The file is cached on this machine. A m
 
 import csv
 import datetime as dt
-import io
 import os
 from pathlib import Path
 
@@ -123,14 +122,3 @@ def _record(row):
         "fonte": "ANAC, Voo Regular Ativo (VRA), dados abertos de "
         f"{row['Referência'][3:10] if row.get('Referência') else ''}; horários de Brasília (UTC-3)",
     }
-
-
-def records_text(records):
-    out = io.StringIO()
-    for item in records:
-        out.write(
-            f"{item['empresa']} {item['voo']}: {item['origem']} → {item['destino']} | prevista "
-            f"{item['partida_prevista']} → {item['chegada_prevista']} | real {item['partida_real'] or '—'} → "
-            f"{item['chegada_real'] or '—'} | {item['situacao']}\n"
-        )
-    return out.getvalue()

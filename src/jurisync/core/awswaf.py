@@ -120,7 +120,7 @@ def _wait_state(driver, wanted, timeout=20):
     while time.monotonic() < deadline:
         try:
             state = driver.execute_script(_STATE_JS)
-        except Exception:
+        except Exception:  # noqa: BLE001 - the page is reloading after the voucher was accepted
             state = {"state": "loading"}  # the page is reloading after the voucher was accepted
         if state.get("state") in wanted:
             return state

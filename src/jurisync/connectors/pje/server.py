@@ -141,7 +141,7 @@ def _fill_job(run_id, stage):
         with sessions.session("trf5-1g") as session:
             filing.run_stage(stage, payload_path=str(payload), checkpoint_path=str(checkpoint), session=session)
         fill_errors.pop(key, None)
-    except BaseException as error:
+    except BaseException as error:  # noqa: BLE001 - background job boundary: the error is kept for pje_get_draft_status
         # The text goes to the calling agent: no URLs, local paths or session tokens.
         fill_errors[key] = sanitize_diagnostics(f"{type(error).__name__}: {error}")[:300]
 
