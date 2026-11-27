@@ -408,7 +408,13 @@ class TjgoGuardTest(unittest.TestCase):
         )
         self.assertTrue(all("QuantidadeRegistrosPagina=500" in p for p in session.paths if "Proprio=1" in p))
         self.assertEqual(([g["grau"] for g in processes["categories"]], processes["activeOnly"]), (["1", "1"], True))
-        for label, expected in (("2º Grau", "2"), ("4ª Câmara Cível", "2"), ("Turma Recursal", None)):
+        for label, expected in (
+            ("Câmara Cível", "2"),
+            ("Seção Cível", "2"),
+            ("Cível", "1"),
+            ("Família - Interior", "1"),
+            ("Turma Recursal", None),
+        ):
             self.assertEqual(tjgo_desk.grau(label), expected, label)
 
     def test_a_type_with_one_process_answers_its_page(self):

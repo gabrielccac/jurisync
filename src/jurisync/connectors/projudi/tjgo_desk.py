@@ -266,16 +266,22 @@ def parse_process_list(html):
     return rows, int(total.group(1)) if total else None
 
 
-SECOND_GRAU = re.compile(r"2º\s*Grau|2o\.?\s*Grau|Segundo Grau|C[âa]mara|Gabinete|Desembargador", re.I)
-FIRST_GRAU = re.compile(r"\bVara\b|Juizado|\bUPJ\b|Ju[íi]zo|CEJUSC|Núcleo", re.I)
+# The home block's serventia types (observed 2026-11-27: "Cível", "UPJ Cível", "Juizado Especial Cível", "Fazenda
+# Pública Mista", "Família - Interior", "Criminal", "Preprocessual", "Câmara Cível", "Seção Cível"): the 2º grau ones
+# name a court body of the Tribunal; a Turma Recursal (the juizados' appeals) is neither.
+SECOND_GRAU = re.compile(
+    r"2º\s*Grau|Segundo Grau|C[âa]mara|Se[çc][ãa]o|[ÓO]rg[ãa]o Especial|Corte Especial|Pleno|Gabinete|Desembargador",
+    re.I,
+)
+NEITHER_GRAU = re.compile(r"Turma Recursal", re.I)
 
 
 def grau(label):
-    """``"2"``/``"1"`` when the serventia type's label tells the instance (TJGO lists both in one home block, the 2º
-    grau as one more type), else None."""
+    """``"2"`` for a type of the Tribunal (TJGO lists both instances in one home block, the 2º grau as one more type),
+    None for a Turma Recursal, else ``"1"``."""
     if SECOND_GRAU.search(label or ""):
         return "2"
-    return "1" if FIRST_GRAU.search(label or "") else None
+    return None if NEITHER_GRAU.search(label or "") or not (label or "").strip() else "1"
 
 
 def situation(item, now=None):
