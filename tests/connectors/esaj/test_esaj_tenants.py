@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import BestAvailableEncryption, pkcs12
 from cryptography.x509.oid import NameOID
 
-from jurisync.connectors.esaj import base, bridge, server
+from jurisync.connectors.esaj import base, bridge, common, documents, server
 from jurisync.core import credentials
 from jurisync.core.session_pool import SessionPool
 
@@ -91,7 +91,7 @@ def test_sessions_are_kept_per_office(monkeypatch):
 
 def test_downloaded_documents_land_in_the_offices_folder(monkeypatch, tmp_path):
     monkeypatch.setenv("JURISYNC_DOCUMENTS_DIR", str(tmp_path))
-    monkeypatch.setattr(base, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
+    monkeypatch.setattr(documents, "document_inventory", lambda *a: [{"documentId": "38", "parameters": "fixture"}])
 
     def fake_request(session, portal, method, path, **kwargs):
         if "getPDF" not in path:
@@ -100,7 +100,7 @@ def test_downloaded_documents_land_in_the_offices_folder(monkeypatch, tmp_path):
         pdf.iter_content.return_value = iter([f"%PDF-{credentials.tenant()}".encode()])
         return pdf
 
-    monkeypatch.setattr(base, "request", fake_request)
+    monkeypatch.setattr(common, "request", fake_request)
     for tenant in ("office-a", "office-b"):
         with credentials.scope(tenant, {}):
             saved = base.document(None, "tjsp-esaj", NUMBER, "38", download=True, read={"estado": "nenhuma"})["savedAs"]
