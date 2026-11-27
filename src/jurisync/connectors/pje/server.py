@@ -133,6 +133,10 @@ def _inbox_envelope(result, max_pages):
     portal's own count (PJe-JT) sets ``total``; otherwise the inboxes' totals add up, or the bucket's counter when
     the region tree leads to fewer rows."""
     boxes = result.get("inboxes") or []
+    for box in boxes:
+        for row in box.get("rows") or []:
+            if "ciencia" in row:
+                row["cienciaDada"] = row["ciencia"]
     if "total" in result:
         total = result["total"]
     else:
@@ -261,7 +265,7 @@ def create_server():
     @server.tool(
         name="pje_get_process",
         title="Get PJe process context",
-        description="Read a PJe process: metadata, parties ([{pole active/passive/other, role, name, taxId}], CPF masked; partiesByPole keeps the old texts per pole for one cycle), timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. audiencias (when the portal has the Audiência tab) lists each hearing: data, hora, tipo, orgaoJulgador, sala, situacao (designada, realizada, cancelada...), acordo, linkSalaVirtual when PJe shows it; the lawyer's hearings across processes come from pje_list_audiencias. expedientes.abertos: not answered, not closed by PJe, and ciência pending or deadline not passed (or not computed yet). pagination.complete is true when every timeline page was read. The timeline is movements, not confirmed publications. Read-only.",
+        description="Read a PJe process: metadata, parties ([{pole active/passive/other, role, name, taxId}], CPF masked; partiesByPole keeps the old texts per pole for one cycle), timeline and document inventory (ids and titles; read texts with pje_read_documents). expedientes lists each communication per recipient with channel, notice date, cienciaDada ({por, em}; ciencia is its old name, kept for one cycle), days, PJe's deadline (limite) and the open ones (abertos); expedientes.complete=false means it was not read in full. pericias (when the portal has the Perícia tab) lists each perícia: data, hora, periciado, valor, perito, situacao; it omits the place, which only the act designating it carries. audiencias (when the portal has the Audiência tab) lists each hearing: data, hora, tipo, orgaoJulgador, sala, situacao (designada, realizada, cancelada...), acordo, linkSalaVirtual when PJe shows it; the lawyer's hearings across processes come from pje_list_audiencias. expedientes.abertos: not answered, not closed by PJe, and ciência pending or deadline not passed (or not computed yet). pagination.complete is true when every timeline page was read. The timeline is movements, not confirmed publications. Read-only.",
         annotations=READ_ONLY,
     )
     def get_process(
@@ -427,7 +431,7 @@ def create_server():
     @server.tool(
         name="pje_list_intimacoes",
         title="List PJe Expedientes inbox rows",
-        description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, ciência date and whether still pending, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. "
+        description="List the communications in one PJe panel bucket, inbox by inbox, up to maxPages of 40 rows each. Each row: expediente id, type, recipient, channel, expedition date, cienciaDada ({por, em}: who gave the ciência and when; ciencia is its old name, kept for one cycle) and cienciaPendente, days, PJe's deadline (limite), process number, last movement; read the act with pje_read_expediente_ato. "
         + intimacao.DESCRIPTION
         + " In PJe the default bucket (0, Pendentes de ciência ou de resposta) is that list: awaiting ciência, ciência given with the deadline running, and no deadline. The others (see pje_get_counters): 1 only awaiting ciência (a Diário/DJEN row there is aguardando_publicacao: PJe shows no Tomar ciência button for it), 2 and 3 ciência given by the recipient or by the system/Diário, deadline running, 4 deadline ended in the last 10 days with no answer (prazo_vencido; outside the default, ask for it), 5 no deadline, 6 answered in the last 10 days. PJe counts as answered only a reply made through Responder: a petition filed through Juntar documentos leaves the expediente pending an answer. processNumber, expedidoDe/expedidoAte and expedienteId run the inbox's own search. inboxes[].complete is true only when every row PJe reports was read. Rows stay in their inboxes; "
         + ENVELOPE

@@ -183,8 +183,13 @@ Helpers em `jurisync.core.responses`:
   (`core.redaction.mask_cpf`). No PJe, as listas mantêm `partes` (texto do painel) e o `pje_get_process` mantém o
   dicionário antigo em `partiesByPole` por um ciclo. O Eproc já usa `role`, `name` e `taxId`; `pole` por enquanto só
   na Relação de Processos.
+- **Ciência pendente:** linha de lista de intimações traz `cienciaPendente` (booleano), como no PJe e no Projudi; no
+  Eproc é `true` nas filas `pending*` e `art334`. Vale para a linha; a trava de ciência vale para o processo
+  inteiro, então uma linha `false` não significa que os documentos do processo podem ser abertos.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
+- **`ciencia`** é só o bloco de estado (`core.ciencia.report`). Quem deu a ciência e quando, por expediente do PJe, é
+  `cienciaDada: {por, em}`; o `ciencia` antigo dessas linhas fica por um ciclo.
 - **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%
   menor), sem mudar o `structuredContent`.
 - Retorno de tool é um `dict` com `success`; texto vindo de portal leva o `notice` de evidência não confiável;
