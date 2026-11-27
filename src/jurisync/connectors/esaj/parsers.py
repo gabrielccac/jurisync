@@ -59,6 +59,8 @@ def messages(html):
                     "messageId": message_id,
                     "sentAt": cells[1].get_text(" ", strip=True),
                     "subject": sanitize_diagnostics(redact_text(cells[2].get_text(" ", strip=True))),
+                    # The mailbox draws an unread message's row as ``tr.msgNaoLida`` (bold).
+                    "naoLida": "msgNaoLida" in (row.get("class") or []),
                 }
             )
     if not page.find("input", attrs={"name": "pag"}) or "Assunto" not in page.get_text():
@@ -66,6 +68,20 @@ def messages(html):
 
         raise EsajParseError("Unrecognized e-SAJ mailbox")
     return result
+
+
+def mailbox_pager(html):
+    """``(last_page_shown, has_next)`` of the mailbox pager (``listaPaginada.do?pag=N`` links and "Próxima")."""
+    numbers, has_next = [], False
+    for link in soup(html).select('a[href*="listaPaginada.do"]'):
+        values = parse_qs(urlsplit(link["href"]).query).get("pag", [])
+        if len(values) != 1 or not values[0].isdigit():
+            continue
+        if link.get_text(" ", strip=True).isdigit():
+            numbers.append(int(values[0]))
+        else:
+            has_next = has_next or "Próxima" in link.get_text(" ", strip=True)
+    return max(numbers, default=None), has_next
 
 
 def process_links(html, prefix):
@@ -93,10 +109,14 @@ def process(html, number):
 
         raise EsajParseError("e-SAJ did not return the requested process detail")
     fields = {}
-    for name in ("classeProcesso", "assuntoProcesso", "foroProcesso", "varaProcesso", "juizProcesso"):
+    for name in FIELDS:
         node = page.find(id=name)
         if node:
-            fields[name] = sanitize_diagnostics(node.get_text(" ", strip=True))
+            fields[name] = sanitize_diagnostics(" ".join(node.get_text(" ", strip=True).split()))
+    for label, name in LABELLED_FIELDS.items():
+        value = labelled(page, label)
+        if value:
+            fields[name] = value
     parties = []
     for row in page.select("#tablePartesPrincipais tr, #tablePartesSecundarias tr"):
         cells = row.find_all("td", recursive=False)
@@ -107,40 +127,197 @@ def process(html, number):
                     "name": sanitize_diagnostics(cells[1].get_text(" ", strip=True)),
                 }
             )
-    return {"processNumber": number, "fields": fields, "parties": parties, "movements": movements(html)}
+    result = {"processNumber": number, "fields": fields, "parties": parties, "movements": movements(html)}
+    tags = header_tags(displayed)
+    if tags:
+        result["tags"] = tags
+    for title, rows in sections(page).items():
+        key = next((key for prefix, key in SECTIONS.items() if title.startswith(prefix)), None)
+        if key:
+            result[key] = rows
+    return result
+
+
+# The detail page's fields by element id: first instance (distribution, control number, area, value) and second
+# (section, judging body, rapporteur, situation, volume/appendix). A field the page lacks is left out.
+FIELDS = (
+    "classeProcesso",
+    "assuntoProcesso",
+    "foroProcesso",
+    "varaProcesso",
+    "juizProcesso",
+    "dataHoraDistribuicaoProcesso",
+    "numeroControleProcesso",
+    "areaProcesso",
+    "valorAcaoProcesso",
+    "situacaoProcesso",
+    "secaoProcesso",
+    "orgaoJulgadorProcesso",
+    "relatorProcesso",
+    "volumeApensoProcesso",
+)
+
+
+# Fields the page shows only under a label, without an id of their own.
+LABELLED_FIELDS = {"Outros assuntos": "outrosAssuntos", "Origem": "origemProcesso"}
+
+
+def labelled(page, label):
+    for node in page.select(".unj-label"):
+        if " ".join(node.get_text(" ", strip=True).split()) == label:
+            value = node.find_next_sibling()
+            if value is not None:
+                return sanitize_diagnostics(" ".join(value.get_text(" ", strip=True).split())) or None
+    return None
+
+
+def header_tags(displayed):
+    """The tags next to the process number ("Tramitação prioritária", "Julgado", "Em grau de recurso"...)."""
+    if displayed is None or displayed.parent is None:
+        return []
+    tags = (" ".join(tag.get_text(" ", strip=True).split()) for tag in displayed.parent.select(".unj-tag"))
+    return list(dict.fromkeys(sanitize_diagnostics(tag) for tag in tags if tag))
+
+
+# Section titles of the detail page (first and second instance) and the key each one gets in the result.
+SECTIONS = {
+    "Petições diversas": "peticoesDiversas",
+    "Incidentes, ações incidentais": "incidentes",
+    "Subprocessos e Recursos": "incidentes",
+    "Apensos": "apensos",
+    "Audiências": "audiencias",
+    "Números de 1ª Instância": "numerosPrimeiraInstancia",
+    "Composição do Julgamento": "composicaoJulgamento",
+    "Julgamentos": "julgamentos",
+}
+
+
+def slug(text):
+    """A header as a lowerCamel key: "Situação do julgamento" -> "situacaoDoJulgamento"."""
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[A-Za-z0-9]+", plain)
+    return "".join(word.lower() if i == 0 else word.capitalize() for i, word in enumerate(words)) or "valor"
+
+
+def section_rows(tables):
+    """The rows of one section's tables as dicts keyed by its header row (``tr.label``); a section without one has no
+    rows. A row linking a process carries its ``processNumber`` and ``codigo``."""
+    headers, rows = [], []
+    for table in tables:
+        for tr in table.find_all("tr"):
+            if tr.find_parent("table") is not table:
+                continue
+            nodes = tr.find_all(["th", "td"], recursive=False)
+            cells = [" ".join(node.get_text(" ", strip=True).split()) for node in nodes]
+            heading = "label" in (tr.get("class") or []) or (nodes and all(node.name == "th" for node in nodes))
+            if heading and not headers and any(cells):
+                headers = [slug(cell) for cell in cells]
+                continue
+            # A row that does not fit the header is not data: "Não há ..." or the notes printed under a block.
+            if not any(cells) or len(cells) != len(headers):
+                continue
+            row = {key: sanitize_diagnostics(value) or None for key, value in zip(headers, cells, strict=True)}
+            number = CNJ.search(" ".join(cells))
+            if number:
+                row["processNumber"] = number.group(0)
+            link = tr.select_one('a[href*="show.do"]')
+            code = parse_qs(urlsplit(link["href"]).query).get("processo.codigo", [None])[0] if link else None
+            if code:
+                row["codigo"] = code
+            rows.append(row)
+    return rows
+
+
+def sections(page):
+    """``{title: rows}`` of the detail page's titled blocks (``h2`` headings): the plain tables between one heading and
+    the next. Tables with an id or a class (parties, CDAs, layout, messages) belong to other readers."""
+    result, title, tables = {}, None, []
+    for node in page.find_all(["h2", "table"]):
+        if node.name == "h2":
+            if title and tables:
+                result[title] = section_rows(tables)
+            title, tables = " ".join(node.get_text(" ", strip=True).split()), []
+        elif title and not node.get("id") and not node.get("class"):
+            tables.append(node)
+    if title and tables:
+        result[title] = section_rows(tables)
+    return result
 
 
 def movements(html):
     """Movements of the full table; the "last movements" table repeats its first rows, so it is read only alone."""
     page = soup(html)
     table = page.find(id="tabelaTodasMovimentacoes") or page.find(id="tabelaUltimasMovimentacoes")
-    rows = table.select("tr") if table is not None else page.select("tr.containerMovimentacao")
+    # The second instance names its rows movimentacaoProcesso.
+    selector = "tr.containerMovimentacao, tr.movimentacaoProcesso"
+    rows = table.select("tr") if table is not None else page.select(selector)
     result = []
     for row in rows:
         cells = row.find_all("td", recursive=False)
         if len(cells) < 2:
             continue
-        docs = []
-        for a in row.select("a[onclick]"):
-            match = re.search(
-                r"validarAberturaIntimacaoNaoRecebida\([^,]+,[^,]+,\s*['\"]?\w+['\"]?,\s*['\"]?(\d+)", a["onclick"]
-            )
-            if match:
-                docs.append(
-                    {
-                        "documentId": match[1],
-                        "title": sanitize_diagnostics(a.get_text(" ", strip=True)),
-                        "accessStatus": "flow_required",
-                    }
-                )
         result.append(
             {
                 "date": cells[0].get_text(" ", strip=True),
                 "text": sanitize_diagnostics(cells[-1].get_text(" ", strip=True)),
-                "documents": docs,
+                "documents": movement_documents(row),
             }
         )
     return result
+
+
+# The movement's document link: ``validarAberturaIntimacaoNaoRecebida(event, this, '<process code>', <movement
+# sequence>, '<document URL>' | '#liberarAutoPorSenha')``. The number is the movement's sequence, not a document.
+RECEIPT_CHECK = re.compile(
+    r"validarAberturaIntimacaoNaoRecebida\([^,]+,[^,]+,\s*['\"]?\w+['\"]?,\s*['\"]?(\d+)['\"]?\s*(?:,\s*['\"]([^'\"]*))?"
+)
+
+
+def link_document_id(target):
+    """``cdDocumento`` of a movement's document URL (``abrirDocumentoVinculadoMovimentacao.do``), or None.
+
+    Only that URL names the document: the second instance's ``#?cdDocumento=N`` links repeat the movement sequence.
+    """
+    parts = urlsplit(target or "")
+    if not parts.path.endswith("/abrirDocumentoVinculadoMovimentacao.do"):
+        return None
+    values = parse_qs(parts.query).get("cdDocumento", [])
+    return values[0] if len(values) == 1 and re.fullmatch(r"\d+", values[0]) else None
+
+
+def movement_documents(row):
+    """The documents a movement links, once each: ``documentId`` is the document code of the link's URL
+    (``cdDocumento``), ``sequence`` the movement's sequence from the receipt check, when the row carries it.
+
+    The portal draws each document twice (icon and title) with the same URL. A link that opens only the
+    process-password dialog names no document: it is kept with ``documentId`` None so its presence is not lost.
+    The document viewer numbers the same documents differently (live on TJSP, 2026-11-27: none of 8 movement codes
+    was in a 70-document inventory), so these codes identify a movement's document, not a viewer entry.
+    """
+    found = {}
+    for link in row.select("a[href], a[onclick]"):
+        check = RECEIPT_CHECK.search(link.get("onclick", ""))
+        document_id = link_document_id(link.get("href")) or link_document_id(check[2] if check else None)
+        if not document_id and not check:
+            continue
+        key = document_id or f"sequence:{check[1]}"
+        entry = found.setdefault(
+            key,
+            {
+                "documentId": document_id,
+                "sequence": check[1] if check else None,
+                "title": "",
+                "accessStatus": "flow_required",
+            },
+        )
+        title = sanitize_diagnostics(link.get_text(" ", strip=True))
+        if len(title) > len(entry["title"]):
+            entry["title"] = title
+        if entry["sequence"] is None and check:
+            entry["sequence"] = check[1]
+    return list(found.values())
 
 
 def movements_on_demand(html):
@@ -152,7 +329,9 @@ def movement_page(html):
     """``(movements, next_cursor)`` of one ``carregarMovimentacoesAjax.do`` answer.
 
     The first page carries the cursor of the second in ``#cursorMovimentacoesPaginado``; every later page carries the
-    cursor of the next one in the hidden row ``#trCursorMovimentacoes``. No cursor: this was the last page.
+    cursor of the next one in the hidden row ``#trCursorMovimentacoes``. The second instance puts it on its "Mais" link
+    (``#linkMaisRecolherMovimentacoes``, first page) and on ``#metaPaginaMovimentacoes`` when
+    ``data-tem-mais-paginas`` is true. No cursor: this was the last page.
     """
     page = soup(html)
     if page.select_one(".mensagemErroMovimentacoes"):
@@ -164,8 +343,15 @@ def movement_page(html):
     if not cursor:
         row = page.find(id="trCursorMovimentacoes")
         cursor = row.get("data-cursor") if row is not None else None
-    if row := page.find(id="trCursorMovimentacoes"):
-        row.decompose()
+    if not cursor:
+        link = page.find(id="linkMaisRecolherMovimentacoes")
+        cursor = link.get("data-cursor") if link is not None else None
+    meta = page.find(id="metaPaginaMovimentacoes")
+    if not cursor and meta is not None and meta.get("data-tem-mais-paginas") == "true":
+        cursor = meta.get("data-cursor")
+    for node in (page.find(id="trCursorMovimentacoes"), meta):
+        if node is not None:
+            node.decompose()
     return movements(str(page)), cursor or None
 
 
@@ -268,12 +454,45 @@ FOUND = re.compile(r"(\d+)\s+Processos?\s+encontrados?", re.I)
 DATE = re.compile(r"\d{2}/\d{2}/\d{4}")
 
 
+def listing_row(row, prefix):
+    """One result row of a consultation list (first or second instance), or None when it links another application."""
+    link = row.select_one("a.linkProcesso[href]")
+    parts = urlsplit(link["href"]) if link else None
+    if parts is None or not parts.path.endswith(f"/{prefix}/show.do"):
+        return None
+    query = parse_qs(parts.query)
+    number = CNJ.search(link.get_text(" ", strip=True))
+
+    def text(selector):
+        found = row.select_one(selector)
+        return sanitize_diagnostics(" ".join(found.get_text(" ", strip=True).split())) if found else None
+
+    # The second instance names the same blocks differently (nomeParticipante, assuntoProcesso, dataLocalDistribuicao).
+    received = text(".dataLocalDistribuicaoProcesso, .dataLocalDistribuicao") or ""
+    date = DATE.search(received)
+    place = received[date.end() :] if date else received
+    return {
+        "processNumber": number.group(0) if number else None,
+        "codigo": query.get("processo.codigo", [None])[0],
+        "foro": query.get("processo.foro", [None])[0],
+        "parte": {
+            "papel": (text(".tipoDeParticipacao") or "").rstrip(":").strip() or None,
+            "nome": text(".nomeParte, .nomeParticipante"),
+        },
+        "classe": text(".classeProcesso"),
+        "assunto": text(".assuntoPrincipalProcesso, .assuntoProcesso"),
+        "recebidoEm": date.group(0) if date else None,
+        "local": place.strip(" -") or None,
+    }
+
+
 def process_listing(html, prefix):
     """``(items, total)`` of a consultation result list (``#listagemDeProcessos``, one ``divProcesso...`` per case).
 
     Each item carries what the row shows: number, code and foro of its detail link, the party the search matched with
     its role, class, main subject, the date it was received and where. ``total`` is the portal's own count
-    ("N Processos encontrados"), None when the page shows none. A page that is neither the list nor the consultation's
+    ("N Processos encontrados"; ``#contadorDeProcessos`` in the first instance, an unnamed ``.resultadoPaginacao`` in
+    the second), None when the page shows none. A page that is neither the list nor the consultation's
     "no information" answer is an error, so an unexpected page is never read as an empty list.
     """
     page = soup(html)
@@ -284,37 +503,31 @@ def process_listing(html, prefix):
         from jurisync.connectors.esaj.base import EsajParseError
 
         raise EsajParseError("e-SAJ did not return a process list")
-    counter = page.find(id="contadorDeProcessos")
+    counter = page.find(id="contadorDeProcessos") or page.select_one(".resultadoPaginacao")
     found = FOUND.search(counter.get_text(" ", strip=True)) if counter else None
-    items = []
-    for row in listing.find_all("div", id=re.compile(r"^divProcesso")):
-        link = row.select_one("a.linkProcesso[href]")
-        parts = urlsplit(link["href"]) if link else None
-        if parts is None or not parts.path.endswith(f"/{prefix}/show.do"):
-            continue
-        query = parse_qs(parts.query)
-        number = CNJ.search(link.get_text(" ", strip=True))
+    rows = (listing_row(row, prefix) for row in listing.find_all("div", id=re.compile(r"^divProcesso")))
+    return [item for item in rows if item], int(found.group(1)) if found else None
 
-        def text(selector, node=row):
-            found = node.select_one(selector)
-            return sanitize_diagnostics(" ".join(found.get_text(" ", strip=True).split())) if found else None
 
-        received = text(".dataLocalDistribuicaoProcesso") or ""
-        date = DATE.search(received)
-        place = received[date.end() :] if date else received
-        items.append(
-            {
-                "processNumber": number.group(0) if number else None,
-                "codigo": query.get("processo.codigo", [None])[0],
-                "foro": query.get("processo.foro", [None])[0],
-                "parte": {
-                    "papel": (text(".tipoDeParticipacao") or "").rstrip(":").strip() or None,
-                    "nome": text(".nomeParte"),
-                },
-                "classe": text(".classeProcesso"),
-                "assunto": text(".assuntoPrincipalProcesso"),
-                "recebidoEm": date.group(0) if date else None,
-                "local": place.strip(" -") or None,
-            }
-        )
-    return items, int(found.group(1)) if found else None
+def incident_parents(html):
+    """``[(cdProcesso, cdForoProcesso)]`` of the rows with an "Incidentes e recursos" link: the children the list
+    loads on demand (``obterProcessosFilhos.do``)."""
+    result = []
+    for link in soup(html).select("a[id^=incidentesRecursos]"):
+        code, foro = link.get("cdprocesso", ""), link.get("cdforoprocesso", "")
+        if re.fullmatch(r"[A-Za-z0-9]{1,40}", code) and re.fullmatch(r"\d{1,6}", foro):
+            result.append((code, foro))
+    return list(dict.fromkeys(result))
+
+
+def incident_children(html, prefix):
+    """The rows ``obterProcessosFilhos.do`` answers: the same row shape, without the list around it."""
+    rows = (listing_row(row, prefix) for row in soup(html).select(".home__lista-de-processos"))
+    return [item for item in rows if item]
+
+
+def csrf_token(html):
+    """The page's ``_csrf`` value, which its own scripts send as ``X-CSRF-Token``; "" when absent."""
+    node = soup(html).select_one('input[name="_csrf"]')
+    value = node.get("value", "") if node is not None else ""
+    return value if re.fullmatch(r"[A-Za-z0-9-]{1,80}", value) else ""
