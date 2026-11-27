@@ -23,11 +23,16 @@ from jurisync.connectors.eproc.auth import login, portal_totp_account
 from jurisync.connectors.eproc.certificate import cert_login
 from jurisync.connectors.eproc.documents import read_selected_documents
 from jurisync.connectors.eproc.parsers import (
+    additional_information_request,
+    parse_additional_information,
     parse_event_response,
     parse_lawyer_process_report,
     parse_panel,
     parse_process_detail,
+    parse_process_exams,
+    parse_process_hearings,
     parse_process_list_page,
+    process_links,
     report_page_request,
 )
 from jurisync.core import credentials, intimacao
@@ -78,6 +83,9 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "acessar_documento",
     "acessar_documento_implementacao",
     "processo_selecionar_pagina",  # TJRS pages the event table through the process page instead of ajax
+    "processo_montar_informacoes_adicionais",  # the process page's "Informações Adicionais" (do_log=0)
+    "audiencia_listar",  # the process' audiências
+    "exame_listar",  # the process' perícias (JFRS)
 }
 # Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
 NOT_FOUND_ACTION = "processo_consultar"
@@ -734,6 +742,43 @@ def _event_pages(session, detail_url, detail, initial_events, *, portal):
     return events, pagination, diagnostics
 
 
+def _process_extras(session, detail_body, detail_url, *, portal):
+    """``(additionalInformation, audiencias, pericias, diagnostics)`` from the lists the process page links to.
+
+    One request each; ``audiencias``/``pericias`` are None when the page has no such button. A list that fails is
+    reported in diagnostics and does not stop the read; a login page answer expires the session (nothing was opened).
+    """
+    base_url = portals.eproc(portal).base_url
+    diagnostics = []
+
+    def read(url, data, action, name):
+        url = urljoin(detail_url, url)
+        require_route(url, {action}, portal=portal)
+        response, body = request(session, "POST" if data is not None else "GET", url, data=data, portal=portal)
+        error = _response_error(response, body)
+        if error == "session_expired":
+            raise SessionExpired("eproc session expired")
+        if error:
+            diagnostics.append(f"{name}_failed")
+            return None
+        return body
+
+    information = {}
+    information_request = additional_information_request(detail_body, base_url)
+    if information_request:
+        body = read(*information_request, "processo_montar_informacoes_adicionais", "additional_information")
+        information = parse_additional_information(body) if body is not None else {}
+    links = process_links(detail_body, base_url)
+    hearings = exams = None
+    if links.get("hearings"):
+        body = read(links["hearings"], None, "audiencia_listar", "audiencias")
+        hearings = parse_process_hearings(body) if body is not None else None
+    if links.get("exams"):
+        body = read(links["exams"], None, "exame_listar", "pericias")
+        exams = parse_process_exams(body) if body is not None else None
+    return information, hearings, exams, diagnostics
+
+
 def fetch_process(
     process_number,
     scope="page",
@@ -820,6 +865,9 @@ def fetch_process(
             session, detail_url, detail, detail.get("events", []), portal=portal
         )
         selected_events = _latest(events) if scope == "latest" else events
+        information, hearings, exams, extra_diagnostics = _process_extras(
+            session, detail_body, detail_url, portal=portal
+        )
         documents = {document.get("id"): document for document in detail.get("documents", []) if document.get("id")}
         for event in events:
             for document in event.get("documents", []):
@@ -861,14 +909,17 @@ def fetch_process(
                 # Counts cover every loaded event page, not just the first one.
                 "eventCount": len(events),
                 "documentCount": len(document_inventory),
+                "additionalInformation": information,
             },
             "parties": detail.get("parties", []),
             "timeline": selected_events,
             "documentInventory": document_inventory,
             "attachments": attachments,
             "pagination": pagination,
-            "diagnostics": event_diagnostics,
+            "diagnostics": event_diagnostics + extra_diagnostics,
             "prazos": ciencia.deadlines(events),
+            "audiencias": hearings,
+            "pericias": exams,
             "ciencia": block,
         }
         return _redact(result)

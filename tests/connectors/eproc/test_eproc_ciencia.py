@@ -289,6 +289,95 @@ class CienciaNoticeTest(unittest.TestCase):
         )
 
 
+# The process page's "Informações Adicionais" legend and action buttons (TJMG and JFRS, 27/11/2026).
+EXTRAS = (
+    '<legend id="legInfAdicional" onclick="carregarInformacoesAdicionais(\'controlador.php?acao=processo_montar_'
+    "informacoes_adicionais&num_processo=1&do_log=0&hash=i', {\n    'id_pessoa_entidade': '1,2',\n    'pagina': '',\n"
+    '    \'ia_aberta\': false\n});">Informações Adicionais</legend><div id="fldInformacoesAdicionais_content"></div>'
+    '<a class="infraButton" href="controlador.php?acao=audiencia_listar&amp;num_processo=1&amp;hash=a">Audiência</a>'
+    '<a class="infraButton" href="controlador.php?acao=exame_listar&amp;num_processo=1&amp;hash=x">Perícia</a>'
+)
+INFORMATION = (
+    '<div class="row"><div class="col"><div class="row"><span class="col">Justiça Gratuita:</span>'
+    '<span class="col font-weight-bold"> Deferida</span></div></div><div class="col"><div class="row">'
+    '<span class="col">Valor da Causa:</span><span class="col"> R$ 1.000,00 </span></div></div>'
+    '<div class="col"><div class="row"><span class="col">Chave Processo:</span><span class="col"></span></div></div></div>'
+)
+HEARINGS = (
+    '<table class="infraTable"><caption>Lista de Audiências (1 registro):</caption><tr><th>Sala</th>'
+    "<th>Data/Hora Início</th><th>Data/Hora Fim</th><th>Descrição da Audiência</th><th>Magistrado</th>"
+    '<th>Realizador</th><th>Situação</th></tr><tr class="infraTrClara"><td>Sala 1</td><td>12/05/2027 15:30</td>'
+    '<td>12/05/2027 16:30</td><td><td>JUIZ DE TESTE<td><input type="hidden" value="" /></td><td>DESIGNADA</td></tr>'
+    "</table>"
+)
+EXAMS = (
+    '<table class="infraTable" id="tblExamesProcesso"><tr><th>Periciado</th><th>Data-Hora designada</th><th>Sala</th>'
+    '<th>Perito</th><th>Especialidade</th></tr><tr class="infraTrClara"><td>FULANO</td>'
+    "<td>08/01/2027  08:40 -  09:00</td><td>Sala de Perícias 01</td><td>PERITO TESTE</td><td>Médico</td></tr></table>"
+)
+
+
+class ProcessExtrasTest(unittest.TestCase):
+    def test_additional_information_hearings_and_exams_come_with_the_process(self):
+        portal = Portal(
+            detail=detail() + EXTRAS,
+            citacao_intimacao_pendente_listar=queue(OTHER),
+            processo_montar_informacoes_adicionais=INFORMATION,
+            audiencia_listar=HEARINGS,
+            exame_listar=EXAMS,
+        )
+        result = read(portal, None)
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            result["metadata"]["additionalInformation"],
+            {"Justiça Gratuita": "Deferida", "Valor da Causa": "R$ 1.000,00"},
+        )
+        self.assertEqual(
+            result["audiencias"],
+            [
+                {
+                    "location": "Sala 1",
+                    "start": "12/05/2027 15:30",
+                    "end": "12/05/2027 16:30",
+                    "description": "",
+                    "judge": "JUIZ DE TESTE",
+                    "conductedBy": "",
+                    "status": "DESIGNADA",
+                }
+            ],
+        )
+        self.assertEqual(result["pericias"][0]["scheduledAt"], "08/01/2027 08:40 - 09:00")
+        self.assertEqual(result["pericias"][0]["specialty"], "Médico")
+        self.assertEqual(portal.opened, [])
+        self.assertEqual(result["diagnostics"], [])
+
+    def test_a_process_without_the_buttons_asks_nothing_more(self):
+        portal = Portal(citacao_intimacao_pendente_listar=queue(OTHER))
+        result = read(portal, None)
+        self.assertEqual((result["audiencias"], result["pericias"]), (None, None))
+        self.assertEqual(result["metadata"]["additionalInformation"], {})
+        self.assertNotIn("audiencia_listar", portal.actions)
+
+    def test_a_failing_list_is_a_diagnostic_and_a_login_page_expires_the_session(self):
+        portal = Portal(
+            detail=detail() + EXTRAS,
+            citacao_intimacao_pendente_listar=queue(OTHER),
+            processo_montar_informacoes_adicionais=Reply("erro", status=500),
+            audiencia_listar=HEARINGS,
+            exame_listar=EXAMS,
+        )
+        result = read(portal, None)
+        self.assertEqual(result["diagnostics"], ["additional_information_failed"])
+        self.assertEqual(len(result["audiencias"]), 1)
+        expired = Portal(
+            detail=detail() + EXTRAS,
+            processo_montar_informacoes_adicionais='<input name="username">',
+        )
+        with self.assertRaises(SessionExpired):
+            read(expired, ["20"])
+        self.assertEqual(expired.opened, [])
+
+
 class TimelineMarkerTest(unittest.TestCase):
     def test_awaiting_events_read_status_reference_and_days(self):
         events = [

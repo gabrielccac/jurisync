@@ -548,3 +548,95 @@ def parse_process_detail(html, base_url):
     else:
         result["eventRequest"] = None
     return result
+
+
+def additional_information_request(html, base_url):
+    """``(url, data)`` the process page posts to load its "Informações Adicionais" (its legend's
+    ``carregarInformacoesAdicionais('url', {...})``), or None when the page has none."""
+    found = re.search(r"carregarInformacoesAdicionais\(\s*'([^']+)'\s*,\s*\{(.*?)\}\s*\)", html or "", re.S)
+    if not found:
+        return None
+    data = dict(re.findall(r"'(\w+)'\s*:\s*'([^']*)'", found.group(2)))
+    data.update(re.findall(r"'(\w+)'\s*:\s*(true|false)\b", found.group(2)))
+    return _href(found.group(1), base_url), data
+
+
+def parse_additional_information(html):
+    """``{label: value}`` of the "Informações Adicionais" fragment (justiça gratuita, sigilo, prevenção, valor da causa,
+    doença grave, Juízo 100% Digital...); labels without a value are left out."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    result = {}
+    for row in soup.select("div.row"):
+        spans = row.find_all("span", recursive=False)
+        if len(spans) < 2:
+            continue
+        label, value = text(spans[0]).rstrip(":").strip(), text(spans[1])
+        if label and value:
+            result.setdefault(label, value)
+    return result
+
+
+def _flat_cells(row):
+    """The texts of a row's cells, also when the portal leaves ``<td>`` unclosed (audiência lists of TJMG, 27/11/2026),
+    which a lenient parser nests one cell inside the other."""
+    parts = re.split(r"<td\b[^>]*>", str(row), flags=re.I)[1:]
+    return [text(BeautifulSoup(part, "html.parser")) for part in parts]
+
+
+def _table_items(html, fields):
+    """Rows of the first list whose headers are ``fields`` keys (lowercase), as dicts with the mapped names."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for table in soup.select("table.infraTable"):
+        headers = [text(th).casefold() for th in table.select("th")]
+        if sum(header in fields for header in headers) < 2:
+            continue
+        items = []
+        for row in table.select("tr.infraTrClara, tr.infraTrEscura"):
+            cells = _flat_cells(row)
+            item = {
+                fields.get(header, header): cells[index] for index, header in enumerate(headers) if index < len(cells)
+            }
+            items.append({key: value for key, value in item.items() if key})
+        return items
+    return []
+
+
+HEARING_FIELDS = {
+    "sala": "location",
+    "data/hora início": "start",
+    "data/hora fim": "end",
+    "descrição da audiência": "description",
+    "magistrado": "judge",
+    "realizador": "conductedBy",
+    "situação": "status",
+}
+EXAM_FIELDS = {
+    "periciado": "examinee",
+    "data-hora designada": "scheduledAt",
+    "sala": "location",
+    "perito": "expert",
+    "especialidade": "specialty",
+}
+
+
+def parse_process_hearings(html):
+    """The process' audiências (Audiência button, ``audiencia_listar``): location, start, end, description, judge,
+    conductedBy, status."""
+    return _table_items(html, HEARING_FIELDS)
+
+
+def parse_process_exams(html):
+    """The process' perícias (Perícia button, ``exame_listar``, JFRS): examinee, scheduledAt, location, expert,
+    specialty."""
+    return _table_items(html, EXAM_FIELDS)
+
+
+def process_links(html, base_url):
+    """The process page's audiência and perícia list links, when its action bar shows them."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    links = {}
+    for key, action in (("hearings", "audiencia_listar"), ("exams", "exame_listar")):
+        anchor = soup.select_one(f'a[href*="acao={action}&"]')
+        if anchor is not None:
+            links[key] = _href(anchor.get("href"), base_url)
+    return links

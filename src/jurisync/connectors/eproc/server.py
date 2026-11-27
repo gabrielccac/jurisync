@@ -153,8 +153,10 @@ def create_server(keys=None):
             "or 'desconhecida' (opened, queues not checked; motivo says why), with intimacoes and an aviso. Always "
             "tell the user ciencia.aviso and note it in the task. prazos: the deadline of every intimação event "
             "(eventId, refersTo, party, days, status aberto/fechado/aguardando_abertura, closedBy, start and end ISO "
-            "dates, djenAvailable/djenPublished). save=true stores each read document (HTML as PDF) in the shared "
-            "documents folder."
+            "dates, djenAvailable/djenPublished). metadata.additionalInformation: the Informações Adicionais "
+            "(justiça gratuita, sigilo, prevenção, valor da causa...); audiencias and pericias: the process' lists "
+            "(null where the portal has no such button). save=true stores each read document (HTML as PDF) in the "
+            "shared documents folder."
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
