@@ -85,6 +85,37 @@ def _plain_parties(cell):
     return parties
 
 
+def _court(cell):
+    """The whole juízo after "Juízo:" ("BHE 6 V.C. J" at TJMG, "SCUABI011" at JFSC), up to the next line break."""
+    lines = [line.strip() for line in cell.get_text("\n", strip=True).split("\n") if line.strip()]
+    for index, line in enumerate(lines):
+        found = re.match(r"Ju[íi�]zo\s*:\s*(.*)", line, re.I)
+        if found:
+            return found.group(1).strip() or (lines[index + 1] if index + 1 < len(lines) else "")
+    return ""
+
+
+_DOCUMENT_LINE = re.compile(r"\(?\s*[\d./-]+\s*\)?")
+_CELL_LABELS = {"juízo:", "juizo:", "colegiado:", "partes:"}
+
+
+def _labelled_parties(cell):
+    """Parties drawn under bold role headers (``<b>Autor</b><br>NAME<br>(document)<br>X<b>Réu</b>...``, TJMG and
+    JFRS queues, 27/11/2026); the document number is left out."""
+    parties, role = [], None
+    for string in cell.find_all(string=True):
+        value = " ".join(string.split())
+        if not value or string.find_parent("a") or string.find_parent("script"):
+            continue
+        if string.find_parent("b"):
+            role = None if value.casefold() in _CELL_LABELS else value
+            continue
+        known = any(party["name"] == value for party in parties)
+        if role and value != "X" and not _DOCUMENT_LINE.fullmatch(value) and not known:
+            parties.append({"role": role, "name": value})
+    return parties
+
+
 def _hearing_row(row, cells, base_url):
     """A row of "Intimações de Pauta" (TJSC 2G, 16/11/2026): Processo, Assunto, Evento, Data Sessão, Sequencial,
     Composição prevista, Visualizado. It has no class or deadline columns; the session period takes their place."""
@@ -92,7 +123,6 @@ def _hearing_row(row, cells, base_url):
     link = process_cell.select_one('a[href*="acao=processo_selecionar"]')
     if not link:
         return None
-    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
     lines = [line.strip() for line in process_cell.get_text("\n", strip=True).split("\n") if line.strip()]
     collegiate = next(
         (lines[i + 1] for i, line in enumerate(lines[:-1]) if line.casefold().rstrip(": ") == "colegiado"), ""
@@ -104,7 +134,7 @@ def _hearing_row(row, cells, base_url):
         "id": None,
         "number": text(link),
         "url": _href(link.get("href"), base_url),
-        "court": court.group(1) if court else "",
+        "court": _court(process_cell),
         "collegiate": collegiate,
         "parties": _plain_parties(process_cell),
         "caseClass": "",
@@ -140,13 +170,12 @@ def _process_row(row, base_url):
         name = text(part)
         if name and name not in {p["name"] for p in parties}:
             parties.append({"role": part.get("data-parte", "").strip(), "name": name})
-    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
     return {
         "id": (row.select_one("input.infraCheckbox[value]") or {}).get("value"),
         "number": text(link),
         "url": _href(link.get("href"), base_url),
-        "court": court.group(1) if court else "",
-        "parties": parties,
+        "court": _court(process_cell),
+        "parties": parties or _labelled_parties(process_cell),
         "caseClass": text(cells[offset + 1]),
         "subject": text(cells[offset + 2]),
         "deadlineEvent": text(cells[offset + 3]),
