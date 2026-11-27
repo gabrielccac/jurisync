@@ -104,6 +104,7 @@ class HearingListTest(unittest.TestCase):
             item["parties"],
             [{"role": "AUTOR", "name": "FULANO DE TAL"}, {"role": "RÉU", "name": "BANCO EXEMPLO S.A."}],
         )
+        self.assertEqual(item["processNumber"], item["number"])
 
     def test_an_empty_list_is_complete_and_another_page_is_not(self):
         self.assertEqual(parse_hearing_list(page(), BASE)["pagination"]["totalItems"], 0)

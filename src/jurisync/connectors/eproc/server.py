@@ -119,7 +119,7 @@ def create_server(keys=None):
             "(queues[] says what each queue gave). With queue: that queue only. "
             + intimacao.DESCRIPTION
             + " Rows also "
-            "carry queue, number, court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "carry queue, processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
             "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
             + ENVELOPE
             + " Read-only: opens no intimação."
@@ -171,9 +171,9 @@ def create_server(keys=None):
             "eproc_get_process. Read-only. "
             "Cost: one page of each list by default; maxPages reads more of long lists; kind reads only one of the "
             "two. "
-            "Each item: kind (audiencia or conciliacao), processNumber, court (juízo), parties, event (what was "
-            "scheduled), location, dateTime and endDateTime (ISO), observation; number, start, end (as the portal "
-            "shows them) and date stay for one cycle. lists[] says what each list gave (problem when it could not be "
+            "Each item: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
+            "parties, event (what was scheduled), location, dateTime and endDateTime (ISO), observation; start and "
+            "end (as the portal shows them) and date stay for one cycle. lists[] says what each list gave (problem when it could not be "
             "read). " + ENVELOPE
         ),
         annotations=READ_ONLY,
@@ -220,8 +220,9 @@ def create_server(keys=None):
             "List the authenticated lawyer's processes (Relação de Processos); not a court-wide search. Every portal "
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
             "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
-            "movement. Rows: number, parties (pole active/passive; the procedural role is in "
-            "eproc_get_process), class, subject, last event, dates, claim value. pagination.totalItems is "
+            "movement. Rows: processNumber (also number, its old name), parties (pole active/passive; the "
+            "procedural role is in eproc_get_process), class, subject, last event, dates, claim value. "
+            "pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread. "
             + ENVELOPE
             + " Details and documents: eproc_get_process. Read-only."

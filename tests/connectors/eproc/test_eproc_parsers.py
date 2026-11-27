@@ -140,6 +140,7 @@ class EprocParserTests(unittest.TestCase):
         self.assertTrue(parsed["pagination"]["complete"])
         item = parsed["items"][0]
         self.assertEqual(item["number"], "0000001-23.2026.8.24.0001")
+        self.assertEqual(item["processNumber"], item["number"])
         self.assertEqual((item["court"], item["collegiate"]), ("GCIV0202", "2ª Câmara de Direito Civil"))
         self.assertEqual(
             item["parties"],
