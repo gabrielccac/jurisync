@@ -250,7 +250,9 @@ class JurisyncServer(MCPServer):
             started, code = time.monotonic(), "unexpected"
             try:
                 result = await super().call_tool(name, arguments, context)
-                code = errors.code_of(error_text(result)) if getattr(result, "is_error", False) else ""
+                code = (
+                    (errors.code_of(error_text(result)) or "tool_error") if getattr(result, "is_error", False) else ""
+                )
                 return compact_text(name, result)
             except UnexpectedToolError as error:
                 log.error("tool %s failed unexpectedly (ref=%s)", name, calls.current(), exc_info=error.__cause__)
@@ -272,12 +274,15 @@ class JurisyncServer(MCPServer):
                 )
 
 
-def portal_key(arguments):
-    """The portal a call names, only when it is a known key (any other argument value never reaches a log)."""
-    from jurisync import portals
+# The shape of a portal key (trf1-1g, tjms-eproc-1g): starts with a letter, so a CPF or a process number never matches.
+# The core does not know the portals; the hosted Office, which does, records only keys it knows.
+PORTAL_KEY = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 
+
+def portal_key(arguments):
+    """The portal a call names, only when it has the shape of a key (any other argument value never reaches a log)."""
     value = (arguments or {}).get("portal") if isinstance(arguments, dict) else None
-    return value if isinstance(value, str) and value in portals.PORTALS else ""
+    return value if isinstance(value, str) and len(value) <= 32 and PORTAL_KEY.fullmatch(value) else ""
 
 
 def error_text(result):

@@ -223,7 +223,7 @@ class Office(MCPServer):
             if getattr(result, "is_error", False):
                 error = "ToolResult"
                 content = getattr(result, "content", None) or []
-                code = errors.code_of(getattr(content[0], "text", "") if content else "")
+                code = errors.code_of(getattr(content[0], "text", "") if content else "") or "tool_error"
             return result
         except BaseException as exc:
             cause = exc.__cause__ or exc

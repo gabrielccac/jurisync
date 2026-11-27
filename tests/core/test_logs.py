@@ -9,6 +9,8 @@ import unittest
 from typing import Any
 from unittest import mock
 
+from mcp.types import CallToolResult, TextContent
+
 from jurisync.core import errors, logs
 from jurisync.core.mcp import JurisyncServer, tool_errors
 
@@ -65,10 +67,22 @@ class CallLinesTest(unittest.TestCase):
         self.assertIsInstance(last["duration_ms"], int)
         self.assertNotIn("0000000-00", json.dumps(lines))
 
-    def test_a_portal_that_is_not_a_known_key_is_left_out(self):
+    def test_a_portal_value_without_the_shape_of_a_key_is_left_out(self):
         built = server()
-        lines = captured(lambda: asyncio.run(built.call_tool("exemplo_get_process", {"portal": "x", "number": "1"})))
-        self.assertNotIn("portal", lines[-1])
+        for value in ("000.000.000-00", "0000000-00.0000.0.00.0000", "Parte Fictícia", "a" * 40):
+            call = built.call_tool("exemplo_get_process", {"portal": value, "number": "1"})
+            lines = captured(lambda call=call: asyncio.run(call))
+            self.assertNotIn("portal", lines[-1], value)
+
+    def test_an_error_result_without_a_code_is_still_a_failure(self):
+        built = server()
+
+        @built.tool(name="exemplo_get_status")
+        def exemplo_get_status() -> CallToolResult:
+            return CallToolResult(content=[TextContent(type="text", text="falhou")], is_error=True)
+
+        lines = captured(lambda: asyncio.run(built.call_tool("exemplo_get_status", {})))
+        self.assertEqual((lines[-1]["ok"], lines[-1]["error_code"]), (False, "tool_error"))
 
     def test_an_anticipated_failure_logs_its_code(self):
         built = server()
