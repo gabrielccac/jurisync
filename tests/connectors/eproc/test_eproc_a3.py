@@ -76,6 +76,60 @@ class KeycloakFlowChecks(unittest.TestCase):
         self.assertIn("login-actions/authenticate?session_code=s", confirm_post.args[0])
         self.assertEqual(len(otp_post.kwargs["data"]["otp"]), 6)
 
+    def test_the_profile_page_after_the_otp_is_answered_as_in_the_a1_login(self):
+        from tests.connectors.eproc.test_eproc_certificate import PROFILE_PAGE
+
+        login_page = page(
+            "https://sso.tjsp.jus.br/realms/eproc/protocol/openid-connect/auth?x=1",
+            '<button id="kc-login-certificate" onclick="document.location.host = \'certificado-sso.tjsp.jus.br\'">',
+        )
+        confirm = Response(
+            "https://certificado-sso.tjsp.jus.br/realms/eproc/x",
+            302,
+            [("Location", "https://sso.tjsp.jus.br/otp")],
+            b"",
+            certificate_sent=True,
+        )
+        landed = page("https://eproc1g.tjsp.jus.br/eproc/externo_controlador.php?acao=entrar_sso", PROFILE_PAGE)
+        session = Mock()
+        session.get.return_value = login_page
+        session.cookies.jar = [SimpleNamespace(name="PHPSESSID", value="p", domain="eproc1g.tjsp.jus.br")]
+        with (
+            patch.object(a3.requests, "Session", return_value=session),
+            patch.object(a3.mtls, "fetch", return_value=confirm),
+            patch.object(a3, "_submit_otp", return_value=landed),
+            patch.object(a3, "_choose_profile", return_value=page(PANEL.replace("tjrs", "tjsp"), "painel")) as choose,
+        ):
+            result = a3.login("tjsp-1g", signer=Mock())
+        self.assertIs(choose.call_args.args[2], landed)
+        self.assertIn("painel", result[1])
+
+    def test_a_login_that_stops_elsewhere_says_where(self):
+        login_page = page(
+            "https://sso.tjsp.jus.br/realms/eproc/protocol/openid-connect/auth?x=1",
+            '<button id="kc-login-certificate" onclick="document.location.host = \'certificado-sso.tjsp.jus.br\'">',
+        )
+        confirm = Response(
+            "https://certificado-sso.tjsp.jus.br/realms/eproc/x",
+            302,
+            [("Location", "https://sso.tjsp.jus.br/otp")],
+            b"",
+            certificate_sent=True,
+        )
+        elsewhere = page(
+            "https://eproc1g.tjsp.jus.br/eproc/externo_controlador.php?acao=termo", "<title>Termo de uso</title>"
+        )
+        session = Mock()
+        session.get.return_value = login_page
+        session.cookies.jar = []
+        with (
+            patch.object(a3.requests, "Session", return_value=session),
+            patch.object(a3.mtls, "fetch", return_value=confirm),
+            patch.object(a3, "_submit_otp", return_value=elsewhere),
+            self.assertRaisesRegex(RuntimeError, "did not reach the panel: .*Termo de uso"),
+        ):
+            a3.login("tjsp-1g", signer=Mock())
+
 
 if __name__ == "__main__":
     unittest.main()

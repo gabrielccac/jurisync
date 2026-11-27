@@ -18,6 +18,7 @@ from curl_cffi import requests
 
 from jurisync import portals
 from jurisync.connectors.eproc.auth import PANEL_MARKER, portal_totp_account
+from jurisync.connectors.eproc.certificate import _choose_profile, _landing
 from jurisync.core import a3, keycloak, mtls
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code
@@ -134,12 +135,10 @@ def login(portal, *, signer=None):
 
         with a3.held_token(signer) as token:
             response = _keycloak_x509(session, page, host.group(1), token)
-        response = _submit_otp(session, response, portal)
+        response = _choose_profile(session, config, _submit_otp(session, response, portal))
         if not _logged_in(response, config):
-            reason = eproc_message(response.url, response.text)
-            raise RuntimeError(
-                f"{config.key} certificate login did not reach the panel" + (f": {reason}" if reason else "")
-            )
+            reason = eproc_message(response.url, response.text) or _landing(response)
+            raise RuntimeError(f"{config.key} certificate login did not reach the panel: {reason}")
         if not any(cookie.name == "PHPSESSID" for cookie in session.cookies.jar):
             raise RuntimeError("Authenticated panel loaded without a PHPSESSID cookie")
         return session, response.text, response.url
