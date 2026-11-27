@@ -4,7 +4,10 @@ without a PIN, and the chain completed from the system store when the token carr
 import contextlib
 import datetime
 import os
+import sys
 import threading
+import time
+from types import SimpleNamespace
 from unittest import mock
 
 import PyKCS11
@@ -72,6 +75,8 @@ def test_the_token_issuers_come_first_and_the_store_completes_the_rest(chain):
 class FakeSession:
     def __init__(self, certs, error=None):
         self.certs, self.error, self.pins, self.sign_errors, self.signed = certs, error, [], [], 0
+        self.logouts = self.closes = self.opened = 0
+        self.state = PyKCS11.CKS_RO_PUBLIC_SESSION
 
     def findObjects(self, template):
         return list(range(len(self.certs)))
@@ -83,6 +88,10 @@ class FakeSession:
         self.pins.append(pin)
         if self.error is not None:
             raise PyKCS11.PyKCS11Error(self.error)
+        self.state = PyKCS11.CKS_RO_USER_FUNCTIONS
+
+    def getSessionInfo(self):
+        return SimpleNamespace(state=self.state)
 
     def sign(self, key, data, mechanism):
         self.signed += 1
@@ -91,10 +100,11 @@ class FakeSession:
         return b"assinatura"
 
     def logout(self):
-        pass
+        self.logouts += 1
+        self.state = PyKCS11.CKS_RO_PUBLIC_SESSION
 
     def closeSession(self):
-        pass
+        self.closes += 1
 
 
 def fake_library(session, flags):
@@ -121,38 +131,56 @@ def fake_library(session, flags):
     return Library
 
 
-def open_token(monkeypatch, certs, flags, error=None, issuers=()):
+def open_token(monkeypatch, certs, flags, error=None, issuers=(), module="desktopID_Provider.dll"):
     session = FakeSession(certs, error)
-    session.opened = 0
     monkeypatch.setattr(PyKCS11, "PyKCS11Lib", fake_library(session, flags))
     monkeypatch.setattr(a3, "system_issuers", lambda: issuers)
-    monkeypatch.setattr(a3, "stored_pin", lambda serial: pytest.fail("a protected token must not read a PIN"))
-    return a3.A3Signer(module="desktopID_Provider.dll"), session
+    monkeypatch.setattr(a3, "stored_pin", lambda serial: pytest.fail("the cloud A3 must not read a PIN"))
+    return a3.A3Signer(module=module), session
+
+
+CLOUD = ["CKF_LOGIN_REQUIRED", "CKF_PROTECTED_AUTHENTICATION_PATH"]
 
 
 def test_a_cloud_a3_logs_in_without_a_pin_and_completes_its_chain(chain, monkeypatch):
     leaf, intermediate, root = chain
-    token, session = open_token(
-        monkeypatch, [leaf], ["CKF_LOGIN_REQUIRED", "CKF_PROTECTED_AUTHENTICATION_PATH"], issuers=(root, intermediate)
-    )
-    assert token.protected
+    token, session = open_token(monkeypatch, [leaf], CLOUD, issuers=(root, intermediate))
+    assert token.cloud
     assert token.chain == [leaf, intermediate, root]
     token.login()
     assert session.pins == [None]
 
 
+def test_a_physical_pin_pad_token_keeps_its_pin_login_and_its_chain(chain, monkeypatch):
+    leaf, intermediate, root = chain
+    token, session = open_token(monkeypatch, [leaf], CLOUD, issuers=(root, intermediate), module="aetpkss1.dll")
+    monkeypatch.setattr(a3, "stored_pin", lambda serial: "1234")
+    assert not token.cloud
+    assert token.chain == [leaf]
+    token.login()
+    assert session.pins == ["1234"]
+
+
 @pytest.fixture(autouse=True)
 def no_shared_token():
     a3._shared.clear()
+    a3._pending.clear()
     yield
     a3._shared.clear()
+    a3._pending.clear()
 
 
 def shared_cloud_token(chain, monkeypatch):
-    """held_token() over a fake cloud A3; returns the session and a list counting the tokens opened."""
-    token, session = open_token(monkeypatch, [chain[0]], ["CKF_PROTECTED_AUTHENTICATION_PATH"])
-    opened = []
-    monkeypatch.setattr(a3, "A3Signer", lambda: opened.append(token) or token)
+    """held_token() over a fake cloud A3 (a new signer, same fake session, per opening); returns the session and the
+    signers opened."""
+    _token, session = open_token(monkeypatch, [chain[0]], CLOUD)
+    real, opened = a3.A3Signer, []
+
+    def signer():
+        opened.append(real(module="desktopID_Provider.dll"))
+        return opened[-1]
+
+    monkeypatch.setattr(a3, "A3Signer", signer)
     monkeypatch.setattr(a3, "token_lock", contextlib.nullcontext)
     return session, opened
 
@@ -171,7 +199,7 @@ def test_one_authorisation_serves_every_login_of_the_process(chain, monkeypatch)
 def test_an_idle_or_old_session_is_logged_out_and_authorised_again(chain, monkeypatch):
     session, opened = shared_cloud_token(chain, monkeypatch)
     clock = [1000.0]
-    monkeypatch.setattr(a3.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(a3, "_now", lambda: clock[0])
     monkeypatch.setenv("PJE_A3_SESSION_IDLE", "20")
     monkeypatch.setenv("PJE_A3_SESSION_TTL", "60")
     with a3.held_token():
@@ -179,70 +207,138 @@ def test_an_idle_or_old_session_is_logged_out_and_authorised_again(chain, monkey
     clock[0] += 19 * 60
     with a3.held_token():
         pass
-    assert len(opened) == 1
+    assert len(opened) == 1 and session.logouts == 0
     clock[0] += 21 * 60  # idle
     with a3.held_token():
         pass
-    assert len(opened) == 2
+    assert len(opened) == 2 and session.logouts == 1 and session.closes == 1
     for _ in range(5):  # used every 15 minutes, but older than an hour
         clock[0] += 15 * 60
         with a3.held_token():
             pass
-    assert len(opened) == 3
+    assert len(opened) == 3 and session.logouts == 2
 
 
-def test_a_session_the_module_ended_is_authorised_again_once_never_in_a_loop(chain, monkeypatch):
+def test_the_process_exit_logs_the_shared_session_out(chain, monkeypatch):
     session, _opened = shared_cloud_token(chain, monkeypatch)
-    session.sign_errors = [PyKCS11.CKR_USER_NOT_LOGGED_IN]
+    with a3.held_token():
+        pass
+    a3.drop_shared_token()  # registered with atexit
+    assert session.logouts == 1 and session.closes == 1 and a3._shared == {}
+
+
+def test_a_session_the_module_ended_is_authorised_again_before_the_block_never_mid_handshake(chain, monkeypatch):
+    session, opened = shared_cloud_token(chain, monkeypatch)
+    with a3.held_token():
+        pass
+    session.state = PyKCS11.CKS_RO_PUBLIC_SESSION  # the module ended it
     with a3.held_token() as token:
-        assert token.sign_digest_info(b"digest-info") == b"assinatura"
-    assert session.pins == [None, None] and session.opened == 2
-    session.sign_errors = [PyKCS11.CKR_USER_NOT_LOGGED_IN]
+        assert token.logged_in and session.signed == 2  # authorised again, once, before the caller connects
+    assert len(opened) == 2 and session.pins == [None, None]
+    session.sign_errors = [PyKCS11.CKR_USER_NOT_LOGGED_IN]  # ended while signing in a handshake: no new window there
     with pytest.raises(PyKCS11.PyKCS11Error), a3.held_token() as token:
         token.sign_digest_info(b"digest-info")
     assert session.pins == [None, None]
-    assert a3._shared == {}  # the failed session is dropped: the next login asks again
+    assert a3._shared == {}  # dropped: the next login authorises again before connecting
 
 
 def test_a_physical_token_is_still_opened_and_closed_per_login(chain, monkeypatch):
-    token, _session = open_token(monkeypatch, [chain[0]], ["CKF_LOGIN_REQUIRED"])
+    token, session = open_token(monkeypatch, [chain[0]], ["CKF_LOGIN_REQUIRED"], module="aetpkss1.dll")
     opened = []
     monkeypatch.setattr(a3, "A3Signer", lambda: opened.append(token) or token)
     monkeypatch.setattr(a3, "token_lock", contextlib.nullcontext)
     for _ in range(2):
         with a3.held_token():
             pass
-    assert len(opened) == 2 and a3._shared == {}
+    assert len(opened) == 2 and session.closes == 2 and a3._shared == {}
 
 
 def test_a_cancelled_authorisation_is_a_pin_error_and_is_not_retried(chain, monkeypatch):
-    token, session = open_token(
-        monkeypatch, [chain[0]], ["CKF_PROTECTED_AUTHENTICATION_PATH"], error=PyKCS11.CKR_FUNCTION_CANCELED
-    )
+    token, session = open_token(monkeypatch, [chain[0]], CLOUD, error=PyKCS11.CKR_FUNCTION_CANCELED)
     with pytest.raises(a3.PinError, match="authorisation"):
         token.login()
     assert session.pins == [None]
 
 
-def test_an_authorisation_never_given_times_out_and_leaves_the_session_alone(chain, monkeypatch):
+def test_an_authorisation_answered_too_late_is_closed_by_its_own_thread(chain, monkeypatch):
     released = threading.Event()
-    token, session = open_token(monkeypatch, [chain[0]], ["CKF_PROTECTED_AUTHENTICATION_PATH"])
+    token, session = open_token(monkeypatch, [chain[0]], CLOUD)
     monkeypatch.setattr(session, "login", lambda pin, user_type: released.wait(5))
-    monkeypatch.setattr(session, "closeSession", lambda: pytest.fail("the session of a pending login is not touched"))
     monkeypatch.setenv("PJE_A3_APPROVAL_TIMEOUT", "0.1")
+    with pytest.raises(a3.PinError, match="not authorised within 0.1 s"):
+        token.login()
+    token.close()
+    assert token.abandoned and session.closes == 0  # the pending call's session is not touched
+    released.set()
+    a3._pending["worker"].join(5)
+    assert session.closes == 1 and not token.abandoned
+
+
+def test_a_timeout_inside_held_token_releases_it_and_the_module_waits_for_the_pending_call(chain, monkeypatch):
+    released = threading.Event()
+    session, opened = shared_cloud_token(chain, monkeypatch)
+    monkeypatch.setattr(session, "sign", lambda key, data, mechanism: released.wait(5) and b"assinatura")
+    monkeypatch.setenv("PJE_A3_APPROVAL_TIMEOUT", "0.1")
+    with pytest.raises(a3.PinError, match="not authorised"), a3.held_token():
+        pass
+    assert a3._shared == {} and len(opened) == 1
+    with pytest.raises(a3.PinError, match="still open"), a3.held_token():
+        pass
+    assert len(opened) == 1  # the module was not opened again while the first window is pending
+    released.set()
+    a3._pending["worker"].join(5)
+    with a3.held_token() as token:
+        assert token.logged_in
+    assert len(opened) == 2
+
+
+def test_the_token_lock_waits_for_the_holder_across_handles(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setattr(a3.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PJE_A3_APPROVAL_TIMEOUT", "30")
+    held, order = threading.Event(), []
+
+    def holder():
+        with a3.token_lock():
+            held.set()
+            time.sleep(12 if sys.platform == "win32" else 1)  # past msvcrt's own 10 s LK_LOCK limit on Windows
+            order.append("first")
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    held.wait(5)
+    with a3.token_lock():
+        order.append("second")
+    thread.join()
+    assert order == ["first", "second"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows lock retries until the approval timeout")
+def test_the_windows_token_lock_gives_up_at_the_approval_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(a3.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PJE_A3_APPROVAL_TIMEOUT", "0.5")
+    held, done = threading.Event(), threading.Event()
+
+    def holder():
+        with a3.token_lock():
+            held.set()
+            done.wait(5)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    held.wait(5)
     try:
-        with pytest.raises(a3.PinError, match="not authorised within 0.1 s"):
-            token.login()
-        token.close()
-        assert token.abandoned and not token.logged_in
+        with pytest.raises(TimeoutError), a3.token_lock():
+            pass
     finally:
-        released.set()
+        done.set()
+        thread.join()
 
 
 def test_a_token_with_its_chain_does_not_read_the_store(chain, monkeypatch):
-    leaf, intermediate, _root = chain
-    token, _session = open_token(monkeypatch, [leaf, intermediate], ["CKF_LOGIN_REQUIRED"], issuers=(_root,))
-    assert not token.protected
+    leaf, intermediate, root = chain
+    token, _session = open_token(monkeypatch, [leaf, intermediate], ["CKF_LOGIN_REQUIRED"], issuers=(root,))
+    assert not token.cloud
     assert token.chain == [leaf, intermediate]
 
 
@@ -295,3 +391,20 @@ def test_check_customer_flags_a_pin_or_an_unknown_module_for_the_cloud_a3(acme):
         '[trf1-1g]\nmethod = "a3_totp"\nsecrets = ["TRF1_1G_2FA_DATA"]\n[env]\nset = { PJE_A3_MODULE = "certisign" }\n'
     ):
         assert customers.validate("acme") == []
+
+
+def test_check_customer_takes_a_module_by_full_path_or_by_a_library_name_it_finds(acme, tmp_path):
+    (tmp_path / "eTPKCS11.dll").write_bytes(b"")
+    toml = '[trf1-1g]\nmethod = "a3_totp"\nsecrets = ["TRF1_1G_2FA_DATA"]\n[env]\nset = {{ PJE_A3_MODULE = {} }}\n'
+    for module in ("'C:\\Windows\\System32\\eTPKCS11.dll'", '"/usr/lib/libaetpkss.so"', '"eTPKCS11.dll"'):
+        with acme(toml.format(module), PATH=str(tmp_path), SYSTEMROOT=str(tmp_path / "nada")):
+            assert customers.validate("acme") == [], module
+    with acme(toml.format('"naoexiste.dll"'), PATH=str(tmp_path), SYSTEMROOT=str(tmp_path / "nada")):
+        assert any("PJE_A3_MODULE" in problem for problem in customers.validate("acme"))
+
+
+def test_the_hosted_plan_knows_a_declared_a3_without_a_pin():
+    from jurisync.hosted import provision
+
+    assert provision.is_a3(customers.PortalSetup("trf1-1g", "a3_totp", ("TRF1_1G_2FA_DATA",)))
+    assert not provision.is_a3(customers.PortalSetup("trf1-1g", "certificate_totp", ("TRF1_1G_2FA_DATA",)))

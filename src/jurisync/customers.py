@@ -20,7 +20,7 @@ import functools
 import os
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from jurisync import portals
 from jurisync.core import a3, credentials
@@ -263,8 +263,11 @@ def validate(name):
             if not any(variable.strip() in listed for variable in group.split("|")):
                 problems.append(f"{name}: .env.example lacks {group}")
     module = fixed_variables(name).get("PJE_A3_MODULE", "").strip()
-    if module and module.lower() not in a3.CLOUD_MODULES and not Path(module).is_absolute():
-        problems.append(f"{name}: [env].set PJE_A3_MODULE must be {', '.join(a3.CLOUD_MODULES)} or a full path")
+    if module and module.lower() not in a3.CLOUD_MODULES and not module_resolves(module):
+        problems.append(
+            f"{name}: [env].set PJE_A3_MODULE must be {', '.join(a3.CLOUD_MODULES)}, a full path or a library found "
+            "in System32 or the PATH"
+        )
     secrets = {
         variable.strip() for setup in setups.values() for group in setup.secrets for variable in group.split("|")
     }
@@ -274,6 +277,20 @@ def validate(name):
             "certificate's app; drop it from secrets"
         )
     return problems
+
+
+def module_resolves(module):
+    """Whether a PKCS#11 module setting can load: a full path (Windows or POSIX, wherever the check runs) or a bare
+    library name found where Windows looks for it (System32, then the PATH)."""
+    if PureWindowsPath(module).is_absolute() or PurePosixPath(module).is_absolute():
+        return True
+    if PureWindowsPath(module).name != module:
+        return False
+    folders = [
+        Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32",
+        *os.environ.get("PATH", "").split(os.pathsep),
+    ]
+    return any((Path(folder) / module).is_file() for folder in folders if folder)
 
 
 def env_example(name):
