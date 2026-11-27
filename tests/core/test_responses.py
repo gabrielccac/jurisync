@@ -46,11 +46,11 @@ class FitTextsTest(unittest.TestCase):
 
 
 class CamelTest(unittest.TestCase):
-    def test_snake_keys_gain_camel_twins_everywhere_and_keep_the_old_name(self):
+    def test_single_objects_keep_the_snake_name_and_collections_are_only_renamed(self):
         value = {
             "numero_processo": "x",
             "pagination": {"loaded_pages": 2, "loadedPages": 3},
-            "rows": [{"type_code": 1}],
+            "movement_candidates": [{"type_code": 1, "nested_item": {"entry_type": "a"}}],
         }
         self.assertEqual(
             responses.camel(value),
@@ -58,13 +58,17 @@ class CamelTest(unittest.TestCase):
                 "numero_processo": "x",
                 "numeroProcesso": "x",
                 "pagination": {"loaded_pages": 2, "loadedPages": 3},
-                "rows": [{"type_code": 1, "typeCode": 1}],
+                "movementCandidates": [{"typeCode": 1, "nestedItem": {"entryType": "a"}}],
             },
         )
 
-    def test_other_keys_are_left_alone(self):
-        value = {"processNumber": "x", "_private": 1, "Polo_Ativo": 2}
+    def test_other_keys_and_data_keyed_dicts_are_left_alone(self):
+        value = {"processNumber": "x", "_private": 1, "Polo_Ativo": 2, "partiesByPole": {"other_interested": []}}
         self.assertEqual(responses.camel(dict(value)), value)
+
+    def test_an_existing_camel_key_wins_whatever_the_order(self):
+        self.assertEqual(responses.camel({"loadedPages": 3, "loaded_pages": 2})["loadedPages"], 3)
+        self.assertEqual(responses.camel({"loaded_pages": 2, "loadedPages": 3})["loadedPages"], 3)
 
 
 class DatedTest(unittest.TestCase):

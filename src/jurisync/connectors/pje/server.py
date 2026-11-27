@@ -118,18 +118,18 @@ def _notifications(portal, read, process_number=None):
 
 
 def _answered(result):
-    """A PJe answer: the connector error check, then camelCase twins of the snake_case keys (old names for a cycle)."""
+    """A PJe answer: the connector error check, then camelCase keys (``responses.camel``), before any budget is applied."""
     return camel(require_success("PJe", result))
 
 
 def _process_dates(result):
-    """pje_get_process dates in ISO: the camelCase copies of the cover dates (the snake keys keep the page's text) and
-    each timeline day, whose text stays in dateText for one cycle."""
+    """pje_get_process dates in ISO: the camelCase copies of the cover dates (the snake keys keep the page's text), each
+    timeline day and each movement candidate, whose text stays in dateText for one cycle."""
     metadata = result.get("metadata") or {}
     for key in ("filedAt", "lastDistribution"):
         if key in metadata:
             metadata[key] = iso_pt(metadata[key])
-    for day in result.get("timeline") or []:
+    for day in [*(result.get("timeline") or []), *(result.get("movementCandidates") or [])]:
         if isinstance(day, dict) and iso_pt(day.get("date")) != day.get("date"):
             day["dateText"], day["date"] = day["date"], iso_pt(day["date"])
     return result
@@ -357,13 +357,14 @@ def create_server():
                     acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
                 ),
             )
+        result = _answered(result)
         reads = [read for document in result.get("documents", []) for read in (document, *document.get("anexos", []))]
         if fit_texts(reads, offset=offset, limit=textLimit):
             result["note"] = (
                 f"Texts were cut to fit {TEXT_BUDGET} characters per answer: read the rest with the same documentIds "
                 "(or only the cut one) and offset=truncated.nextOffset."
             )
-        return _answered(result)
+        return result
 
     @server.tool(
         name="pje_read_expediente_ato",
