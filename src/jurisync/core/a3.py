@@ -11,7 +11,8 @@ back to the gerid-adapter entry for the same token). It is tried once per login:
 
 A cloud A3 works the same way when its app ships a PKCS#11 module: ``PJE_A3_MODULE=certisign`` loads Certisign's
 desktopID (RemoteID). Such a token has a protected authentication path: the login is authorised in the vendor's app
-(its password plus an OTP or a push to the phone), so no PIN is read or sent here. It also carries the holder's
+(its password plus an OTP or a push to the phone), so no PIN is read or sent here; a login not authorised within
+``PJE_A3_APPROVAL_TIMEOUT`` seconds (120) gives up and releases the token lock. It also carries the holder's
 certificate alone; the issuers come from the system's certificate store.
 """
 
@@ -22,6 +23,7 @@ import logging
 import os
 import ssl
 import sys
+import threading
 import warnings
 from contextlib import contextmanager
 from functools import lru_cache
@@ -42,6 +44,8 @@ DEFAULT_MODULES = {
 # Cloud A3 apps whose PKCS#11 module PJE_A3_MODULE takes by name; each one authorises the login in the app, never with
 # a PIN. desktopID_Provider.dll is the Windows provider of Certisign's desktopID (RemoteID), a PKCS#11 module as well.
 CLOUD_MODULES = {"certisign": "desktopID_Provider.dll"}
+# Seconds a login on a token with a protected authentication path waits for the person (PJE_A3_APPROVAL_TIMEOUT).
+APPROVAL_TIMEOUT = 120
 
 # DER prefix of DigestInfo for MD5 (RFC 8017 §9.2): the token pads, the caller hashes.
 MD5_DIGEST_INFO = bytes.fromhex("3020300c06082a864886f70d020505000410")
@@ -198,6 +202,7 @@ class A3Signer:
         self.protected = "CKF_PROTECTED_AUTHENTICATION_PATH" in info.flags2text()
         self.session = self.lib.openSession(self.slot, PyKCS11.CKF_SERIAL_SESSION)
         self.logged_in = False
+        self.abandoned = False  # a protected login still waiting in its thread: the session is not touched again
         self._pin = pin
         certs = self._certificates()
         self.ident, self.chain = certificate_chain(certs)
@@ -231,12 +236,33 @@ class A3Signer:
         problems = self.unsafe_pin_state()
         if problems:
             raise PinError("A3 login cancelled: " + "; ".join(problems) + ". Unlock it in tokenadmin first.")
-        if self.protected:
-            log.info("A3 login waits for the authorisation on the token or in its app (push or code)")
         pin = None if self.protected else self._pin or stored_pin(self.serial)
-        try:
-            self.session.login(pin, pkcs11.CKU_USER)
-        except pkcs11.PyKCS11Error as error:
+        failure = []
+
+        def attempt():
+            try:
+                self.session.login(pin, pkcs11.CKU_USER)
+            except pkcs11.PyKCS11Error as error:
+                failure.append(error)
+
+        if self.protected:
+            # The token or its app may wait for a person forever (the cloud A3's app closed, a push never answered):
+            # C_Login cannot be interrupted, so it is left in a daemon thread and this signer stops using the session,
+            # which releases the token lock for the next login.
+            timeout = float(os.environ.get("PJE_A3_APPROVAL_TIMEOUT") or APPROVAL_TIMEOUT)
+            log.info("A3 login waits up to %g s for the authorisation on the token or in its app", timeout)
+            worker = threading.Thread(target=attempt, name="a3-approval", daemon=True)
+            worker.start()
+            worker.join(timeout)
+            if worker.is_alive():
+                self.abandoned = True
+                raise PinError(
+                    f"The A3 login was not authorised within {timeout:g} s (is the certificate's app open and signed "
+                    "in?); not retrying. Approve the request in the app on the next login."
+                )
+        else:
+            attempt()
+        for error in failure:
             if error.value == pkcs11.CKR_USER_ALREADY_LOGGED_IN:
                 self.logged_in = True
                 return
@@ -286,6 +312,8 @@ class A3Signer:
         return java_pkipath64(self.chain)
 
     def close(self):
+        if self.abandoned:
+            return
         try:
             if self.logged_in:
                 self.session.logout()

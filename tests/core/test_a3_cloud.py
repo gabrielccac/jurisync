@@ -3,6 +3,7 @@ without a PIN, and the chain completed from the system store when the token carr
 
 import datetime
 import os
+import threading
 from unittest import mock
 
 import PyKCS11
@@ -138,6 +139,21 @@ def test_a_cancelled_authorisation_is_a_pin_error_and_is_not_retried(chain, monk
     with pytest.raises(a3.PinError, match="authorisation"):
         token.login()
     assert session.pins == [None]
+
+
+def test_an_authorisation_never_given_times_out_and_leaves_the_session_alone(chain, monkeypatch):
+    released = threading.Event()
+    token, session = open_token(monkeypatch, [chain[0]], ["CKF_PROTECTED_AUTHENTICATION_PATH"])
+    monkeypatch.setattr(session, "login", lambda pin, user_type: released.wait(5))
+    monkeypatch.setattr(session, "closeSession", lambda: pytest.fail("the session of a pending login is not touched"))
+    monkeypatch.setenv("PJE_A3_APPROVAL_TIMEOUT", "0.1")
+    try:
+        with pytest.raises(a3.PinError, match="not authorised within 0.1 s"):
+            token.login()
+        token.close()
+        assert token.abandoned and not token.logged_in
+    finally:
+        released.set()
 
 
 def test_a_token_with_its_chain_does_not_read_the_store(chain, monkeypatch):
