@@ -151,8 +151,10 @@ def create_server(keys=None):
             "the lawyer's pending queues: estado 'nenhuma' (nothing pending involved), 'pendente' (one awaits ciência, "
             "no document opened), 'dada' (documents opened: the ciência may be registered and the deadline started) "
             "or 'desconhecida' (opened, queues not checked; motivo says why), with intimacoes and an aviso. Always "
-            "tell the user ciencia.aviso and note it in the task. save=true stores each read document (HTML as PDF) "
-            "in the shared documents folder."
+            "tell the user ciencia.aviso and note it in the task. prazos: the deadline of every intimação event "
+            "(eventId, refersTo, party, days, status aberto/fechado/aguardando_abertura, closedBy, start and end ISO "
+            "dates, djenAvailable/djenPublished). save=true stores each read document (HTML as PDF) in the shared "
+            "documents folder."
         ),
         annotations=MAY_GIVE_CIENCIA,
     )

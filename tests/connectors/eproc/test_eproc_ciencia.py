@@ -141,6 +141,16 @@ class CienciaNoticeTest(unittest.TestCase):
         self.assertIn("Não foi possível verificar", result["ciencia"]["aviso"])
         self.assertTrue(result["ciencia"]["motivo"])
 
+    def test_an_intimacao_awaiting_the_djen_says_so_and_the_read_lists_its_deadlines(self):
+        waiting = queue(NUMBER).replace("<td></td><td></td></tr>", "<td>Aguarda publicação no DJEN</td><td></td></tr>")
+        result = read(Portal(citacao_intimacao_pendente_listar=waiting), None)
+        self.assertEqual(result["ciencia"]["estado"], "pendente")
+        self.assertIn("aguarda a publicação no DJEN", result["ciencia"]["aviso"])
+        self.assertEqual([item["eventId"] for item in result["prazos"]], ["3"])
+        self.assertEqual(result["prazos"][0]["status"], "aguardando_abertura")
+        result = read(Portal(citacao_intimacao_pendente_listar=queue(NUMBER)), None)
+        self.assertNotIn("DJEN", result["ciencia"]["aviso"])
+
     def test_pending_queues_are_read_once_per_session_until_a_document_is_opened(self):
         portal = Portal(citacao_intimacao_pendente_listar=queue(NUMBER))
 
@@ -295,6 +305,77 @@ class TimelineMarkerTest(unittest.TestCase):
             [{"eventId": "5", "dateTime": "05/11", "label": "", "refersTo": ["3", "4"], "deadlineDays": 5}],
         )
         self.assertEqual(ciencia.awaiting_events(None), [])
+
+    def test_deadlines_read_the_live_event_format_with_its_djen_dates(self):
+        # TJMG and JFRS timelines, 27/11/2026 (names replaced): an open deadline, one closed by its decurso, a perito's
+        # deadline without days ("Status do Prazo"), and the DJEN events that refer to them.
+        events = [
+            {"id": "43", "description": "Publicado no DJEN - no dia 12/11/2026 - Refer. ao Evento: 41"},
+            {"id": "42", "description": "Disponibilizado no DJEN - no dia 11/11/2026 - Refer. ao Evento: 41"},
+            {
+                "id": "41",
+                "classes": ["infraTrClara", "infraEventoPrazoAberto"],
+                "description": "Expedida/certificada a intimação eletrônica Refer. ao Evento 40 ( AUTOR - FULANO DE TAL) "
+                "Prazo: 10 dias Status:ABERTO Data inicial da contagem do prazo: 13/11/2026 00:00:00 "
+                "Data final: 27/11/2026 23:59:59",
+            },
+            {"id": "37", "description": "Decorrido prazo - Refer. aos Eventos: 33 e 34"},
+            {"id": "35", "description": "Disponibilizado no DJEN - no dia 03/09/2026 - Refer. aos Eventos: 33, 34"},
+            {
+                "id": "34",
+                "description": "Expedida/certificada a intimação eletrônica - URGENTE Refer. ao Evento 14 e ao Evento 15 "
+                "( RÉU - EMPRESA X LTDA) Prazo: 15 dias Status:FECHADO ( 37 - Decorrido prazo ) Data inicial da "
+                "contagem do prazo: 08/09/2026 00:00:00 Data final: 28/09/2026 23:59:59",
+            },
+            {
+                "id": "18",
+                "description": "Expedida/certificada a intimação eletrônica - Perito Refer. ( PERITO - BELTRANO) Status "
+                "do Prazo: ABERTO Data inicial da contagem do prazo: 06/11/2026 00:00:00 Data final: 22/01/2027 23:59:59",
+            },
+            {"id": "2", "description": "Despacho"},
+        ]
+        found = ciencia.deadlines(events)
+        self.assertEqual([item["eventId"] for item in found], ["18", "34", "41"])
+        perito, closed, running = found
+        self.assertEqual(
+            {key: running[key] for key in ("refersTo", "party", "days", "status", "closedBy", "start", "end")},
+            {
+                "refersTo": ["40"],
+                "party": "AUTOR",
+                "days": 10,
+                "status": "aberto",
+                "closedBy": None,
+                "start": "2026-11-13",
+                "end": "2026-11-27",
+            },
+        )
+        self.assertEqual((running["djenAvailable"], running["djenPublished"]), ("2026-11-11", "2026-11-12"))
+        self.assertEqual(
+            (
+                closed["refersTo"],
+                closed["status"],
+                closed["closedBy"],
+                closed["djenAvailable"],
+                closed["djenPublished"],
+            ),
+            (["14", "15"], "fechado", "37 - Decorrido prazo", "2026-09-03", None),
+        )
+        self.assertEqual(
+            (perito["party"], perito["days"], perito["status"], perito["end"]), ("PERITO", None, "aberto", "2027-01-22")
+        )
+        self.assertEqual(ciencia.awaiting_events(events), [])  # every deadline was opened already
+
+    def test_a_deadline_neither_open_nor_closed_still_awaits_opening(self):
+        events = [
+            {
+                "id": "9",
+                "description": "Expedida/certificada a intimação eletrônica Refer. ao Evento 8 ( AUTOR - FULANO) Prazo: "
+                "15 dias Status:AGUARDANDO",
+            }
+        ]
+        self.assertEqual(ciencia.deadlines(events)[0]["status"], "aguardando")
+        self.assertEqual([marker["eventId"] for marker in ciencia.awaiting_events(events)], ["9"])
+        self.assertEqual(ciencia.awaiting_events(events)[0]["refersTo"], ["8"])
 
     def test_tied_documents_need_the_confirmed_link(self):
         events = [

@@ -388,7 +388,7 @@ def situation(item, queue):
     """
     end = _iso_date(item.get("deadlineEnd"))
     if queue in ciencia.PENDING_QUEUES:
-        waiting = "publica" in (item.get("deadlineStart") or "").casefold()
+        waiting = ciencia.awaiting_publication(item)
         return intimacao.fields(intimacao.AWAITING_PUBLICATION if waiting else intimacao.AWAITING_CIENCIA)
     if queue in ("open_deadlines", "urgent", "due_today"):
         return intimacao.fields(intimacao.RUNNING if end else intimacao.UNKNOWN, end, "portal")
@@ -868,6 +868,7 @@ def fetch_process(
             "attachments": attachments,
             "pagination": pagination,
             "diagnostics": event_diagnostics,
+            "prazos": ciencia.deadlines(events),
             "ciencia": block,
         }
         return _redact(result)
