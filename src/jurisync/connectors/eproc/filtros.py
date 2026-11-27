@@ -4,6 +4,7 @@ Pure functions; the requests stay in ``client``.
 """
 
 import re
+from datetime import date
 
 from jurisync.core.errors import InputError
 
@@ -16,6 +17,22 @@ def process_digits(value):
     if not re.fullmatch(r"\d{20}", digits):
         raise InputError("processNumber must be a CNJ number, e.g. 5000001-00.2026.4.04.7200")
     return digits
+
+
+def intimation_dates(date_from=None, date_to=None):
+    """``AAAA-MM-DD`` bounds as the portal's ``DD/MM/AAAA`` (None stays None), checked before anything is read."""
+    days = []
+    for name, value in (("intimationDateFrom", date_from), ("intimationDateTo", date_to)):
+        try:
+            day = None if value is None else date.fromisoformat(value) if len(value) == 10 else ""
+        except ValueError:
+            day = ""
+        if day == "":
+            raise InputError(f"{name} must be a date as YYYY-MM-DD")
+        days.append(day)
+    if None not in days and days[0] > days[1]:
+        raise InputError("intimationDateFrom must not be after intimationDateTo")
+    return tuple(day and day.strftime("%d/%m/%Y") for day in days)
 
 
 def by_process(result, process_number=None):

@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 from mcp.client.client import Client
 
-from jurisync.connectors.eproc import filtros, server
+from jurisync.connectors.eproc import client, filtros, server
+from jurisync.connectors.eproc.parsers import report_filter_request
 from jurisync.core.errors import InputError
 
 BASE = "https://eproc1g.trf6.jus.br/eproc/"
@@ -119,6 +120,57 @@ class ProcessNumberTests(unittest.TestCase):
         self.assertEqual(processes["items"][0]["processNumber"], FIRST)
         self.assertEqual((processes["returned"], processes["total"], processes["next"]), (1, 1, None))
         self.assertTrue(wrong.is_error)
+
+
+class IntimationDateTests(unittest.TestCase):
+    def sent(self, html, start, end):
+        _, fields = report_filter_request(html, BASE, date_from=start, date_to=end)
+        return dict(fields), fields
+
+    def test_dates_go_to_the_period_fields_as_the_portal_writes_them(self):
+        self.assertEqual(filtros.intimation_dates("2026-11-01", "2026-11-30"), ("01/11/2026", "30/11/2026"))
+        self.assertEqual(filtros.intimation_dates(None, "2026-11-30"), (None, "30/11/2026"))
+        sent, fields = self.sent(page(), "01/11/2026", "30/11/2026")
+        self.assertEqual((sent["dataInicioField"], sent["dataFimField"]), ("01/11/2026", "30/11/2026"))
+        self.assertEqual(sent["dataIntimacaoField"], "")
+        self.assertEqual(sent["hdnInfraPaginaAtual"], "0")
+        self.assertEqual(sent["prazoField"], "t0")  # the other criteria keep the form's value
+        self.assertEqual(len(fields), len(sent))
+
+    def test_a_form_with_only_the_intimation_day_takes_one_day(self):
+        only_day = page().replace('name="dataInicioField"', 'name="a"').replace('name="dataFimField"', 'name="b"')
+        sent, _ = self.sent(only_day, "03/11/2026", "03/11/2026")
+        self.assertEqual(sent["dataIntimacaoField"], "03/11/2026")
+        with self.assertRaisesRegex(ValueError, "single intimation date"):
+            self.sent(only_day, "03/11/2026", "04/11/2026")
+        with self.assertRaisesRegex(ValueError, "no intimation date filter"):
+            self.sent(only_day.replace('name="dataIntimacaoField"', 'name="c"'), "03/11/2026", None)
+
+    def test_dates_are_validated_before_login(self):
+        for wrong in ("03/11/2026", "2026-02-30", "2026-1-3", ""):
+            with self.assertRaises(InputError):
+                filtros.intimation_dates(wrong)
+        with self.assertRaisesRegex(InputError, "after"):
+            filtros.intimation_dates("2026-11-30", "2026-11-01")
+
+        async def run():
+            async with Client(server.create_server(["trf6-1g"])) as mcp:
+                arguments = {"portal": "trf6-1g", "intimationDateFrom": "2026-11-30", "intimationDateTo": "2026-11-01"}
+                return await mcp.call_tool("eproc_list_processes", arguments)
+
+        with patch.object(server.sessions, "_login") as login:
+            self.assertTrue(asyncio.run(run()).is_error)
+        login.assert_not_called()
+        server.sessions.close()
+
+    def test_client_posts_the_dates_and_reads_the_answer(self):
+        session = Session(page(), page(FILTERED))
+        result = client.list_processes(
+            session=session, panel_html=PANEL, panel_url=BASE, portal="trf6-1g", date_from="01/11/2026"
+        )
+        self.assertEqual([method for method, *_ in session.calls], ["GET", "POST"])
+        self.assertEqual(session.calls[1][2]["dataInicioField"], "01/11/2026")
+        self.assertEqual([item["number"] for item in result["items"]], [FILTERED])
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ from jurisync.connectors.eproc.client import (
     request,
 )
 from jurisync.connectors.eproc.consulta import MAX_SEARCH_PAGES, search_processes, search_term
-from jurisync.connectors.eproc.filtros import by_process, process_digits
+from jurisync.connectors.eproc.filtros import by_process, intimation_dates, process_digits
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -192,7 +192,8 @@ def create_server(keys=None):
         description=(
             "List the authenticated lawyer's processes (Relação de Processos); not a court-wide search. Every portal "
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
-            "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
+            "(aguardando_abertura, aberto, vencido, fechado, sem_prazo) and intimationDateFrom/To by the intimation date "
+            "(each filter costs one more request); latestMovementFirst orders by the latest "
             "movement. Rows: number, parties (pole active/passive; the procedural role is in "
             "eproc_get_process), class, subject, last event, dates, claim value; processNumber is the same as number "
             "(its old name, kept for one cycle). pagination.totalItems is "
@@ -222,10 +223,22 @@ def create_server(keys=None):
             bool,
             Field(description="true: latest movement first (the panel's Últimas movimentações)."),
         ] = False,
+        intimationDateFrom: Annotated[
+            str | None,
+            Field(
+                pattern=r"^\d{4}-\d{2}-\d{2}$",
+                description="YYYY-MM-DD, first intimation day (Data Início; Data da Intimação where it is the only one).",
+            ),
+        ] = None,
+        intimationDateTo: Annotated[
+            str | None,
+            Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="YYYY-MM-DD, last intimation day (Data Fim)."),
+        ] = None,
         processNumber: Process = None,
     ) -> dict[str, Any]:
         with tool_errors("Eproc"):
             wanted = process_digits(processNumber)
+            start, end = intimation_dates(intimationDateFrom, intimationDateTo)
         result = call(
             portal,
             lambda **context: list_processes(
@@ -233,6 +246,8 @@ def create_server(keys=None):
                 include_archived=includeArchived,
                 prazo=prazo,
                 latest_first=latestMovementFirst,
+                date_from=start,
+                date_to=end,
                 **context,
             ),
         )

@@ -808,12 +808,15 @@ def list_processes(
     include_archived=None,
     prazo=None,
     latest_first=False,
+    date_from=None,
+    date_to=None,
 ):
     """Read Relação de Processos, up to ``max_pages`` pages of its pager.
 
     Without filters the portal's defaults apply, which leave baixados out on every portal. ``include_archived`` and
     ``prazo`` (a ``PRAZO_FILTER`` key) search again with the list form, as its Buscar button does; ``latest_first``
-    opens the panel's "Últimas movimentações" link (latest movement first) instead of the plain list.
+    opens the panel's "Últimas movimentações" link (latest movement first) instead of the plain list. ``date_from`` and
+    ``date_to`` (``DD/MM/AAAA``) filter by the intimation date the same way.
 
     The portal shows 50 rows a page (500 on TJSC). Later pages are asked for the way the pager does it: the list form
     is posted again with the same criteria and ``hdnInfraPaginaAtual``. ``pagination.complete`` is true only when
@@ -843,8 +846,10 @@ def list_processes(
         require_route(endpoint, {PROCESS_REPORT_ACTION}, portal=portal)
         response, body = request(session, "GET", endpoint, portal=portal)
         error = _response_error(response, body)
-        if not error and (include_archived is not None or prazo is not None):
-            filtered = report_filter_request(body, base_url, include_archived=include_archived, prazo=prazo)
+        if not error and (include_archived is not None or prazo is not None or date_from or date_to):
+            filtered = report_filter_request(
+                body, base_url, include_archived=include_archived, prazo=prazo, date_from=date_from, date_to=date_to
+            )
             if filtered is None:
                 raise RuntimeError("Relação de Processos did not show its filter form")
             url, fields = filtered
