@@ -287,7 +287,7 @@ class A3Signer:
             )
         if "error" in outcome:
             raise outcome["error"]
-        return outcome.get("value")
+        return outcome["value"]
 
     def _private_key(self):
         pkcs11 = self._pkcs11
