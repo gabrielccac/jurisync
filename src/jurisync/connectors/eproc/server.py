@@ -172,8 +172,8 @@ def create_server(keys=None):
             "Cost: one page of each list by default; maxPages reads more of long lists; kind reads only one of the "
             "two. "
             "Each item: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
-            "parties, event (what was scheduled), location, dateTime and endDateTime (ISO), observation; start and "
-            "end (as the portal shows them) and date stay for one cycle. lists[] says what each list gave (problem when it could not be "
+            "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO; items "
+            "without one come last) and observation. lists[] says what each list gave (problem when it could not be "
             "read). " + ENVELOPE
         ),
         annotations=READ_ONLY,

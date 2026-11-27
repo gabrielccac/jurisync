@@ -1,4 +1,4 @@
-"""eproc_list_audiencias: the panel's upcoming hearing and conciliation lists, soonest first."""
+"""eproc_list_audiencias: the panel's audiência lists (upcoming, held, not held), with their conciliation twins."""
 
 import asyncio
 import unittest
@@ -170,7 +170,7 @@ def held(session, **kwargs):
 
 
 class HearingSituationsTest(unittest.TestCase):
-    def test_held_lists_latest_first_with_common_keys_kept_beside_the_old_ones(self):
+    def test_held_lists_latest_first(self):
         portal = Portal(r=page(row(FIRST, "10/03/2026 14:00:00")), rc=page(row(SECOND, "20/05/2026 09:30:00")))
         result = held(portal)
         self.assertEqual(
@@ -185,7 +185,6 @@ class HearingSituationsTest(unittest.TestCase):
         )
         first = result["audiencias"][0]
         self.assertEqual((first["kind"], first["processNumber"], first["number"]), ("conciliacao", SECOND, SECOND))
-        self.assertEqual((first["dateTime"], first["endDateTime"]), ("2026-05-20T09:30:00", "2026-05-20T17:00:00"))
         self.assertEqual((first["start"], first["date"]), ("20/05/2026 09:30:00", "2026-05-20"))
 
     def test_kind_and_process_number_narrow_the_read(self):
@@ -235,6 +234,35 @@ class HearingSituationsTest(unittest.TestCase):
             result = held(Portal(r=portal_page), kind="audiencia", offset=result["next"]["offset"])
             seen += result["returned"]
         self.assertEqual(seen, 300)
+
+    def test_a_caption_counting_more_rows_than_read_is_not_complete(self):
+        one_of_many = page(row(FIRST, "10/03/2026 14:00:00")).replace("(1 registros)", "(843 registros - 1 a 500)")
+        result = held(Portal(r=one_of_many), kind="audiencia")
+        self.assertFalse(result["lists"][0]["complete"])
+        self.assertEqual(result["total"], 843)
+        filtered = held(Portal(r=one_of_many), kind="audiencia", process_number=FIRST)
+        self.assertEqual((filtered["returned"], filtered["total"]), (1, None))
+
+    def test_one_item_over_the_budget_comes_alone_and_next_moves_on(self):
+        huge = row(FIRST, "10/03/2026 14:00:00").replace("Sala 1", "Sala " + "x" * client.BUDGET)
+        rows = page(huge, row(SECOND, "11/03/2026 14:00:00"))
+        result = held(Portal(r=rows), kind="audiencia")
+        self.assertEqual(result["returned"], 1)
+        self.assertEqual(result["next"], {"maxPages": 1, "offset": 1})
+        rest = held(Portal(r=rows), kind="audiencia", offset=1)
+        self.assertEqual((rest["returned"], rest["next"]), (1, None))
+
+    def test_items_without_a_date_come_last_in_every_order(self):
+        undated = (
+            row(FIRST, "10/03/2026 14:00:00").replace("10/03/2026 14:00:00", "").replace("10/03/2026 17:00:00", "")
+        )
+        rows = page(undated, row(SECOND, "11/03/2026 14:00:00"), row(FIRST, "12/03/2026 14:00:00"))
+        result = held(Portal(r=rows), kind="audiencia")
+        self.assertEqual([item["date"] for item in result["audiencias"]], ["2026-03-12", "2026-03-11", None])
+        upcoming = client.list_hearings(
+            "upcoming", "audiencia", session=Portal(a=rows), panel_html=PANEL, panel_url=PANEL_URL, portal="tjmg-1g"
+        )
+        self.assertEqual([item["date"] for item in upcoming["audiencias"]], ["2026-03-11", "2026-03-12", None])
 
     def test_another_layout_is_a_problem_not_an_empty_list(self):
         result = held(Portal(r="<html><h1>Outra tela</h1></html>"), kind="audiencia")

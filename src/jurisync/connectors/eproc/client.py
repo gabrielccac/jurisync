@@ -43,7 +43,7 @@ from jurisync.connectors.eproc.parsers import (
 from jurisync.core import credentials, intimacao
 from jurisync.core.http import IMPERSONATE, REDIRECTS, TIMEOUT, enable_request_logging, log_request, require_url
 from jurisync.core.redaction import drop_keys
-from jurisync.core.responses import BUDGET, compact, iso, listing
+from jurisync.core.responses import BUDGET, compact, listing
 from jurisync.core.session_pool import MissingLogin, SessionExpired
 from jurisync.customers import load_env_file
 
@@ -785,18 +785,20 @@ def _hearing_pages(session, url, action, *, max_pages, portal):
             problem = f"page {page + 1} {error or 'did not match'}"  # stop rather than mix lists
             break
         items.extend(parsed["items"])
-    complete = problem is None and ((total is not None and len(items) >= total) or (total_pages or 1) <= max_pages)
+    # A count in the caption ("(843 registros - 1 a 500)") decides; without one, every page of the pager was read.
+    complete = problem is None and (len(items) >= total if total is not None else (total_pages or 1) <= max_pages)
     entry = {"count": len(items), "complete": complete, "totalItems": total, "totalPages": total_pages}
     return items, {**entry, "problem": problem} if problem else entry
 
 
 def _fit(items):
-    """The leading items whose JSON fits the answer budget, leaving room for the envelope."""
+    """The leading items whose JSON fits the answer budget, leaving room for the envelope; at least one, so the
+    offset in next always moves on."""
     used = 0
     for count, item in enumerate(items):
         used += len(compact(item)) + 1
         if used > BUDGET - 5_000:
-            return items[:count]
+            return items[: max(count, 1)]
     return items
 
 
@@ -849,20 +851,22 @@ def list_hearings(
                 session, urljoin(panel_url or base_url, endpoint), action, max_pages=max_pages, portal=portal
             )
             lists.append({"kind": list_kind, **entry})
-            if "problem" in entry and entry["problem"] != "not in the panel":
+            if "problem" in entry:
                 problems.append(f"the {list_kind} list: {entry['problem']}")
             items.extend(
                 {
                     "kind": list_kind,
                     **item,
                     "date": _iso_date(item["start"]),
-                    # Common keys (docs/padroes.md); start and end stay for one cycle.
-                    "dateTime": iso(item["start"]),
-                    "endDateTime": iso(item["end"]),
                 }
                 for item in found
             )
-        items.sort(key=lambda item: (item["date"] or "9999", item["start"][11:]), reverse=situation != "upcoming")
+        dated = sorted(
+            (item for item in items if item["date"]),
+            key=lambda item: (item["date"], item["start"][11:]),
+            reverse=situation != "upcoming",
+        )
+        items = dated + [item for item in items if not item["date"]]  # undated last in every order
         complete = all(entry["complete"] for entry in lists)
         if process_number:
             items = [item for item in items if item["processNumber"] == process_number]

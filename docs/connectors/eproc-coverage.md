@@ -55,8 +55,9 @@ As seis listas da seção "Audiências" do painel, lidas pelo link que o própri
   listas foram lidas até o fim, senão `null`. Sem filtro, `total` é a soma dos contadores do portal.
 - `maxPages` (1 a 10) segue o paginador Infra de cada lista (reposta o formulário com `hdnInfraPaginaAtual`, como a
   Relação de Processos); resposta acima de `core.responses.BUDGET` é cortada e `next` traz `{"maxPages", "offset"}`.
-- Itens: chaves comuns novas `processNumber`, `dateTime` e `endDateTime` (ISO por `iso`); `number`, `start`,
-  `end` (texto do portal) e `date` ficam por um ciclo. `lists[]` diz por lista `count`, `complete`,
+- Itens: `processNumber` (com `number`, o nome antigo), `start`/`end` como o portal mostra e `date` (ISO); sem
+  data, o item vai para o fim em qualquer ordem. As datas ISO de `start`/`end` vêm com o #34. `lists[]` diz por
+  lista `count`, `complete` (a legenda "(N registros)" manda: menos linhas lidas que N é incompleto),
   `totalItems`, `totalPages` e `problem` (fora do painel, erro do portal, layout não reconhecido, página que não
   bateu).
 - Tela que não traz nem a tabela conhecida nem a área de tabela vazia vira `problem: "layout not recognized"`, para
