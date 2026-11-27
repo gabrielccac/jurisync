@@ -501,10 +501,13 @@ class TjgoAdapter(base.Adapter):
         }
 
     def list_processes(self, session, portal):
+        """The lawyer's active processes, one group per serventia type (the home page's counters): the portal lists
+        only active ones, and its 1º and 2º grau share the list; ``grau`` says which when the type's label tells."""
         groups, complete, hearings = self._own_processes(session, portal)
         for group in groups:
             group["processes"] = [tjgo_desk.public(row) for row in group["processes"]]
-        return {"categories": groups, "hearingsToday": hearings, "complete": complete}
+            group["grau"] = tjgo_desk.grau(group["label"])
+        return {"categories": groups, "hearingsToday": hearings, "activeOnly": True, "complete": complete}
 
     def _own_processes(self, session, portal):
         """``(groups, complete, hearings)``; rows keep ``_id`` (the portal's link to the process) or ``_page``."""

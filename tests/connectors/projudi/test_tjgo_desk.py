@@ -407,6 +407,9 @@ class TjgoGuardTest(unittest.TestCase):
             [("1", 2, True), ("72", 2, False)],
         )
         self.assertTrue(all("QuantidadeRegistrosPagina=500" in p for p in session.paths if "Proprio=1" in p))
+        self.assertEqual(([g["grau"] for g in processes["categories"]], processes["activeOnly"]), (["1", "1"], True))
+        for label, expected in (("2º Grau", "2"), ("4ª Câmara Cível", "2"), ("Turma Recursal", None)):
+            self.assertEqual(tjgo_desk.grau(label), expected, label)
 
     def test_a_type_with_one_process_answers_its_page(self):
         from tests.connectors.projudi.test_projudi import PROCESS_HTML

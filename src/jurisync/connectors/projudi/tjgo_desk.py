@@ -266,6 +266,18 @@ def parse_process_list(html):
     return rows, int(total.group(1)) if total else None
 
 
+SECOND_GRAU = re.compile(r"2º\s*Grau|2o\.?\s*Grau|Segundo Grau|C[âa]mara|Gabinete|Desembargador", re.I)
+FIRST_GRAU = re.compile(r"\bVara\b|Juizado|\bUPJ\b|Ju[íi]zo|CEJUSC|Núcleo", re.I)
+
+
+def grau(label):
+    """``"2"``/``"1"`` when the serventia type's label tells the instance (TJGO lists both in one home block, the 2º
+    grau as one more type), else None."""
+    if SECOND_GRAU.search(label or ""):
+        return "2"
+    return "1" if FIRST_GRAU.search(label or "") else None
+
+
 def situation(item, now=None):
     """``core.intimacao`` fields of a Diário row: awaiting its publication (which gives the ciência) or published with
     the deadline running; ``prazoFinal`` is the portal's "possível data limite", an estimate."""

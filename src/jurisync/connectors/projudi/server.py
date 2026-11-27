@@ -362,9 +362,11 @@ def create_server(keys=None):
             title="List Projudi lawyer processes",
             description=(
                 "The lawyer's own processes, in groups with the portal's total (may differ) and complete=false "
-                "when fewer rows came back: either active ones by serventia type, short number, parties, with "
-                "hearingsToday = home hearing counters (portal_timeout: try later); or, on desk-list portals, "
-                "'Processos' (1º grau) and 'Recursos' (2º grau) of one situation, deskCounts per situation. Read-only."
+                "when fewer rows came back: either the ACTIVE processes only (activeOnly=true; no archived list), "
+                "one group per serventia type, 1º and 2º grau in the same list (grau '1'/'2' when the type's label "
+                "tells, else null), short number, parties, with hearingsToday = home hearing counters "
+                "(portal_timeout: try later); or, on desk-list portals, 'Processos' (1º grau) and 'Recursos' "
+                "(2º grau) of one situation, deskCounts per situation. Read-only."
             ),
             annotations=READ_ONLY,
         )
