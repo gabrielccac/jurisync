@@ -198,15 +198,23 @@ def create_server(keys=None):
     @server.tool(
         title="List the lawyer's e-SAJ processes",
         annotations=READ_ONLY,
-        description="First-instance processes found by each of the lawyer's OABs. oabs[] has each search's total "
-        "and complete; complete is true only when all were read in full. A portal without this search answers "
-        "not_supported. Read-only.",
+        description="Processes found by each of the lawyer's OABs in each consultation the court serves: 1g (with the "
+        "incidents and appeals the list loads under a case, item pai = parent's code), and on TJSP 2g and "
+        "colegio_recursal; each item has instancia. oabs[] has each search's instancia, total and complete; complete "
+        "is true only when all were read in full. A search that found nothing in this login is skipped for some hours "
+        "(skipped says when; refresh=true searches again). Consultations go about 1 s apart, so a run with many OABs "
+        "takes a while. A portal without this search answers not_supported. Read-only.",
     )
     def esaj_list_processes(
         portal: Annotated[Portal, portal_field] = default,
         maxPages: Annotated[int, Field(ge=1, le=account.MAX_LIST_PAGES, description="Pages of 25 per OAB.")] = 10,
+        instancias: Annotated[
+            list[Literal["1g", "2g", "colegio_recursal"]] | None,
+            Field(description="Consultations to search; empty: every one the portal has."),
+        ] = None,
+        refresh: Annotated[bool, Field(description="Search again the OABs that found nothing earlier.")] = False,
     ) -> dict[str, Any]:
-        return call(portal, lambda s: account.list_processes(s, portal, maxPages))
+        return call(portal, lambda s: account.list_processes(s, portal, maxPages, instancias, refresh))
 
     @server.tool(
         title="Get e-SAJ process context",

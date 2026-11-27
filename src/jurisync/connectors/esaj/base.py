@@ -14,6 +14,7 @@ from jurisync.connectors.esaj.account import (
     account_oabs,
     detail_item,
     list_processes,
+    oab_answer,
     oab_page,
     oab_params,
 )
@@ -174,6 +175,7 @@ __all__ = [
     "oab_params",
     "detail_item",
     "oab_page",
+    "oab_answer",
     "list_processes",
     "load_process",
     "MAX_MOVEMENT_PAGES",

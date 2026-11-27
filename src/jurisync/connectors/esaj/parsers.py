@@ -299,12 +299,45 @@ FOUND = re.compile(r"(\d+)\s+Processos?\s+encontrados?", re.I)
 DATE = re.compile(r"\d{2}/\d{2}/\d{4}")
 
 
+def listing_row(row, prefix):
+    """One result row of a consultation list (first or second instance), or None when it links another application."""
+    link = row.select_one("a.linkProcesso[href]")
+    parts = urlsplit(link["href"]) if link else None
+    if parts is None or not parts.path.endswith(f"/{prefix}/show.do"):
+        return None
+    query = parse_qs(parts.query)
+    number = CNJ.search(link.get_text(" ", strip=True))
+
+    def text(selector):
+        found = row.select_one(selector)
+        return sanitize_diagnostics(" ".join(found.get_text(" ", strip=True).split())) if found else None
+
+    # The second instance names the same blocks differently (nomeParticipante, assuntoProcesso, dataLocalDistribuicao).
+    received = text(".dataLocalDistribuicaoProcesso, .dataLocalDistribuicao") or ""
+    date = DATE.search(received)
+    place = received[date.end() :] if date else received
+    return {
+        "processNumber": number.group(0) if number else None,
+        "codigo": query.get("processo.codigo", [None])[0],
+        "foro": query.get("processo.foro", [None])[0],
+        "parte": {
+            "papel": (text(".tipoDeParticipacao") or "").rstrip(":").strip() or None,
+            "nome": text(".nomeParte, .nomeParticipante"),
+        },
+        "classe": text(".classeProcesso"),
+        "assunto": text(".assuntoPrincipalProcesso, .assuntoProcesso"),
+        "recebidoEm": date.group(0) if date else None,
+        "local": place.strip(" -") or None,
+    }
+
+
 def process_listing(html, prefix):
     """``(items, total)`` of a consultation result list (``#listagemDeProcessos``, one ``divProcesso...`` per case).
 
     Each item carries what the row shows: number, code and foro of its detail link, the party the search matched with
     its role, class, main subject, the date it was received and where. ``total`` is the portal's own count
-    ("N Processos encontrados"), None when the page shows none. A page that is neither the list nor the consultation's
+    ("N Processos encontrados"; ``#contadorDeProcessos`` in the first instance, an unnamed ``.resultadoPaginacao`` in
+    the second), None when the page shows none. A page that is neither the list nor the consultation's
     "no information" answer is an error, so an unexpected page is never read as an empty list.
     """
     page = soup(html)
@@ -315,37 +348,31 @@ def process_listing(html, prefix):
         from jurisync.connectors.esaj.base import EsajParseError
 
         raise EsajParseError("e-SAJ did not return a process list")
-    counter = page.find(id="contadorDeProcessos")
+    counter = page.find(id="contadorDeProcessos") or page.select_one(".resultadoPaginacao")
     found = FOUND.search(counter.get_text(" ", strip=True)) if counter else None
-    items = []
-    for row in listing.find_all("div", id=re.compile(r"^divProcesso")):
-        link = row.select_one("a.linkProcesso[href]")
-        parts = urlsplit(link["href"]) if link else None
-        if parts is None or not parts.path.endswith(f"/{prefix}/show.do"):
-            continue
-        query = parse_qs(parts.query)
-        number = CNJ.search(link.get_text(" ", strip=True))
+    rows = (listing_row(row, prefix) for row in listing.find_all("div", id=re.compile(r"^divProcesso")))
+    return [item for item in rows if item], int(found.group(1)) if found else None
 
-        def text(selector, node=row):
-            found = node.select_one(selector)
-            return sanitize_diagnostics(" ".join(found.get_text(" ", strip=True).split())) if found else None
 
-        received = text(".dataLocalDistribuicaoProcesso") or ""
-        date = DATE.search(received)
-        place = received[date.end() :] if date else received
-        items.append(
-            {
-                "processNumber": number.group(0) if number else None,
-                "codigo": query.get("processo.codigo", [None])[0],
-                "foro": query.get("processo.foro", [None])[0],
-                "parte": {
-                    "papel": (text(".tipoDeParticipacao") or "").rstrip(":").strip() or None,
-                    "nome": text(".nomeParte"),
-                },
-                "classe": text(".classeProcesso"),
-                "assunto": text(".assuntoPrincipalProcesso"),
-                "recebidoEm": date.group(0) if date else None,
-                "local": place.strip(" -") or None,
-            }
-        )
-    return items, int(found.group(1)) if found else None
+def incident_parents(html):
+    """``[(cdProcesso, cdForoProcesso)]`` of the rows with an "Incidentes e recursos" link: the children the list
+    loads on demand (``obterProcessosFilhos.do``)."""
+    result = []
+    for link in soup(html).select("a[id^=incidentesRecursos]"):
+        code, foro = link.get("cdprocesso", ""), link.get("cdforoprocesso", "")
+        if re.fullmatch(r"[A-Za-z0-9]{1,40}", code) and re.fullmatch(r"\d{1,6}", foro):
+            result.append((code, foro))
+    return list(dict.fromkeys(result))
+
+
+def incident_children(html, prefix):
+    """The rows ``obterProcessosFilhos.do`` answers: the same row shape, without the list around it."""
+    rows = (listing_row(row, prefix) for row in soup(html).select(".home__lista-de-processos"))
+    return [item for item in rows if item]
+
+
+def csrf_token(html):
+    """The page's ``_csrf`` value, which its own scripts send as ``X-CSRF-Token``; "" when absent."""
+    node = soup(html).select_one('input[name="_csrf"]')
+    value = node.get("value", "") if node is not None else ""
+    return value if re.fullmatch(r"[A-Za-z0-9-]{1,80}", value) else ""
