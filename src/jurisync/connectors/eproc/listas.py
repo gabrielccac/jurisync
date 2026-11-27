@@ -16,7 +16,7 @@ from jurisync.connectors.eproc.client import _response_error, request, require_r
 from jurisync.connectors.eproc.parsers import _PROCESS_NUMBER, form_fields, parse_panel, text
 from jurisync.core.errors import NotSupported, PortalError
 from jurisync.core.redaction import mask_cpf
-from jurisync.core.responses import BUDGET, compact, iso, listing
+from jurisync.core.responses import BUDGET, compact, dated, listing
 from jurisync.core.session_pool import SessionExpired
 
 MESSAGES_ACTION = "caixa_mensagem_listar"
@@ -97,7 +97,7 @@ def parse_messages(html):
         cells = row.find_all("td", recursive=False)
         if len(cells) != 3:
             return None
-        items.append({"sentAt": iso(text(cells[0])), "title": text(cells[1]), "text": text(cells[2])})
+        items.append(dated({"sentAt": text(cells[0]), "title": text(cells[1]), "text": text(cells[2])}, "sentAt"))
     total = _caption_total(table)
     return {
         "filter": checked.get("value") if checked else None,
@@ -179,16 +179,20 @@ def parse_paradas(html):
             if outage is not None:
                 reason, extended, start, end = (cells[index] for index in outage)
                 paradas.append(
-                    {
-                        "description": reason,
-                        "prorrogacao": _YES_NO.get(extended.casefold()),
-                        "start": iso(start),
-                        "end": iso(end),
-                    }
+                    dated(
+                        {
+                            "description": reason,
+                            "prorrogacao": _YES_NO.get(extended.casefold()),
+                            "start": start,
+                            "end": end,
+                        },
+                        "start",
+                        "end",
+                    )
                 )
             else:
                 date, kind = (cells[index] for index in suspension)
-                suspensoes.append({"date": iso(date), "type": kind})
+                suspensoes.append(dated({"date": date, "type": kind}, "date"))
     counter = form.select_one('input[name="hdnInfraNroItens"]')
     total = int(counter["value"]) if counter and str(counter.get("value", "")).isdigit() else None
     return {
@@ -243,16 +247,12 @@ def parse_header_table(html, form):
     for row in _rows(table):
         values = [text(cell) for cell in row.find_all("td", recursive=False)]
         found = next((match for value in values if (match := _PROCESS_NUMBER.search(value))), None)
-        items.append(
-            {
-                "processNumber": found[0] if found else None,
-                "columns": {
-                    header: mask_cpf(iso(value))
-                    for header, value in zip(headers, values, strict=False)
-                    if header.casefold() not in _ACTION_COLUMNS
-                },
-            }
-        )
+        columns = {
+            header: mask_cpf(value)
+            for header, value in zip(headers, values, strict=False)
+            if header.casefold() not in _ACTION_COLUMNS
+        }
+        items.append({"processNumber": found[0] if found else None, "columns": dated(columns, *columns)})
     total = _caption_total(table)
     return {"items": items, "total": total if total is not None and total >= len(items) else len(items)}
 

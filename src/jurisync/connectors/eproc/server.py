@@ -257,7 +257,7 @@ def create_server(keys=None):
             "Read the lawyer's Caixa de Mensagens (court notices sent through the portal), unread or read. Only the "
             "list is read: no message is opened, since opening one marks it read. "
             "status picks the portal's own filter; offset continues a list cut to fit the answer (see next). "
-            "Rows: sentAt (ISO), title, text as the list shows it. " + ENVELOPE + " Read-only."
+            "Rows: sentAt (ISO), title, text as the list shows it. " + ENVELOPE + " " + DATES + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -279,7 +279,7 @@ def create_server(keys=None):
             "(prorrogação de prazo), and the dates deadlines were suspended. Use it to check whether a deadline's "
             'final day moved; the portal\'s own "Final Prazo" is what the queues show. One page, no parameters. '
             "paradas: description, prorrogacao (true/false, null when the portal says neither), start, end (ISO); "
-            "suspensoes: date (ISO), type. " + ENVELOPE + " Read-only."
+            "suspensoes: date (ISO), type. " + ENVELOPE + " " + DATES + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -296,6 +296,8 @@ def create_server(keys=None):
             "kind picks the list; one page. "
             "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). "
             + ENVELOPE
+            + " "
+            + DATES
             + " Read-only."
         ),
         annotations=READ_ONLY,
@@ -320,6 +322,8 @@ def create_server(keys=None):
             "kind picks the list; one page. "
             "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). "
             + ENVELOPE
+            + " "
+            + DATES
             + " Read-only."
         ),
         annotations=READ_ONLY,

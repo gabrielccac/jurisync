@@ -72,7 +72,8 @@ faz o mesmo GET (ou o POST do filtro da própria lista, como a página faz) e l�
 formulário que age; cada ação lida entra explicitamente em `READ_ACTIONS`, e os testes provam que as ações de
 abrir/escrever das mesmas telas continuam bloqueadas. Portal cujo menu não tem a ação responde o erro
 `[not_available]` (o portal não oferece a lista; não é falha da leitura). Todas usam o envelope de lista
-(`returned`, `total`, `next`) e datas ISO.
+(`returned`, `total`, `next`) e datas ISO por `responses.dated` (o texto do portal em `<campo>Text` por um
+ciclo, como no #34; nas colunas por cabeçalho, `<cabeçalho>Text`).
 
 ### Mensagens: `eproc_list_mensagens`
 

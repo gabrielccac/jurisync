@@ -210,6 +210,7 @@ class MessagesTest(unittest.TestCase):
             parsed["items"][0],
             {
                 "sentAt": "2026-11-13T08:33:12",
+                "sentAtText": "13/11/2026 08:33:12",
                 "title": "Indisponibilidade programada",
                 "text": "O sistema ficará indisponível no sábado das 20h às 23h.",
             },
@@ -277,13 +278,18 @@ class ParadasTest(unittest.TestCase):
                 "description": "DIFICULDADE DE ACESSO",
                 "prorrogacao": True,
                 "start": "2026-10-21T11:00:00",
+                "startText": "21/10/2026 11:00:00",
                 "end": "2026-10-21T16:00:00",
+                "endText": "21/10/2026 16:00:00",
             },
         )
         self.assertFalse(parsed["paradas"][1]["prorrogacao"])
         self.assertEqual(
             parsed["suspensoes"],
-            [{"date": "2026-01-24", "type": "Fechamento"}, {"date": "2026-03-10", "type": "Abertura"}],
+            [
+                {"date": "2026-01-24", "type": "Fechamento", "dateText": "24/01/2026"},
+                {"date": "2026-03-10", "type": "Abertura", "dateText": "10/03/2026"},
+            ],
         )
         self.assertEqual(parsed["total"], 2)
 
@@ -321,6 +327,7 @@ class PreparedTest(unittest.TestCase):
                 "columns": {
                     "Processo": "5000001-00.2026.4.04.7200",
                     "Data de Criação": "2026-11-20T14:05:00",
+                    "Data de CriaçãoText": "20/11/2026 14:05",
                     "Tipo": "Petição intercorrente",
                     "Parte": "MARIA FICTÍCIA (123.***.***-09)",
                 },
@@ -369,7 +376,9 @@ class CustasTest(unittest.TestCase):
                         "columns": {
                             "Processo": "5000001-00.2026.4.04.7200",
                             "Data Emissão": "2026-11-10",
+                            "Data EmissãoText": "10/11/2026",
                             "Vencimento": "2026-11-20",
+                            "VencimentoText": "20/11/2026",
                             "Valor": "R$ 150,00",
                         },
                     },
