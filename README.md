@@ -45,7 +45,7 @@ src/jurisync/
                         filing lives in the portal's connector (pje/filing for TRF5)
   install/              setup, credential bundles, skills sync, local HTTP serving
 customers/
-  jean/                 Juridiq publication triage: profile, runner, skill, notes
+  jean/                 Juridiq publication triage: profile, skill, notes
   victor/               DJEN → ADVBOX routing skill, TRF5 filing prep
   elisandra/            DJEN → eproc intimações skill (TRF4 SC/RS, TJRS), task drafts for approval
   wesley/               PJe (TRF1, TRF3, TRF5) and Eproc (TRF4) access on the A1 certificate
@@ -171,8 +171,8 @@ only the first call logs in; later calls reuse it until it expires.
 Each customer folder owns its policy: skills, profiles, workflows, and notes.
 Shared code never imports from `customers/`.
 
-- **Jean** — `customers.jean.run_publications.run_jean_publications(agent)` runs
-  the publication pipeline with Jean's template mapping.
+- **Jean** — Juridiq publication triage skill and the template mapping (`customers/jean/profile.py`) for
+  the publication pipeline.
 - **Victor** — DJEN → ADVBOX task routing skill; TRF5 initial-filing preparation
   (`python -m jurisync.workflows.filing --help`, profile `victor`).
 
