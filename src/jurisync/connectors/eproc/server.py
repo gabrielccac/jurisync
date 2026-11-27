@@ -28,7 +28,7 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
-from jurisync.connectors.eproc.listas import MESSAGE_FILTERS, list_messages, list_paradas
+from jurisync.connectors.eproc.listas import MESSAGE_FILTERS, PREPARED, list_messages, list_paradas, list_prepared
 from jurisync.core import certificate, ciencia, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
@@ -259,6 +259,29 @@ def create_server(keys=None):
     )
     def eproc_list_paradas(portal: Portal) -> dict[str, Any]:
         return call(portal, list_paradas)
+
+    @server.tool(
+        name="eproc_list_peticoes_preparadas",
+        title="List Eproc prepared filings",
+        description=(
+            "List what the lawyer prepared in the portal and has not filed yet: petições iniciais pendentes de "
+            "distribuição or movimentações pendentes (petições intercorrentes). A draft left here was not filed, so a "
+            "deadline may be at risk. Only the list is read; nothing is distributed or filed. "
+            "kind picks the list; one page. "
+            "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_peticoes_preparadas(
+        portal: Portal,
+        kind: Annotated[
+            Literal[tuple(PREPARED)],
+            Field(
+                description="'iniciais': petições iniciais pendentes de distribuição; 'movimentacoes': movimentações pendentes."
+            ),
+        ] = "iniciais",
+    ) -> dict[str, Any]:
+        return call(portal, lambda **context: list_prepared(kind, **context))
 
     @server.tool(
         name="eproc_get_process",

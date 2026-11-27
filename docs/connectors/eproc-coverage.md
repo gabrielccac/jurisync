@@ -99,6 +99,18 @@ abrir/escrever das mesmas telas continuam bloqueadas. Portal cujo menu não tem 
 - Capturas: TRF4 2G, TRF6 2G, TJSC 1G/2G com 19 a 78 paradas e 30 a 44 suspensões, tudo numa página; TJRJ sem
   tabela (lista vazia). Layout de colunas diferente é erro, não lista vazia.
 
+### Petições preparadas: `eproc_list_peticoes_preparadas`
+
+- Ações: `peticao_inicial_preparada_listar` (`kind='iniciais'`, "Petições Iniciais pendentes de distribuição",
+  formulário `frmPeticaoInicial`) e `movimentacao_preparada_listar` (`kind='movimentacoes'`, "Movimentações
+  pendentes", `frmMovimentacaoFutura`), um GET cada.
+- Os botões Distribuir (`peticao_inicial_preparada_distribuir`) e Peticionar (`movimentacao_preparada_peticionar`)
+  postam o mesmo formulário com outra ação; nenhum deles entra no allowlist, e os testes provam que ficam bloqueados.
+- Itens `peticoes`: `processNumber` (o primeiro CNJ da linha, ou `null`) e `columns` (cada célula sob o texto do
+  cabeçalho, datas ISO, CPF mascarado), sem as colunas de seleção e de ações.
+- **Falta validar com linhas.** As cinco capturas vieram vazias (formulário sem tabela), então o parser lê por
+  `<th>` em vez de colunas fixas; confirmar os cabeçalhos num portal com rascunho e então fixar os campos.
+
 ## Features planejadas
 
 ### A. Filas/contadores extras (mesmo formato do `list_notices`)

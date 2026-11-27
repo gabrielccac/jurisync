@@ -13,8 +13,9 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.eproc.client import _response_error, request, require_route
-from jurisync.connectors.eproc.parsers import form_fields, parse_panel, text
+from jurisync.connectors.eproc.parsers import _PROCESS_NUMBER, form_fields, parse_panel, text
 from jurisync.core.errors import NotSupported, PortalError
+from jurisync.core.redaction import mask_cpf
 from jurisync.core.responses import BUDGET, compact, iso, listing
 from jurisync.core.session_pool import SessionExpired
 
@@ -209,4 +210,67 @@ def list_paradas(*, session, panel_html, panel_url, portal):
         "source": "eproc",
         "portal": portal,
         **listing(parsed["paradas"], key="paradas", total=parsed["total"], suspensoes=parsed["suspensoes"]),
+    }
+
+
+# The tool's kind argument -> (list action, its form, the page's title).
+PREPARED = {
+    "iniciais": (
+        "peticao_inicial_preparada_listar",
+        "frmPeticaoInicial",
+        "Petições Iniciais pendentes de distribuição",
+    ),
+    "movimentacoes": ("movimentacao_preparada_listar", "frmMovimentacaoFutura", "Movimentações pendentes"),
+}
+_ACTION_COLUMNS = {"", "ações", "ação"}
+
+
+def parse_header_table(html, form_id=None):
+    """``{"items", "total"}`` of the page's list table read by its headers, or None when ``form_id`` is missing.
+
+    For lists whose rows were not seen in any capture: each row keeps its cells under their header text (dates as
+    ISO, CPFs masked), without the checkbox and action columns, plus the first CNJ number found as ``processNumber``.
+    A page with the form and no table is an empty list.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    if form_id and soup.select_one(f"form#{form_id}") is None:
+        return None
+    table = soup.select_one("table.infraTable")
+    if table is None:
+        return {"items": [], "total": 0}
+    headers = _headers(table)
+    items = []
+    for row in _rows(table):
+        values = [text(cell) for cell in row.find_all("td", recursive=False)]
+        found = next((match for value in values if (match := _PROCESS_NUMBER.search(value))), None)
+        items.append(
+            {
+                "processNumber": found[0] if found else None,
+                "columns": {
+                    header: mask_cpf(iso(value))
+                    for header, value in zip(headers, values, strict=False)
+                    if header.casefold() not in _ACTION_COLUMNS
+                },
+            }
+        )
+    total = _caption_total(table)
+    return {"items": items, "total": total if total is not None and total >= len(items) else len(items)}
+
+
+def list_prepared(kind="iniciais", *, session, panel_html, panel_url, portal):
+    """Petições iniciais or movimentações the lawyer prepared and has not filed yet; never Distribuir/Peticionar."""
+    portal = portals.eproc(portal).key
+    if kind not in PREPARED:
+        raise ValueError(f"kind must be one of {', '.join(PREPARED)}")
+    action, form_id, label = PREPARED[kind]
+    url = _link(action, panel_html=panel_html, panel_url=panel_url, portal=portal, label=label)
+    parsed = parse_header_table(_read(session, "GET", url, action, portal=portal), form_id)
+    if parsed is None:
+        raise PortalError(f"unsupported {label} layout")
+    return {
+        "success": True,
+        "source": "eproc",
+        "portal": portal,
+        "kind": kind,
+        **listing(parsed["items"], key="peticoes", total=parsed["total"]),
     }

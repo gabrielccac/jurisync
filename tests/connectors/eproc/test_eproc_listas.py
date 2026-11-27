@@ -135,6 +135,45 @@ OUTAGES = [
 SUSPENSIONS = [("24/01/2026", "Fechamento"), ("10/03/2026", "Abertura")]
 
 
+def prepared_page(form_id, title, button, rows=()):
+    """A prepared list with its action button; a table only when rows are given (no capture had rows)."""
+    table = ""
+    if rows:
+        lines = "".join(
+            f'<tr class="infraTrClara"><td><input type="checkbox" name="chkInfraItem{index}" value="{index}"/></td>'
+            f'<td><a href="controlador.php?acao=processo_selecionar&amp;num_processo=1&amp;hash=s">{number}</a></td>'
+            f"<td>{created}</td><td>{kind}</td><td>{party}</td>"
+            f'<td><a href="controlador.php?acao=peticao_inicial_preparada_alterar&amp;hash=e{index}">Alterar</a></td></tr>'
+            for index, (number, created, kind, party) in enumerate(rows)
+        )
+        table = (
+            f'<table class="infraTable"><caption>Lista ({len(rows)} registros):</caption><tr><th class="infraTh"></th>'
+            f"{sort_header('Processo')}{sort_header('Data de Criação')}{sort_header('Tipo')}{sort_header('Parte')}"
+            f'<th class="infraTh">Ações</th></tr>{lines}</table>'
+        )
+    return f"""<html><body><div id="divInfraAreaTelaD"><div id="divInfraBarraLocalizacao">{title}</div>
+<form id="{form_id}" method="post" action="controlador.php?acao=x&amp;hash=f">
+<input type="hidden" id="hdnInfraItensSelecionados" name="hdnInfraItensSelecionados" value=""/>
+<button type="button" id="{button[0]}" onclick="{button[1]}();">{button[2]}</button>
+{table}</form></div></body></html>"""
+
+
+INITIAL_EMPTY = prepared_page(
+    "frmPeticaoInicial",
+    "Petições Iniciais pendentes de distribuição",
+    ("btnDistribuir", "distribuirPeticaoInicialPreparada", "Distribuir"),
+)
+MOVEMENT_EMPTY = prepared_page(
+    "frmMovimentacaoFutura",
+    "Movimentações pendentes",
+    ("btnPeticionar", "peticionarMovimentacaoPreparada", "Peticionar"),
+)
+PREPARED_ROWS = [
+    ("5000001-00.2026.4.04.7200", "20/11/2026 14:05", "Petição intercorrente", "MARIA FICTÍCIA (123.456.789-09)"),
+    ("", "21/11/2026", "Petição inicial", "JOÃO INVENTADO"),
+]
+
+
 def read(function, session, *actions, **arguments):
     return function(session=session, panel_html=panel(*actions), panel_url=BASE, portal=PORTAL, **arguments)
 
@@ -242,12 +281,69 @@ class ParadasTest(unittest.TestCase):
         self.assertNotIn("certidao", compact(result))
 
 
+class PreparedTest(unittest.TestCase):
+    def test_empty_lists_as_captured_are_empty(self):
+        for page, form in ((INITIAL_EMPTY, "frmPeticaoInicial"), (MOVEMENT_EMPTY, "frmMovimentacaoFutura")):
+            self.assertEqual(listas.parse_header_table(page, form), {"items": [], "total": 0})
+        self.assertIsNone(listas.parse_header_table(INITIAL_EMPTY, "frmMovimentacaoFutura"))
+
+    def test_rows_are_read_by_their_headers_without_the_checkbox_and_actions(self):
+        page = prepared_page("frmPeticaoInicial", "Petições", ("btnDistribuir", "d", "Distribuir"), PREPARED_ROWS)
+        parsed = listas.parse_header_table(page, "frmPeticaoInicial")
+        self.assertEqual(parsed["total"], 2)
+        self.assertEqual(
+            parsed["items"][0],
+            {
+                "processNumber": "5000001-00.2026.4.04.7200",
+                "columns": {
+                    "Processo": "5000001-00.2026.4.04.7200",
+                    "Data de Criação": "2026-11-20T14:05:00",
+                    "Tipo": "Petição intercorrente",
+                    "Parte": "MARIA FICTÍCIA (123.***.***-09)",
+                },
+            },
+        )
+        self.assertEqual(parsed["items"][1]["processNumber"], None)
+        self.assertEqual(parsed["items"][1]["columns"]["Processo"], None)
+
+    def test_each_kind_reads_its_own_list_with_one_get(self):
+        for kind, action, page in (
+            ("iniciais", "peticao_inicial_preparada_listar", INITIAL_EMPTY),
+            ("movimentacoes", "movimentacao_preparada_listar", MOVEMENT_EMPTY),
+        ):
+            with self.subTest(kind=kind):
+                session = Session(page)
+                result = read(listas.list_prepared, session, action, kind=kind)
+                self.assertEqual(
+                    [(method, f"acao={action}" in url) for method, url, _ in session.calls], [("GET", True)]
+                )
+                self.assertEqual(
+                    (result["kind"], result["peticoes"], result["total"], result["next"]), (kind, [], 0, None)
+                )
+
+    def test_another_page_is_an_error_not_an_empty_list(self):
+        with self.assertRaises(PortalError):
+            read(listas.list_prepared, Session(MOVEMENT_EMPTY), "peticao_inicial_preparada_listar")
+
+
 class AllowlistTest(unittest.TestCase):
     def test_actions_that_open_or_write_stay_blocked(self):
-        for action in ("caixa_mensagem_vizualizar", "eprocsysadm_consultar", "eprocsysadm_certidao"):
+        for action in (
+            "caixa_mensagem_vizualizar",
+            "eprocsysadm_consultar",
+            "eprocsysadm_certidao",
+            "peticao_inicial_preparada_distribuir",
+            "peticao_inicial_preparada_alterar",
+            "movimentacao_preparada_peticionar",
+        ):
             with self.subTest(action=action), self.assertRaises(RuntimeError):
                 client.require_route(f"{BASE}controlador.php?acao={action}&hash=x", portal=PORTAL)
-        for action in ("caixa_mensagem_listar", "eprocsysadm_listar"):
+        for action in (
+            "caixa_mensagem_listar",
+            "eprocsysadm_listar",
+            "peticao_inicial_preparada_listar",
+            "movimentacao_preparada_listar",
+        ):
             client.require_route(f"{BASE}controlador.php?acao={action}&hash=x", portal=PORTAL)
 
 
@@ -279,6 +375,16 @@ class ServerTest(unittest.TestCase):
         )
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["paradas"][1]["prorrogacao"], False)
+
+    def test_eproc_list_peticoes_preparadas(self):
+        result = self.call(
+            "eproc_list_peticoes_preparadas",
+            {"portal": PORTAL, "kind": "movimentacoes"},
+            Session(MOVEMENT_EMPTY),
+            panel("movimentacao_preparada_listar"),
+        )
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["kind"], "movimentacoes")
 
     def test_not_available_is_a_clear_tool_error(self):
         result = self.call("eproc_list_mensagens", {"portal": PORTAL}, Session(), panel("painel_adv_listar"))
