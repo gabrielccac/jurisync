@@ -16,7 +16,8 @@ Each portal gets one attempt and the run stops at the first refused login or CAP
 authenticator usually serves other portals, and a few refusals lock the account. Consecutive logins wait for a new
 authenticator window, because portals refuse a code already used. Results carry codes and times, never values.
 An A3 login refused by the token (a wrong PIN, a cancelled authorisation in the cloud A3's app) stops the run too:
-a few wrong PINs lock the token.
+a few wrong PINs lock the token. A cloud A3 is authorised once and that session serves every login of the run
+(``core.a3.held_token``).
 """
 
 import argparse
@@ -173,6 +174,8 @@ def run(found, *, say=print, attempt=login, wait=wait_for_new_code):
     from jurisync.core.mcp import sanitize_diagnostics
 
     results, stopped, logged = [], None, False
+    if any(target.method.startswith("a3") for target in found):
+        say("A3: responda a janela do certificado quando abrir (desktopID: PIN e e-token); uma vale para toda a rodada")
     for target in found:
         if stopped:
             results.append(Result(target.key, target.method, "nao_testado", detail=f"parado após {stopped}"))
@@ -181,10 +184,6 @@ def run(found, *, say=print, attempt=login, wait=wait_for_new_code):
             wait(say)
         logged = True
         say(f"{target.key}: login ({target.method})...")
-        if target.method.startswith("a3"):
-            say(
-                "  A3: responda a janela do certificado neste computador (desktopID: PIN e e-token) ou o push no celular"
-            )
         began = time.monotonic()
         try:
             attempt(target)

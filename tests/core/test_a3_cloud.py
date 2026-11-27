@@ -1,6 +1,7 @@
 """The A3 through a cloud app's PKCS#11 module (Certisign desktopID): named module, login authorised in the app
 without a PIN, and the chain completed from the system store when the token carries the holder's certificate alone."""
 
+import contextlib
 import datetime
 import os
 import threading
@@ -70,7 +71,7 @@ def test_the_token_issuers_come_first_and_the_store_completes_the_rest(chain):
 
 class FakeSession:
     def __init__(self, certs, error=None):
-        self.certs, self.error, self.pins = certs, error, []
+        self.certs, self.error, self.pins, self.sign_errors, self.signed = certs, error, [], [], 0
 
     def findObjects(self, template):
         return list(range(len(self.certs)))
@@ -82,6 +83,12 @@ class FakeSession:
         self.pins.append(pin)
         if self.error is not None:
             raise PyKCS11.PyKCS11Error(self.error)
+
+    def sign(self, key, data, mechanism):
+        self.signed += 1
+        if self.sign_errors:
+            raise PyKCS11.PyKCS11Error(self.sign_errors.pop(0))
+        return b"assinatura"
 
     def logout(self):
         pass
@@ -108,6 +115,7 @@ def fake_library(session, flags):
             return Info()
 
         def openSession(self, slot, flags):
+            session.opened += 1
             return session
 
     return Library
@@ -115,6 +123,7 @@ def fake_library(session, flags):
 
 def open_token(monkeypatch, certs, flags, error=None, issuers=()):
     session = FakeSession(certs, error)
+    session.opened = 0
     monkeypatch.setattr(PyKCS11, "PyKCS11Lib", fake_library(session, flags))
     monkeypatch.setattr(a3, "system_issuers", lambda: issuers)
     monkeypatch.setattr(a3, "stored_pin", lambda serial: pytest.fail("a protected token must not read a PIN"))
@@ -130,6 +139,80 @@ def test_a_cloud_a3_logs_in_without_a_pin_and_completes_its_chain(chain, monkeyp
     assert token.chain == [leaf, intermediate, root]
     token.login()
     assert session.pins == [None]
+
+
+@pytest.fixture(autouse=True)
+def no_shared_token():
+    a3._shared.clear()
+    yield
+    a3._shared.clear()
+
+
+def shared_cloud_token(chain, monkeypatch):
+    """held_token() over a fake cloud A3; returns the session and a list counting the tokens opened."""
+    token, session = open_token(monkeypatch, [chain[0]], ["CKF_PROTECTED_AUTHENTICATION_PATH"])
+    opened = []
+    monkeypatch.setattr(a3, "A3Signer", lambda: opened.append(token) or token)
+    monkeypatch.setattr(a3, "token_lock", contextlib.nullcontext)
+    return session, opened
+
+
+def test_one_authorisation_serves_every_login_of_the_process(chain, monkeypatch):
+    session, opened = shared_cloud_token(chain, monkeypatch)
+    for _portal in ("trf1-1g", "trf3-1g", "tjsc-1g"):
+        with a3.held_token() as token:
+            # authorised before any connection (desktopID asks at the first signature), never in a TLS handshake
+            assert token.logged_in and session.signed >= 1
+            token.sign_digest_info(b"digest-info")
+    assert len(opened) == 1 and session.pins == [None]
+    assert session.signed == 4  # the authorisation, then one per portal
+
+
+def test_an_idle_or_old_session_is_logged_out_and_authorised_again(chain, monkeypatch):
+    session, opened = shared_cloud_token(chain, monkeypatch)
+    clock = [1000.0]
+    monkeypatch.setattr(a3.time, "monotonic", lambda: clock[0])
+    monkeypatch.setenv("PJE_A3_SESSION_IDLE", "20")
+    monkeypatch.setenv("PJE_A3_SESSION_TTL", "60")
+    with a3.held_token():
+        pass
+    clock[0] += 19 * 60
+    with a3.held_token():
+        pass
+    assert len(opened) == 1
+    clock[0] += 21 * 60  # idle
+    with a3.held_token():
+        pass
+    assert len(opened) == 2
+    for _ in range(5):  # used every 15 minutes, but older than an hour
+        clock[0] += 15 * 60
+        with a3.held_token():
+            pass
+    assert len(opened) == 3
+
+
+def test_a_session_the_module_ended_is_authorised_again_once_never_in_a_loop(chain, monkeypatch):
+    session, _opened = shared_cloud_token(chain, monkeypatch)
+    session.sign_errors = [PyKCS11.CKR_USER_NOT_LOGGED_IN]
+    with a3.held_token() as token:
+        assert token.sign_digest_info(b"digest-info") == b"assinatura"
+    assert session.pins == [None, None] and session.opened == 2
+    session.sign_errors = [PyKCS11.CKR_USER_NOT_LOGGED_IN]
+    with pytest.raises(PyKCS11.PyKCS11Error), a3.held_token() as token:
+        token.sign_digest_info(b"digest-info")
+    assert session.pins == [None, None]
+    assert a3._shared == {}  # the failed session is dropped: the next login asks again
+
+
+def test_a_physical_token_is_still_opened_and_closed_per_login(chain, monkeypatch):
+    token, _session = open_token(monkeypatch, [chain[0]], ["CKF_LOGIN_REQUIRED"])
+    opened = []
+    monkeypatch.setattr(a3, "A3Signer", lambda: opened.append(token) or token)
+    monkeypatch.setattr(a3, "token_lock", contextlib.nullcontext)
+    for _ in range(2):
+        with a3.held_token():
+            pass
+    assert len(opened) == 2 and a3._shared == {}
 
 
 def test_a_cancelled_authorisation_is_a_pin_error_and_is_not_retried(chain, monkeypatch):

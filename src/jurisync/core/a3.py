@@ -18,6 +18,7 @@ certificate alone; the issuers come from the system's certificate store.
 """
 
 import argparse
+import atexit
 import getpass
 import hashlib
 import logging
@@ -25,6 +26,7 @@ import os
 import ssl
 import sys
 import threading
+import time
 import warnings
 from contextlib import contextmanager
 from functools import lru_cache
@@ -50,6 +52,7 @@ APPROVAL_TIMEOUT = 300
 
 # DER prefix of DigestInfo for MD5 (RFC 8017 §9.2): the token pads, the caller hashes.
 MD5_DIGEST_INFO = bytes.fromhex("3020300c06082a864886f70d020505000410")
+SHA256_DIGEST_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
 
 # Any of these states blocks the automatic login: one more wrong PIN could lock the token.
 UNSAFE_PIN_FLAGS = {
@@ -101,15 +104,79 @@ def token_lock():
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+# A token that authorises by itself (the cloud A3) stays logged in for the process, so one authorisation (PIN and app
+# code in desktopID's window) serves every portal's login: {"token", "opened", "used"}, read and changed under
+# token_lock. It is logged out when idle or too old (PJE_A3_SESSION_IDLE / PJE_A3_SESSION_TTL, minutes), on a PKCS#11
+# or PIN error and when the process exits.
+SESSION_IDLE = 20
+SESSION_TTL = 120
+_shared = {}
+
+
+def _minutes(name, default):
+    return float(os.environ.get(name) or default) * 60
+
+
+def drop_shared_token():
+    """Log out and close the process's cloud A3 session, if any."""
+    token = _shared.get("token")
+    _shared.clear()
+    if token is not None:
+        token.close()
+
+
+def _shared_token():
+    """The process's logged-in cloud A3, or None when there is none or it is idle, too old or abandoned."""
+    token = _shared.get("token")
+    if token is None:
+        return None
+    now = time.monotonic()
+    if (
+        token.abandoned
+        or now - _shared["opened"] > _minutes("PJE_A3_SESSION_TTL", SESSION_TTL)
+        or now - _shared["used"] > _minutes("PJE_A3_SESSION_IDLE", SESSION_IDLE)
+    ):
+        drop_shared_token()
+        return None
+    return token
+
+
+atexit.register(drop_shared_token)
+
+
 @contextmanager
 def held_token(signer=None):
-    """``signer`` as given (tests, a caller that already holds the token), else the A3 token opened under
-    ``token_lock`` for the whole block, so parallel logins never interleave PIN logins on it."""
+    """``signer`` as given (tests, a caller that already holds the token), else the A3 token under ``token_lock`` for
+    the whole block, so parallel logins never interleave PIN logins on it.
+
+    A physical token is opened and closed per block. A token that authorises by itself (the cloud A3) is authorised on
+    first use, before any connection (inside a TLS handshake the server gives up while the person types its window),
+    and then shared by the next blocks of this process while it is valid.
+    """
     if signer is not None:
         yield signer
         return
-    with token_lock(), A3Signer() as token:
-        yield token
+    with token_lock():
+        token = _shared_token()
+        if token is None:
+            token = A3Signer()
+            if not token.protected:
+                with token:
+                    yield token
+                return
+            try:
+                token.authorise()
+            except BaseException:
+                token.close()
+                raise
+            _shared.update(token=token, opened=time.monotonic())
+        _shared["used"] = time.monotonic()
+        try:
+            yield token
+        except (PinError, token.pkcs11_error):
+            drop_shared_token()
+            raise
+        _shared["used"] = time.monotonic()
 
 
 def _keyring_pin(serial):
@@ -204,6 +271,8 @@ class A3Signer:
         self.session = self.lib.openSession(self.slot, PyKCS11.CKF_SERIAL_SESSION)
         self.logged_in = False
         self.abandoned = False  # a protected login still waiting in its thread: the session is not touched again
+        self.reauthorised = False  # a cloud A3 session the module expired is authorised again once, never more
+        self.pkcs11_error = PyKCS11.PyKCS11Error
         self._pin = pin
         certs = self._certificates()
         self.ident, self.chain = certificate_chain(certs)
@@ -302,6 +371,25 @@ class A3Signer:
 
     def sign_digest_info(self, digest_info):
         """RSA PKCS#1 v1.5 over a DigestInfo built by the caller (CKM_RSA_PKCS); used by TLS client auth."""
+        pkcs11 = self._pkcs11
+        expired = (pkcs11.CKR_USER_NOT_LOGGED_IN, pkcs11.CKR_SESSION_HANDLE_INVALID, pkcs11.CKR_SESSION_CLOSED)
+        try:
+            return self._sign(digest_info)
+        except pkcs11.PyKCS11Error as error:
+            if not self.protected or self.reauthorised or error.value not in expired:
+                raise
+        log.warning("The A3 module ended its session; asking for the authorisation once more")
+        self.reauthorised = True
+        self.session = self.lib.openSession(self.slot, pkcs11.CKF_SERIAL_SESSION)
+        self.logged_in, self._key = False, None
+        return self._sign(digest_info)
+
+    def authorise(self):
+        """Ask the person now: desktopID's C_Login returns at once and its window opens at the first signature (then
+        each one takes under a second, idle minutes later too), so one throwaway signature of a fixed local text."""
+        self.sign_digest_info(SHA256_DIGEST_INFO + hashlib.sha256(b"jurisync-a3-authorisation").digest())
+
+    def _sign(self, digest_info):
         self.login()
         mechanism = self._pkcs11.Mechanism(self._pkcs11.CKM_RSA_PKCS, None)
         key = self._private_key()
