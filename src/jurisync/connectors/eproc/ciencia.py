@@ -10,10 +10,16 @@ process there, so the result can tell the user what the read did or would do:
 - the queues could not be read to their end: ``desconhecida`` when documents were opened (``motivo``), else
   ``nenhuma`` with an ``aviso``.
 
-Which document a pending intimação covers is not in the captured pages. The standard eproc timeline marks the
-intimação event with "Status: AGUARD. ABERTURA" and "Refer. ao Evento N"; ``EVENT_LINK_CONFIRMED`` turns that reading
-on (the block then names the requested documents that belong to the pending event), and it stays off until it is
-confirmed on a live portal.
+The timeline describes each intimação with its deadline (TJMG and JFRS, 27/11/2026): "Expedida/certificada a intimação
+eletrônica Refer. ao Evento 40 ( AUTOR - name) Prazo: 10 dias Status:ABERTO Data inicial da contagem do prazo:
+13/11/2026 00:00:00 Data final: 27/11/2026 23:59:59", or "Status:FECHADO ( 37 - Decorrido prazo )" once it closed,
+followed by "Disponibilizado no DJEN - no dia ... - Refer. ao Evento: 41" and "Publicado no DJEN ...". ``deadlines``
+reads them into the ``prazos`` of a process read. An intimação event whose status is neither ABERTO nor FECHADO
+("AGUARD. ABERTURA") still waits to be opened (``awaiting_events``).
+
+Which document a pending intimação covers: "Refer. ao Evento N" names the event whose documents it sends, but no live
+read has shown a pending event yet (opening one is what must not happen), so ``EVENT_LINK_CONFIRMED`` stays off; on, the
+block names the requested documents that belong to the pending event.
 """
 
 import re
@@ -30,15 +36,100 @@ _AWAITING = re.compile(r"aguard\w*\.?\s*(?:a\s+)?abertura", re.I)
 _REFERENCE = re.compile(r"refer\w*\.?\s*a?o?s?\s*eventos?\s*:?\s*((?:\d+\s*(?:,|\be\b)?\s*)+)", re.I)
 _DEADLINE = re.compile(r"prazo\s*:?\s*(\d+)\s*dias?", re.I)
 _DAYS = re.compile(r"(\d+)\s*dias?", re.I)
+_STATUS = re.compile(r"status(?:\s+do\s+prazo)?\s*:\s*(.+?)(?=\s*\(|\s+data\b|$)", re.I)
+_CLOSED_BY = re.compile(r"status(?:\s+do\s+prazo)?\s*:\s*fechado\s*\(\s*(\d+\s*-\s*[^)]*?)\s*\)", re.I)
+_REFERRED = re.compile(r"refer\w*\.?\s*([^()]*?)\s*(?:\(|prazo\s*:|$)", re.I)
+_PARTY = re.compile(r"\(\s*([A-ZÀ-Ú][A-ZÀ-Ú ]*?)\s+-\s")
+_START = re.compile(r"data inicial da contagem do prazo\s*:\s*(\d{2}/\d{2}/\d{4})", re.I)
+_END = re.compile(r"data final\s*:\s*(\d{2}/\d{2}/\d{4})", re.I)
+_DJEN = re.compile(
+    r"(disponibilizad|publicad)o no djen\s*-\s*no dia\s*(\d{2}/\d{2}/\d{4}).*?refer\w*\.?\s*a?o?s?\s*eventos?\s*:?"
+    r"\s*((?:\d+\s*(?:,|\be\b)?\s*)+)",
+    re.I,
+)
 QUEUE_FIELDS = ("queue", "deadlineEvent", "requestedAt", "deadlineStart", "deadlineEnd")
+OPENED = {"ABERTO": "aberto", "FECHADO": "fechado"}
+
+
+def _iso(value):
+    day, month, year = value.split("/")
+    return f"{year}-{month}-{day}"
+
+
+def awaiting_publication(row):
+    """A pending queue row that waits for its DJEN publication ("Aguarda publicação no DJEN" as the deadline start)."""
+    return "publica" in str(row.get("deadlineStart") or "").casefold()
+
+
+def _status(description, classes):
+    found = _STATUS.search(description)
+    if found:
+        raw = " ".join(found.group(1).split()).upper()
+        if raw in OPENED:
+            return OPENED[raw]
+        return "aguardando_abertura" if _AWAITING.search(raw) else raw.lower()
+    if "infraEventoPrazoAberto" in classes:
+        return "aberto"
+    if "infraEventoPrazoFechado" in classes:
+        return "fechado"
+    return None
+
+
+def deadlines(events):
+    """The deadline of every intimação event of the timeline, oldest first, with its DJEN dates when shown.
+
+    Each: eventId, dateTime, refersTo (the events it sends), party (the role it is addressed to), days, status
+    (``aberto``, ``fechado``, ``aguardando_abertura`` or the portal's own word), closedBy (the event that closed it),
+    start and end (ISO dates of the count), djenAvailable and djenPublished (ISO dates).
+    """
+    djen = {}
+    for event in events or []:
+        found = _DJEN.search(str(event.get("description") or ""))
+        if found:
+            kind = "djenAvailable" if found.group(1).lower().startswith("disponibiliz") else "djenPublished"
+            for identifier in re.findall(r"\d+", found.group(3)):
+                djen.setdefault(identifier, {})[kind] = _iso(found.group(2))
+    result = []
+    for event in events or []:
+        description = " ".join(str(event.get("description") or "").split())
+        classes = event.get("classes") or []
+        status = _status(description, classes)
+        if status is None or not (
+            _DEADLINE.search(description) or _END.search(description) or _STATUS.search(description)
+        ):
+            continue
+        referred = _REFERRED.search(description)
+        days, party = _DEADLINE.search(description), _PARTY.search(description)
+        start, end, closed = _START.search(description), _END.search(description), _CLOSED_BY.search(description)
+        identifier = str(event.get("id") or "")
+        result.append(
+            {
+                "eventId": identifier,
+                "dateTime": event.get("dateTime", ""),
+                "label": event.get("label", ""),
+                "refersTo": re.findall(r"\d+", referred.group(1)) if referred else [],
+                "party": party.group(1).strip() if party else None,
+                "days": int(days.group(1)) if days else None,
+                "status": status,
+                "closedBy": " ".join(closed.group(1).split()) if closed else None,
+                "start": _iso(start.group(1)) if start else None,
+                "end": _iso(end.group(1)) if end else None,
+                "djenAvailable": djen.get(identifier, {}).get("djenAvailable"),
+                "djenPublished": djen.get(identifier, {}).get("djenPublished"),
+            }
+        )
+    return sorted(result, key=lambda item: int(item["eventId"]) if item["eventId"].isdigit() else 0)
 
 
 def awaiting_events(events):
-    """Timeline events that announce an intimação still waiting to be opened, with the events they refer to."""
+    """Timeline events that announce an intimação still waiting to be opened, with the events they refer to: a
+    deadline whose status is neither ABERTO nor FECHADO, or any event that says "aguardando abertura"."""
+    waiting = {item["eventId"]: item for item in deadlines(events) if item["status"] not in OPENED.values()}
     found = []
     for event in events or []:
         description = str(event.get("description") or "")
-        if not _AWAITING.search(description):
+        identifier = str(event.get("id") or "")
+        if identifier not in waiting and not _AWAITING.search(description):
             continue
         reference = _REFERENCE.search(description)
         days = _DEADLINE.search(description)
@@ -126,6 +217,11 @@ def notice(process_number, document_ids, *, notices, problem, events, events_com
     if markers:
         shown += "; na linha do tempo: " + "; ".join(_describe_event(marker) for marker in markers[:5])
     deadline = f"o prazo de {days} dias" if days else "o prazo"
+    if all(awaiting_publication(row) for row in notices):
+        shown += (
+            "; o portal informa que ela aguarda a publicação no DJEN, que dá a ciência e abre o prazo mesmo sem "
+            "abrir nada"
+        )
     if opened:
         aviso = (
             f"Este processo ({process_number}) tinha intimação aguardando ciência ({shown}); abrir os documentos pode "
