@@ -41,18 +41,6 @@ PRESETS = (READ_ONLY, SAVES_FILE, MAY_GIVE_CIENCIA, WRITE, WRITE_IDEMPOTENT, DES
 
 log = logging.getLogger(__name__)
 
-# Names that identify or unlock one person's account.
-SECRET_PATTERNS = (
-    "*_PASSWORD", "*_SENHA", "*_PIN", "*_2FA_*", "*_TOTP*", "*_OTP_SECRET", "*_P12", "*_PFX", "*_PASSPHRASE",
-    "*_TOKEN", "*_SECRET", "*_API_KEY", "*_KEY", "*_DEVICE_ID", "*_EMAIL", "*_USERNAME", "*_USUARIO", "*_CPF",
-    "*_EXPORT_DATA", "*_QR", "*_CREDENTIALS",
-)  # fmt: skip
-
-
-def is_secret_name(name):
-    return any(fnmatch.fnmatchcase(name.upper(), pattern) for pattern in SECRET_PATTERNS)
-
-
 # With a customer selected, the shared file provides only these: settings about this computer, never about an office.
 # JURISYNC_* are locations, binaries and limits; the *_PATH/_BIN/_CACHE names point at installed programs and
 # libraries; DJEN_BRIDGE_* is the server's own route to the CNJ API; the ADVBOX numbers are local limits; DISPLAY is

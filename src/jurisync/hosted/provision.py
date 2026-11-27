@@ -31,13 +31,11 @@ that password at the first sign-in; deliver the file through a separate channel 
 
 import json
 import os
-import re
 import secrets
 import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from jurisync import customers, portals, registry
 from jurisync.install import credentials_bundle
@@ -477,56 +475,3 @@ def apply_local(store, vault, office, say):
         store.remove_user(row["email"])
         say(f"{tenant}: usuário {row['email']} removido")
     store.log(tenant, "operador", "escritório só local", reason)
-
-
-# Tools an office plugin may name that the hosted server does not serve: filing runs on the office's machine, and so do
-# each connector's local-only tools (PJe drafts).
-LOCAL_ONLY_TOOLS = re.compile(
-    r"\b(filing_[a-z_]+|"
-    + "|".join(sorted(tool for connector in registry.CONNECTORS.values() for tool in connector.local_only_tools))
-    + r")\b"
-)
-
-
-def remote_plugin(source, url, out, *, say=print):
-    """Copy an office plugin with its local MCP servers replaced by the hosted ones: ``/tribunais/mcp`` for its court
-    systems and DJEN, ``/<name>/mcp`` for each management system (ADVBOX, Juridiq) it uses.
-
-    Skills are copied as files (the plugin's symlinks point into customers/), customer profiles are left out: the
-    server holds them. Returns the skills that name tools the server does not serve.
-    """
-    source, out = Path(source), Path(out)
-    manifest = json.loads((source / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    base = url.rstrip("/").removesuffix("/mcp")
-    if not base.startswith("https://") or not urlsplit(base).netloc or urlsplit(base).path:
-        raise SystemExit("--url deve ser o endereço público do servidor, https://<host>")
-    used = [name for name in manifest.get("mcpServers", {}) if name in registry.CONNECTORS]
-    paths = registry.endpoints(used or [registry.GROUPS[registry.COURTS][0]])
-    manifest["mcpServers"] = {path.split("/")[1]: {"type": "http", "url": base + path} for path in paths}
-    manifest["description"] = manifest.get("description", "") + " (servidor remoto)"
-    if out.exists():
-        shutil.rmtree(out)
-    (out / ".claude-plugin").mkdir(parents=True)
-    local_only = {}
-    for entry in manifest.get("skills", []):
-        skill = (source / entry).resolve()
-        shutil.copytree(skill, out / entry, symlinks=False)
-        found = sorted(
-            {
-                match.group(1)
-                for path in skill.rglob("*.md")
-                for match in LOCAL_ONLY_TOOLS.finditer(path.read_text(encoding="utf-8"))
-            }
-        )
-        if found:
-            local_only[Path(entry).name] = found
-    (out / ".claude-plugin" / "plugin.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    say(
-        f"Plugin remoto em {out}: "
-        + ", ".join(f"{name} -> {entry['url']}" for name, entry in manifest["mcpServers"].items())
-    )
-    for skill, tools in local_only.items():
-        say(f"    {skill} usa ferramentas que o servidor não serve ({', '.join(tools)}): continua na instalação local")
-    return local_only

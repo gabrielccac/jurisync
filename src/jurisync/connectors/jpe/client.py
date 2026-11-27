@@ -49,7 +49,6 @@ from jurisync.core.totp import configured_account, fresh_code
 
 PORTAL = "tjmg-jpe-2g"
 ROOT = "/rupe/"
-SSO_SERVLET = "loginSsoKeycloakServlet"
 SSO_REFUSED = (
     "o JPe recusou o login pelo PDPJ do lado do tribunal: o SSO do PDPJ não aceita o endereço de retorno que o "
     "próprio JPe envia para o client jpe-tjmg-2g (acontece também no navegador, antes de qualquer credencial). Use o "
