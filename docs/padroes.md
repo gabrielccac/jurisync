@@ -180,6 +180,8 @@ Helpers em `jurisync.core.responses`:
   Eproc (filas, Relação de Processos, pautas e audiências) `number` continua por um ciclo como cópia.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
+- **`ciencia`** é só o bloco de estado (`core.ciencia.report`). Quem deu a ciência e quando, por expediente do PJe, é
+  `cienciaDada: {por, em}`; o `ciencia` antigo dessas linhas fica por um ciclo.
 - **JSON compacto:** o `JurisyncServer` troca a cópia em texto indentada do SDK pelo mesmo JSON sem espaços (25-33%
   menor), sem mudar o `structuredContent`.
 - Retorno de tool é um `dict` com `success`; texto vindo de portal leva o `notice` de evidência não confiável;
