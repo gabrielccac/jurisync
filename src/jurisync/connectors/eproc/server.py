@@ -300,9 +300,14 @@ def create_server(keys=None):
             "aberto/fechado/aguardando_abertura, closedBy, start and end ISO dates, djenAvailable/djenPublished). "
             "metadata.additionalInformation: the Informações Adicionais (justiça gratuita, sigilo, prevenção, valor "
             "da causa...); audiencias and pericias: the process' lists (null where the portal has no such button). "
-            "save=true stores each read document (HTML as PDF) in the shared documents folder. timeline[].dateTime, "
-            "metadata.cover.filedAt, audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and "
-            "eventos: " + DATES
+            "save=true stores each read document (HTML as PDF) in the shared documents folder. Inventory: the timeline is "
+            "read up to 5 event pages; when it was not read to its end, or a documentId is not in it, the Árvore (the "
+            "case's full document list, nothing opened) is listed too and inventorySource says 'tree' (else 'timeline'). "
+            "inventory='tree' always lists it, 'timeline' never (one request less). With the Árvore, documentInventory "
+            "shows 150 entries and inventory.next gives the arguments for the rest (inventoryOffset; documentIds empty and "
+            "save false, so nothing is opened again); a timeline-only inventory comes whole. Documents found in the Árvore "
+            "are opened under the same ciência rule. timeline[].dateTime, documentInventory[].date, metadata.cover.filedAt, "
+            "audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and eventos: " + DATES
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -333,6 +338,16 @@ def create_server(keys=None):
             bool | None,
             Field(description=ciencia.ACKNOWLEDGE),
         ] = None,
+        inventory: Annotated[
+            Literal["auto", "timeline", "tree"],
+            Field(description="'auto': list the Árvore only when the timeline is incomplete. 'tree' or 'timeline'."),
+        ] = "auto",
+        inventoryOffset: Annotated[
+            int,
+            Field(
+                ge=0, description="First documentInventory entry to show when the Árvore was listed (inventory.next)."
+            ),
+        ] = 0,
     ) -> dict[str, Any]:
         result = call(
             portal,
@@ -342,10 +357,14 @@ def create_server(keys=None):
                 documentIds or None,
                 save=save,
                 acknowledge_ciencia=_allow_ciencia(acknowledgeCiencia),
+                inventory=inventory,
+                inventory_offset=inventoryOffset,
                 **context,
             ),
         )
         dated((result.get("metadata") or {}).get("cover") or {}, "filedAt")
+        for document in result.get("documentInventory") or []:
+            dated(document, "date")
         for event in result.get("timeline") or []:
             dated(event, "dateTime")
         for hearing in result.get("audiencias") or []:

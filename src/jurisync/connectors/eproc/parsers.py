@@ -713,10 +713,14 @@ def parse_process_exams(html):
 
 
 def process_links(html, base_url):
-    """The process page's audiência and perícia list links, when its action bar shows them."""
+    """The process page's audiência, perícia and Árvore (document tree) links, when its action bar shows them."""
     soup = BeautifulSoup(html or "", "html.parser")
     links = {}
-    for key, action in (("hearings", "audiencia_listar"), ("exams", "exame_listar")):
+    for key, action in (
+        ("hearings", "audiencia_listar"),
+        ("exams", "exame_listar"),
+        ("tree", "arvore_documento_listar"),
+    ):
         anchor = soup.select_one(f'a[href*="acao={action}&"]')
         if anchor is not None:
             links[key] = _href(anchor.get("href"), base_url)

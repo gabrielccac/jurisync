@@ -53,6 +53,7 @@ class DatesTest(unittest.TestCase):
         result = {
             "metadata": {"cover": {"filedAt": "16/07/2026 15:54:12"}},
             "timeline": [{"dateTime": "21/09/2026 12:19:13"}],
+            "documentInventory": [{"id": "70", "date": "01/10/2026 09:00:00"}, {"id": "10"}],
             "audiencias": [{"start": "12/05/2027 15:30:00", "end": "12/05/2027 16:30:00"}],
             "prazos": [{"dateTime": "06/11/2026 10:00:00", "start": "2026-11-07"}],
             "ciencia": {
@@ -65,6 +66,8 @@ class DatesTest(unittest.TestCase):
         self.assertEqual(answer["metadata"]["cover"]["filedAt"], "2026-07-16T15:54:12")
         self.assertEqual(answer["timeline"][0]["dateTime"], "2026-09-21T12:19:13")
         self.assertEqual(answer["timeline"][0]["dateTimeText"], "21/09/2026 12:19:13")
+        self.assertEqual(answer["documentInventory"][0]["date"], "2026-10-01T09:00:00")
+        self.assertEqual(answer["documentInventory"][1], {"id": "10"})
         self.assertEqual(answer["audiencias"][0]["end"], "2027-05-12T16:30:00")
         self.assertEqual(answer["prazos"][0]["dateTime"], "2026-11-06T10:00:00")
         (row,) = answer["ciencia"]["intimacoes"]
