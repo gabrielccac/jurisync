@@ -18,7 +18,7 @@ from jurisync.connectors.eproc import client
 from jurisync.connectors.eproc.parsers import _href, _list_pagination, form_fields, parse_panel, text
 from jurisync.core.errors import InputError, PortalError
 from jurisync.core.redaction import mask_cpf
-from jurisync.core.responses import iso, listing
+from jurisync.core.responses import dated, listing
 from jurisync.core.session_pool import SessionExpired
 
 MAX_SEARCH_PAGES = 5
@@ -199,8 +199,6 @@ def _row(headers, cells):
         elif key in ("active", "passive", "parties"):
             pole = None if key == "parties" else key
             item["parties"] += [{"pole": pole, "name": mask_cpf(name)} for name in cell.stripped_strings]
-        elif key in ("filedAt", "lastEventAt"):
-            item[key] = iso(value)
         elif key:
             item[key] = value or None
         elif value and header:
@@ -210,7 +208,7 @@ def _row(headers, cells):
             (CNJ.search(text(cell)) for cell in cells if cell.select_one('a[href*="processo_selecionar"]')), None
         )
         item["processNumber"] = link.group(0) if link else None
-    return item if item["processNumber"] else None
+    return dated(item, "filedAt", "lastEventAt") if item["processNumber"] else None
 
 
 def parse_search_results(body):

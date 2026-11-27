@@ -39,7 +39,7 @@ from jurisync.core.mcp import (
     serve,
     tool_errors,
 )
-from jurisync.core.responses import ENVELOPE, listing
+from jurisync.core.responses import DATES, ENVELOPE, dated, listing
 from jurisync.core.session_pool import SessionExpired, SessionPool
 from jurisync.customers import ciencia_on_read, load_env_file
 from jurisync.portals import PORTAL_HELP, offer_portals
@@ -106,12 +106,16 @@ def create_server(keys=None):
                 ),
             )
 
-    def enveloped(result, max_pages=None, process_number=None):
-        """The common list envelope; ``next`` only when pages remain that a larger maxPages reaches (the pager's count, or
-        one estimated from the rows of a page: ``filtros.page_count``).
+    QUEUE_DATES = ("requestedAt", "deadlineStart", "deadlineEnd", "sessionStart", "sessionEnd")
+
+    def enveloped(result, dates, max_pages=None, process_number=None):
+        """The common list envelope, the items' ``dates`` in ISO; ``next`` only when pages remain that a larger maxPages
+        reaches (the pager's count, or one estimated from the rows of a page: ``filtros.page_count``).
 
         With ``process_number`` only that process' rows stay (``filtros.by_process``)."""
         result, total = by_process(result, process_number)
+        for item in result["items"]:
+            dated(item, *dates)
         pagination = result.get("pagination") or {}
         pages = page_count(pagination) or 0
         more = None
@@ -128,8 +132,13 @@ def create_server(keys=None):
             "(queues[] says what each queue gave). With queue: that queue only. "
             + intimacao.DESCRIPTION
             + " Rows also "
-            "carry queue, processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
-            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. "
+            "carry queue, cienciaPendente (true in the pending queues; situacao says whether it awaits the ciência or "
+            "the DJEN publication; it is about this row, while the ciência lock of eproc_get_process covers the "
+            "whole process: a false row does not mean the process' documents may be opened), "
+            "processNumber (also number, its old name), court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "deadlineEnd. Counts of every queue: eproc_get_counters. "
+            + DATES
+            + " "
             + ENVELOPE
             + " Read-only: opens no intimação."
         ),
@@ -153,7 +162,8 @@ def create_server(keys=None):
     ) -> dict[str, Any]:
         with tool_errors("Eproc"):
             wanted = process_digits(processNumber)
-        return enveloped(call(portal, lambda **context: list_notices(queue, **context)), process_number=wanted)
+        result = call(portal, lambda **context: list_notices(queue, **context))
+        return enveloped(result, QUEUE_DATES, process_number=wanted)
 
     @server.tool(
         name="eproc_get_counters",
@@ -179,14 +189,18 @@ def create_server(keys=None):
         description=(
             "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
             "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), processNumber (also number, its old name), court (juízo), "
-            "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO) and "
-            "observation. lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
-            "Read-only."
+            "parties, event (what was scheduled), location, start and end, date (the day of start) and observation. "
+            "lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
+            + DATES
+            + " Read-only."
         ),
         annotations=READ_ONLY,
     )
     def eproc_list_audiencias(portal: Portal) -> dict[str, Any]:
-        return call(portal, lambda **context: list_hearings(**context))
+        result = call(portal, lambda **context: list_hearings(**context))
+        for hearing in result.get("audiencias") or []:
+            dated(hearing, "start", "end")
+        return result
 
     @server.tool(
         name="eproc_list_processes",
@@ -200,6 +214,8 @@ def create_server(keys=None):
             "procedural role is in eproc_get_process), class, subject, last event, dates, claim value. "
             "pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread. "
+            + DATES
+            + " "
             + ENVELOPE
             + " Details and documents: eproc_get_process. Read-only."
         ),
@@ -253,7 +269,7 @@ def create_server(keys=None):
                 **context,
             ),
         )
-        return enveloped(result, maxPages, wanted)
+        return enveloped(result, ("lastEventAt", "filedAt"), maxPages, wanted)
 
     @server.tool(
         name="eproc_search_processes",
@@ -265,7 +281,7 @@ def create_server(keys=None):
             "Cost: one request for the search page plus one per result page (maxPages); includeClosed adds baixados.\n"
             "Answer: processes (processNumber, caseClass, parties with pole, subject, court, status, filedAt and the "
             "portal's other columns in extra), returned, total (the portal's count) and next (the maxPages that reads "
-            "the rest, or null). Details and documents: eproc_get_process."
+            "the rest, or null). Details and documents: eproc_get_process. " + DATES
         ),
         annotations=READ_ONLY,
     )
@@ -313,7 +329,9 @@ def create_server(keys=None):
             "aberto/fechado/aguardando_abertura, closedBy, start and end ISO dates, djenAvailable/djenPublished). "
             "metadata.additionalInformation: the Informações Adicionais (justiça gratuita, sigilo, prevenção, valor "
             "da causa...); audiencias and pericias: the process' lists (null where the portal has no such button). "
-            "save=true stores each read document (HTML as PDF) in the shared documents folder."
+            "save=true stores each read document (HTML as PDF) in the shared documents folder. timeline[].dateTime, "
+            "metadata.cover.filedAt, audiencias start/end, prazos[].dateTime and the ciencia block's intimacoes and "
+            "eventos: " + DATES
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -345,7 +363,7 @@ def create_server(keys=None):
             Field(description=ciencia.ACKNOWLEDGE),
         ] = None,
     ) -> dict[str, Any]:
-        return call(
+        result = call(
             portal,
             lambda **context: fetch_process(
                 processNumber,
@@ -356,6 +374,19 @@ def create_server(keys=None):
                 **context,
             ),
         )
+        dated((result.get("metadata") or {}).get("cover") or {}, "filedAt")
+        for event in result.get("timeline") or []:
+            dated(event, "dateTime")
+        for hearing in result.get("audiencias") or []:
+            dated(hearing, "start", "end")
+        for prazo in result.get("prazos") or []:
+            dated(prazo, "dateTime")
+        block = result.get("ciencia") or {}
+        for row in block.get("intimacoes") or []:
+            dated(row, *QUEUE_DATES)
+        for marker in block.get("eventos") or []:
+            dated(marker, "dateTime")
+        return result
 
     return server
 

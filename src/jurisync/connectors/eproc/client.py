@@ -430,7 +430,8 @@ def situation(item, queue):
 
 
 def _situated(items, queue):
-    return [{**item, "queue": queue, **situation(item, queue)} for item in items]
+    pending = queue in ciencia.PENDING_QUEUES
+    return [{**item, "queue": queue, "cienciaPendente": pending, **situation(item, queue)} for item in items]
 
 
 def list_notices(queue=None, *, session=None, panel_html=None, panel_url=None, portal):

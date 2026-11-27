@@ -179,6 +179,7 @@ class SearchResultTests(unittest.TestCase):
         self.assertEqual(item["caseClass"], "Procedimento Comum")
         self.assertEqual(item["court"], "1ª Vara Fictícia")
         self.assertEqual(item["filedAt"], "2025-07-30T09:18:54")
+        self.assertEqual(item["filedAtText"], "30/07/2025 09:18:54")  # the portal's text, for one cycle
         self.assertEqual(item["extra"], {"Relator": "Des. Inventado"})
         self.assertEqual(
             item["parties"],

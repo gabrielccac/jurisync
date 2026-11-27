@@ -43,7 +43,7 @@ Em validação (12/09/2026), o texto retornado por `pje_get_process` (tanto em c
 - **Certidão automática de marcação de perícia**: geralmente traz data, hora, nome do perito e especialidade.
 - **Ato ordinatório / intimação de perícia**, publicado no mesmo movimento: geralmente traz o **endereço completo do local** (clínica/consultório/endereço da Central de Perícias), instruções ao autor (documentos, laudos e exames a levar) e, por vezes, o próprio nome do perito e a data/hora repetidos.
 
-Busque os dois antes de decidir que a informação está incompleta. O nome do representante legal da parte autora não precisa ser buscado no texto do documento — já vem estruturado em `parties.active` na resposta principal do `pje_get_process`.
+Busque os dois antes de decidir que a informação está incompleta. O nome do representante legal da parte autora não precisa ser buscado no texto do documento — já vem estruturado em `parties` na resposta principal do `pje_get_process` (os itens com `pole: "active"`; `role` diz se é parte ou advogado).
 
 Com esses dados, complete a descrição da tarefa provisória (`Comunicação Perícia Médica Federal` ou `Comunicação Perícia Social`) com data, hora, local e perito, remova a marca de provisória e crie o evento na agenda (Fase 5 do SKILL.md). Sem data e hora confirmadas em nenhum dos documentos do cluster, não crie evento.
 
