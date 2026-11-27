@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from jurisync.core import certificate
-from jurisync.core.certificate import pkipath_encode
+from jurisync.core.certificate import java_pkipath64, pkipath_encode
 from jurisync.core.http import IMPERSONATE
 from jurisync.core.session_pool import LoginRejected
 
@@ -56,17 +56,6 @@ def issuer_path(cert, chain):
         current = by_subject.pop(current.issuer)
         path.append(current)
     return path
-
-
-def java_pkipath64(path):
-    """Base64 of Java's ``CertPath.getEncoded("PkiPath")`` for a holder-first path: Java writes it root first.
-
-    This is what PJeOffice sends as ``cadeiaCertificado``. A server decoding it with ``generateCertPath(.., "PkiPath")``
-    gets the holder back at index 0; a holder-first encoding would give it the root CA instead.
-    """
-    from cryptography.hazmat.primitives.serialization import Encoding
-
-    return base64.b64encode(pkipath_encode([c.public_bytes(Encoding.DER) for c in reversed(path)])).decode("ascii")
 
 
 class A1Signer:

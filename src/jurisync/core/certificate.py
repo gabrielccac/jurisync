@@ -5,6 +5,7 @@ Locally the file comes from the path in an environment variable; hosted, from th
 directory only for the duration of the block, never kept on disk.
 """
 
+import base64
 import os
 import tempfile
 from contextlib import contextmanager
@@ -25,6 +26,17 @@ def pkipath_encode(certs_der):
     """Java CertPath PkiPath: DER SEQUENCE OF Certificate (the chain format of the PJeOffice and A3 signers)."""
     body = b"".join(certs_der)
     return b"\x30" + _der_length(len(body)) + body
+
+
+def java_pkipath64(path):
+    """Base64 of Java's ``CertPath.getEncoded("PkiPath")`` for a holder-first path: Java writes it root first.
+
+    This is what PJeOffice sends as ``cadeiaCertificado``. A server decoding it with ``generateCertPath(.., "PkiPath")``
+    gets the holder back at index 0; a holder-first encoding would give it the root CA instead.
+    """
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    return base64.b64encode(pkipath_encode([c.public_bytes(Encoding.DER) for c in reversed(path)])).decode("ascii")
 
 
 DEFAULT_FILE = "PJE_A1_P12"

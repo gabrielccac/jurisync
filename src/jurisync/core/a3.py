@@ -21,7 +21,7 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding
 
-from jurisync.core.certificate import pkipath_encode
+from jurisync.core.certificate import java_pkipath64, pkipath_encode
 
 DEFAULT_MODULES = {
     "darwin": "/Applications/tokenadmin.app/Contents/Frameworks/libaetpkss.dylib",
@@ -235,8 +235,6 @@ class A3Signer:
         return base64.b64encode(pkipath_encode(blobs)).decode("ascii")
 
     def pkipath64(self):
-        from jurisync.connectors.pje.auth.signer import java_pkipath64
-
         return java_pkipath64(self.chain)
 
     def close(self):
