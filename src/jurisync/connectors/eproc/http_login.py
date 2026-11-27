@@ -32,7 +32,7 @@ from curl_cffi import requests
 from jurisync import portals
 from jurisync.connectors.eproc.a3 import _cookies_for, _store_cookies, eproc_message
 from jurisync.connectors.eproc.auth import is_panel, panel_link
-from jurisync.core import image_captcha, mtls
+from jurisync.core import a3, image_captcha, mtls
 from jurisync.core.session_pool import LoginFailed, LoginRejected
 from jurisync.core.totp import answer_code
 
@@ -145,8 +145,6 @@ def login(username, password, account, *, portal, signer=None, certificate=False
     ``certificate``: take the "Certificado Digital" route (password, then the A3 token at ``login_cert.php``);
     otherwise "Entrar" (the password alone).
     """
-    from jurisync.connectors.pje.auth import a3
-
     if account["type"] != "totp":
         raise ValueError("Selected authenticator account is not TOTP")
     config = portals.eproc(portal)
@@ -159,11 +157,8 @@ def login(username, password, account, *, portal, signer=None, certificate=False
                 f"{config.key}: the portal asks for the certificate after the password; log in with the A3 token "
                 f"({config.env_name('AUTH')}=a3)"
             )
-        cookies = _cookies_for(session, config.host)
-        if signer is not None:
-            return mtls.fetch(url, signer=signer, cookies=cookies)
-        with a3.token_lock(), a3.A3Signer() as token:
-            return mtls.fetch(url, signer=token, cookies=cookies)
+        with a3.held_token(signer) as token:
+            return mtls.fetch(url, signer=token, cookies=_cookies_for(session, config.host))
 
     try:
         page = session.get(config.login_url, impersonate="chrome", timeout=60)

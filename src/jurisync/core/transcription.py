@@ -45,7 +45,7 @@ def transcribe_bytes(content, *, language=DEFAULT_LANGUAGE):
         model = _load_model()
         segments, _ = model.transcribe(io.BytesIO(content), language=language, beam_size=1, vad_filter=True)
         lines = [f"[{segment.start:.1f}] {segment.text.strip()}" for segment in segments]
-    except Exception:
+    except Exception:  # noqa: BLE001 - the model runtime raises many types; the status says so
         return "transcription_failed", ""
     text = "\n".join(lines)
     if not text.strip():

@@ -13,7 +13,7 @@ from jurisync import portals
 from jurisync.connectors.pje import parsers, search
 from jurisync.connectors.pje import process as client
 from jurisync.connectors.pje.auth import sso as auth
-from jurisync.core import totp
+from jurisync.core import keycloak, totp
 
 TRF1_SEARCH = portals.pje("trf1-1g").search_url
 
@@ -23,7 +23,7 @@ class PjeChecks(unittest.TestCase):
         html = (
             '<form id="loginForm"></form><span class="kc-feedback-text">Senha expirada. Solicite uma nova senha</span>'
         )
-        kind, reason = auth.credential_failure(html)
+        kind, reason = keycloak.credential_failure(html)
         self.assertEqual(kind, "expired")
         self.assertIn("expired password", reason)
 

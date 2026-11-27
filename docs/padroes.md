@@ -141,6 +141,12 @@ Como usar num conector:
   erros de rede viram `portal_unavailable`. `KeyError`, `AttributeError`, `TypeError` e afins são bug: o agente
   recebe só `[unexpected] ... ref=...` e o detalhe fica no log.
 - Toda mensagem passa por `sanitize_diagnostics` (sem URL, caminho, cookie, token ou CPF).
+- `except Exception` que não relança só com motivo: `# noqa: BLE001 - <por quê>` (regra `BLE` do ruff). Os casos aceitos são
+  fronteira de CLI ou de job em segundo plano, item de lote que não pode parar os outros, sonda ou limpeza que não pode
+  custar o resultado, e biblioteca que levanta tipos demais (pypdf, OCR, navegador). Se der para registrar, registre com
+  `exc_info=True` em vez do `noqa`.
+- Item de lote que falha guarda `errors.summary(error)`: `[code] mensagem` quando previsto; um bug vira
+  `[unexpected] ... (ref=...)` e o texto e o trace ficam só no log.
 
 ## 6. Respostas
 
@@ -169,6 +175,14 @@ Helpers em `jurisync.core.responses`:
   (regra `G` do ruff).
 - Nunca logar argumentos ou resultados inteiros de tools, credenciais, CPF ou número de processo (LGPD). URLs só pela
   forma (`core.redaction.url_shape`).
+- Servidores (MCP local, hospedado, `jurisync-serve`) escrevem uma linha JSON por evento no stderr (`core.logs`):
+  `at, level, logger, message` e os campos da chamada em curso, `call, tool, tenant, portal` (`core.calls`, um
+  `ContextVar`; `portal` só com formato de chave; o core não conhece os portais). Cada chamada termina com uma linha `event: "call"`, `ok`,
+  `error_code` (o `[code]` que o agente recebeu, seção 5) e `duration_ms`; um bug traz `exception` e `trace` sob o
+  mesmo `call` do `ref`. CLIs continuam em texto. `JURISYNC_LOG_FORMAT=text|json` força um dos dois.
+- Para ler: `jq 'select(.call == "c-1a2b3c4d")'` junta tudo de uma chamada; `select(.event == "call" and .ok == false)`
+  lista as falhas com o código.
+- No hospedado, a tabela `calls` guarda também `error_code` (e `jurisync-hosted calls` mostra o código).
 
 ## 8. Esqueleto de conector
 
@@ -197,11 +211,13 @@ Passos para um conector novo:
 |---|---|
 | Lint e formato | `ruff check`, `ruff format --check` no CI |
 | Logging com `%`-args, sem `print` de depuração | regras `G`, `LOG`, `T10` do ruff |
+| `except Exception` só com motivo (`noqa: BLE001 - ...`) ou registrado | regra `BLE` do ruff |
 | Comprehensions e literais simples | regras `C4`, `PIE`, `ISC` do ruff |
 | Molde de conector válido | `tests/core/test_connector_template.py` |
 | Toda tool com `title` e preset; regra única da ciência | `tests/core/test_annotations.py` |
 | Orçamento, offset e JSON compacto (pior caso do `pje_read_documents`) | `tests/core/test_responses.py` |
 | Nomes no vocabulário; todo alias aponta para uma tool listada e funciona | `tests/core/test_names.py` |
 | Prefixo de variável = chave do portal (ou exceção listada); nome antigo aceito; `.env.example` gerado passa no `check-customer` | `tests/core/test_env_names.py` |
+| Logs JSON com a chamada, código de erro no fim de cada chamada, sem argumentos | `tests/core/test_logs.py` |
 | Formato único de erro, bug sem vazar texto, todo conector monta `JurisyncServer` | `tests/core/test_errors.py` |
 | O core não importa `customers`, `portals`, `registry` nem `connectors`, nem dentro de função (única exceção: o shim dos nomes antigos de `core.mcp`, `core.mcp.MOVED`, que sai num ciclo futuro) | `tests/core/test_core_imports.py` |

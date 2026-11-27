@@ -6,6 +6,8 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from jurisync.core.jsf import jsf_data, response_html  # noqa: F401 - the PJe modules import them from here
+
 
 def parse_process_number(value):
     match = re.fullmatch(r"(\d{7})-(\d{2})\.(\d{4})\.(\d)\.(\d{2})\.(\d{4})", value.strip())
@@ -14,49 +16,8 @@ def parse_process_number(value):
     return match.groups()
 
 
-def jsf_data(html):
-    soup = BeautifulSoup(html, "html.parser")
-    state = soup.find("input", attrs={"name": "javax.faces.ViewState"})
-    fields = {}
-    for element in soup.find_all(["input", "select"]):
-        name = element.get("name")
-        if not name or name == "javax.faces.ViewState":
-            continue
-        if element.name == "input" and element.get("type") in {"checkbox", "radio"} and not element.has_attr("checked"):
-            continue
-        if element.name == "select":
-            selected = element.find("option", selected=True)
-            fields[name] = (selected or element.find("option")).get("value", "") if element.find("option") else ""
-        else:
-            fields[name] = element.get("value", "")
-    return (state.get("value") if state else None), fields
-
-
 def clean_text(value):
     return re.sub(r"\s+", " ", BeautifulSoup(value or "", "html.parser").get_text(" ")).strip()
-
-
-def response_html(response):
-    content = getattr(response, "content", b"")
-    if not isinstance(content, (bytes, bytearray)):
-        return response.text
-    content_type = response.headers.get("Content-Type", "").lower()
-    header_match = re.search(r"charset\s*=\s*[\"']?([a-z0-9_-]+)", content_type, re.I)
-    meta_match = re.search(rb"charset\s*=\s*[\"']?([a-z0-9_-]+)", content[:4096], re.I)
-    charset = (
-        header_match.group(1).lower()
-        if header_match
-        else meta_match.group(1).decode("ascii", errors="ignore").lower()
-        if meta_match
-        else ""
-    )
-    if charset in {"iso-8859-1", "latin1", "latin-1"}:
-        return bytes(content).decode("iso-8859-1")
-    try:
-        return bytes(content).decode("utf-8")
-    except UnicodeDecodeError:
-        # PJe has served Latin-1 bytes while declaring UTF-8.
-        return bytes(content).decode("cp1252")
 
 
 def _coded_value(value):

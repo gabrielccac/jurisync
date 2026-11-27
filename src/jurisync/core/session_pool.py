@@ -18,6 +18,7 @@ change (the operator's ``jurisync-hosted`` runs in another process), the session
 the next call logs in with the new credentials.
 """
 
+import logging
 import os
 import threading
 import time
@@ -25,6 +26,8 @@ from collections.abc import Callable
 from contextlib import contextmanager
 
 from jurisync.core import credentials
+
+log = logging.getLogger(__name__)
 
 DEFAULT_LOGIN_COOLDOWN = 15 * 60
 DEFAULT_IDLE_TTL = 30 * 60
@@ -60,6 +63,7 @@ class LoginFailed(RuntimeError):
     """A login that did not go through; ``reason`` is one of ``REASONS``."""
 
     reason = "unexpected"
+    flow_error = False  # a Keycloak flow broke before anything was refused: one fresh login may follow
 
     def __init__(self, message="", *, reason=None):
         super().__init__(message)
@@ -129,7 +133,7 @@ def _report_login(portal, error, began):
     try:
         on_login(portal, error, round((time.monotonic() - began) * 1000))
     except Exception:
-        pass  # Telemetry never costs a login.
+        log.debug("login telemetry failed", exc_info=True)  # Telemetry never costs a login.
 
 
 _login_slots = None
@@ -230,7 +234,7 @@ class SessionPool:
             try:
                 self._close(entry[0])
             except Exception:
-                pass  # Closing a stale session must not block a fresh login.
+                log.debug("closing a stale session failed", exc_info=True)  # It must not block a fresh login.
 
     def _evict_idle(self, keep=None):
         """Close sessions unused for ``idle_ttl`` and drop their locks. A key whose lock is held is in use: skipped."""
@@ -313,6 +317,16 @@ class SessionPool:
         """Prove the current credentials with a fresh login under the pool's rules; nothing is kept."""
         self._close(self.fresh_login(portal))
 
+    def verify(self, portal, login=None):
+        """A fresh login under the pool's rules, then the pool's own liveness check on it; nothing is kept. Raises
+        ``LoginFailed`` when the login went through but the portal does not treat the session as logged in."""
+        value = self.fresh_login(portal, login)
+        try:
+            if self._refresh(portal, value) is None:
+                raise LoginFailed(f"{portal}: the login finished but the portal does not show a logged-in session")
+        finally:
+            self._close(value)
+
     @contextmanager
     def session(self, portal):
         key = (credentials.tenant(), portal)
@@ -327,6 +341,7 @@ class SessionPool:
                 try:
                     value = self._refresh(portal, entry[0])
                 except Exception:
+                    log.debug("refreshing a pooled session failed; logging in again", exc_info=True)
                     value = None
                 if value is None:
                     self._discard(key)

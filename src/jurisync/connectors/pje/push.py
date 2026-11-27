@@ -485,7 +485,7 @@ def main():
     try:
         with redirect_stdout(sys.stderr):
             output = read_push(args.portal)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - CLI boundary: the error is the JSON answer
         output = {"success": False, "portal": args.portal, "error": str(error)}
     print(json.dumps(output, ensure_ascii=False, indent=2))
 

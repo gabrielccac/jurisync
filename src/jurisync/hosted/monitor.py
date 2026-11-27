@@ -65,7 +65,7 @@ def fetch(url, impersonate):
 
     try:
         return requests.get(url, impersonate=impersonate, allow_redirects=False, timeout=PROBE_TIMEOUT).status_code
-    except Exception:
+    except Exception:  # noqa: BLE001 - a probe: any failure means nothing answered
         return None
 
 
