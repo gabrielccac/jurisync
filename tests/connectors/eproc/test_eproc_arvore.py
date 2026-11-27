@@ -83,13 +83,13 @@ class ParseTreeTest(unittest.TestCase):
                 "eventId": "1",
                 "title": "INIC1",
                 "description": "PETIÇÃO INICIAL",
-                "date": "2026-10-01T09:00:00",
+                "date": "01/10/2026 09:00:00",
             },
         )
         self.assertEqual(first["url"], BASE + "controlador.php?acao=acessar_documento&doc=70&evento=1&key=k&hash=h70")
-        self.assertEqual(documents[2]["date"], "2026-11-05")  # its own date wins over the event's
+        self.assertEqual(documents[2]["date"], "05/11/2026")  # its own date wins over the event's
         self.assertIsNone(documents[3]["description"])
-        self.assertEqual(documents[3]["date"], "2026-11-02T10:00:00")
+        self.assertEqual(documents[3]["date"], "02/11/2026 10:00:00")
 
     def test_infra_arvore_script_nodes_are_read(self):
         page = (
@@ -112,7 +112,7 @@ class ParseTreeTest(unittest.TestCase):
                     "eventId": "4",
                     "title": "INIC1",
                     "description": "PETIÇÃO INICIAL",
-                    "date": "2026-10-01T09:00:00",
+                    "date": "01/10/2026 09:00:00",
                 }
             ],
         )
@@ -167,7 +167,7 @@ class TreeInventoryTest(unittest.TestCase):
                 "eventId": "1",
                 "title": "INIC1",
                 "description": "PETIÇÃO INICIAL",
-                "date": "2026-10-01T09:00:00",
+                "date": "01/10/2026 09:00:00",
             },
         )
         self.assertEqual(result["inventory"], {"returned": 4, "total": 4, "next": None})

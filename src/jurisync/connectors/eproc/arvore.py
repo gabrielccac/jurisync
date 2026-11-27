@@ -17,7 +17,6 @@ from bs4 import BeautifulSoup
 
 from jurisync import portals
 from jurisync.connectors.eproc.parsers import process_links, text
-from jurisync.core.responses import iso
 from jurisync.core.session_pool import SessionExpired
 
 TREE_ACTION = "arvore_documento_listar"
@@ -62,7 +61,7 @@ def _entry(url, title, description, own_text, dates):
         "eventId": event,
         "title": title,
         "description": description if description and description != title else None,
-        "date": iso(date.group(0) if date else dates.get(event)),
+        "date": date.group(0) if date else dates.get(event),  # ISO at the server (responses.dated)
         "url": url,
     }
 

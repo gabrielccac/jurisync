@@ -98,6 +98,7 @@ class AttentionListTest(unittest.TestCase):
             ],
         )
         self.assertEqual(result["items"][0]["court"], "BHE 6 V.C. J")
+        self.assertEqual([item["cienciaPendente"] for item in result["items"]], [True, False, False])
         self.assertEqual(
             [(entry["queue"], entry["count"]) for entry in result["queues"]], [("pending", 1), ("open_deadlines", 2)]
         )
@@ -143,6 +144,8 @@ class AttentionListTest(unittest.TestCase):
         self.assertEqual(
             [(item["situacao"], item["prazoFinal"]) for item in result["items"]], [("prazo_vencido", "2026-10-07")]
         )
+        self.assertEqual([item["processNumber"] for item in result["items"]], ["0000004-75.2026.8.13.0024"])
+        self.assertEqual([item["cienciaPendente"] for item in result["items"]], [False])
 
 
 if __name__ == "__main__":
