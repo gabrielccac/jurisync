@@ -2,6 +2,7 @@
 
 import argparse
 import fnmatch
+import importlib
 import io
 import json
 import logging
@@ -9,6 +10,7 @@ import os
 import re
 import secrets
 import sys
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -313,3 +315,27 @@ def serve(server, on_exit=None, argv=None):
     finally:
         if on_exit is not None:
             on_exit()
+
+
+# Names that moved a layer up (F6-4) so the core imports no portal or customer module. The old import keeps working
+# with a DeprecationWarning for scripts outside the repository; it goes away in a future cycle.
+MOVED = {
+    "load_env_file": "jurisync.customers",
+    "PORTAL_HELP": "jurisync.portals",
+    "PORTAL_NOTE": "jurisync.portals",
+    "portal_note": "jurisync.portals",
+    "with_portal_note": "jurisync.portals",
+    "offer_portals": "jurisync.portals",
+}
+
+
+def __getattr__(name):
+    module = MOVED.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    warnings.warn(
+        f"jurisync.core.mcp.{name} moved to {module}.{name}; the old name goes away in a future cycle",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return getattr(importlib.import_module(module), name)
