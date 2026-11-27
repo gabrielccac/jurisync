@@ -239,7 +239,7 @@ def create_server(keys=None):
             "Read the lawyer's Caixa de Mensagens (court notices sent through the portal), unread or read. Only the "
             "list is read: no message is opened, since opening one marks it read. "
             "status picks the portal's own filter; offset continues a list cut to fit the answer (see next). "
-            "Rows: sentAt (ISO), title, text as the list shows it; total is the portal's count. Read-only."
+            "Rows: sentAt (ISO), title, text as the list shows it. " + ENVELOPE + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -261,7 +261,7 @@ def create_server(keys=None):
             "(prorrogação de prazo), and the dates deadlines were suspended. Use it to check whether a deadline's "
             'final day moved; the portal\'s own "Final Prazo" is what the queues show. One page, no parameters. '
             "paradas: description, prorrogacao (true/false, null when the portal says neither), start, end (ISO); "
-            "suspensoes: date (ISO), type. Read-only."
+            "suspensoes: date (ISO), type. " + ENVELOPE + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -276,7 +276,9 @@ def create_server(keys=None):
             "distribuição or movimentações pendentes (petições intercorrentes). A draft left here was not filed, so a "
             "deadline may be at risk. Only the list is read; nothing is distributed or filed. "
             "kind picks the list; one page. "
-            "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). Read-only."
+            "Rows: processNumber (when the row shows one) and columns (each cell under its header, dates ISO). "
+            + ENVELOPE
+            + " Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -298,7 +300,9 @@ def create_server(keys=None):
             "List the guias the user already generated in the portal: custas, or depósitos judiciais (TRF4 and TRF6 "
             "menus). A portal whose menu has no such list answers not_available. Nothing is generated or paid. "
             "kind picks the list; one page. "
-            "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). Read-only."
+            "Rows: processNumber (when shown) and columns (each cell under its header, dates ISO). "
+            + ENVELOPE
+            + " Read-only."
         ),
         annotations=READ_ONLY,
     )
