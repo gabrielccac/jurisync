@@ -24,6 +24,7 @@ from jurisync.connectors.eproc.auth import login, portal_totp_account
 from jurisync.connectors.eproc.certificate import cert_login
 from jurisync.connectors.eproc.documents import read_selected_documents
 from jurisync.connectors.eproc.parsers import (
+    PRAZO_FILTER,
     additional_information_request,
     parse_additional_information,
     parse_event_response,
@@ -36,6 +37,7 @@ from jurisync.connectors.eproc.parsers import (
     parse_process_hearings,
     parse_process_list_page,
     process_links,
+    report_filter_request,
     report_page_request,
 )
 from jurisync.core import credentials, intimacao
@@ -784,8 +786,22 @@ def list_hearings(*, session=None, panel_html=None, panel_url=None, portal):
 MAX_REPORT_PAGES = 20
 
 
-def list_processes(*, session=None, panel_html=None, panel_url=None, portal, max_pages=1):
-    """Read Relação de Processos with the portal's default filters, up to ``max_pages`` pages of its pager.
+def list_processes(
+    *,
+    session=None,
+    panel_html=None,
+    panel_url=None,
+    portal,
+    max_pages=1,
+    include_archived=None,
+    prazo=None,
+    latest_first=False,
+):
+    """Read Relação de Processos, up to ``max_pages`` pages of its pager.
+
+    Without filters the portal's defaults apply, which leave baixados out on every portal. ``include_archived`` and
+    ``prazo`` (a ``PRAZO_FILTER`` key) search again with the list form, as its Buscar button does; ``latest_first``
+    opens the panel's "Últimas movimentações" link (latest movement first) instead of the plain list.
 
     The portal shows 50 rows a page (500 on TJSC). Later pages are asked for the way the pager does it: the list form
     is posted again with the same criteria and ``hdnInfraPaginaAtual``. ``pagination.complete`` is true only when
@@ -794,25 +810,45 @@ def list_processes(*, session=None, panel_html=None, panel_url=None, portal, max
     portal = portals.eproc(portal).key
     if not isinstance(max_pages, int) or isinstance(max_pages, bool) or not 1 <= max_pages <= MAX_REPORT_PAGES:
         raise ValueError(f"max_pages must be between 1 and {MAX_REPORT_PAGES}")
+    if prazo is not None and prazo not in PRAZO_FILTER:
+        raise ValueError(f"prazo must be one of {', '.join(PRAZO_FILTER)}")
     owned = session is None
     if owned:
         session, panel_html, panel_url = authenticate(portal)
     try:
         base_url = portals.eproc(portal).base_url
         panel = parse_panel(panel_html, base_url)
+        notes = []
         endpoint = panel["actions"].get(PROCESS_REPORT_ACTION)
+        latest = (panel.get("variants") or {}).get(PROCESS_REPORT_ACTION, {}).get("ord_ultimas_movimentacoes")
+        if latest_first and latest:
+            endpoint = latest
+        elif latest_first:
+            notes.append("latest_movement_order_unavailable")
         if not endpoint:
             raise RuntimeError("Authenticated panel did not expose Relação de Processos")
         endpoint = urljoin(panel_url or base_url, endpoint)
         require_route(endpoint, {PROCESS_REPORT_ACTION}, portal=portal)
         response, body = request(session, "GET", endpoint, portal=portal)
         error = _response_error(response, body)
+        if not error and (include_archived is not None or prazo is not None):
+            filtered = report_filter_request(body, base_url, include_archived=include_archived, prazo=prazo)
+            if filtered is None:
+                raise RuntimeError("Relação de Processos did not show its filter form")
+            url, fields = filtered
+            url = urljoin(endpoint, url)
+            require_route(url, {PROCESS_REPORT_ACTION}, portal=portal)
+            response, body = request(session, "POST", url, data=fields, portal=portal)
+            error = _response_error(response, body)
         if error:
             parsed = {"items": [], "pagination": {}, "diagnostics": [error]}
         else:
             parsed = parse_lawyer_process_report(body, base_url)
             if not parsed["diagnostics"]:
                 parsed = _report_pages(session, body, parsed, endpoint, max_pages=max_pages, portal=portal)
+        if latest_first and latest:
+            parsed.setdefault("filters", {})["order"] = "latest_movement"
+        parsed["notes"] = notes + parsed.get("notes", [])
         return _redact(
             {
                 "success": not parsed["diagnostics"],
@@ -1150,6 +1186,9 @@ def main():
     processes = subparsers.add_parser("processes", help="List Relação de Processos with default filters")
     processes.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     processes.add_argument("--max-pages", type=int, default=1)
+    processes.add_argument("--include-archived", action="store_true", default=None)
+    processes.add_argument("--prazo", choices=tuple(PRAZO_FILTER))
+    processes.add_argument("--latest-first", action="store_true")
     process = subparsers.add_parser("process")
     process.add_argument("--portal", choices=portals.keys("eproc"), required=True)
     process.add_argument("--process-number", required=True)
@@ -1162,7 +1201,13 @@ def main():
         if args.command == "queue":
             result = list_notices(args.queue, portal=args.portal)
         elif args.command == "processes":
-            result = list_processes(portal=args.portal, max_pages=args.max_pages)
+            result = list_processes(
+                portal=args.portal,
+                max_pages=args.max_pages,
+                include_archived=args.include_archived,
+                prazo=args.prazo,
+                latest_first=args.latest_first,
+            )
         else:
             result = fetch_process(
                 args.process_number,

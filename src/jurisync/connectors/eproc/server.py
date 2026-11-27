@@ -14,6 +14,7 @@ from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
     MAX_REPORT_PAGES,
+    PRAZO_FILTER,
     QUEUE_KINDS,
     _response_error,
     auth_method,
@@ -160,10 +161,12 @@ def create_server(keys=None):
         name="eproc_list_processes",
         title="List Eproc lawyer processes",
         description=(
-            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters, which "
-            "may exclude baixados); not a court-wide search. Rows: number, parties, class, subject, last event, dates, "
-            "claim value. pagination.totalItems is the portal's count; pagination.complete=false means rows remain "
-            "unread: call again with a larger maxPages. Details and documents: eproc_get_process. Read-only."
+            "List the authenticated lawyer's processes (Relação de Processos); not a court-wide search. Every portal "
+            "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
+            "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
+            "movement. Rows: number, parties, class, subject, last event, dates, claim value. pagination.totalItems is "
+            "the portal's count; pagination.complete=false means rows remain unread: call again with a larger "
+            "maxPages. Details and documents: eproc_get_process. Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -173,8 +176,31 @@ def create_server(keys=None):
             int,
             Field(ge=1, le=MAX_REPORT_PAGES, description="Pages to read (50 rows each, more on some portals)."),
         ] = 1,
+        includeArchived: Annotated[
+            bool | None,
+            Field(
+                description="true also lists baixados (Listar processos baixados); omitted: the portal's default, without them."
+            ),
+        ] = None,
+        prazo: Annotated[
+            Literal[tuple(PRAZO_FILTER)] | None,
+            Field(description="Only processes whose intimação deadline is in this state; omitted: all."),
+        ] = None,
+        latestMovementFirst: Annotated[
+            bool,
+            Field(description="true: latest movement first (the panel's Últimas movimentações)."),
+        ] = False,
     ) -> dict[str, Any]:
-        return call(portal, lambda **context: list_processes(max_pages=maxPages, **context))
+        return call(
+            portal,
+            lambda **context: list_processes(
+                max_pages=maxPages,
+                include_archived=includeArchived,
+                prazo=prazo,
+                latest_first=latestMovementFirst,
+                **context,
+            ),
+        )
 
     @server.tool(
         name="eproc_get_process",

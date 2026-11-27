@@ -333,6 +333,7 @@ def parse_lawyer_process_report(html, base_url):
         "filters": {
             "includeClosed": closed.has_attr("checked") if closed else None,
             "status": text(soup.select_one('select[name="selStatusProcesso"] option[selected]')) or None,
+            "prazo": text(soup.select_one('select[name="prazoField"] option[selected]')) or None,
         },
         "diagnostics": [],
     }
@@ -361,6 +362,41 @@ def form_fields(form):
                 continue
             fields.append((name, node.get("value", "on" if kind in ("checkbox", "radio") else "")))
     return fields
+
+
+# Relação de Processos filters: the Prazo select's values and the "Listar processos baixados" checkbox (every portal
+# leaves it unchecked, so baixados are left out unless asked for; TJMG and JFRS, 27/11/2026).
+PRAZO_FILTER = {"aguardando_abertura": "S", "vencido": "V", "aberto": "A", "fechado": "F", "sem_prazo": "SP"}
+ARCHIVED_FIELD = "chkMostrarBaixados"
+
+
+def report_filter_request(html, base_url, *, include_archived=None, prazo=None):
+    """``(url, fields)`` that search Relação de Processos again with these filters, as its Buscar button does.
+
+    ``include_archived`` None keeps the form's choice; ``prazo`` one of ``PRAZO_FILTER``. Raises ``ValueError`` when the
+    form lacks the field a filter needs, and returns None without the form.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.select_one("form#frmProcessoLista[action]")
+    if form is None:
+        return None
+    fields = [(name, value) for name, value in form_fields(form) if name not in ("hdnInfraPaginaAtual", "hdnExcel")]
+    if prazo is not None:
+        options = {option.get("value") for option in form.select('select[name="prazoField"] option')}
+        if PRAZO_FILTER[prazo] not in options:
+            raise ValueError("this portal's Relação de Processos has no Prazo filter")
+        fields = [(name, value) for name, value in fields if name != "prazoField"] + [
+            ("prazoField", PRAZO_FILTER[prazo])
+        ]
+    if include_archived is not None:
+        box = form.select_one(f'input[name="{ARCHIVED_FIELD}"]')
+        if box is None:
+            raise ValueError("this portal's Relação de Processos has no Listar baixados option")
+        fields = [(name, value) for name, value in fields if name != ARCHIVED_FIELD]
+        if include_archived:
+            fields.append((ARCHIVED_FIELD, box.get("value", "S")))
+    fields += [("hdnInfraPaginaAtual", "0"), ("hdnExcel", "0")]
+    return _href(form["action"], base_url), fields
 
 
 def report_page_request(html, base_url, page):
