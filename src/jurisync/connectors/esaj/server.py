@@ -11,7 +11,7 @@ from pydantic import Field
 
 from jurisync import customers, portals
 from jurisync.connectors.esaj import account, cas, common, dashboard, documents, intimacoes, parsers, process
-from jurisync.core import ciencia, errors
+from jurisync.core import ciencia, errors, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
     READ_ONLY,
@@ -152,9 +152,33 @@ def create_server(keys=None):
         return call(portal, lambda s: dashboard.list_messages(s, portal, page))
 
     @server.tool(
+        title="List e-SAJ intimações",
+        annotations=READ_ONLY,
+        description="List the panel's intimações with an open deadline (the 'Manifestações / ciência' list): cases "
+        "whose intimação was already received and whose deadline runs. Opens nothing and never closes a card. "
+        f"{intimacao.DESCRIPTION} Here an open card is prazo_correndo with prazoFinal null (TJSP sends no date) and a "
+        "closed card (cardFechado: 'Fechar' / 'ciência com renúncia ao prazo') is sem_prazo. e-SAJ lists no "
+        "intimação awaiting ciência: one not yet received surfaces only as a movement document of esaj_get_process "
+        "that the portal opens after the receipt is confirmed in the portal (receipt_required). Items carry "
+        "processNumber when the panel resolves cdProcesso, and instancia (1g/2g).",
+    )
+    def esaj_list_intimacoes(
+        portal: Annotated[Portal, portal_field] = default,
+        situacao: Annotated[
+            list[Literal[intimacao.SITUATIONS]] | None,
+            Field(
+                description="Situations to return; empty: aguardando_ciencia, aguardando_publicacao, prazo_correndo."
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        return call(portal, lambda s: intimacoes.list_intimacoes(s, portal, situacao))
+
+    @server.tool(
         title="List e-SAJ dashboard tasks",
         annotations=READ_ONLY,
-        description="List dashboard intimações, audiências or petition tasks. Read-only.",
+        description="List the panel's raw task lists: intimacoes (open-deadline cards; esaj_list_intimacoes reads the "
+        "same list with situacao and process numbers; ciencia there is only the card's closed flag), audiencias or "
+        "peticoes by state. Read-only.",
     )
     def esaj_list_tasks(
         portal: Annotated[Portal, portal_field] = default,

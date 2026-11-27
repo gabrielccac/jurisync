@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import pytest
 from curl_cffi.requests import exceptions
 
-from jurisync.connectors.esaj import base, common, dashboard, documents, parsers, process, search
+from jurisync.connectors.esaj import base, common, dashboard, documents, intimacoes, parsers, process, search
 from jurisync.core.http import UnsafeUrlError
 
 NUMBER = "0000001-00.2026.8.26.0001"
@@ -295,6 +295,50 @@ def test_the_intimacoes_list_waits_longer_and_reports_a_timeout(portal):
         base.list_tasks(None, "tjsp-esaj", "intimacoes")
     assert error.value.reason == "portal_timeout"
     assert [method for method, _p, _k in fake.seen] == ["GET"]
+
+
+# --- esaj_list_intimacoes: the open-deadline list with the shared situacao -------------------------------------------
+
+
+def test_open_cards_are_a_running_deadline_and_closed_ones_have_none(portal):
+    fake = portal(
+        intimations=[
+            intimation("AB0000000001") | {"instancia": "PG", "dataMovimentacao": "2026-11-20T10:00:00"},
+            intimation("AB0000000002", ciencia=True) | {"instancia": "SG"},
+            intimation("AB0000000003"),
+        ],
+        by_code={
+            "AB0000000001": [entry("PG")],
+            "AB0000000002": [entry("SG", number=OTHER, code="AB0000000002")],
+        },
+    )
+    result = intimacoes.list_intimacoes(None, "tjsp-esaj")
+    assert [item["cdProcesso"] for item in result["items"]] == ["AB0000000001", "AB0000000003"]
+    first, unresolved = result["items"]
+    assert first["processNumber"] == NUMBER and first["instancia"] == "1g" and first["cardFechado"] is False
+    assert (first["situacao"], first["prazoFinal"], first["prazoFinalTipo"]) == ("prazo_correndo", None, None)
+    assert unresolved["processNumber"] is None
+    assert result["returned"] == result["total"] == 2 and result["cardsInPanel"] == 3
+    closed = intimacoes.list_intimacoes(None, "tjsp-esaj", ["sem_prazo"])["items"]
+    assert [(item["situacao"], item["instancia"], item["processNumber"]) for item in closed] == [
+        ("sem_prazo", "2g", "0000002-00.2026.8.26.0001")
+    ]
+    # Only reads: the panel list and its own code lookup, never the card's ciência PUT.
+    assert {method for method, _p, _k in fake.seen} == {"GET"}
+    assert not any("ciencia" in path for path in fake.paths())
+    with pytest.raises(ValueError):
+        intimacoes.list_intimacoes(None, "tjsp-esaj", ["lida"])
+
+
+def test_the_list_survives_a_panel_that_does_not_resolve_the_codes(portal, monkeypatch):
+    portal(intimations=[intimation("AB0000000001")])
+
+    def refuse(*a, **k):
+        raise common.EsajBlocked("timeout", "portal_timeout")
+
+    monkeypatch.setattr(dashboard, "dashboard_lookup", refuse)
+    result = intimacoes.list_intimacoes(None, "tjsp-esaj")
+    assert result["items"][0]["processNumber"] is None and "note" in result
 
 
 # --- Bug: TJSP returning only the first 5 movements ------------------------------------------------------------------

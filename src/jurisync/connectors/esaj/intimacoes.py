@@ -1,12 +1,91 @@
-"""The ciência check that runs before a process's document viewer opens."""
+"""The panel's open-deadline intimações (``esaj_list_intimacoes``) and the ciência check that runs before a process's
+document viewer opens.
+
+What the panel calls intimações (``tarefas-adv/api/intimacoes``, the list the page labels "Manifestações / ciência")
+are cases with an open deadline: the intimação was already received and the deadline runs. Each card's ``ciencia``
+flag is the box the card closes with ("Fechar" on TJSP, "ciência com renúncia ao prazo" on other courts), set by an
+irreversible ``PUT ciencia-intimacao`` this connector never sends; ``false`` only means the card is still open. TJSP
+sends no deadline date. An intimação not yet received is not on this list: it shows up only on a movement's document,
+where the portal asks for the receipt first (``receipt_required``).
+"""
 
 import re
 
 from curl_cffi.requests.exceptions import RequestException
 
 from jurisync.connectors.esaj import common, dashboard
-from jurisync.core import ciencia
+from jurisync.core import ciencia, intimacao
 from jurisync.core.session_pool import SessionExpired
+
+INSTANCES = {"PG": "1g", "SG": "2g"}
+
+
+def formatted_number(value):
+    """A CNJ number with punctuation from the panel's ``nuProcesso`` (digits or already formatted); None otherwise."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) != 20:
+        return None
+    return f"{digits[:7]}-{digits[7:9]}.{digits[9:13]}.{digits[13]}.{digits[14:16]}.{digits[16:]}"
+
+
+def process_numbers(session, portal, codes):
+    """``{cdProcesso: CNJ number}`` for the codes the panel resolves (its own ``processos?cdsProcesso=`` lookup, 50 at
+    a time); a code it does not resolve is left out."""
+    resolved = {}
+    codes = sorted(code for code in set(codes) if isinstance(code, str) and dashboard.PROCESS_CODE.fullmatch(code))
+    for start in range(0, len(codes), 50):
+        batch = codes[start : start + 50]
+        for item in dashboard.dashboard_lookup(session, portal, [("cdsProcesso", code) for code in batch]):
+            if isinstance(item, dict) and item.get("cdProcesso") in batch and formatted_number(item.get("nuProcesso")):
+                resolved.setdefault(item["cdProcesso"], formatted_number(item["nuProcesso"]))
+    return resolved
+
+
+def intimacao_item(item, numbers):
+    """One panel card as a ``list_intimacoes`` item.
+
+    An open card is ``prazo_correndo`` (the intimação was received and its deadline runs; ``prazoFinal`` None: the
+    portal sends no date). A closed card is ``sem_prazo``: closing it ("Fechar", or "ciência com renúncia ao prazo")
+    gives up the deadline, so nothing is left to meet; the panel does not say whether the lawyer answered first, so it is
+    never reported as ``respondido``.
+    """
+    from jurisync.connectors.esaj.parsers import public_json
+
+    code = str(item.get("cdProcesso") or "") or None
+    closed = item.get("ciencia") is True
+    return {
+        "processNumber": numbers.get(code),
+        "cdProcesso": code,
+        "instancia": INSTANCES.get(item.get("instancia"), item.get("instancia")),
+        "titulo": public_json(item.get("titulo")),
+        "descricao": public_json(item.get("descricao")),
+        "dataMovimentacao": item.get("dataMovimentacao"),
+        "cardFechado": closed,
+        **intimacao.fields(intimacao.NO_DEADLINE if closed else intimacao.RUNNING),
+    }
+
+
+def list_intimacoes(session, portal, situacoes=None):
+    """The panel's open-deadline intimações with the shared ``situacao``; without ``situacoes``, what needs attention."""
+    from jurisync.core.responses import listing
+
+    wanted = tuple(situacoes or intimacao.ATTENTION)
+    if not set(wanted) <= set(intimacao.SITUATIONS):
+        raise ValueError(f"situacao must be among {', '.join(intimacao.SITUATIONS)}")
+    items = dashboard.intimations(session, portal)
+    if not all(isinstance(item, dict) for item in items):
+        raise common.EsajParseError("Unexpected intimações response")
+    note = None
+    try:
+        numbers = process_numbers(session, portal, [item.get("cdProcesso") for item in items])
+    except (common.EsajParseError, common.EsajBlocked) as error:
+        numbers, note = {}, f"The panel did not resolve the process numbers ({error}); cdProcesso is kept."
+    every = [intimacao_item(item, numbers) for item in items]
+    chosen = [item for item in every if item["situacao"] in wanted]
+    extra = {"situacoes": list(wanted), "cardsInPanel": len(every)}
+    if note:
+        extra["note"] = note
+    return listing(chosen, key="items", total=len(chosen), more=None, **extra)
 
 
 def pending_intimation_numbers(session, portal):

@@ -163,6 +163,7 @@ async def test_tools_and_registration():
         "esaj_get_session",
         "esaj_list_messages",
         "esaj_list_tasks",
+        "esaj_list_intimacoes",
         "esaj_list_processes",
         "esaj_get_process",
         "esaj_list_documents",
