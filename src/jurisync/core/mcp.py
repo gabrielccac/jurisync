@@ -20,6 +20,7 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import TextContent, ToolAnnotations
 
 from jurisync.core import calls, errors, names, responses
+from jurisync.core.redaction import CPF_PATTERNS
 
 # Annotation presets: every tool takes one of these, never its own ToolAnnotations (docs/padroes.md, section 4).
 # They are hints for the client's confirmation prompts; the real guards (write grants, acknowledgeCiencia) stay here.
@@ -131,8 +132,7 @@ _REDACTIONS = (
     (_PATH, "[path]"),
     (re.compile(r"(?<![A-Za-zÀ-ÿ])(?:set-)?cookies?\s*[=:]\s*(?:[^\s;=]+=[^\s;]*;?\s*)+", re.I), "[redacted] "),
     (re.compile(rf"(?<![A-Za-zÀ-ÿ])(?:{_KEYS}|cookie)\s*[=:]\s*{_VALUE}", re.I), "[redacted]"),
-    (re.compile(r"(?<![\d.])(\d{3})\.\d{3}\.\d{3}-(\d{2})(?!\d)"), r"\1.***.***-\2"),
-    (re.compile(r"(\bCPF\W{0,3})(\d{3})\d{6}(\d{2})(?!\d)", re.I), r"\1\2******\3"),
+    *CPF_PATTERNS[:2],
 )
 
 

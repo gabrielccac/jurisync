@@ -448,6 +448,17 @@ class TimelineMarkerTest(unittest.TestCase):
         )
         self.assertEqual(ciencia.awaiting_events(None), [])
 
+    def test_reference_reads_the_event_with_or_without_colon(self):
+        for reference in ("Refer. ao Evento 6 (AUTOR - Parte de teste)", "Refer. ao Evento: 6", "Refer. ao Evento:6"):
+            with self.subTest(reference=reference):
+                events = [
+                    {
+                        "id": "7",
+                        "description": f"Expedida/certificada a intimação eletrônica {reference} Status:AGUARD. ABERTURA",
+                    }
+                ]
+                self.assertEqual(ciencia.awaiting_events(events)[0]["refersTo"], ["6"])
+
     def test_deadlines_read_the_live_event_format_with_its_djen_dates(self):
         # TJMG and JFRS timelines, 27/11/2026 (names replaced): an open deadline, one closed by its decurso, a perito's
         # deadline without days ("Status do Prazo"), and the DJEN events that refer to them.

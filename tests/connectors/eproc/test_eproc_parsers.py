@@ -51,6 +51,48 @@ class EprocParserTests(unittest.TestCase):
         self.assertEqual(parsed["parties"][0]["representatives"], ["ADVOGADO"])
         self.assertEqual(parsed["documents"][0]["id"], "9")
 
+    def test_cover_maps_court_specific_fields_and_keeps_unknown_ones_under_extra(self):
+        html = """<fieldset id="fldCapa" data-classe="1"><span id="txtNumProcesso">5000001-23.2026.4.04.0000</span>
+        <span id="txtOrgaoColegiado">TURMA FICTICIA</span><span id="txtNumRequis">000001</span>
+        <span id="txtMagistradoAtuante">JUIZ FICTICIO</span><span id="txtCampoNovo">valor</span>
+        <span id="txtLocalidade"></span></fieldset>"""
+        self.assertEqual(
+            parse_process_detail(html, BASE)["cover"],
+            {
+                "number": "5000001-23.2026.4.04.0000",
+                "collegiateBody": "TURMA FICTICIA",
+                "paymentRequestNumber": "000001",
+                "actingJudge": "JUIZ FICTICIO",
+                "OrgaoColegiado": "TURMA FICTICIA",
+                "NumRequis": "000001",
+                "MagistradoAtuante": "JUIZ FICTICIO",
+                "CampoNovo": "valor",
+                "caseClassCode": "1",
+                "extra": {"CampoNovo": "valor"},
+            },
+        )
+
+    def test_party_cpf_is_masked_and_cnpj_kept(self):
+        html = """<table id="tblPartesERepresentantes"><tr><th>AUTOR</th><th>RÉU</th></tr><tr>
+        <td><span data-parte="AUTOR">Parte Ficticia</span><span id="spnCpfParteAutor0">123.456.789-09</span></td>
+        <td><span data-parte="REU">Empresa Ficticia</span><span id="spnCpfParteReu0">12.345.678/0001-90</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Outra Parte</span><span id="spnCpfParteAutor1">98765432100</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Terceira Parte</span><span id="spnCpfParteAutor2">111222333-44</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Quarta Parte</span><span id="spnCpfParteAutor3">555.666.77788</span></td></tr>
+        <tr><td><span data-parte="AUTOR">Empresa Dois</span><span id="spnCpfParteAutor4">12345678000190</span></td></tr></table>"""
+        parties = parse_process_detail(html, BASE)["parties"]
+        self.assertEqual(
+            [party["taxId"] for party in parties],
+            [
+                "123.***.***-09",
+                "12.345.678/0001-90",
+                "987.***.***-00",
+                "111.***.***-44",
+                "555.***.***-88",
+                "12345678000190",
+            ],
+        )
+
     def test_detail_discovers_event_filter_request_and_all_co_parties(self):
         html = """<script>url: 'controlador_ajax.php?acao_ajax=montar_tabela_eventos_filtrados&amp;num_processo=123&amp;hash=h'</script>
         <table id="tblOpcoesEventos"><tr><td><input type="checkbox" value="hdnDocs" checked></td><td><input type="checkbox" value="hdnExternal"></td></tr></table>

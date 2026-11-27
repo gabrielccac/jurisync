@@ -171,7 +171,8 @@ def create_server(keys=None):
             "List the authenticated lawyer's processes (Relação de Processos); not a court-wide search. Every portal "
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
             "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
-            "movement. Rows: number, parties, class, subject, last event, dates, claim value. pagination.totalItems is "
+            "movement. Rows: number, parties (pole active/passive; the procedural role is in "
+            "eproc_get_process), class, subject, last event, dates, claim value. pagination.totalItems is "
             "the portal's count; pagination.complete=false means rows remain unread: call again with a larger "
             "maxPages. Details and documents: eproc_get_process. Read-only."
         ),
