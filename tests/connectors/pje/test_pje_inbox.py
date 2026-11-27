@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from jurisync.connectors.pje import inbox
@@ -105,6 +107,17 @@ def test_parse_inbox_row_variants_person_notice_no_deadline_and_pending_notice()
     assert rows[0]["ciencia"] == {"por": "BENEDITA DIAS", "em": "2026-10-05"}
     assert rows[1]["semPrazo"] is True and rows[1]["prazoDias"] is None and rows[1]["limite"] is None
     assert rows[2]["ciencia"] is None and rows[2]["cienciaPendente"] is True
+
+
+def test_tjmg_deadline_with_the_weekday_before_the_date_is_read():
+    # TJMG, 27/11/2026: the date comes after the weekday, inside <strong>.
+    tjmg = row("4", limit=False).replace(
+        "<div></div></div>",
+        "<div>Data limite prevista para manifestação: <em></em> <strong>Terça-feira, 01/12/2026 23:59</strong></div></div>",
+        1,
+    )
+    found = inbox.parse_inbox(inbox_page([tjmg], 1))["rows"][0]
+    assert (found["limite"], found["limiteTipo"]) == ("2026-12-01", "manifestação")
 
 
 @pytest.mark.parametrize(
@@ -532,3 +545,73 @@ def test_a_branch_whose_expander_answers_empty_is_opened_by_its_jurisdiction_lin
     # Only the node's own link is accepted as a jurisdiction control.
     with pytest.raises(RuntimeError):
         inbox.check_control("jurisdiction", f"{TREE}:210::j_id99:cxExItem")
+
+
+# TRF5, 27/11/2026: a Despacho sent through the Diário, in "Apenas pendentes de ciência", with no button and no date.
+DIARIO_PENDING = (
+    row("5", notice="", limit=False)
+    .replace("Expedição eletrônica", "Diário Eletrônico")
+    .replace("<div></div></div>", "<div>Data limite prevista para ciência: (cálculo em processamento)</div></div>", 1)
+)
+TODAY = date(2026, 11, 27)
+
+
+def _situation(html, label):
+    found = inbox.parse_inbox(inbox_page([html], 1))["rows"][0]
+    return inbox.with_situation(found, label, TODAY)
+
+
+def test_a_diario_row_in_the_pending_bucket_awaits_its_publication_without_a_button():
+    found = _situation(DIARIO_PENDING, "Apenas pendentes de ciência")
+    assert found["cienciaPendente"] is True and found["ciencia"] is None and found["limite"] is None
+    assert (found["situacao"], found["prazoFinal"], found["prazoFinalTipo"]) == ("aguardando_publicacao", None, None)
+    # In the default bucket (the union) the row says the same: no notice yet.
+    assert _situation(DIARIO_PENDING, "Pendentes de ciência ou de resposta")["situacao"] == "aguardando_publicacao"
+    electronic = row("6", notice="", button='<a class="btn">Tomar ciência</a>')
+    assert _situation(electronic, "Apenas pendentes de ciência")["situacao"] == "aguardando_ciencia"
+
+
+@pytest.mark.parametrize(
+    "label,situation",
+    [
+        ("Ciência dada pelo destinatário direto ou indireto - pendente de resposta", "prazo_correndo"),
+        ("Ciência dada pelo Judiciário - pendente de resposta", "prazo_correndo"),
+        ("Cujo prazo findou nos últimos 10 dias - sem resposta", "prazo_vencido"),
+        ("Prazo findo nos últimos 10 dias", "prazo_vencido"),
+        ("Sem prazo", "sem_prazo"),
+        ("Respondidos nos últimos 10 dias", "respondido"),
+    ],
+)
+def test_the_bucket_gives_the_situation(label, situation):
+    found = _situation(row("7"), label)
+    assert found["situacao"] == situation
+    assert (found["prazoFinal"], found["prazoFinalTipo"]) == ("2026-10-13", "portal")
+
+
+def test_rows_of_the_default_bucket_are_told_apart_one_by_one():
+    label = "Pendentes de ciência ou de resposta"
+    running = row("8").replace("13/10/2026", "03/12/2026")
+    assert _situation(running, label)["situacao"] == "prazo_correndo"
+    assert _situation(row("9", prazo="Prazo: sem prazo", limit=False), label)["situacao"] == "sem_prazo"
+    legacy_row = {"expedienteId": "1", "pending": False}
+    assert inbox.with_situation(legacy_row, "Intimações / Outros")["situacao"] == "desconhecida"
+    kz_row = {
+        "expedienteId": "2",
+        "ciencia": {"em": "2026-11-01"},
+        "limite": "2026-11-10",
+        "limiteTipo": "manifestação",
+    }
+    assert inbox.with_situation({**kz_row, "prazoVencido": True}, "Meus Expedientes", TODAY)["situacao"] == (
+        "prazo_vencido"
+    )
+
+
+def test_read_inbox_adds_the_situation_to_every_row(monkeypatch):
+    def read(portal, bucket, regions, filters, max_pages, session):
+        parsed = inbox.parse_inbox(inbox_page([DIARIO_PENDING], 1))["rows"]
+        bucket = {"index": 1, "label": "Apenas pendentes de ciência", "count": 1}
+        return {"bucket": bucket, "inboxes": [{"rows": parsed}]}
+
+    monkeypatch.setattr(inbox, "_read_inbox", read)
+    rows = inbox.read_inbox("trf5-1g", bucket="1", session=object())["inboxes"][0]["rows"]
+    assert rows[0]["situacao"] == "aguardando_publicacao" and rows[0]["cienciaPendente"] is True

@@ -391,6 +391,15 @@ class TjgoGuardTest(unittest.TestCase):
         self.assertEqual((listed["diarioCount"], listed["diarioDeclared"], listed["complete"]), (2, 2, True))
         self.assertEqual([i["id"] for i in listed["awaitingPublicationNotOnHome"]], ["700000009"])
         self.assertNotIn("_key", json.dumps(listed))
+        # The Diário behaves like DJEN publications: the ciência is the publication date, the deadline an estimate.
+        self.assertEqual(
+            [(i["situacao"], i["prazoFinal"], i["prazoFinalTipo"]) for i in listed["diario"]],
+            [("prazo_correndo", "2026-12-03", "estimado"), ("aguardando_publicacao", None, None)],
+        )
+        self.assertEqual(listed["awaitingPublicationNotOnHome"][0]["situacao"], "aguardando_publicacao")
+        self.assertEqual(listed["omitted"], {})
+        expired = {"deadline": "10/11/2026", "awaitingPublication": False}
+        self.assertEqual(tjgo_desk.situation(expired, TODAY)["situacao"], "prazo_vencido")
         processes = self.adapter.list_processes(session, "tjgo-1g")
         self.assertFalse(processes["complete"])
         self.assertEqual(
@@ -398,6 +407,15 @@ class TjgoGuardTest(unittest.TestCase):
             [("1", 2, True), ("72", 2, False)],
         )
         self.assertTrue(all("QuantidadeRegistrosPagina=500" in p for p in session.paths if "Proprio=1" in p))
+        self.assertEqual(([g["grau"] for g in processes["categories"]], processes["activeOnly"]), (["1", "1"], True))
+        for label, expected in (
+            ("Câmara Cível", "2"),
+            ("Seção Cível", "2"),
+            ("Cível", "1"),
+            ("Família - Interior", "1"),
+            ("Turma Recursal", None),
+        ):
+            self.assertEqual(tjgo_desk.grau(label), expected, label)
 
     def test_a_type_with_one_process_answers_its_page(self):
         from tests.connectors.projudi.test_projudi import PROCESS_HTML

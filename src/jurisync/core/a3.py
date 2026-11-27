@@ -15,10 +15,15 @@ its PIN login per block): the app authorises (desktopID opens its own window ask
 at the first signature), so no PIN is read or sent here; a call not authorised within ``PJE_A3_APPROVAL_TIMEOUT``
 seconds (300) gives up and releases the token lock. One authorisation then serves every login of the process
 (``held_token``). The token carries the holder's certificate alone; the issuers come from the system's store.
+
+A token with several holder certificates (expired ones, an e-CNPJ beside the lawyer's e-CPF) is set up once:
+``python -m jurisync.connectors.pje.auth.a3 choose`` stores the chosen certificate's serial in ``PJE_A3_CERT``, and
+every login uses that one until it is chosen again. Nothing is picked at login time.
 """
 
 import argparse
 import atexit
+import datetime
 import getpass
 import hashlib
 import logging
@@ -62,6 +67,11 @@ UNSAFE_PIN_FLAGS = {
     "CKF_USER_PIN_TO_BE_CHANGED": "the PIN must be changed",
 }
 
+# The serial (hex) of the holder certificate chosen at setup, for a token that carries several.
+CHOSEN_CERTIFICATE = "PJE_A3_CERT"
+# ICP-Brasil SAN otherName that carries a company's data: the certificate of an e-CNPJ, not of a person.
+ICP_BRASIL_CNPJ = "2.16.76.1.3.3"
+
 KEYRING_SERVICE = "jurisync"
 GERID_KEYRING_SERVICE = "gerid-adapter"
 
@@ -73,6 +83,19 @@ class PinError(RuntimeError):
 def module_path():
     value = os.environ.get("PJE_A3_MODULE", "").strip()
     return CLOUD_MODULES.get(value.lower(), value) or DEFAULT_MODULES.get(sys.platform, "")
+
+
+def chosen_serial():
+    return normal_serial(os.environ.get(CHOSEN_CERTIFICATE, ""))
+
+
+def normal_serial(value):
+    """A serial as ``serial_hex`` prints it, whatever separators or case it was typed with."""
+    return value.strip().lower().replace(":", "").replace(" ", "").lstrip("0")
+
+
+def serial_hex(cert):
+    return format(cert.serial_number, "x")
 
 
 def approval_timeout():
@@ -253,9 +276,8 @@ def system_issuers():
     return tuple(found)
 
 
-def certificate_chain(certs, issuers=()):
-    """The holder's certificate (the only non-CA one) followed by its issuers found on the token, then in
-    ``issuers`` for the ones the token does not carry."""
+def holder_certificates(certs):
+    """The ``(ident, cert)`` pairs that are not a CA: the holders' own certificates."""
     leaves = []
     for ident, cert in certs:
         try:
@@ -264,8 +286,51 @@ def certificate_chain(certs, issuers=()):
             is_ca = False
         if not is_ca:
             leaves.append((ident, cert))
-    if len(leaves) != 1:
-        raise RuntimeError(f"Expected one holder certificate on the A3 token, found {len(leaves)}")
+    return leaves
+
+
+def is_company(cert):
+    try:
+        names = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        return False
+    return any(name.type_id.dotted_string == ICP_BRASIL_CNPJ for name in names.get_values_for_type(x509.OtherName))
+
+
+def describe(cert):
+    """One line about a holder certificate, for choosing it: serial, holder, issuer, validity, kind."""
+
+    def name(value):
+        found = value.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+        return found[0].value if found else value.rfc4514_string()
+
+    until = cert.not_valid_after_utc
+    notes = [f"until {until:%Y-%m-%d}"]
+    if until < datetime.datetime.now(datetime.UTC):
+        notes.append("expired")
+    if is_company(cert):
+        notes.append("e-CNPJ")
+    return f"{serial_hex(cert)}  {name(cert.subject)} (issuer {name(cert.issuer)}; {', '.join(notes)})"
+
+
+def certificate_chain(certs, issuers=(), chosen=""):
+    """The holder's certificate followed by its issuers found on the token, then in ``issuers`` for the ones the
+    token does not carry. The holder is the only non-CA certificate, or the one whose serial is ``chosen``."""
+    leaves = holder_certificates(certs)
+    if chosen:
+        leaves = [(ident, cert) for ident, cert in leaves if serial_hex(cert) == chosen]
+        if not leaves:
+            raise RuntimeError(
+                f"The certificate chosen in {CHOSEN_CERTIFICATE} ({chosen}) is not on the A3 token; choose another "
+                "with: python -m jurisync.connectors.pje.auth.a3 choose"
+            )
+    elif len(leaves) > 1:
+        raise RuntimeError(
+            f"The A3 token carries {len(leaves)} holder certificates; choose the one to log in with, once, with: "
+            f"python -m jurisync.connectors.pje.auth.a3 choose (kept in {CHOSEN_CERTIFICATE})"
+        )
+    if not leaves:
+        raise RuntimeError("No holder certificate on the A3 token")
     ident, leaf = leaves[0]
     by_subject = {cert.subject: cert for cert in issuers} | {cert.subject: cert for _, cert in certs}
     chain, current = [leaf], leaf
@@ -282,7 +347,8 @@ def md5_digest_info(message):
 class A3Signer:
     """Opens the token, logs in once and signs SSO challenges. Use as a context manager."""
 
-    def __init__(self, module=None, pin=None):
+    def __init__(self, module=None, pin=None, *, select=True):
+        """``select=False`` only reads the token's certificates (``certs``), for choosing one: no chain, no login."""
         import PyKCS11
 
         self._pkcs11 = PyKCS11
@@ -311,11 +377,13 @@ class A3Signer:
         self.pkcs11_error = PyKCS11.PyKCS11Error
         self._pin = pin
         self._waiting = threading.Lock()
-        certs = self._certificates()
-        self.ident, self.chain = certificate_chain(certs)
-        if self.cloud and len(self.chain) == 1:  # the cloud A3 carries the holder's certificate alone
-            self.ident, self.chain = certificate_chain(certs, system_issuers())
         self._key = None
+        self.certs = certs = self._certificates()
+        if not select:
+            return
+        self.ident, self.chain = certificate_chain(certs, chosen=chosen_serial())
+        if self.cloud and len(self.chain) == 1:  # the cloud A3 carries the holder's certificate alone
+            self.ident, self.chain = certificate_chain(certs, system_issuers(), chosen_serial())
 
     def __enter__(self):
         return self
@@ -476,11 +544,53 @@ def _pin_set():
     print(f"PIN stored in the system keyring ({KEYRING_SERVICE} / a3-pin:{serial}).")
 
 
+def env_file():
+    """The install's credentials file, where the chosen certificate is kept."""
+    from jurisync.paths import USER_ENV_FILE
+
+    return Path(os.environ.get("JURISYNC_ENV_FILE") or USER_ENV_FILE)
+
+
+def _choose(serial):
+    """Store in ``PJE_A3_CERT`` the holder certificate to log in with: ``serial`` when given, else the token's only
+    valid personal certificate (not expired, not an e-CNPJ). No PIN is used."""
+    from jurisync.install.setup import write_env
+
+    with A3Signer(select=False) as token:
+        leaves = [cert for _, cert in holder_certificates(token.certs)]
+    print("Holder certificates on the token:")
+    for cert in leaves:
+        print(f"  {describe(cert)}")
+    if serial:
+        picked = [cert for cert in leaves if serial_hex(cert) == normal_serial(serial)]
+        if not picked:
+            raise SystemExit(f"No holder certificate with serial {serial} on the token; nothing was stored.")
+    else:
+        now = datetime.datetime.now(datetime.UTC)
+        picked = [cert for cert in leaves if cert.not_valid_after_utc > now and not is_company(cert)]
+        if len(picked) != 1:
+            raise SystemExit(
+                f"{len(picked)} valid personal certificates: choose one with --serial <serial above>; nothing was "
+                "stored."
+            )
+    path = env_file()
+    write_env(path, {CHOSEN_CERTIFICATE: serial_hex(picked[0])})
+    print(f"Chosen: {describe(picked[0])}")
+    print(f"Stored as {CHOSEN_CERTIFICATE} in {path}: every login uses it until another is chosen.")
+
+
 def _check(sign):
     """Token, certificate and PIN state; with --sign, one offline test signature verified locally."""
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import padding
 
+    with A3Signer(select=False) as token:
+        leaves = holder_certificates(token.certs)
+        if len(leaves) > 1 or chosen_serial():
+            print("holder certificates on the token:")
+            for _, cert in leaves:
+                marker = "*" if serial_hex(cert) == chosen_serial() else " "
+                print(f" {marker} {describe(cert)}")
     with held_token() as token:
         leaf = token.chain[0]
         print(f"token: {token.serial}")
@@ -502,6 +612,11 @@ def main():
     parser = argparse.ArgumentParser(description="A3 token for the PJe SSO certificate login")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("pin-set", help="store the token PIN in the system keyring")
+    choose = sub.add_parser(
+        "choose",
+        help=f"choose, once, the holder certificate to log in with (kept in {CHOSEN_CERTIFICATE}; no PIN used)",
+    )
+    choose.add_argument("--serial", help="the certificate's serial, as listed (default: the only valid e-CPF)")
     check = sub.add_parser("check", help="token, certificate and PIN state (no PIN used)")
     check.add_argument(
         "--sign", action="store_true", help="also log in once (or ask the token's app) and verify a test signature"
@@ -509,6 +624,8 @@ def main():
     args = parser.parse_args()
     if args.command == "pin-set":
         _pin_set()
+    elif args.command == "choose":
+        _choose(args.serial)
     else:
         _check(args.sign)
 

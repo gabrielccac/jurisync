@@ -64,7 +64,7 @@ class ProcessReportTests(unittest.TestCase):
                 {"pole": "passive", "role": "REU", "name": "INSS"},
             ],
         )
-        self.assertEqual(result["filters"], {"status": "Todos", "includeClosed": False})
+        self.assertEqual(result["filters"], {"status": "Todos", "includeClosed": False, "prazo": None})
         self.assertTrue(result["pagination"]["complete"])
         partial = parse_lawyer_process_report(REPORT.replace("(1 registro)", "(7 registros)"), BASE)
         self.assertFalse(partial["pagination"]["complete"])

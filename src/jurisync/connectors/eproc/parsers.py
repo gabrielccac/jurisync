@@ -23,19 +23,33 @@ def _query(href):
     return parse_qs(urlsplit(href).query, keep_blank_values=True)
 
 
+# Query parameters that narrow a panel link to part of its list: the deadlines expiring today, the urgent ones, the
+# Relação de Processos by latest movement, the next hearing. A link with one of them is kept apart from the full list.
+LINK_VARIANTS = ("vence_hoje", "urgente", "ord_ultimas_movimentacoes", "proxima")
+
+
 def parse_panel(html, base_url):
     """Discover only routes visibly advertised by the authenticated panel."""
     soup = BeautifulSoup(html, "html.parser")
     queues = {}
     actions = {}
+    variants = {}
     for element in soup.select("a[href], form[action]"):
         absolute = _href(element.get("href") or element.get("action"), base_url)
-        action = _query(absolute).get("acao", [""])[0]
+        query = _query(absolute)
+        action = query.get("acao", [""])[0]
         if not action:
+            continue
+        variant = next((name for name in LINK_VARIANTS if name in query), None)
+        if variant:
+            variants.setdefault(action, {}).setdefault(variant, absolute)
             continue
         actions.setdefault(action, absolute)
         if action in {"citacao_intimacao_prazo_aberto_listar", "citacao_intimacao_pendente_listar"}:
             queues.setdefault(action, absolute)
+    for action, found in variants.items():
+        # A panel that shows only the narrowed link (TJMG: "vencendo hoje") still advertises the route.
+        actions.setdefault(action, next(iter(found.values())))
 
     form = soup.select_one("form#formPesquisaRapida")
     quick = {}
@@ -54,11 +68,26 @@ def parse_panel(html, base_url):
         }
 
     state = None
+    instances = {}
     for element in soup.select("[data-urlassinadacarregamento]"):
         candidate = _href(element.get("data-urlassinadacarregamento"), base_url)
-        if _query(candidate).get("acao_ajax", [""])[0] == "retornar_citacao_intimacao_estado":
-            state = candidate
-            break
+        query = _query(candidate)
+        if query.get("acao_ajax", [""])[0] != "retornar_citacao_intimacao_estado":
+            continue
+        state = state or candidate
+        name = query.get("estado", [""])[0]
+        entry = instances.setdefault(name, {"instance": name, "label": "", "current": False, "url": candidate})
+        entry["current"] = entry["current"] or query.get("usuarioAtual", [""])[0] == "true"
+        entry["label"] = entry["label"] or text(element)
+    counters = re.search(r"[\"']([^\"'\s]*controlador_ajax\.php\?acao_ajax=listar_painel_advogado[^\"'\s]*)[\"']", html)
+    due_today = next(
+        (
+            text(anchor)
+            for anchor in soup.select('a[href*="vence_hoje=S"]')
+            if "citacao_intimacao_prazo_aberto_listar" in anchor.get("href", "")
+        ),
+        "",
+    )
     return {
         "queues": {
             "open_deadlines": queues.get("citacao_intimacao_prazo_aberto_listar"),
@@ -66,8 +95,15 @@ def parse_panel(html, base_url):
         },
         "queueActions": queues,
         "actions": actions,
+        "variants": variants,
         "quickSearch": quick,
         "stateEndpoint": state,
+        # The counters of each instance's citações/intimações tab (TJMG: MG and TJMG; JFRS: RS, TRF4, SC, PR).
+        "instances": list(instances.values()),
+        # The ajax call that fills the panel's counters, and the fieldsets the panel asks it for.
+        "countersEndpoint": _href(html_lib.unescape(counters.group(1)), base_url) if counters else None,
+        "counterFieldsets": list(dict.fromkeys(re.findall(r"buscarDadosPainel\(\s*'(\w+)'\s*\)", html))),
+        "dueTodayCount": int(due_today) if due_today.isdigit() else None,
     }
 
 
@@ -87,6 +123,37 @@ def _plain_parties(cell):
     return parties
 
 
+def _court(cell):
+    """The whole juízo after "Juízo:" ("BHE 6 V.C. J" at TJMG, "SCUABI011" at JFSC), up to the next line break."""
+    lines = [line.strip() for line in cell.get_text("\n", strip=True).split("\n") if line.strip()]
+    for index, line in enumerate(lines):
+        found = re.match(r"Ju[íi�]zo\s*:\s*(.*)", line, re.I)
+        if found:
+            return found.group(1).strip() or (lines[index + 1] if index + 1 < len(lines) else "")
+    return ""
+
+
+_DOCUMENT_LINE = re.compile(r"\(?\s*[\d./-]+\s*\)?")
+_CELL_LABELS = {"juízo:", "juizo:", "colegiado:", "partes:"}
+
+
+def _labelled_parties(cell):
+    """Parties drawn under bold role headers (``<b>Autor</b><br>NAME<br>(document)<br>X<b>Réu</b>...``, TJMG and
+    JFRS queues, 27/11/2026); the document number is left out."""
+    parties, role = [], None
+    for string in cell.find_all(string=True):
+        value = " ".join(string.split())
+        if not value or string.find_parent("a") or string.find_parent("script"):
+            continue
+        if string.find_parent("b"):
+            role = None if value.casefold() in _CELL_LABELS else value
+            continue
+        known = any(party["name"] == value for party in parties)
+        if role and value != "X" and not _DOCUMENT_LINE.fullmatch(value) and not known:
+            parties.append({"role": role, "name": value})
+    return parties
+
+
 def _hearing_row(row, cells, base_url):
     """A row of "Intimações de Pauta" (TJSC 2G, 16/11/2026): Processo, Assunto, Evento, Data Sessão, Sequencial,
     Composição prevista, Visualizado. It has no class or deadline columns; the session period takes their place."""
@@ -94,7 +161,6 @@ def _hearing_row(row, cells, base_url):
     link = process_cell.select_one('a[href*="acao=processo_selecionar"]')
     if not link:
         return None
-    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
     lines = [line.strip() for line in process_cell.get_text("\n", strip=True).split("\n") if line.strip()]
     collegiate = next(
         (lines[i + 1] for i, line in enumerate(lines[:-1]) if line.casefold().rstrip(": ") == "colegiado"), ""
@@ -106,7 +172,7 @@ def _hearing_row(row, cells, base_url):
         "id": None,
         "number": text(link),
         "url": _href(link.get("href"), base_url),
-        "court": court.group(1) if court else "",
+        "court": _court(process_cell),
         "collegiate": collegiate,
         "parties": _plain_parties(process_cell),
         "caseClass": "",
@@ -142,13 +208,12 @@ def _process_row(row, base_url):
         name = text(part)
         if name and name not in {p["name"] for p in parties}:
             parties.append({"role": part.get("data-parte", "").strip(), "name": name})
-    court = re.search(r"Ju[íi�]zo\s*:\s*([^\s]+)", text(process_cell), re.I)
     return {
         "id": (row.select_one("input.infraCheckbox[value]") or {}).get("value"),
         "number": text(link),
         "url": _href(link.get("href"), base_url),
-        "court": court.group(1) if court else "",
-        "parties": parties,
+        "court": _court(process_cell),
+        "parties": parties or _labelled_parties(process_cell),
         "caseClass": text(cells[offset + 1]),
         "subject": text(cells[offset + 2]),
         "deadlineEvent": text(cells[offset + 3]),
@@ -273,6 +338,7 @@ def parse_lawyer_process_report(html, base_url):
         "filters": {
             "includeClosed": closed.has_attr("checked") if closed else None,
             "status": text(soup.select_one('select[name="selStatusProcesso"] option[selected]')) or None,
+            "prazo": text(soup.select_one('select[name="prazoField"] option[selected]')) or None,
         },
         "diagnostics": [],
     }
@@ -301,6 +367,41 @@ def form_fields(form):
                 continue
             fields.append((name, node.get("value", "on" if kind in ("checkbox", "radio") else "")))
     return fields
+
+
+# Relação de Processos filters: the Prazo select's values and the "Listar processos baixados" checkbox (every portal
+# leaves it unchecked, so baixados are left out unless asked for; TJMG and JFRS, 27/11/2026).
+PRAZO_FILTER = {"aguardando_abertura": "S", "vencido": "V", "aberto": "A", "fechado": "F", "sem_prazo": "SP"}
+ARCHIVED_FIELD = "chkMostrarBaixados"
+
+
+def report_filter_request(html, base_url, *, include_archived=None, prazo=None):
+    """``(url, fields)`` that search Relação de Processos again with these filters, as its Buscar button does.
+
+    ``include_archived`` None keeps the form's choice; ``prazo`` one of ``PRAZO_FILTER``. Raises ``ValueError`` when the
+    form lacks the field a filter needs, and returns None without the form.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.select_one("form#frmProcessoLista[action]")
+    if form is None:
+        return None
+    fields = [(name, value) for name, value in form_fields(form) if name not in ("hdnInfraPaginaAtual", "hdnExcel")]
+    if prazo is not None:
+        options = {option.get("value") for option in form.select('select[name="prazoField"] option')}
+        if PRAZO_FILTER[prazo] not in options:
+            raise ValueError("this portal's Relação de Processos has no Prazo filter")
+        fields = [(name, value) for name, value in fields if name != "prazoField"] + [
+            ("prazoField", PRAZO_FILTER[prazo])
+        ]
+    if include_archived is not None:
+        box = form.select_one(f'input[name="{ARCHIVED_FIELD}"]')
+        if box is None:
+            raise ValueError("this portal's Relação de Processos has no Listar baixados option")
+        fields = [(name, value) for name, value in fields if name != ARCHIVED_FIELD]
+        if include_archived:
+            fields.append((ARCHIVED_FIELD, box.get("value", "S")))
+    fields += [("hdnInfraPaginaAtual", "0"), ("hdnExcel", "0")]
+    return _href(form["action"], base_url), fields
 
 
 def report_page_request(html, base_url, page):
@@ -524,3 +625,155 @@ def parse_process_detail(html, base_url):
     else:
         result["eventRequest"] = None
     return result
+
+
+def additional_information_request(html, base_url):
+    """``(url, data)`` the process page posts to load its "Informações Adicionais" (its legend's
+    ``carregarInformacoesAdicionais('url', {...})``), or None when the page has none."""
+    found = re.search(r"carregarInformacoesAdicionais\(\s*'([^']+)'\s*,\s*\{(.*?)\}\s*\)", html or "", re.S)
+    if not found:
+        return None
+    data = dict(re.findall(r"'(\w+)'\s*:\s*'([^']*)'", found.group(2)))
+    data.update(re.findall(r"'(\w+)'\s*:\s*(true|false)\b", found.group(2)))
+    return _href(found.group(1), base_url), data
+
+
+def parse_additional_information(html):
+    """``{label: value}`` of the "Informações Adicionais" fragment (justiça gratuita, sigilo, prevenção, valor da causa,
+    doença grave, Juízo 100% Digital...); labels without a value are left out."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    result = {}
+    for row in soup.select("div.row"):
+        spans = row.find_all("span", recursive=False)
+        if len(spans) < 2:
+            continue
+        label, value = text(spans[0]).rstrip(":").strip(), text(spans[1])
+        if label and value:
+            result.setdefault(label, value)
+    return result
+
+
+def _flat_cells(row):
+    """The texts of a row's cells, also when the portal leaves ``<td>`` unclosed (audiência lists of TJMG, 27/11/2026),
+    which a lenient parser nests one cell inside the other."""
+    parts = re.split(r"<td\b[^>]*>", str(row), flags=re.I)[1:]
+    return [text(BeautifulSoup(part, "html.parser")) for part in parts]
+
+
+def _table_items(html, fields):
+    """Rows of the first list whose headers are ``fields`` keys (lowercase), as dicts with the mapped names."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for table in soup.select("table.infraTable"):
+        headers = [text(th).casefold() for th in table.select("th")]
+        if sum(header in fields for header in headers) < 2:
+            continue
+        items = []
+        for row in table.select("tr.infraTrClara, tr.infraTrEscura"):
+            cells = _flat_cells(row)
+            item = {
+                fields.get(header, header): cells[index] for index, header in enumerate(headers) if index < len(cells)
+            }
+            items.append({key: value for key, value in item.items() if key})
+        return items
+    return []
+
+
+HEARING_FIELDS = {
+    "sala": "location",
+    "data/hora início": "start",
+    "data/hora fim": "end",
+    "descrição da audiência": "description",
+    "magistrado": "judge",
+    "realizador": "conductedBy",
+    "situação": "status",
+}
+EXAM_FIELDS = {
+    "periciado": "examinee",
+    "data-hora designada": "scheduledAt",
+    "sala": "location",
+    "perito": "expert",
+    "especialidade": "specialty",
+}
+
+
+def parse_process_hearings(html):
+    """The process' audiências (Audiência button, ``audiencia_listar``): location, start, end, description, judge,
+    conductedBy, status."""
+    return _table_items(html, HEARING_FIELDS)
+
+
+def parse_process_exams(html):
+    """The process' perícias (Perícia button, ``exame_listar``, JFRS): examinee, scheduledAt, location, expert,
+    specialty."""
+    return _table_items(html, EXAM_FIELDS)
+
+
+def process_links(html, base_url):
+    """The process page's audiência and perícia list links, when its action bar shows them."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    links = {}
+    for key, action in (("hearings", "audiencia_listar"), ("exams", "exame_listar")):
+        anchor = soup.select_one(f'a[href*="acao={action}&"]')
+        if anchor is not None:
+            links[key] = _href(anchor.get("href"), base_url)
+    return links
+
+
+def parse_panel_counters(body):
+    """``{name: count}`` of one ``listar_painel_advogado`` XML reply (``<fldAudiencia><audienciaFutura>2</...>``), or
+    None when the reply is not that XML (TJMG answers fldDepositosJudiciais with a PHP error, 27/11/2026)."""
+    found = re.fullmatch(r"\s*(?:<\?xml[^>]*\?>)?\s*<(\w+)>(.*)</\1>\s*", body or "", re.S)
+    if not found:
+        return None
+    values = {}
+    for name, value in re.findall(r"<(\w+)>\s*([^<]*?)\s*</\1>", found.group(2)):
+        values[name] = int(value) if value.isdigit() else html_lib.unescape(value)
+    return values
+
+
+_HEARING_TIME = r"(\d{2}/\d{2}/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)"
+
+
+def parse_hearing_list(html, base_url):
+    """The panel's audiência lists (``audiencia_futura_listar``, ``audiencia_futura_conciliacao_listar``; TJMG and
+    JFRS, 27/11/2026): Número Processo (number, juízo, parties), Evento, Local Data/Hora (Sala, Início, Previsão
+    Término) and Observação. The portal leaves the last ``<td>`` of a row unclosed."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for table in soup.select("table.infraTable"):
+        headers = [text(th).casefold() for th in table.select("th")]
+        if not any("processo" in header for header in headers) or not any("local" in header for header in headers):
+            continue
+        items = []
+        for row in table.select("tr.infraTrClara, tr.infraTrEscura"):
+            cells = [BeautifulSoup(part, "html.parser") for part in re.split(r"<td\b[^>]*>", str(row), flags=re.I)[1:]]
+            link = cells[0].select_one('a[href*="acao=processo_selecionar"]') if cells else None
+            if link is None or len(cells) < 3:
+                continue
+            lines = [line.strip() for line in cells[0].get_text("\n", strip=True).split("\n") if line.strip()]
+            court = next((line[1:-1] for line in lines[1:2] if line.startswith("(") and line.endswith(")")), "")
+            place = text(cells[2])
+            location = re.search(r"Sala\s*:\s*(.*?)\s*(?:In[íi]cio|$)", place)
+            start = re.search(r"In[íi]cio\s*" + _HEARING_TIME, place)
+            end = re.search(r"T[ée]rmino\s*" + _HEARING_TIME, place)
+            items.append(
+                {
+                    "number": text(link),
+                    "url": _href(link.get("href"), base_url),
+                    "court": court,
+                    "parties": [
+                        {"role": lines[index + 1], "name": line.rstrip(" -").strip()}
+                        for index, line in enumerate(lines[:-1])
+                        if index > 1 and line.endswith("-")
+                    ],
+                    "event": text(cells[1]),
+                    "location": location.group(1) if location else place,
+                    "start": start.group(1) if start else "",
+                    "end": end.group(1) if end else "",
+                    "observation": text(cells[3]) if len(cells) > 3 else "",
+                }
+            )
+        return {"items": items, "pagination": _list_pagination(soup, items)}
+    # An empty list draws an empty table area (JFRS, 27/11/2026); a page without one is not this list.
+    area = soup.select_one("#divInfraAreaTabela")
+    empty = area is not None and not text(area)
+    return {"items": [], "pagination": {"totalItems": 0 if empty else None, "itemCount": 0, "complete": empty}}

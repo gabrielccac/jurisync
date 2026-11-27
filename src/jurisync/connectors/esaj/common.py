@@ -65,6 +65,11 @@ def is_cas_login_page(response):
     return response.status_code == 200 and path.split(";")[0].rstrip("/").endswith("/sajcas/login")
 
 
+# The only POSTs sent, both reads: the document permission check (it answers whether a document opens without a
+# receipt) and the panel's petition filter (the period search its own page posts). Everything else is a GET.
+READ_POSTS = frozenset({"pastadigital/validarAberturaIntimacaoNaoRecebida.do", "tarefas-adv/api/peticoes-filtro"})
+
+
 def request(session, portal, method, path, *, accept=(), **kwargs):
     """One guarded request on the portal host.
 
@@ -73,8 +78,8 @@ def request(session, portal, method, path, *, accept=(), **kwargs):
     page means the session expired. A 403 is a flow the portal will not serve without a person (a captcha), unless the
     caller reads that answer itself (``accept=(403,)``: a check whose refusal page says why).
     """
-    if method != "GET" and not (method == "POST" and path == "pastadigital/validarAberturaIntimacaoNaoRecebida.do"):
-        raise ValueError("e-SAJ connector allows only reads and the document permission check")
+    if method != "GET" and not (method == "POST" and path in READ_POSTS):
+        raise ValueError("e-SAJ connector allows only reads, the document permission check and the petition filter")
     config = portals.esaj(portal)
     url = config.url(path)
     require_portal_url(config, url)

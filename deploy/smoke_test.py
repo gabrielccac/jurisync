@@ -176,6 +176,12 @@ def sign_in(client, base, email, password, path="/mcp"):
         raise RuntimeError(f"/authorize answered {authorize.status_code}")
     request_id = parse_qs(urlsplit(authorize.headers["location"]).query)["request"][0]
     login = client.post("/login", data={"request": request_id, "email": email, "password": password})
+    if login.status_code == 200 and 'name="new_password"' in login.text:
+        # The password-change page: the check never chooses a password for anyone.
+        raise RuntimeError(
+            f"o servidor pede uma senha nova para {email} (tela 'Escolha uma senha nova'); "
+            "troque-a no navegador e rode o teste de novo"
+        )
     if login.status_code != 302:
         raise RuntimeError(f"sign-in refused ({login.status_code})")
     code = parse_qs(urlsplit(login.headers["location"]).query)["code"][0]

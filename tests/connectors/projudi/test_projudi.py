@@ -485,6 +485,7 @@ class ServerTest(unittest.TestCase):
             [
                 "projudi_download_document",
                 "projudi_get_process",
+                "projudi_list_audiencias",
                 "projudi_list_documents",
                 "projudi_list_intimacoes",
                 "projudi_list_processes",
@@ -522,6 +523,20 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(
             tjam_adapter.list_processes.call_args.kwargs, {"situation": "todos", "instances": ("1",), "max_pages": 3}
         )
+
+    def test_audiencias_options_reach_the_desk_adapter_and_tjgo_says_it_has_no_list(self):
+        self.assertTrue(self.call("projudi_list_audiencias", {"portal": "tjgo-1g", "situation": "aguardando"}).is_error)
+        desk = mock.Mock(flavor="legacy-local")
+        desk.list_hearings.return_value = {"situation": "movimentadas", "groups": [], "complete": True}
+        with mock.patch.dict(server.ADAPTERS, {"legacy-local": desk}):
+            result = self.call(
+                "projudi_list_audiencias", {"portal": "tjam-1g", "situation": "movimentadas", "instances": ["2"]}
+            )
+        self.assertEqual(result.structured_content["situation"], "movimentadas")
+        self.assertEqual(desk.list_hearings.call_args.kwargs, {"situation": "movimentadas", "instances": ("2",)})
+        with mock.patch.object(tjgo.TjgoAdapter, "_home", return_value={"hearings": [{"label": "x", "count": 1}]}):
+            listed = tjgo.ADAPTER.list_hearings(object(), "tjgo-1g")
+        self.assertEqual((listed["supported"], listed["hearingsToday"][0]["count"]), (False, 1))
 
     def test_get_process_hides_hashes_and_attaches_files_to_movements(self):
         result = self.call("projudi_get_process", {"process_number": NUMBER}).structured_content
@@ -675,3 +690,36 @@ class ServentiaTest(unittest.TestCase):
         self.assertEqual(session.get.call_args.args[0], app + "Usuario?PaginaAtual=7&a1=1002&a2=2&a3=&a4=&a5=")
         self.assertEqual(session.post.call_count, 1)
         self.assertFalse(any("memorizar" in str(call).lower() for call in session.mock_calls))
+
+
+class SessionGuardTest(unittest.TestCase):
+    """27/11/2026: ``Usuario?PaginaAtual=7&LoginPronto=S`` (the serventia switch without ``a1``) and then a bare
+    ``/Usuario`` ended a live TJGO session. Neither is ever sent."""
+
+    APP = "https://projudi.tjgo.jus.br/"
+
+    def test_the_two_requests_are_refused_before_anything_is_sent(self):
+        session = mock.Mock()
+        for path in ("Usuario", "Usuario?", "Usuario/", "Usuario?PaginaAtual=7&LoginPronto=S", "Usuario?PaginaAtual=7"):
+            with self.subTest(path=path), self.assertRaises(tjgo.UnsafeNavigation):
+                tjgo.ADAPTER.request(session, "tjgo-1g", "GET", path)
+        session.request.assert_not_called()
+
+    def test_the_home_and_a_chosen_serventia_pass(self):
+        for url in (
+            self.APP + "Usuario?PaginaAtual=-10",
+            self.APP + "Usuario?PaginaAtual=7&a1=1002&a2=2",
+            self.APP + "BuscaProcesso?PaginaAtual=4",
+            self.APP + "UsuarioAlgo",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(tjgo.require_safe_navigation(url), url)
+
+    def test_a_serventia_link_without_a1_is_never_an_option(self):
+        page = SERVENTIAS_HTML.replace(
+            "Usuario?PaginaAtual=7&a1=1001&a2=2&a3=&a4=&a5=", "Usuario?PaginaAtual=7&LoginPronto=S"
+        )
+        self.assertEqual(
+            [href for href, _ in tjgo.serventias(page)], ["Usuario?PaginaAtual=7&a1=1002&a2=2&a3=&a4=&a5="]
+        )
+        self.assertEqual(tjgo.serventias(SERVENTIAS_HTML.replace("a1=1001", "a1=").replace("a1=1002", "a1=")), [])

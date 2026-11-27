@@ -14,16 +14,19 @@ from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
     MAX_REPORT_PAGES,
+    PRAZO_FILTER,
     QUEUE_KINDS,
     _response_error,
     auth_method,
     authenticate,
     fetch_process,
+    list_hearings,
     list_notices,
     list_processes,
+    read_counters,
     request,
 )
-from jurisync.core import certificate
+from jurisync.core import certificate, intimacao
 from jurisync.core.mcp import (
     MAY_GIVE_CIENCIA,
     READ_ONLY,
@@ -91,34 +94,80 @@ def create_server(keys=None):
 
     @server.tool(
         name="eproc_list_intimacoes",
-        title="List Eproc notices",
-        description="Read one citation/intimation queue of an Eproc portal. Read-only.",
+        title="List Eproc intimações",
+        description=(
+            "List the lawyer's citações/intimações of an Eproc portal. Without queue: what needs attention, the pending "
+            "queues (awaiting ciência or the DJEN publication) and the open deadlines together, each intimação once "
+            "(queues[] says what each queue gave). With queue: that queue only. "
+            + intimacao.DESCRIPTION
+            + " Rows also "
+            "carry queue, number, court (juízo), parties, class, subject, deadlineEvent, requestedAt, deadlineStart and "
+            "deadlineEnd as the portal shows them. Counts of every queue: eproc_get_counters. Read-only: opens no "
+            "intimação."
+        ),
         annotations=READ_ONLY,
     )
     def eproc_list_intimacoes(
         portal: Portal,
         queue: Annotated[
-            Queue,
+            Queue | None,
             Field(
                 description=(
-                    "'open_deadlines': prazo aberto, deadline running; 'pending': citação/intimação awaiting ciência; "
-                    "'pending_urgent': urgent ones awaiting ciência; 'pending_agreement': awaiting ciência, acordo; "
-                    "'art334': citação for the art. 334 CPC hearing, awaiting ciência; 'expired_deadline': prazo "
-                    "decorrido (decurso) in the last days; 'hearing_notice': intimação de pauta (session schedule)."
+                    "Omit for what needs attention. 'pending': awaiting ciência or publication; 'pending_urgent', "
+                    "'pending_agreement', 'art334': the other pending queues; 'open_deadlines': prazo aberto, deadline "
+                    "running; 'urgent': open urgent deadlines; 'due_today': deadlines ending today; "
+                    "'expired_deadline': deadlines that ended in the last 30 days (decurso de prazo); 'hearing_notice': "
+                    "intimações de pauta."
                 )
             ),
-        ],
+        ] = None,
     ) -> dict[str, Any]:
         return call(portal, lambda **context: list_notices(queue, **context))
+
+    @server.tool(
+        name="eproc_get_counters",
+        title="Get Eproc panel counters",
+        description=(
+            "Read the counters of the lawyer's Eproc panel. panel: each fieldset the panel fills (citações/intimações, "
+            "audiências, perícias, conciliações, depósitos judiciais, petições iniciais preparadas, movimentações "
+            "pendentes, recursos, substabelecimentos...) with label and count per counter; a fieldset the portal fails "
+            "to answer carries error. instances: the citações/intimações counters of every instance tab of the panel "
+            "(the portal's own section, the court of appeal, sister sections), named as the eproc_list_intimacoes "
+            "queues; current=true is the instance this portal lists, the others are read in their own portal. "
+            "dueToday: deadlines ending today. "
+            "Read-only: opens nothing."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_get_counters(portal: Portal) -> dict[str, Any]:
+        return call(portal, lambda **context: read_counters(**context))
+
+    @server.tool(
+        name="eproc_list_audiencias",
+        title="List Eproc upcoming audiências",
+        description=(
+            "List the lawyer's upcoming audiências in an Eproc portal, from the panel's two lists (hearings and "
+            "conciliation hearings), soonest first. Each: kind (audiencia or conciliacao), number, court (juízo), "
+            "parties, event (what was scheduled), location, start and end as the portal shows them, date (ISO) and "
+            "observation. lists[] says how many each list gave. The audiências of one process: eproc_get_process. "
+            "Read-only."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_list_audiencias(portal: Portal) -> dict[str, Any]:
+        return call(portal, lambda **context: list_hearings(**context))
 
     @server.tool(
         name="eproc_list_processes",
         title="List Eproc lawyer processes",
         description=(
-            "List the authenticated lawyer's processes (Relação de Processos with the portal's default filters, which "
-            "exclude baixados on every portal); not a court-wide search. Rows: number, parties (pole active/passive; "
-            "the procedural role is in eproc_get_process), class, subject, last event, dates, claim value. pagination.totalItems is the portal's count; pagination.complete=false means rows remain "
-            "unread: call again with a larger maxPages. Details and documents: eproc_get_process. Read-only."
+            "List the authenticated lawyer's processes (Relação de Processos); not a court-wide search. Every portal "
+            "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
+            "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
+            "movement. Rows: number, parties (pole active/passive; the procedural role is in "
+            "eproc_get_process), class, subject, last event, dates, claim value. pagination.totalItems is "
+            "the portal's count; pagination.complete=false means rows remain unread: call again with a larger "
+            "maxPages. Details and documents: eproc_get_process. Read-only."
         ),
         annotations=READ_ONLY,
     )
@@ -126,10 +175,33 @@ def create_server(keys=None):
         portal: Portal,
         maxPages: Annotated[
             int,
-            Field(ge=1, le=MAX_REPORT_PAGES, description="Pages to read (50 rows each, 500 on TJSC)."),
+            Field(ge=1, le=MAX_REPORT_PAGES, description="Pages to read (50 rows each, more on some portals)."),
         ] = 1,
+        includeArchived: Annotated[
+            bool | None,
+            Field(
+                description="true also lists baixados (Listar processos baixados); omitted: the portal's default, without them."
+            ),
+        ] = None,
+        prazo: Annotated[
+            Literal[tuple(PRAZO_FILTER)] | None,
+            Field(description="Only processes whose intimação deadline is in this state; omitted: all."),
+        ] = None,
+        latestMovementFirst: Annotated[
+            bool,
+            Field(description="true: latest movement first (the panel's Últimas movimentações)."),
+        ] = False,
     ) -> dict[str, Any]:
-        return call(portal, lambda **context: list_processes(max_pages=maxPages, **context))
+        return call(
+            portal,
+            lambda **context: list_processes(
+                max_pages=maxPages,
+                include_archived=includeArchived,
+                prazo=prazo,
+                latest_first=latestMovementFirst,
+                **context,
+            ),
+        )
 
     @server.tool(
         name="eproc_get_process",
@@ -141,8 +213,12 @@ def create_server(keys=None):
             "the lawyer's pending queues: estado 'nenhuma' (nothing pending involved), 'pendente' (one awaits ciência, "
             "no document opened), 'dada' (documents opened: the ciência may be registered and the deadline started) "
             "or 'desconhecida' (opened, queues not checked; motivo says why), with intimacoes and an aviso. Always "
-            "tell the user ciencia.aviso and note it in the task. save=true stores each read document (HTML as PDF) "
-            "in the shared documents folder."
+            "tell the user ciencia.aviso and note it in the task. prazos: the deadline of every intimação event "
+            "(eventId, refersTo, party, days, status aberto/fechado/aguardando_abertura, closedBy, start and end ISO "
+            "dates, djenAvailable/djenPublished). metadata.additionalInformation: the Informações Adicionais "
+            "(justiça gratuita, sigilo, prevenção, valor da causa...); audiencias and pericias: the process' lists "
+            "(null where the portal has no such button). save=true stores each read document (HTML as PDF) in the "
+            "shared documents folder."
         ),
         annotations=MAY_GIVE_CIENCIA,
     )
@@ -167,7 +243,7 @@ def create_server(keys=None):
         ] = [],
         save: Annotated[
             bool,
-            Field(description="true returns savedAs file names for advbox_create_task."),
+            Field(description="true returns savedAs file names (shared documents folder)."),
         ] = False,
     ) -> dict[str, Any]:
         return call(

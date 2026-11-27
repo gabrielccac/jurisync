@@ -210,7 +210,10 @@ def document(session, portal, number, document_id, *, download=False, acknowledg
     inventory = document_inventory(session, portal, number)
     entry = next((item for item in inventory if item["documentId"] == document_id), None)
     if entry is None:
-        raise ValueError("documentId is not in the current process inventory")
+        raise ValueError(
+            "documentId is not in the current process inventory: use the ids esaj_list_documents returns (a "
+            "movement's documentId from esaj_get_process is the movement link's code, which the viewer does not use)"
+        )
     if not entry.get("parameters"):
         raise common.EsajBlocked("Document requires a password or restricted access flow", "password_required")
     # This POST only checks permission. When the portal itself wants the receipt confirmed first (its own dialog, not

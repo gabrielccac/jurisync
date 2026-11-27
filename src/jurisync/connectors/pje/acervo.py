@@ -23,7 +23,7 @@ from html import unescape
 from bs4 import BeautifulSoup
 
 from jurisync import portals
-from jurisync.connectors.pje import jsf
+from jurisync.connectors.pje import jsf, legacy
 from jurisync.connectors.pje.parsers import parse_process_number, response_html
 
 PANEL_SUFFIX = "Painel/painel_usuario/advogado.seam"
@@ -424,17 +424,33 @@ def list_processes(session, portal, *, regions=None, max_pages=5, max_nodes=MAX_
         "complete": not skipped and all(j["complete"] for j in jurisdictions),
     }
     if skipped:
+        # One call reads MAX_NODES jurisdictions; the rest come with a second call filtered to them.
         result["notRead"] = skipped
+        result["next"] = "Call pje_list_processes again with regions set to notRead to read these jurisdictions."
     return result
 
 
+ARCHIVED = re.compile(r"arquivad", re.I)
+
+
+def is_archived(item):
+    """Whether a listed process is archived: it sits in an Arquivados box (or PJe-JT bucket). The PJe-JT archiving date
+    alone does not say so: a process taken out of the archive keeps it."""
+    return bool(ARCHIVED.search(item.get("caixa") or ""))
+
+
 def read_acervo(portal, *, session, regions=None, max_pages=5):
-    """``list_processes`` on the classic panel, the Acervo Geral bucket on the PJe-JT (KZ) one."""
+    """``list_processes`` on the classic panel, the Acervo Geral bucket on the PJe-JT (KZ) one, the Acervo sub-tabs'
+    grids on PJe 1.x. Every item says whether the process is ``arquivado``."""
     config = portals.pje(portal)
     if config.pje1x:
-        raise ValueError(f"{portal} is a PJe 1.x panel; the Acervo listing covers PJe 2.x and the PJe-JT panels")
-    if config.kz:
+        result = legacy.list_processes(session, portal, regions=regions, max_pages=max_pages)
+    elif config.kz:
         from jurisync.connectors.pje import kz
 
-        return kz.read_acervo(session, portal, regions=regions, max_pages=max_pages)
-    return list_processes(session, portal, regions=regions, max_pages=max_pages)
+        result = kz.read_acervo(session, portal, regions=regions, max_pages=max_pages)
+    else:
+        result = list_processes(session, portal, regions=regions, max_pages=max_pages)
+    for item in result.get("items") or []:
+        item["arquivado"] = is_archived(item)
+    return result

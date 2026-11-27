@@ -1,4 +1,5 @@
-"""PJe 1.x (TRF5's pje.trf5.jus.br): the lawyer panel (Acervo and Intimações tabs) and the process search.
+"""PJe 1.x (TRF5's pje.trf5.jus.br): the lawyer panel (Acervo and Intimações tabs), its Acervo listing and the
+process search.
 
 This PJe is an older Seam/RichFaces app than the other PJe portals: its panel has no Expedientes buckets but tabs
 (Acervo, Intimações, Intimações de RPV/PRC, Intimações de Pauta de Julgamento) whose buckets are toggle panels
@@ -23,6 +24,8 @@ HEADER = re.compile(r"^[«»\s]*(?P<label>.+?)\s+-\s+(?P<count>\d+)$")
 DETAIL_LINK = re.compile(r"listProcessoCompletoAdvogado\.seam\?id=(\d+)&(?:amp;)?ca=([0-9a-fA-F]{32,})")
 PROCESS_RE = re.compile(r"\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b")
 ACERVO = "Acervo"
+ACERVO_GRID = "formProcessoTrfInicialAdvogado:processoTrfInicialAdvogadoList"
+DATE = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
 DEFAULT_BUCKET = "Intimações / Pendentes"
 
 
@@ -101,23 +104,11 @@ def _tab_html(session, url, html, tab, label):
     return _post(session, url, html, form_id, {"AJAXREQUEST": "_viewRoot", tab_id: tab_id, "ajaxSingle": tab_id}, label)
 
 
-def _walk_panel(session, portal):
-    """Walk the panel's tabs, yielding ``(bucket, html)`` as each bucket's counter is read.
-
-    Acervo: "Pendentes de Manifestação" and "Acervo Geral" (the two sub-tabs). Each Intimações tab: its toggle
-    buckets, with the tab's page (``html``) on which the bucket's toggle can be opened. Indices follow the walk.
-    """
-    config = portals.pje(portal)
+def _acervo_pages(session, config):
+    """The Acervo sub-tabs as ``(label, url, html)``: the panel page opens on "Pendentes de Manifestação", and the
+    "Acervo Geral" sub-tab is posted from it when the page has it."""
     url, html = _panel(session, config)
-    index = 0
-
-    def bucket(group, label, count, **where):
-        nonlocal index
-        index += 1
-        return {"index": str(index - 1), "label": f"{group} / {label}", "count": count, "url": url, **where}
-
-    counts = parse_found_counts(html)
-    yield bucket(ACERVO, "Pendentes de Manifestação", counts[0] if counts else 0, kind="acervo"), html
+    yield "Pendentes de Manifestação", url, html
     general = _soup(html).find("td", id="idCaixa_lbl")
     if general is not None and general.find_parent("form") is not None:
         html = _post(
@@ -128,8 +119,27 @@ def _walk_panel(session, portal):
             {"idCaixa_server_submit": "idCaixa_server_submit"},
             f"{config.key} Acervo Geral",
         )
+        yield "Acervo Geral", url, html
+
+
+def _walk_panel(session, portal):
+    """Walk the panel's tabs, yielding ``(bucket, html)`` as each bucket's counter is read.
+
+    Acervo: "Pendentes de Manifestação" and "Acervo Geral" (the two sub-tabs). Each Intimações tab: its toggle
+    buckets, with the tab's page (``html``) on which the bucket's toggle can be opened. Indices follow the walk.
+    """
+    config = portals.pje(portal)
+    url, html = config.url(PANEL_PATH), None
+    index = 0
+
+    def bucket(group, label, count, **where):
+        nonlocal index
+        index += 1
+        return {"index": str(index - 1), "label": f"{group} / {label}", "count": count, "url": url, **where}
+
+    for label, _, html in _acervo_pages(session, config):
         counts = parse_found_counts(html)
-        yield bucket(ACERVO, "Acervo Geral", counts[0] if counts else 0, kind="acervo"), html
+        yield bucket(ACERVO, label, counts[0] if counts else 0, kind="acervo"), html
     for tab in parse_tabs(html):
         if tab[0] == "tabProcAdvPainelPeticaoInicial":
             continue
@@ -228,6 +238,109 @@ def read_inbox(session, portal, *, bucket=None, filters=None):
         "rows": rows,
     }
     return {"success": True, "portal": portal, "bucket": brief, "inboxes": [inbox], "complete": inbox["complete"]}
+
+
+def _date(value):
+    match = DATE.search(value or "")
+    return f"{match.group(3)}-{match.group(2)}-{match.group(1)}" if match else None
+
+
+def parse_acervo_grid(html):
+    """The Acervo sub-tab's grid: rows keyed by header, the "Foram encontrados" total, whether it has a page scroller
+    and how many nodes its jurisdiction tree shows. None when the page has no Acervo grid."""
+    soup = _soup(html)
+    table = soup.find("table", id=ACERVO_GRID)
+    if table is None:
+        return None
+    heads = [" ".join(th.get_text(" ").split()) for th in table.select("thead th")]
+    rows = []
+    for tr in table.select("tbody > tr"):
+        values = [" ".join(td.get_text(" ").split()) for td in tr.find_all("td", recursive=False)]
+        columns = {head: values[i] for i, head in enumerate(heads) if head and i < len(values) and values[i]}
+        number = PROCESS_RE.search(columns.get("Processo") or " ".join(values))
+        if not number:
+            continue
+        link = DETAIL_LINK.search(str(tr))
+        rows.append(
+            {"processNumber": number.group(0), "processId": link.group(1) if link else None, "columns": columns}
+        )
+    form = table.find_parent("form") or soup
+    total = FOUND.search(" ".join(form.get_text(" ").split()))
+    return {
+        "total": int(total.group(1)) if total else None,
+        "rows": rows,
+        "paged": form.select_one(".rich-datascr") is not None,
+        "treeNodes": len(soup.select(".rich-tree .rich-tree-node")),
+    }
+
+
+def _acervo_item(row, box):
+    columns = row["columns"]
+    classe = PROCESS_RE.sub("", columns.get("Processo", "")).strip(" -") or None
+    parties = [columns.get("Polo Ativo"), columns.get("Polo Passivo")]
+    return {
+        "processNumber": row["processNumber"],
+        "processId": row["processId"],
+        "classe": classe,
+        "assunto": None,
+        "partes": " x ".join(party for party in parties if party) or None,
+        "orgaoJulgador": None,
+        "distribuidoEm": _date(columns.get("Autuação")),
+        "ultimoMovimento": None,
+        "jurisdicao": None,
+        "caixa": f"{ACERVO} / {box}",
+    }
+
+
+def list_processes(session, portal, *, regions=None, max_pages=None):
+    """The lawyer's processes in the panel's Acervo: the "Pendentes de Manifestação" and "Acervo Geral" grids.
+
+    Each grid shows Processo, Polo Ativo, Polo Passivo and Autuação (no subject, órgão or last movement) and the
+    "Foram encontrados: N" total the counters read. The jurisdiction tree beside Acervo Geral and the grid's page
+    scroller were never seen with rows (validated 27/11/2026 on an empty acervo), so neither is followed: a grid
+    with fewer rows than its total, or a tree with nodes, leaves ``complete`` false. ``max_pages`` is accepted for
+    the shared tool and unused. Only the sub-tabs are opened: no row, "Autos Digitais" link or Ciente is touched.
+    """
+    if regions:
+        raise ValueError(f"{portal} (PJe 1.x) has no jurisdiction filter in its Acervo listing; leave regions empty")
+    config = portals.pje(portal)
+    boxes, items, notes = [], {}, []
+    for label, _, html in _acervo_pages(session, config):
+        grid = parse_acervo_grid(html)
+        if grid is None:
+            raise RuntimeError(f"{config.key} {ACERVO} / {label}: the Acervo grid was not rendered")
+        total = grid["total"] if grid["total"] is not None else len(grid["rows"])
+        for row in grid["rows"]:
+            items.setdefault(row["processId"] or row["processNumber"], _acervo_item(row, label))
+        complete = len(grid["rows"]) >= total
+        if grid["treeNodes"]:
+            complete = False
+            notes.append(f"{label}: the jurisdiction tree has {grid['treeNodes']} nodes, not opened")
+        if len(grid["rows"]) < total:
+            notes.append(f"{label}: {len(grid['rows'])} of {total} rows on the first page; the pager is not followed")
+        boxes.append(
+            {
+                "label": f"{ACERVO} / {label}",
+                "count": total,
+                "pages": 1,
+                "returned": len(grid["rows"]),
+                "complete": complete,
+            }
+        )
+    general = next((box for box in boxes if box["label"].endswith("/ Acervo Geral")), boxes[0])
+    result = {
+        "success": True,
+        "portal": portal,
+        "source": "acervo",
+        "jurisdictions": boxes,
+        "total": general["count"],
+        "returned": len(items),
+        "items": list(items.values()),
+        "complete": all(box["complete"] for box in boxes),
+    }
+    if notes:
+        result["notes"] = notes
+    return result
 
 
 def parse_search_rows(html):

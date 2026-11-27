@@ -419,7 +419,7 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace
                 if email in existing:
                     continue
                 password = secrets.token_urlsafe(15)
-                store.add_user(email, tenant, password, must_change=True)
+                store.add_user(email, tenant, password)
                 store.log(tenant, "operador", "usuário criado", email)
                 created_users.append(f"{email}\t{tenant}\t{password}")
                 say(f"{tenant}: usuário {email} criado")
@@ -428,9 +428,7 @@ def apply(directory, passphrase_file, *, only=None, user_passwords=None, replace
         if created_users:
             write_private(user_passwords, "\n".join(created_users) + "\n")
             say(f"Senhas iniciais dos {len(created_users)} usuário(s) novos em {user_passwords} (0600, não impressas)")
-            say(
-                "Cada usuário troca a senha no 1º login. Entregue as senhas por outro canal e apague o arquivo em seguida."
-            )
+            say("Entregue as senhas por outro canal e apague o arquivo em seguida.")
         say(
             "Próximo passo, um login por portal: jurisync-hosted portal check <escritório> <portal> (lista em plan.json)"
         )

@@ -152,11 +152,15 @@ class Store:
             ("calls", "portal", "text not null default ''"),  # and before the monitoring API
             ("calls", "reason", "text not null default ''"),
             ("calls", "error_code", "text not null default ''"),  # and before errors had one format
-            # Every password stored before users could choose their own was set by the operator: due for a change.
-            ("users", "must_change", "integer not null default 1"),
+            ("users", "must_change", "integer not null default 0"),  # and before users could choose their own
         ):
             if column not in {row["name"] for row in self._db.execute(f"pragma table_info({table})")}:
                 self._db.execute(f"alter table {table} add column {column} {definition}")
+        if self._db.execute("pragma user_version").fetchone()[0] < 1:
+            # Once: an earlier version marked every existing user, and every new one, for a forced change. No user is
+            # forced to change the password any more.
+            self._db.execute("update users set must_change = 0")
+            self._db.execute("pragma user_version = 1")
         self._lock = threading.Lock()
         self.path.chmod(0o600)
 
@@ -231,7 +235,7 @@ class Store:
         self._run("delete from tenants where id = ?", tenant)
 
     def add_user(self, email, tenant, password, *, must_change=False):
-        """``must_change``: the operator chose the password, so the user picks a new one at the next sign-in."""
+        """``must_change``: the user has to pick a new password at the next sign-in. No caller sets it today."""
         office = self.tenant(tenant)
         if office is None:
             raise ValueError(f"Unknown tenant {tenant}")
@@ -271,7 +275,7 @@ class Store:
         return [dict(row) for row in self._run(sql + " order by email", *args)]
 
     def must_change(self, email):
-        """Whether the user still signs in with a password the operator set."""
+        """Whether the user has to pick a new password at the next sign-in."""
         rows = self._run("select must_change from users where email = ?", email.strip().lower())
         return bool(rows and rows[0]["must_change"])
 

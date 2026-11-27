@@ -460,6 +460,24 @@ class PjeChecks(unittest.TestCase):
         session.post.assert_called_once()
         self.assertIn("divTimeLine%3Aj_id77", session.post.call_args.kwargs["data"])
 
+    def test_ajax_timeline_that_answers_nothing_new_is_complete(self):
+        detail = (
+            "https://pje1g.trf1.jus.br/pje/Processo/ConsultaProcesso/Detalhe/listProcessoCompletoAdvogado.seam?id=1"
+        )
+        action = "<script id='divTimeLine:j_id77'>novaPagina=function(){A4J.AJAX.Submit('divTimeLine',null,{'similarityGroupingId':'divTimeLine:j_id77'})};</script>"
+        first = (
+            "<form id='divTimeLine'><input name='javax.faces.ViewState' value='first'></form><div class='media data'><span class='data-interna'>today</span><div class='media tipo-M'><span class='texto-movimento text-upper'>One</span></div></div>"
+            + action
+        )
+        response = SimpleNamespace(status_code=200, headers={"Content-Type": "text/html"}, content=first.encode())
+        session = Mock()
+        session.post.return_value = response
+        _, pagination = search.fetch_timeline_pages(session, first, detail, None, TRF1_SEARCH, max_pages=5)
+        session.post.assert_called_once()
+        self.assertTrue(pagination["complete"])
+        self.assertFalse(pagination["morePagesPossible"])
+        self.assertEqual(pagination["diagnostics"][0]["code"], "pagination_no_new_events")
+
     def test_portal_credentials_are_separate(self):
         first, second = "JBSWY3DPEHPK3PXP", "GEZDGNBVGY3TQOJQ"
         with patch.dict(

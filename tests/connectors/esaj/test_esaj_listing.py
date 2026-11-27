@@ -4,6 +4,7 @@ Every number, code, name and court here is invented; the page shapes follow what
 """
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from jurisync.connectors.esaj import account, base, common, parsers, search
 
 HOST = "https://www2.tjal.jus.br"
+FIXTURES = Path(__file__).parent / "fixtures"
 NOT_FOUND = (
     '<div id="mensagemRetorno"><li>Não existem informações disponíveis para os parâmetros informados.</li></div>'
 )
@@ -189,3 +191,126 @@ def test_a_captcha_portal_searches_with_a_minted_token(monkeypatch):
 def test_max_pages_is_bounded():
     with pytest.raises(ValueError):
         base.list_processes(None, "tjal-esaj", 0)
+
+
+# --- Second instance, Colégio Recursal and the incidents of a first-instance case (TJSP) ----------------------------
+
+TJSP = "https://esaj.tjsp.jus.br"
+
+
+def sp_number(i):
+    return f"{i:07d}-00.2026.8.26.0001"
+
+
+def test_the_second_instance_list_reads_its_own_row_names():
+    items, total = parsers.process_listing((FIXTURES / "cposg_lista.html").read_text(encoding="utf-8"), "cposg")
+    assert total == 2
+    assert items[0] == {
+        "processNumber": sp_number(1),
+        "codigo": "RS0000000001",
+        "foro": None,
+        "parte": {"papel": "Apelante", "nome": "Banco Exemplo S/A"},
+        "classe": "Apelação Cível",
+        "assunto": "DIREITO DO CONSUMIDOR - Contratos de Consumo",
+        "recebidoEm": "10/03/2026",
+        "local": "99ª Câmara de Direito Privado",
+    }
+
+
+def parent_row(number, code):
+    return row(number, code) + (
+        f'<div><a id="incidentesRecursos_{code}" href="#" cdProcesso="{code}" cdForoProcesso="1" '
+        'class="unj-link-collapse"><span>Incidentes e recursos</span></a></div>'
+        f'<div style="display: none;" id="divFilhos{code}"></div>'
+    )
+
+
+class SaoPaulo:
+    """A fake TJSP: first instance (one case with an incident), second instance and Colégio Recursal by OAB."""
+
+    def __init__(self, oabs, first, second=(), recursal=()):
+        self.oabs, self.first, self.second, self.recursal = oabs, first, list(second), list(recursal)
+        self.seen = []
+
+    def __call__(self, session, portal, method, path, **kwargs):
+        params = kwargs.get("params") or {}
+        self.seen.append((method, path, params, kwargs.get("headers")))
+        assert method == "GET"
+        if path == "esaj/api/auth/session":
+            body = {"usuarioLogado": True, "oabs": [{"stringOab": oab, "regular": True} for oab in self.oabs]}
+            return reply(json.dumps(body))
+        if path == "cpopg/search.do":
+            found = self.first.get(params["dadosConsulta.valorConsulta"], [])
+            if not found:
+                return reply(f"<html>{NOT_FOUND}</html>")
+            rows = [parent_row(n, c) if c.endswith("P") else row(n, c) for n, c in found]
+            return reply(listing(rows, len(found)), url=f"{TJSP}/cpopg/search.do")
+        if path == "cpopg/obterProcessosFilhos.do":
+            child = row(sp_number(9), "1A0009C").replace('id="divProcesso1A0009C"', "")
+            return reply(child, url=f"{TJSP}/cpopg/obterProcessosFilhos.do")
+        if path in ("cposg/search.do", "cposgcr/search.do"):
+            assert params["cbPesquisa"] == "NUMOAB" and "dePesquisa" in params
+            cases = self.second if path.startswith("cposg/") else self.recursal
+            if not cases or params["dePesquisa"] != self.oabs[0]:
+                return reply(f"<html>{NOT_FOUND}</html>")
+            app = path.split("/")[0]
+            return reply(listing([row(n, c, app=app) for n, c in cases], len(cases)), url=f"{TJSP}/{path}")
+        raise AssertionError(f"unexpected request {method} {path}")
+
+
+@pytest.fixture
+def sao_paulo(monkeypatch):
+    monkeypatch.setattr(account, "LIST_PAUSE", 0)
+
+    def install(*args, **kwargs):
+        fake = SaoPaulo(*args, **kwargs)
+        monkeypatch.setattr(common, "request", fake)
+        return fake
+
+    return install
+
+
+class Session:
+    """A session object the per-login cache can live on."""
+
+
+def test_tjsp_lists_every_instance_with_the_incidents_of_a_case(sao_paulo):
+    fake = sao_paulo(
+        ["000001SP", "000002GO"],
+        {"000001SP": [(sp_number(1), "1A0001P"), (sp_number(2), "1A0002")]},
+        second=[(sp_number(1), "RS0000000001")],
+    )
+    result = base.list_processes(Session(), "tjsp-esaj", 10)
+    assert result["instancias"] == {"1g": "cpopg", "2g": "cposg", "colegio_recursal": "cposgcr"}
+    by_instance = [(item["instancia"], item["processNumber"], item.get("pai")) for item in result["items"]]
+    assert by_instance == [
+        ("1g", sp_number(1), None),
+        ("1g", sp_number(2), None),
+        ("1g", sp_number(9), "1A0001P"),
+        ("2g", sp_number(1), None),
+    ]
+    first = result["oabs"][0]
+    assert (first["instancia"], first["total"], first["returned"], first["incidentes"]) == ("1g", 2, 2, 1)
+    assert result["complete"] is True and len(result["oabs"]) == 6
+    # The incidents load as the list page's own script asks: the parent's code and foro, with the page's token.
+    _m, _p, params, headers = next(entry for entry in fake.seen if entry[1] == "cpopg/obterProcessosFilhos.do")
+    assert (params["cdProcessoMaster"], params["cdForoProcesso"]) == ("1A0001P", "1")
+    assert headers == {"X-CSRF-Token": "00000000-0000-0000-0000-000000000000"}
+
+
+def test_an_oab_that_found_nothing_is_skipped_later_in_the_login_unless_refreshed(sao_paulo):
+    session = Session()
+    fake = sao_paulo(["000001SP", "000002GO"], {"000001SP": [(sp_number(2), "1A0002")]})
+    base.list_processes(session, "tjsp-esaj", 10, ["1g"])
+    searched = len(fake.seen)
+    again = base.list_processes(session, "tjsp-esaj", 10, ["1g"])
+    skipped = [o for o in again["oabs"] if o.get("skipped")]
+    assert [o["oab"] for o in skipped] == ["000002GO"] and again["complete"] is True
+    assert len(fake.seen) - searched == 2  # the session API and the one OAB with cases
+    refreshed = base.list_processes(session, "tjsp-esaj", 10, ["1g"], refresh=True)
+    assert not any(o.get("skipped") for o in refreshed["oabs"])
+
+
+def test_an_instance_the_portal_does_not_have_is_refused():
+    with pytest.raises(ValueError):
+        base.list_processes(None, "tjal-esaj", 10, ["2g"])
