@@ -158,10 +158,10 @@ def test_main_runs_the_targets_and_saves_without_values(monkeypatch, tmp_path):
 
 
 def test_load_env_reads_the_shared_file(monkeypatch):
-    from jurisync.core import mcp
+    from jurisync import customers
 
     calls = []
-    monkeypatch.setattr(mcp, "load_env_file", lambda: calls.append("loaded"))
+    monkeypatch.setattr(customers, "load_env_file", lambda: calls.append("loaded"))
     monkeypatch.delenv("JURISYNC_CUSTOMER", raising=False)
     smoke.load_env("")
     assert calls == ["loaded"]

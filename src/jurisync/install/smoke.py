@@ -222,7 +222,7 @@ def compare(before, after):
 
 
 def load_env(customer):
-    from jurisync.core.mcp import load_env_file
+    from jurisync.customers import load_env_file
 
     if customer:
         customers.load_setup(customer)  # an invalid name or a broken portals.toml fails before any login
