@@ -186,6 +186,9 @@ Helpers em `jurisync.core.responses`:
 - **Ciência pendente:** linha de lista de intimações traz `cienciaPendente` (booleano), como no PJe e no Projudi; no
   Eproc é `true` nas filas `pending*` e `art334`. Vale para a linha; a trava de ciência vale para o processo
   inteiro, então uma linha `false` não significa que os documentos do processo podem ser abertos.
+- **camelCase:** chave de resposta é camelCase. No PJe, `responses.camel` dá a toda chave snake_case a versão
+  camelCase, e a antiga fica por um ciclo; no `pje_get_process`, `filedAt`, `lastDistribution` e `timeline[].date`
+  saem em ISO, enquanto `filed_at`, `last_distribution` e `timeline[].dateText` guardam o texto da página.
 - **Datas:** ISO 8601 (`AAAA-MM-DD` ou `AAAA-MM-DDTHH:MM:SS`) em todo campo estruturado, e `null` (nunca `""`) para
   vazio. `iso(valor)` converte a data do portal (`DD/MM/AAAA[ HH:MM[:SS]]`).
 - **`ciencia`** é só o bloco de estado (`core.ciencia.report`). Quem deu a ciência e quando, por expediente do PJe, é

@@ -45,6 +45,28 @@ class FitTextsTest(unittest.TestCase):
         self.assertEqual(responses.listing([]), {"items": [], "returned": 0, "total": None, "next": None})
 
 
+class CamelTest(unittest.TestCase):
+    def test_snake_keys_gain_camel_twins_everywhere_and_keep_the_old_name(self):
+        value = {
+            "numero_processo": "x",
+            "pagination": {"loaded_pages": 2, "loadedPages": 3},
+            "rows": [{"type_code": 1}],
+        }
+        self.assertEqual(
+            responses.camel(value),
+            {
+                "numero_processo": "x",
+                "numeroProcesso": "x",
+                "pagination": {"loaded_pages": 2, "loadedPages": 3},
+                "rows": [{"type_code": 1, "typeCode": 1}],
+            },
+        )
+
+    def test_other_keys_are_left_alone(self):
+        value = {"processNumber": "x", "_private": 1, "Polo_Ativo": 2}
+        self.assertEqual(responses.camel(dict(value)), value)
+
+
 class DatedTest(unittest.TestCase):
     def test_dates_become_iso_and_the_portal_text_stays_for_a_cycle(self):
         item = {"requestedAt": "05/11/2026 17:00:38", "deadlineStart": "", "deadlineEnd": "2026-12-02", "name": ""}

@@ -71,6 +71,23 @@ def dated(item, *keys):
     return item
 
 
+SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
+
+
+def camel(value):
+    """Give every snake_case key of ``value`` (in nested dicts and lists too) its camelCase twin, keeping the old key
+    for one cycle (docs/padroes.md). A camelCase key already there wins."""
+    if isinstance(value, list):
+        for item in value:
+            camel(item)
+    elif isinstance(value, dict):
+        for key in list(value):
+            camel(value[key])
+            if SNAKE.fullmatch(key):
+                value.setdefault(re.sub(r"_([a-z0-9])", lambda found: found[1].upper(), key), value[key])
+    return value
+
+
 def _shares(wanted, budget):
     """Split ``budget`` among texts wanting ``wanted`` characters: short ones keep all, long ones share the rest."""
     shares, left = [0] * len(wanted), budget
