@@ -132,6 +132,7 @@ class EprocServerTest(unittest.TestCase):
                 "eproc_get_counters": True,
                 "eproc_list_audiencias": True,
                 "eproc_list_processes": True,
+                "eproc_search_processes": True,
                 "eproc_list_mensagens": True,
                 "eproc_list_paradas": True,
                 "eproc_list_peticoes_preparadas": True,

@@ -376,13 +376,29 @@ def form_fields(form):
 # leaves it unchecked, so baixados are left out unless asked for; TJMG and JFRS, 27/11/2026).
 PRAZO_FILTER = {"aguardando_abertura": "S", "vencido": "V", "aberto": "A", "fechado": "F", "sem_prazo": "SP"}
 ARCHIVED_FIELD = "chkMostrarBaixados"
+# The intimation date fields beside Prazo: a period (Data Início, Data Fim) and a single day (Data da Intimação), on
+# TRF4, TRF6, TJSC and TJRJ (27/11/2026).
+DATE_FIELDS = ("dataInicioField", "dataFimField")
+INTIMATION_DATE_FIELD = "dataIntimacaoField"
 
 
-def report_filter_request(html, base_url, *, include_archived=None, prazo=None):
+def _date_fields(form, date_from, date_to):
+    names = {node["name"] for node in form.select("input[name]")}
+    if set(DATE_FIELDS) <= names:
+        return dict(zip(DATE_FIELDS, (date_from or "", date_to or ""), strict=True))
+    if INTIMATION_DATE_FIELD in names and date_from == date_to:
+        return {INTIMATION_DATE_FIELD: date_from}
+    if INTIMATION_DATE_FIELD in names:
+        raise ValueError("this portal's Relação de Processos filters a single intimation date: pass the same two dates")
+    raise ValueError("this portal's Relação de Processos has no intimation date filter")
+
+
+def report_filter_request(html, base_url, *, include_archived=None, prazo=None, date_from=None, date_to=None):
     """``(url, fields)`` that search Relação de Processos again with these filters, as its Buscar button does.
 
-    ``include_archived`` None keeps the form's choice; ``prazo`` one of ``PRAZO_FILTER``. Raises ``ValueError`` when the
-    form lacks the field a filter needs, and returns None without the form.
+    ``include_archived`` None keeps the form's choice; ``prazo`` one of ``PRAZO_FILTER``; ``date_from``/``date_to``
+    (``DD/MM/AAAA``) go to Data Início/Data Fim, or to Data da Intimação when the form has only that day. Raises
+    ``ValueError`` when the form lacks the field a filter needs, and returns None without the form.
     """
     soup = BeautifulSoup(html, "html.parser")
     form = soup.select_one("form#frmProcessoLista[action]")
@@ -403,6 +419,9 @@ def report_filter_request(html, base_url, *, include_archived=None, prazo=None):
         fields = [(name, value) for name, value in fields if name != ARCHIVED_FIELD]
         if include_archived:
             fields.append((ARCHIVED_FIELD, box.get("value", "S")))
+    if date_from or date_to:
+        dates = _date_fields(form, date_from, date_to)
+        fields = [(name, value) for name, value in fields if name not in dates] + list(dates.items())
     fields += [("hdnInfraPaginaAtual", "0"), ("hdnExcel", "0")]
     return _href(form["action"], base_url), fields
 

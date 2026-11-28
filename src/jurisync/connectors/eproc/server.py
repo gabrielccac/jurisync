@@ -15,6 +15,7 @@ from pydantic import Field
 from jurisync import customers, portals
 from jurisync.connectors.eproc.auth import is_panel
 from jurisync.connectors.eproc.client import (
+    BUDGET_NOTE,
     MAX_HEARING_PAGES,
     MAX_REPORT_PAGES,
     PRAZO_FILTER,
@@ -29,6 +30,8 @@ from jurisync.connectors.eproc.client import (
     read_counters,
     request,
 )
+from jurisync.connectors.eproc.consulta import MAX_SEARCH_PAGES, search_processes, search_term
+from jurisync.connectors.eproc.filtros import by_process, intimation_dates, page_count, process_digits
 from jurisync.connectors.eproc.listas import (
     CUSTAS,
     MAX_MESSAGE_PAGES,
@@ -97,6 +100,10 @@ def create_server(keys=None):
     keys = tuple(keys or portals.keys("eproc"))
     Portal = Annotated[Literal[keys], Field(description=PORTAL_HELP)]  # noqa: N806 - built from the configured portals
     Queue = Literal[tuple(QUEUE_KINDS)]  # noqa: N806 - a type built from the queue kinds
+    Process = Annotated[  # noqa: N806 - an argument type shared by the list tools
+        str | None,
+        Field(description="Only this process (CNJ number, e.g. '5000001-00.2026.4.04.7200'), among the rows read."),
+    ]
     server = JurisyncServer("eproc")
 
     def call(portal, read):
@@ -113,17 +120,21 @@ def create_server(keys=None):
 
     QUEUE_DATES = ("requestedAt", "deadlineStart", "deadlineEnd", "sessionStart", "sessionEnd")
 
-    def enveloped(result, dates, max_pages=None):
-        """The common list envelope, the items' ``dates`` in ISO; ``next`` only when the portal's pager has pages a
-        larger maxPages reaches."""
-        for item in result.get("items") or []:
+    def enveloped(result, dates, max_pages=None, process_number=None):
+        """The common list envelope, the items' ``dates`` in ISO; ``next`` only when pages remain that a larger maxPages
+        reaches (the pager's count, or one estimated from the rows of a page: ``filtros.page_count``).
+
+        With ``process_number`` only that process' rows stay (``filtros.by_process``)."""
+        result, total = by_process(result, process_number)
+        for item in result["items"]:
             dated(item, *dates)
         pagination = result.get("pagination") or {}
-        pages = pagination.get("totalPages") or 0
+        pages = page_count(pagination) or 0
         more = None
-        if max_pages and not pagination.get("complete") and max_pages < min(pages, MAX_REPORT_PAGES):
+        budget = BUDGET_NOTE in result.get("notes", [])
+        if max_pages and not pagination.get("complete") and not budget and max_pages < min(pages, MAX_REPORT_PAGES):
             more = {"maxPages": min(pages, MAX_REPORT_PAGES)}
-        return {**result, **listing(result.get("items") or [], total=pagination.get("totalItems"), more=more)}
+        return {**result, **listing(result["items"], total=total, more=more)}
 
     @server.tool(
         name="eproc_list_intimacoes",
@@ -160,9 +171,12 @@ def create_server(keys=None):
                 )
             ),
         ] = None,
+        processNumber: Process = None,
     ) -> dict[str, Any]:
+        with tool_errors("Eproc"):
+            wanted = process_digits(processNumber)
         result = call(portal, lambda **context: list_notices(queue, **context))
-        return enveloped(result, QUEUE_DATES)
+        return enveloped(result, QUEUE_DATES, process_number=wanted)
 
     @server.tool(
         name="eproc_get_counters",
@@ -245,7 +259,8 @@ def create_server(keys=None):
         description=(
             "List the authenticated lawyer's processes (Relação de Processos); not a court-wide search. Every portal "
             "leaves baixados (archived) out unless includeArchived=true. prazo filters by the intimação deadline "
-            "(aguardando_abertura, aberto, vencido, fechado, sem_prazo); latestMovementFirst orders by the latest "
+            "(aguardando_abertura, aberto, vencido, fechado, sem_prazo) and intimationDateFrom/To by the intimation date "
+            "(each filter costs one more request); latestMovementFirst orders by the latest "
             "movement. Rows: processNumber (also number, its old name), parties (pole active/passive; the "
             "procedural role is in eproc_get_process), class, subject, last event, dates, claim value. "
             "pagination.totalItems is "
@@ -277,7 +292,22 @@ def create_server(keys=None):
             bool,
             Field(description="true: latest movement first (the panel's Últimas movimentações)."),
         ] = False,
+        intimationDateFrom: Annotated[
+            str | None,
+            Field(
+                pattern=r"^\d{4}-\d{2}-\d{2}$",
+                description="YYYY-MM-DD, first intimation day (Data Início; Data da Intimação where it is the only one).",
+            ),
+        ] = None,
+        intimationDateTo: Annotated[
+            str | None,
+            Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="YYYY-MM-DD, last intimation day (Data Fim)."),
+        ] = None,
+        processNumber: Process = None,
     ) -> dict[str, Any]:
+        with tool_errors("Eproc"):
+            wanted = process_digits(processNumber)
+            start, end = intimation_dates(intimationDateFrom, intimationDateTo)
         result = call(
             portal,
             lambda **context: list_processes(
@@ -285,10 +315,49 @@ def create_server(keys=None):
                 include_archived=includeArchived,
                 prazo=prazo,
                 latest_first=latestMovementFirst,
+                date_from=start,
+                date_to=end,
                 **context,
             ),
         )
-        return enveloped(result, ("lastEventAt", "filedAt"), maxPages)
+        return enveloped(result, ("lastEventAt", "filedAt"), maxPages, wanted)
+
+    @server.tool(
+        name="eproc_search_processes",
+        title="Search Eproc court processes",
+        description=(
+            "Search the court (Consulta Processual) by party name, CPF/CNPJ, OAB or originating process number, with "
+            "exactly one criterion per call. A court-wide public search: it returns other lawyers' and third parties' "
+            "processes, unlike eproc_list_processes (the lawyer's own Relação). Read-only.\n"
+            "Cost: one request for the search page plus one per result page (maxPages); includeClosed adds baixados.\n"
+            "Answer: processes (processNumber, caseClass, parties with pole, subject, court, status, filedAt and the "
+            "portal's other columns in extra). " + ENVELOPE + " " + DATES + " Details and documents: eproc_get_process."
+        ),
+        annotations=READ_ONLY,
+    )
+    def eproc_search_processes(
+        portal: Portal,
+        partyName: Annotated[
+            str | None, Field(description="Party name, at least name and surname (Nome da Parte).")
+        ] = None,
+        taxId: Annotated[
+            str | None, Field(description="CPF (11 digits) or CNPJ (14), digits with optional . - / punctuation.")
+        ] = None,
+        oab: Annotated[
+            str | None, Field(description="OAB registration: UF and number, e.g. 'SC123456' or '12345/SC'.")
+        ] = None,
+        originNumber: Annotated[
+            str | None, Field(description="Originating or related process number (Originário/Relacionado).")
+        ] = None,
+        includeClosed: Annotated[bool, Field(description="true also shows baixados (Exibir Baixados).")] = False,
+        maxPages: Annotated[int, Field(ge=1, le=MAX_SEARCH_PAGES, description="Result pages to read.")] = 1,
+    ) -> dict[str, Any]:
+        with tool_errors("Eproc"):
+            term = search_term(party_name=partyName, tax_id=taxId, oab=oab, origin_number=originNumber)
+        return call(
+            portal,
+            lambda **context: search_processes(term, include_closed=includeClosed, max_pages=maxPages, **context),
+        )
 
     @server.tool(
         name="eproc_list_mensagens",

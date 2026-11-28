@@ -93,6 +93,16 @@ HEARING_SITUATIONS = {
 HEARING_ACTIONS = {action for lists in HEARING_SITUATIONS.values() for action in lists.values()}
 MAX_HEARING_PAGES = 10
 HEARING_PAGER = 'form[action]:has(input[name="hdnInfraPaginaAtual"])'
+# Consulta Processual (eproc_search_processes): its page, and the lookups its Consultar button posts, one per search
+# type (the tipoPesquisa option's data-acaoConsultaAssinada). Court-wide reads, kept out of READ_ACTIONS and
+# AJAX_ACTIONS so that only the search, which names them, reaches them.
+SEARCH_ACTION = "processo_consultar"
+SEARCH_AJAX_ACTIONS = {
+    "processos_consulta_por_nome_parte",
+    "processos_consulta_por_documento_identificacao",
+    "processos_consulta_por_oab",
+    "processos_consulta_por_originario",
+}
 READ_ACTIONS = QUEUE_ACTIONS | {
     PROCESS_REPORT_ACTION,
     "painel_adv_listar",
@@ -116,8 +126,9 @@ READ_ACTIONS = QUEUE_ACTIONS | {
     "guia_pagamento_custas_gerados_listar",
     "guia_pagamento_depositos_judiciais_gerados_listar",
 }
-# Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); never requested.
-NOT_FOUND_ACTION = "processo_consultar"
+# Where the quick search sends a number the instance does not hold (TJMG 2G, TRF2 2G, 16/11/2026); fetch_process never
+# follows it.
+NOT_FOUND_ACTION = SEARCH_ACTION
 AJAX_ACTIONS = {"montar_tabela_eventos_filtrados", "retornar_citacao_intimacao_estado", "listar_painel_advogado"}
 MAX_EVENT_PAGES = 5  # event pages read per process; a longer timeline reports event_pagination_limit
 # Seconds the pending queues read for one session answer the next process reads; opening a document drops them,
@@ -202,9 +213,14 @@ def _response_error(response, body=""):
     return None
 
 
-def send(session, method, url, *, data=None, ajax=False, portal, headers=None, stream=False):
-    """The one guarded request to the portal: allowlisted route, no redirects, shared fingerprint and timeout."""
-    require_route(url, AJAX_ACTIONS if ajax else READ_ACTIONS, ajax=ajax, portal=portal)
+def send(session, method, url, *, data=None, ajax=False, portal, headers=None, stream=False, actions=None):
+    """The one guarded request to the portal: allowlisted route, no redirects, shared fingerprint and timeout.
+
+    The route must be one of ``actions`` when the caller names them (the Consulta Processual search does, and only it
+    reaches SEARCH_ACTION and SEARCH_AJAX_ACTIONS), else of READ_ACTIONS or AJAX_ACTIONS."""
+    if actions is None:
+        actions = AJAX_ACTIONS if ajax else READ_ACTIONS
+    require_route(url, actions, ajax=ajax, portal=portal)
     try:
         response = session.request(
             method,
@@ -222,8 +238,8 @@ def send(session, method, url, *, data=None, ajax=False, portal, headers=None, s
     return response
 
 
-def request(session, method, url, *, data=None, ajax=False, portal):
-    response = send(session, method, url, data=data, ajax=ajax, portal=portal)
+def request(session, method, url, *, data=None, ajax=False, portal, actions=None):
+    response = send(session, method, url, data=data, ajax=ajax, portal=portal, actions=actions)
     return response, _decode(response)
 
 
@@ -907,6 +923,8 @@ def list_hearings(
 
 
 MAX_REPORT_PAGES = 20
+# A list read cut by the answer budget: a larger maxPages would stop at the same place, so no next is offered.
+BUDGET_NOTE = "stopped at the answer budget: narrow the filters to read the rest"
 
 
 def list_processes(
@@ -919,12 +937,15 @@ def list_processes(
     include_archived=None,
     prazo=None,
     latest_first=False,
+    date_from=None,
+    date_to=None,
 ):
     """Read Relação de Processos, up to ``max_pages`` pages of its pager.
 
     Without filters the portal's defaults apply, which leave baixados out on every portal. ``include_archived`` and
     ``prazo`` (a ``PRAZO_FILTER`` key) search again with the list form, as its Buscar button does; ``latest_first``
-    opens the panel's "Últimas movimentações" link (latest movement first) instead of the plain list.
+    opens the panel's "Últimas movimentações" link (latest movement first) instead of the plain list. ``date_from`` and
+    ``date_to`` (``DD/MM/AAAA``) filter by the intimation date the same way.
 
     The portal shows 50 rows a page (500 on TJSC). Later pages are asked for the way the pager does it: the list form
     is posted again with the same criteria and ``hdnInfraPaginaAtual``. ``pagination.complete`` is true only when
@@ -954,8 +975,10 @@ def list_processes(
         require_route(endpoint, {PROCESS_REPORT_ACTION}, portal=portal)
         response, body = request(session, "GET", endpoint, portal=portal)
         error = _response_error(response, body)
-        if not error and (include_archived is not None or prazo is not None):
-            filtered = report_filter_request(body, base_url, include_archived=include_archived, prazo=prazo)
+        if not error and (include_archived is not None or prazo is not None or date_from or date_to):
+            filtered = report_filter_request(
+                body, base_url, include_archived=include_archived, prazo=prazo, date_from=date_from, date_to=date_to
+            )
             if filtered is None:
                 raise RuntimeError("Relação de Processos did not show its filter form")
             url, fields = filtered
@@ -987,16 +1010,25 @@ def list_processes(
 
 
 def _report_pages(session, body, first, endpoint, *, max_pages, portal):
-    """``first`` plus the following report pages, at most ``max_pages`` in all, with truthful pagination."""
+    """``first`` plus the following report pages, at most ``max_pages`` in all, with truthful pagination.
+
+    The pager's page count is not needed (no portal showed one, 27/11/2026): pages are asked for until the caption's
+    count is read, a page comes back empty, the form has no pager, ``max_pages`` or the answer budget.
+    """
     base_url = portals.eproc(portal).base_url
     items = list(first["items"])
+    seen = {item.get("number") for item in items}
     pagination = dict(first["pagination"])
     total, total_pages = pagination.get("totalItems"), pagination.get("totalPages")
     notes = []
     page = 0
-    while (total is None or len(items) < total) and page + 1 < max_pages and total_pages and page + 1 < total_pages:
-        page += 1
-        following = report_page_request(body, base_url, page)
+    while (
+        (total is None or len(items) < total) and page + 1 < max_pages and (not total_pages or page + 1 < total_pages)
+    ):
+        if len(compact(items)) > BUDGET:
+            notes.append(BUDGET_NOTE)
+            break
+        following = report_page_request(body, base_url, page + 1)
         if following is None:
             notes.append("report_pager_unavailable")
             break
@@ -1009,22 +1041,26 @@ def _report_pages(session, body, first, endpoint, *, max_pages, portal):
             raise SessionExpired("eproc session expired")  # a list read can be repeated
         parsed = {"diagnostics": [error]} if error else parse_lawyer_process_report(body, base_url)
         if parsed["diagnostics"]:
-            notes.append(f"report_page_{page + 1}_failed")
+            notes.append(f"report_page_{page + 2}_failed")
             break
-        if parsed["pagination"].get("page") != page or parsed["pagination"].get("totalItems") != total:
+        numbers = {item.get("number") for item in parsed["items"]}
+        if (
+            parsed["pagination"].get("page") != page + 1
+            or parsed["pagination"].get("totalItems") != total
+            or numbers & seen
+        ):
             # The portal answered another page or a different list: stop rather than mix lists.
-            notes.append(f"report_page_{page + 1}_mismatch")
+            notes.append(f"report_page_{page + 2}_mismatch")
             break
+        if not parsed["items"]:
+            break  # past the last page
+        page += 1
         items.extend(parsed["items"])
-    pagination.update(
-        {
-            "pagesRead": page + 1 - (1 if notes else 0),
-            "itemCount": len(items),
-            "complete": total is not None and len(items) >= total,
-        }
-    )
-    if not pagination["complete"] and not notes and total_pages and total_pages > max_pages:
-        notes.append(f"stopped at maxPages={max_pages} of {total_pages}")
+        seen |= numbers
+    complete = total is not None and len(items) >= total
+    pagination.update({"pagesRead": page + 1, "itemCount": len(items), "complete": complete})
+    if not complete and not notes and page + 1 == max_pages:
+        notes.append(f"stopped at maxPages={max_pages}" + (f" of {total_pages}" if total_pages else ""))
     return {**first, "items": items, "pagination": pagination, "notes": notes}
 
 
